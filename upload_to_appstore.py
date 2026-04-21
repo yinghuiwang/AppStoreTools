@@ -563,9 +563,9 @@ def upload_metadata(
                     existing_info_locales.append(info_locale)
 
         description = meta.get("长描述", "")
-        keywords = meta.get("关键子", "")
-        support_url = meta.get("技术支持链接", "")
-        marketing_url = meta.get("营销网站", "")
+        keywords = meta.get("关键词", "") or meta.get("关键子", "")
+        support_url = meta.get("技术支持网址", "") or meta.get("技术支持链接", "")
+        marketing_url = meta.get("营销网站", "") or meta.get("营销网址", "")
 
         ver_attrs = {}
         if description and (include_version_fields is None or "description" in include_version_fields):
