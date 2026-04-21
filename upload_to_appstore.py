@@ -14,6 +14,11 @@ App Store Connect 元数据 & 截图上传工具
   --dry-run       仅预览将要执行的操作，不实际上传
   --metadata-only 仅上传元数据，跳过截图
   --screenshots-only 仅上传截图，跳过元数据
+  --keywords-only 仅上传关键词 (Keywords)
+  --support-url-only 仅上传技术支持链接 (Support URL)
+  --marketing-url-only 仅上传营销网站链接 (Marketing URL)
+  --iap-file      IAP 批量配置 JSON 文件路径
+  --iap-only      仅上传 IAP，跳过元数据/截图
 """
 
 from __future__ import annotations
@@ -84,6 +89,7 @@ SCREENSHOT_FOLDER_TO_LOCALE = {
 
 CSV_LOCALE_TO_ASC = {
     "en": "en-US",
+    "ar": "ar-SA",
     "zh-Hans": "zh-Hans",
     "zh-Hant": "zh-Hant",
     "ja": "ja",
@@ -92,7 +98,28 @@ CSV_LOCALE_TO_ASC = {
     "de": "de-DE",
     "es": "es-ES",
     "pt-BR": "pt-BR",
+    "pt": "pt-BR",
 }
+
+
+def normalize_locale_code(locale_code: str) -> str:
+    """标准化 locale，兼容 CSV 中常见简写/大小写差异"""
+    code = (locale_code or "").strip().strip('"').strip("'")
+    if not code:
+        return code
+    code = code.replace("_", "-")
+    lowered = code.lower()
+    if lowered == "zh-hans":
+        return "zh-Hans"
+    if lowered == "zh-hant":
+        return "zh-Hant"
+    if len(code) == 2:
+        return lowered
+    if "-" in code:
+        lang, region = code.split("-", 1)
+        if len(lang) == 2 and len(region) == 2:
+            return f"{lang.lower()}-{region.upper()}"
+    return code
 
 
 class AppStoreConnectAPI:
@@ -319,13 +346,78 @@ class AppStoreConnectAPI:
             }
         })
 
+    # ── IAP ──
+
+    def list_in_app_purchases(self, app_id: str) -> list:
+        endpoints = [
+            f"/v1/apps/{app_id}/inAppPurchasesV2",
+            f"/v2/apps/{app_id}/inAppPurchasesV2",
+        ]
+        last_error = None
+        for endpoint in endpoints:
+            try:
+                resp = self.get(endpoint, limit=200)
+                return resp.get("data", [])
+            except Exception as e:
+                last_error = e
+                continue
+        raise Exception(f"获取 IAP 列表失败: {last_error}")
+
+    def create_in_app_purchase(self, app_id: str, attributes: dict) -> dict:
+        return self.post("/v2/inAppPurchases", {
+            "data": {
+                "type": "inAppPurchases",
+                "attributes": attributes,
+                "relationships": {
+                    "app": {
+                        "data": {"type": "apps", "id": app_id}
+                    }
+                },
+            }
+        })
+
+    def update_in_app_purchase(self, iap_id: str, attributes: dict) -> dict:
+        return self.patch(f"/v2/inAppPurchases/{iap_id}", {
+            "data": {
+                "type": "inAppPurchases",
+                "id": iap_id,
+                "attributes": attributes,
+            }
+        })
+
+    def get_in_app_purchase_localizations(self, iap_id: str) -> list:
+        resp = self.get(f"/v2/inAppPurchases/{iap_id}/inAppPurchaseLocalizations")
+        return resp.get("data", [])
+
+    def create_in_app_purchase_localization(self, iap_id: str, locale: str, attributes: dict) -> dict:
+        return self.post("/v1/inAppPurchaseLocalizations", {
+            "data": {
+                "type": "inAppPurchaseLocalizations",
+                "attributes": {"locale": locale, **attributes},
+                "relationships": {
+                    "inAppPurchaseV2": {
+                        "data": {"type": "inAppPurchases", "id": iap_id}
+                    }
+                },
+            }
+        })
+
+    def update_in_app_purchase_localization(self, loc_id: str, attributes: dict) -> dict:
+        return self.patch(f"/v1/inAppPurchaseLocalizations/{loc_id}", {
+            "data": {
+                "type": "inAppPurchaseLocalizations",
+                "id": loc_id,
+                "attributes": attributes,
+            }
+        })
+
 
 def extract_locale(raw_lang: str) -> str:
     """从 '简体中文(zh-Hans)' 或 '英文(en-US)' 格式中提取 locale 代码"""
     m = re.search(r"\(([^)]+)\)", raw_lang)
     if m:
-        return m.group(1)
-    return raw_lang.strip()
+        return normalize_locale_code(m.group(1))
+    return normalize_locale_code(raw_lang.strip())
 
 
 def parse_csv(csv_path: str) -> list[dict]:
@@ -380,6 +472,8 @@ def get_sorted_screenshots(folder: Path) -> list[Path]:
 
 def resolve_locale(csv_locale: str, existing_locales: list[str]) -> str | None:
     """将 CSV 中的语言代码映射到 ASC 中实际存在的 locale"""
+    csv_locale = normalize_locale_code(csv_locale)
+
     if csv_locale in existing_locales:
         return csv_locale
 
@@ -402,7 +496,13 @@ def md5_of_file(file_path: Path) -> str:
     return h.hexdigest()
 
 
-def upload_metadata(api: AppStoreConnectAPI, app_id: str, metadata_list: list[dict], dry_run: bool = False):
+def upload_metadata(
+    api: AppStoreConnectAPI,
+    app_id: str,
+    metadata_list: list[dict],
+    dry_run: bool = False,
+    include_version_fields: set[str] | None = None,
+):
     """上传元数据（应用名称、副标题、描述、关键词等）"""
     print("\n" + "=" * 60)
     print("📝 上传元数据")
@@ -444,7 +544,7 @@ def upload_metadata(api: AppStoreConnectAPI, app_id: str, metadata_list: list[di
 
         name = meta.get("应用名称", "")
         subtitle = meta.get("副标题", "")
-        if name or subtitle:
+        if (name or subtitle) and include_version_fields is None:
             info_attrs = {}
             if name:
                 info_attrs["name"] = name
@@ -468,13 +568,13 @@ def upload_metadata(api: AppStoreConnectAPI, app_id: str, metadata_list: list[di
         marketing_url = meta.get("营销网站", "")
 
         ver_attrs = {}
-        if description:
+        if description and (include_version_fields is None or "description" in include_version_fields):
             ver_attrs["description"] = description
-        if keywords:
+        if keywords and (include_version_fields is None or "keywords" in include_version_fields):
             ver_attrs["keywords"] = keywords
-        if support_url:
+        if support_url and (include_version_fields is None or "supportUrl" in include_version_fields):
             ver_attrs["supportUrl"] = support_url
-        if marketing_url:
+        if marketing_url and (include_version_fields is None or "marketingUrl" in include_version_fields):
             ver_attrs["marketingUrl"] = marketing_url
 
         if ver_attrs:
@@ -543,17 +643,36 @@ def upload_screenshots(
         print("  截图目录中没有子文件夹")
         return
 
+    # 构建 resolved_locale → 文件夹 的映射
+    locale_to_folder: dict[str, Path] = {}
     for folder in sorted(folders):
         folder_name = folder.name.lower()
         locale = SCREENSHOT_FOLDER_TO_LOCALE.get(folder_name, folder_name)
         resolved = resolve_locale(locale, existing_locales)
-        print(f"\n  ── 文件夹: {folder.name} → locale: {resolved} ──")
+        locale_to_folder[resolved] = folder
 
-        if resolved not in ver_loc_map:
-            print(f"    ⚠️  locale '{resolved}' 在版本本地化中不存在，跳过")
-            continue
+    # 找到 en-US 文件夹，用于回退
+    en_us_folder = locale_to_folder.get("en-US")
+    if en_us_folder is None:
+        # 也尝试直接按文件夹名匹配
+        for folder in folders:
+            if folder.name.lower() in ("en", "en-us"):
+                en_us_folder = folder
+                break
 
-        localization_id = ver_loc_map[resolved]["id"]
+    # 按版本本地化中已有的语言逐一处理，缺失截图文件夹时回退 en-US
+    for resolved, loc_data in sorted(ver_loc_map.items()):
+        folder = locale_to_folder.get(resolved)
+        if folder is None:
+            if en_us_folder is None:
+                print(f"\n  ── locale: {resolved} → 无截图文件夹且无 en-US 可回退，跳过 ──")
+                continue
+            print(f"\n  ── locale: {resolved} → 无截图文件夹，使用 en-US 截图回退 ──")
+            folder = en_us_folder
+        else:
+            print(f"\n  ── 文件夹: {folder.name} → locale: {resolved} ──")
+
+        localization_id = loc_data["id"]
         files = get_sorted_screenshots(folder)
         if not files:
             print(f"    没有找到截图文件，跳过")
@@ -692,6 +811,59 @@ def update_whats_new(
     print("\n✅ 版本描述更新完成")
 
 
+def update_version_field(
+    api: AppStoreConnectAPI,
+    app_id: str,
+    field_key: str,
+    field_label: str,
+    field_value: str,
+    locales: list[str] | None = None,
+    dry_run: bool = False,
+):
+    """更新版本本地化字段（如 supportUrl / marketingUrl）"""
+    print("\n" + "=" * 60)
+    print(f"🔧 更新版本字段 ({field_label})")
+    print("=" * 60)
+
+    version = api.get_editable_version(app_id)
+    if not version:
+        print("❌ 找不到可编辑的 App Store 版本")
+        return
+    version_id = version["id"]
+    version_string = version["attributes"].get("versionString", "?")
+    version_state = version["attributes"].get("appStoreState") or version["attributes"].get("appVersionState", "?")
+    print(f"  版本: {version_string} (状态: {version_state})")
+
+    ver_locs = api.get_version_localizations(version_id)
+    if not ver_locs:
+        print("❌ 该版本没有本地化信息")
+        return
+
+    target_locs = ver_locs
+    if locales:
+        target_locs = [loc for loc in ver_locs if loc["attributes"]["locale"] in locales]
+        if not target_locs:
+            available = [loc["attributes"]["locale"] for loc in ver_locs]
+            print(f"❌ 指定的语言不存在，可用语言: {available}")
+            return
+
+    preview = field_value[:80] + "..." if len(field_value) > 80 else field_value
+    print(f"  {field_label}: {preview}")
+    print(f"  目标语言: {[loc['attributes']['locale'] for loc in target_locs]}")
+
+    if dry_run:
+        print("  ⚠️  预览模式，不实际更新")
+        return
+
+    for loc in target_locs:
+        locale = loc["attributes"]["locale"]
+        loc_id = loc["id"]
+        api.update_version_localization(loc_id, {field_key: field_value})
+        print(f"  ✅ {locale}: 已更新")
+
+    print(f"\n✅ {field_label} 更新完成")
+
+
 def update_whats_new_from_file(
     api: AppStoreConnectAPI,
     app_id: str,
@@ -761,6 +933,115 @@ def update_whats_new_from_file(
     print("\n✅ 版本描述更新完成")
 
 
+def load_iap_package(file_path: str) -> list[dict]:
+    """读取 IAP 配置 JSON，支持 {items:[...]} 或 [...]"""
+    raw = Path(file_path).read_text(encoding="utf-8-sig")
+    data = json.loads(raw)
+    if isinstance(data, dict):
+        items = data.get("items", [])
+    elif isinstance(data, list):
+        items = data
+    else:
+        raise ValueError("IAP 配置格式错误：应为数组或包含 items 数组的对象")
+
+    if not isinstance(items, list) or not items:
+        raise ValueError("IAP 配置为空，请至少提供一个 IAP 项")
+    return items
+
+
+def upload_iap_packages(
+    api: AppStoreConnectAPI,
+    app_id: str,
+    iap_items: list[dict],
+    dry_run: bool = False,
+):
+    """上传/更新 IAP 包（基础属性 + 本地化）"""
+    print("\n" + "=" * 60)
+    print("🛍️  上传 IAP 包")
+    print("=" * 60)
+
+    existing_iaps = api.list_in_app_purchases(app_id)
+    existing_by_product_id = {}
+    for iap in existing_iaps:
+        product_id = iap.get("attributes", {}).get("productId")
+        if product_id:
+            existing_by_product_id[product_id] = iap
+
+    for item in iap_items:
+        product_id = str(item.get("productId", "")).strip()
+        if not product_id:
+            print("  ❌ 跳过：缺少 productId")
+            continue
+
+        name = str(item.get("name", "")).strip()
+        iap_type = str(item.get("inAppPurchaseType", "")).strip()
+        review_note = str(item.get("reviewNote", "")).strip()
+        available_all = item.get("availableInAllTerritories", True)
+        localizations = item.get("localizations", {})
+
+        print(f"\n  ── IAP: {product_id} ──")
+        existing = existing_by_product_id.get(product_id)
+
+        attrs = {"productId": product_id, "availableInAllTerritories": bool(available_all)}
+        if name:
+            attrs["name"] = name
+        if iap_type:
+            attrs["inAppPurchaseType"] = iap_type
+        if review_note:
+            attrs["reviewNote"] = review_note
+
+        if existing:
+            iap_id = existing["id"]
+            print(f"    已存在，ID: {iap_id}，执行更新")
+            if not dry_run:
+                update_attrs = {k: v for k, v in attrs.items() if k != "productId"}
+                if update_attrs:
+                    api.update_in_app_purchase(iap_id, update_attrs)
+        else:
+            print("    不存在，执行创建")
+            if not dry_run:
+                create_resp = api.create_in_app_purchase(app_id, attrs)
+                iap_id = create_resp["data"]["id"]
+                print(f"    ✅ 已创建，ID: {iap_id}")
+            else:
+                iap_id = "DRY_RUN_ID"
+
+        if not isinstance(localizations, dict) or not localizations:
+            print("    ⚠️  无本地化配置，跳过本地化上传")
+            continue
+
+        if dry_run:
+            print(f"    [预览] 将更新本地化: {list(localizations.keys())}")
+            continue
+
+        existing_locs = api.get_in_app_purchase_localizations(iap_id)
+        loc_map = {loc["attributes"]["locale"]: loc for loc in existing_locs}
+
+        for locale, loc_data in localizations.items():
+            if not isinstance(loc_data, dict):
+                print(f"    ⚠️  locale={locale} 配置格式错误，已跳过")
+                continue
+            loc_attrs = {}
+            display_name = str(loc_data.get("name") or loc_data.get("displayName") or "").strip()
+            description = str(loc_data.get("description") or "").strip()
+            if display_name:
+                loc_attrs["name"] = display_name
+            if description:
+                loc_attrs["description"] = description
+            if not loc_attrs:
+                print(f"    ⚠️  locale={locale} 无有效字段（name/description），已跳过")
+                continue
+
+            if locale in loc_map:
+                api.update_in_app_purchase_localization(loc_map[locale]["id"], loc_attrs)
+                print(f"    ✅ {locale}: 已更新本地化")
+            else:
+                api.create_in_app_purchase_localization(iap_id, locale, loc_attrs)
+                print(f"    ✅ {locale}: 已创建本地化")
+
+    print("\n✅ IAP 上传完成")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="上传元数据和截图到 App Store Connect",
@@ -772,9 +1053,18 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="预览模式，不实际上传")
     parser.add_argument("--metadata-only", action="store_true", help="仅上传元数据")
     parser.add_argument("--screenshots-only", action="store_true", help="仅上传截图")
+    parser.add_argument("--keywords-only", action="store_true", help="仅上传关键词 (Keywords)")
+    parser.add_argument("--support-url-only", action="store_true", help="仅上传技术支持链接 (Support URL)")
+    parser.add_argument("--marketing-url-only", action="store_true", help="仅上传营销网站链接 (Marketing URL)")
+    parser.add_argument("--support-url", help="直接设置 Support URL（对所有语言生效）")
+    parser.add_argument("--support-url-locales", help="限定 Support URL 语言，逗号分隔 (如 zh-Hans,en-US)")
+    parser.add_argument("--marketing-url", help="直接设置 Marketing URL（对所有语言生效）")
+    parser.add_argument("--marketing-url-locales", help="限定 Marketing URL 语言，逗号分隔 (如 zh-Hans,en-US)")
     parser.add_argument("--whats-new", help="设置更新描述 (What's New)，对所有语言生效")
     parser.add_argument("--whats-new-file", help="从文件读取多语言更新描述 (格式见 README)")
     parser.add_argument("--whats-new-locales", help="限定更新描述的语言，逗号分隔 (如 zh-Hans,en-US)")
+    parser.add_argument("--iap-file", help="IAP 批量配置 JSON 文件路径")
+    parser.add_argument("--iap-only", action="store_true", help="仅上传 IAP，跳过元数据/截图")
     parser.add_argument("--app-id", help="App Apple ID (覆盖 .env 中的配置)")
     parser.add_argument("--issuer-id", help="Issuer ID (覆盖 .env 中的配置)")
     parser.add_argument("--key-id", help="Key ID (覆盖 .env 中的配置)")
@@ -840,6 +1130,22 @@ def main():
         sys.exit(1)
 
     is_whats_new_mode = args.whats_new or args.whats_new_file
+    is_support_url_mode = bool(args.support_url)
+    is_marketing_url_mode = bool(args.marketing_url)
+    is_iap_mode = bool(args.iap_file)
+    include_version_fields = None
+    if args.keywords_only or args.support_url_only or args.marketing_url_only:
+        include_version_fields = set()
+        if args.keywords_only:
+            include_version_fields.add("keywords")
+        if args.support_url_only:
+            include_version_fields.add("supportUrl")
+        if args.marketing_url_only:
+            include_version_fields.add("marketingUrl")
+
+    if args.iap_only and not args.iap_file:
+        print("❌ 使用 --iap-only 时必须同时指定 --iap-file")
+        sys.exit(1)
 
     if is_whats_new_mode:
         if args.whats_new_file:
@@ -855,6 +1161,42 @@ def main():
             if args.whats_new_locales:
                 locales = [l.strip() for l in args.whats_new_locales.split(",")]
             update_whats_new(api, app_id, args.whats_new, locales=locales, dry_run=args.dry_run)
+    elif is_support_url_mode:
+        locales = None
+        if args.support_url_locales:
+            locales = [l.strip() for l in args.support_url_locales.split(",")]
+        update_version_field(
+            api,
+            app_id,
+            "supportUrl",
+            "Support URL",
+            args.support_url,
+            locales=locales,
+            dry_run=args.dry_run,
+        )
+    elif is_marketing_url_mode:
+        locales = None
+        if args.marketing_url_locales:
+            locales = [l.strip() for l in args.marketing_url_locales.split(",")]
+        update_version_field(
+            api,
+            app_id,
+            "marketingUrl",
+            "Marketing URL",
+            args.marketing_url,
+            locales=locales,
+            dry_run=args.dry_run,
+        )
+    elif args.iap_only:
+        iap_path = Path(args.iap_file)
+        if not iap_path.is_absolute():
+            iap_path = script_dir / iap_path
+        if not iap_path.exists():
+            print(f"❌ IAP 配置文件不存在: {iap_path}")
+            sys.exit(1)
+        iap_items = load_iap_package(str(iap_path))
+        print(f"\n📦 从 IAP 配置读取 {len(iap_items)} 项")
+        upload_iap_packages(api, app_id, iap_items, dry_run=args.dry_run)
     else:
         if not args.screenshots_only:
             if csv_path.exists():
@@ -862,7 +1204,22 @@ def main():
                 print(f"\n📄 从 CSV 读取了 {len(metadata_list)} 个语言的元数据")
                 for m in metadata_list:
                     print(f"  - {m['语言']}: {m.get('应用名称', 'N/A')}")
-                upload_metadata(api, app_id, metadata_list, dry_run=args.dry_run)
+                if include_version_fields is not None:
+                    selected = []
+                    if "keywords" in include_version_fields:
+                        selected.append("Keywords")
+                    if "supportUrl" in include_version_fields:
+                        selected.append("Support URL")
+                    if "marketingUrl" in include_version_fields:
+                        selected.append("Marketing URL")
+                    print(f"  ⚙️  仅上传字段: {', '.join(selected)}")
+                upload_metadata(
+                    api,
+                    app_id,
+                    metadata_list,
+                    dry_run=args.dry_run,
+                    include_version_fields=include_version_fields,
+                )
             else:
                 print(f"\n⚠️  CSV 文件不存在: {csv_path}")
 
@@ -875,6 +1232,17 @@ def main():
                 )
             else:
                 print(f"\n⚠️  截图目录不存在: {screenshots_path}")
+
+        if is_iap_mode:
+            iap_path = Path(args.iap_file)
+            if not iap_path.is_absolute():
+                iap_path = script_dir / iap_path
+            if not iap_path.exists():
+                print(f"\n❌ IAP 配置文件不存在: {iap_path}")
+                sys.exit(1)
+            iap_items = load_iap_package(str(iap_path))
+            print(f"\n📦 从 IAP 配置读取 {len(iap_items)} 项")
+            upload_iap_packages(api, app_id, iap_items, dry_run=args.dry_run)
 
     print("\n" + "=" * 60)
     print("🎉 全部完成！")

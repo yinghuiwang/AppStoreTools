@@ -1,6 +1,6 @@
 # App Store Connect 上传工具
 
-通过 App Store Connect API 批量上传应用元数据（名称、副标题、描述、关键词等）和截图。
+通过 App Store Connect API 批量上传应用元数据（名称、副标题、描述、关键词等）、截图和 IAP 包信息。
 
 ## 快速开始
 
@@ -23,6 +23,7 @@ AppStoreTools/
 │   └── AuthKey_*.p8                #   API 私钥
 ├── data/                           # 上传数据
 │   ├── appstore_info.csv           #   元数据 CSV
+│   ├── iap_packages.example.json   #   IAP 配置示例
 │   └── screenshots/                #   截图
 │       ├── cn/                     #     中文截图
 │       └── en/                     #     英文截图
@@ -34,6 +35,11 @@ AppStoreTools/
 ```
 
 ## 前置准备
+
+> 入口脚本会在未检测到 Python 3.9+ 时自动尝试安装：
+> - macOS: `brew install python`
+> - Linux: `apt-get` / `dnf` / `yum` / `pacman` / `zypper`
+> 自动安装可能需要管理员权限；若安装失败，请手动安装 Python 3.9+ 后重试。
 
 ### 获取 API Key
 
@@ -98,6 +104,12 @@ APP_ID=1234567890
 # 手动指定截图设备类型
 ./run.sh --display-type APP_IPHONE_67
 
+# 仅上传 IAP 包
+./run.sh iap --iap-file data/iap_packages.json
+
+# 完整上传（元数据 + 截图 + IAP）
+./run.sh --iap-file data/iap_packages.json
+
 # 指定自定义数据路径
 ./run.sh --csv /path/to/info.csv --screenshots /path/to/shots
 
@@ -128,6 +140,46 @@ en-US:
 - Faster video generation
 - New trending templates
 ```
+
+### IAP 配置文件格式 (`iap_packages.json`)
+
+支持两种结构：
+- 顶层数组 `[...]`
+- 或对象 `{ "items": [...] }`
+
+示例：
+
+```json
+{
+  "items": [
+    {
+      "productId": "com.example.app.coins.100",
+      "name": "100 Coins",
+      "inAppPurchaseType": "CONSUMABLE",
+      "reviewNote": "Used to buy 100 coins in app.",
+      "availableInAllTerritories": true,
+      "localizations": {
+        "zh-Hans": {
+          "name": "100 金币",
+          "description": "用于在应用内购买 100 金币。"
+        },
+        "en-US": {
+          "name": "100 Coins",
+          "description": "Used to buy 100 coins in app."
+        }
+      }
+    }
+  ]
+}
+```
+
+字段说明：
+- `productId`: IAP Product ID（唯一）
+- `name`: IAP 内部名称（ASC 中显示）
+- `inAppPurchaseType`: IAP 类型（如 `CONSUMABLE` / `NON_CONSUMABLE`）
+- `reviewNote`: 审核备注
+- `availableInAllTerritories`: 是否全地区可售
+- `localizations`: 多语言信息（`name` / `description`）
 
 ### 支持的设备类型
 
