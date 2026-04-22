@@ -357,3 +357,356 @@ class AppStoreConnectAPI:
                 }
             },
         )
+
+    # ── 订阅组 ──
+
+    def list_subscription_groups(self, app_id: str) -> list:
+        resp = self.get(f"/v1/apps/{app_id}/subscriptionGroups", limit=200)
+        return resp.get("data", [])
+
+    def create_subscription_group(self, app_id: str, reference_name: str) -> dict:
+        return self.post(
+            "/v1/subscriptionGroups",
+            {
+                "data": {
+                    "type": "subscriptionGroups",
+                    "attributes": {"referenceName": reference_name},
+                    "relationships": {
+                        "app": {"data": {"type": "apps", "id": app_id}}
+                    },
+                }
+            },
+        )
+
+    def update_subscription_group(self, group_id: str, attrs: dict) -> dict:
+        return self.patch(
+            f"/v1/subscriptionGroups/{group_id}",
+            {
+                "data": {
+                    "type": "subscriptionGroups",
+                    "id": group_id,
+                    "attributes": attrs,
+                }
+            },
+        )
+
+    def list_subscription_group_localizations(self, group_id: str) -> list:
+        resp = self.get(
+            f"/v1/subscriptionGroups/{group_id}/subscriptionGroupLocalizations",
+            limit=200,
+        )
+        return resp.get("data", [])
+
+    def create_subscription_group_localization(
+        self, group_id: str, locale: str, name: str, custom_app_name: str | None = None
+    ) -> dict:
+        attrs = {"locale": locale, "name": name}
+        if custom_app_name:
+            attrs["customAppName"] = custom_app_name
+        return self.post(
+            "/v1/subscriptionGroupLocalizations",
+            {
+                "data": {
+                    "type": "subscriptionGroupLocalizations",
+                    "attributes": attrs,
+                    "relationships": {
+                        "subscriptionGroup": {
+                            "data": {"type": "subscriptionGroups", "id": group_id}
+                        }
+                    },
+                }
+            },
+        )
+
+    def update_subscription_group_localization(self, loc_id: str, attrs: dict) -> dict:
+        return self.patch(
+            f"/v1/subscriptionGroupLocalizations/{loc_id}",
+            {
+                "data": {
+                    "type": "subscriptionGroupLocalizations",
+                    "id": loc_id,
+                    "attributes": attrs,
+                }
+            },
+        )
+
+    # ── 订阅商品 ──
+
+    def list_subscriptions(self, group_id: str) -> list:
+        resp = self.get(
+            f"/v1/subscriptionGroups/{group_id}/subscriptions", limit=200
+        )
+        return resp.get("data", [])
+
+    def create_subscription(self, group_id: str, attrs: dict) -> dict:
+        return self.post(
+            "/v1/subscriptions",
+            {
+                "data": {
+                    "type": "subscriptions",
+                    "attributes": attrs,
+                    "relationships": {
+                        "group": {
+                            "data": {"type": "subscriptionGroups", "id": group_id}
+                        }
+                    },
+                }
+            },
+        )
+
+    def update_subscription(self, sub_id: str, attrs: dict) -> dict:
+        return self.patch(
+            f"/v1/subscriptions/{sub_id}",
+            {
+                "data": {
+                    "type": "subscriptions",
+                    "id": sub_id,
+                    "attributes": attrs,
+                }
+            },
+        )
+
+    def list_subscription_localizations(self, sub_id: str) -> list:
+        resp = self.get(
+            f"/v1/subscriptions/{sub_id}/subscriptionLocalizations", limit=200
+        )
+        return resp.get("data", [])
+
+    def create_subscription_localization(
+        self, sub_id: str, locale: str, name: str, description: str
+    ) -> dict:
+        return self.post(
+            "/v1/subscriptionLocalizations",
+            {
+                "data": {
+                    "type": "subscriptionLocalizations",
+                    "attributes": {
+                        "locale": locale, "name": name, "description": description,
+                    },
+                    "relationships": {
+                        "subscription": {
+                            "data": {"type": "subscriptions", "id": sub_id}
+                        }
+                    },
+                }
+            },
+        )
+
+    def update_subscription_localization(self, loc_id: str, attrs: dict) -> dict:
+        return self.patch(
+            f"/v1/subscriptionLocalizations/{loc_id}",
+            {
+                "data": {
+                    "type": "subscriptionLocalizations",
+                    "id": loc_id,
+                    "attributes": attrs,
+                }
+            },
+        )
+
+    # ── 订阅价格 ──
+
+    def find_subscription_price_point(
+        self, sub_id: str, territory: str, amount: str
+    ) -> str | None:
+        resp = self.get(
+            f"/v1/subscriptions/{sub_id}/pricePoints",
+            **{"filter[territory]": territory, "limit": 200},
+        )
+        target = str(amount).strip()
+        for pp in resp.get("data", []):
+            price = str(pp.get("attributes", {}).get("customerPrice", "")).strip()
+            if price == target:
+                return pp["id"]
+        return None
+
+    def list_subscription_price_points(
+        self, sub_id: str, territory: str
+    ) -> list:
+        resp = self.get(
+            f"/v1/subscriptions/{sub_id}/pricePoints",
+            **{"filter[territory]": territory, "limit": 200},
+        )
+        return resp.get("data", [])
+
+    def create_subscription_price(
+        self, sub_id: str, price_point_id: str, territory: str, start_date: str | None = None
+    ) -> dict:
+        attrs = {}
+        if start_date:
+            attrs["startDate"] = start_date
+        return self.post(
+            "/v1/subscriptionPrices",
+            {
+                "data": {
+                    "type": "subscriptionPrices",
+                    "attributes": attrs,
+                    "relationships": {
+                        "subscription": {
+                            "data": {"type": "subscriptions", "id": sub_id}
+                        },
+                        "subscriptionPricePoint": {
+                            "data": {
+                                "type": "subscriptionPricePoints",
+                                "id": price_point_id,
+                            }
+                        },
+                        "territory": {
+                            "data": {"type": "territories", "id": territory}
+                        },
+                    },
+                }
+            },
+        )
+
+    def list_subscription_prices(self, sub_id: str) -> list:
+        resp = self.get(f"/v1/subscriptions/{sub_id}/prices", limit=200)
+        return resp.get("data", [])
+
+    def delete_subscription_price(self, price_id: str):
+        return self.delete(f"/v1/subscriptionPrices/{price_id}")
+
+    # ── 入门优惠 ──
+
+    def list_subscription_intro_offers(self, sub_id: str) -> list:
+        resp = self.get(
+            f"/v1/subscriptions/{sub_id}/introductoryOffers", limit=200
+        )
+        return resp.get("data", [])
+
+    def create_subscription_intro_offer(
+        self, sub_id: str, attrs: dict, price_point_id: str | None = None
+    ) -> dict:
+        relationships = {
+            "subscription": {"data": {"type": "subscriptions", "id": sub_id}}
+        }
+        if price_point_id:
+            relationships["subscriptionPricePoint"] = {
+                "data": {"type": "subscriptionPricePoints", "id": price_point_id}
+            }
+        return self.post(
+            "/v1/subscriptionIntroductoryOffers",
+            {
+                "data": {
+                    "type": "subscriptionIntroductoryOffers",
+                    "attributes": attrs,
+                    "relationships": relationships,
+                }
+            },
+        )
+
+    def delete_subscription_intro_offer(self, offer_id: str):
+        return self.delete(f"/v1/subscriptionIntroductoryOffers/{offer_id}")
+
+    # ── 促销优惠 ──
+
+    def list_subscription_promo_offers(self, sub_id: str) -> list:
+        resp = self.get(
+            f"/v1/subscriptions/{sub_id}/promotionalOffers", limit=200
+        )
+        return resp.get("data", [])
+
+    def create_subscription_promo_offer(
+        self, sub_id: str, attrs: dict, price_point_id: str
+    ) -> dict:
+        return self.post(
+            "/v1/subscriptionPromotionalOffers",
+            {
+                "data": {
+                    "type": "subscriptionPromotionalOffers",
+                    "attributes": attrs,
+                    "relationships": {
+                        "subscription": {
+                            "data": {"type": "subscriptions", "id": sub_id}
+                        },
+                        "subscriptionPricePoint": {
+                            "data": {
+                                "type": "subscriptionPricePoints",
+                                "id": price_point_id,
+                            }
+                        },
+                    },
+                }
+            },
+        )
+
+    def update_subscription_promo_offer(self, offer_id: str, attrs: dict) -> dict:
+        return self.patch(
+            f"/v1/subscriptionPromotionalOffers/{offer_id}",
+            {
+                "data": {
+                    "type": "subscriptionPromotionalOffers",
+                    "id": offer_id,
+                    "attributes": attrs,
+                }
+            },
+        )
+
+    def delete_subscription_promo_offer(self, offer_id: str):
+        return self.delete(f"/v1/subscriptionPromotionalOffers/{offer_id}")
+
+    # ── 订阅审核截图 ──
+
+    def list_subscription_review_screenshots(self, sub_id: str) -> list:
+        resp = self.get(
+            f"/v1/subscriptions/{sub_id}/appStoreReviewScreenshot"
+        )
+        data = resp.get("data")
+        if not data:
+            return []
+        return [data] if isinstance(data, dict) else data
+
+    def create_subscription_review_screenshot_reservation(
+        self, sub_id: str, filename: str, filesize: int
+    ) -> dict:
+        return self.post(
+            "/v1/subscriptionAppStoreReviewScreenshots",
+            {
+                "data": {
+                    "type": "subscriptionAppStoreReviewScreenshots",
+                    "attributes": {"fileName": filename, "fileSize": filesize},
+                    "relationships": {
+                        "subscription": {
+                            "data": {"type": "subscriptions", "id": sub_id}
+                        }
+                    },
+                }
+            },
+        )
+
+    def upload_subscription_review_screenshot(
+        self, upload_operations: list, file_bytes: bytes
+    ):
+        for op in upload_operations:
+            url = op["url"]
+            offset = op["offset"]
+            length = op["length"]
+            req_headers = {h["name"]: h["value"] for h in op["requestHeaders"]}
+            chunk = file_bytes[offset : offset + length]
+            resp = requests.put(url, headers=req_headers, data=chunk)
+            if resp.status_code not in (200, 201):
+                raise Exception(
+                    f"审核截图上传失败 [{resp.status_code}]: {resp.text[:200]}"
+                )
+
+    def commit_subscription_review_screenshot(
+        self, screenshot_id: str, source_file_checksum: str
+    ) -> dict:
+        return self.patch(
+            f"/v1/subscriptionAppStoreReviewScreenshots/{screenshot_id}",
+            {
+                "data": {
+                    "type": "subscriptionAppStoreReviewScreenshots",
+                    "id": screenshot_id,
+                    "attributes": {
+                        "uploaded": True,
+                        "sourceFileChecksum": source_file_checksum,
+                    },
+                }
+            },
+        )
+
+    def delete_subscription_review_screenshot(self, screenshot_id: str):
+        return self.delete(
+            f"/v1/subscriptionAppStoreReviewScreenshots/{screenshot_id}"
+        )
