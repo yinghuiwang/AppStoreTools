@@ -5,61 +5,57 @@
 ## 快速开始
 
 ```bash
-# 1. 配置 API 凭证
-cp config/.env.example config/.env
-# 编辑 config/.env 填写你的凭证，并将 .p8 私钥放入 config/ 目录
+# 1. 安装
+pip install asc-appstore-tools
 
-# 2. 一键运行（自动检查环境、安装依赖）
-./run.sh
+# 2. 添加应用配置（交互式）
+asc app add myapp
+
+# 3. 运行
+asc --app myapp upload
 ```
 
 ## 目录结构
 
 ```
 AppStoreTools/
-├── config/                         # 配置与密钥（git 忽略敏感文件）
-│   ├── .env.example                #   配置模板
-│   ├── .env                        #   实际配置
-│   └── AuthKey_*.p8                #   API 私钥
+├── src/asc/                        # pip 包源码
+│   ├── commands/                   #   子命令实现
+│   ├── api.py                      #   App Store Connect REST 客户端
+│   ├── config.py                   #   配置管理
+│   ├── constants.py                #   设备类型、Locale 映射
+│   └── utils.py                    #   工具函数
 ├── data/                           # 上传数据
 │   ├── appstore_info.csv           #   元数据 CSV
 │   ├── iap_packages.example.json   #   IAP 配置示例
 │   └── screenshots/                #   截图
 │       ├── cn/                     #     中文截图
 │       └── en/                     #     英文截图
-├── upload_to_appstore.py           # 主程序
-├── run.sh                          # 入口脚本
-├── requirements.txt                # Python 依赖
-├── .gitignore
+├── pyproject.toml
 └── README.md
 ```
 
 ## 前置准备
-
-> 入口脚本会在未检测到 Python 3.9+ 时自动尝试安装：
-> - macOS: `brew install python`
-> - Linux: `apt-get` / `dnf` / `yum` / `pacman` / `zypper`
-> 自动安装可能需要管理员权限；若安装失败，请手动安装 Python 3.9+ 后重试。
 
 ### 获取 API Key
 
 1. 前往 [App Store Connect - API Keys](https://appstoreconnect.apple.com/access/integrations/api)
 2. 点击 "+" 创建新的 API Key，权限选择 **App Manager** 或更高
 3. 记录 **Issuer ID** 和 **Key ID**
-4. 下载 `.p8` 私钥文件（只能下载一次），放入 `config/` 目录
+4. 下载 `.p8` 私钥文件（只能下载一次）
 
 ### 获取 App ID
 
 在 App Store Connect 中进入你的 App → 通用 → App 信息，页面 URL 中的数字即为 Apple ID。
 
-### 配置 `config/.env`
+### 添加应用配置
 
-```env
-ISSUER_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-KEY_ID=XXXXXXXXXX
-KEY_FILE=AuthKey_XXXXXXXXXX.p8
-APP_ID=1234567890
+```bash
+asc app add myapp
+# 交互式填写：Issuer ID、Key ID、.p8 路径、App ID、数据路径
 ```
+
+私钥文件会自动复制到 `~/.config/asc/keys/`，配置保存在 `~/.config/asc/profiles/myapp.toml`。
 
 ## CSV 格式
 
@@ -90,39 +86,69 @@ APP_ID=1234567890
 
 ```bash
 # 完整上传（元数据 + 截图）
-./run.sh
+asc --app myapp upload
 
 # 预览模式（不实际上传）
-./run.sh --dry-run
+asc --app myapp upload --dry-run
 
 # 仅上传元数据
-./run.sh --metadata-only
+asc --app myapp metadata
+
+# 仅上传关键词
+asc --app myapp keywords
 
 # 仅上传截图
-./run.sh --screenshots-only
+asc --app myapp screenshots
 
 # 手动指定截图设备类型
-./run.sh --display-type APP_IPHONE_67
+asc --app myapp screenshots --display-type APP_IPHONE_67
 
-# 仅上传 IAP 包
-./run.sh iap --iap-file data/iap_packages.json
+# 仅上传 IAP 包（一次性）
+asc --app myapp iap --iap-file data/iap_packages.json
 
-# 完整上传（元数据 + 截图 + IAP）
-./run.sh --iap-file data/iap_packages.json
+# 上传订阅商品（默认跳过已存在）
+asc --app myapp iap --iap-file data/iap_packages.json
 
-# 指定自定义数据路径
-./run.sh --csv /path/to/info.csv --screenshots /path/to/shots
+# 强制更新已存在的订阅
+asc --app myapp iap --iap-file data/iap_packages.json --update-existing
 
 # ── 更新版本描述 (What's New) ──
 
 # 所有语言使用同一段文字
-./run.sh --whats-new "修复已知问题，提升稳定性。"
+asc --app myapp whats-new --text "修复已知问题，提升稳定性。"
 
 # 限定只更新指定语言
-./run.sh --whats-new "Bug fixes." --whats-new-locales en-US
+asc --app myapp whats-new --text "Bug fixes." --locales en-US
 
 # 从文件读取多语言更新描述
-./run.sh --whats-new-file data/whats_new.txt
+asc --app myapp whats-new --file data/whats_new.txt
+
+# ── 直接设置 URL ──
+asc --app myapp set-support-url --text "https://example.com/support"
+asc --app myapp set-marketing-url --text "https://example.com" --locales en-US
+asc --app myapp set-privacy-policy-url --text "https://example.com/privacy"
+
+# 检查环境配置
+asc --app myapp check
+
+# 管理应用配置
+asc app list
+asc app remove myapp
+```
+
+### 使用本地 `.asc/config.toml` 省略 `--app`
+
+在项目目录创建 `.asc/config.toml`：
+
+```toml
+default_app = "myapp"
+```
+
+之后可以省略 `--app` 参数：
+
+```bash
+asc upload
+asc screenshots
 ```
 
 ### 更新描述文件格式 (`whats_new.txt`)
@@ -144,10 +170,11 @@ en-US:
 ### IAP 配置文件格式 (`iap_packages.json`)
 
 支持两种结构：
-- 顶层数组 `[...]`
-- 或对象 `{ "items": [...] }`
+- 顶层数组 `[...]`（仅一次性 IAP）
+- 或对象 `{ "items": [...] }`（一次性 IAP）
+- 或对象 `{ "items": [...], "subscriptionGroups": [...] }`（含订阅）
 
-示例：
+示例（一次性 IAP）：
 
 ```json
 {
@@ -173,13 +200,75 @@ en-US:
 }
 ```
 
-字段说明：
+### 订阅配置示例 (`iap_packages.json` 中的 `subscriptionGroups`)
+
+```json
+{
+  "subscriptionGroups": [
+    {
+      "referenceName": "Pro Membership",
+      "localizations": {
+        "en-US": { "name": "Pro", "customAppName": "MyApp Pro" },
+        "zh-Hans": { "name": "高级会员" }
+      },
+      "subscriptions": [
+        {
+          "productId": "com.example.pro.monthly",
+          "name": "Pro Monthly",
+          "subscriptionPeriod": "ONE_MONTH",
+          "groupLevel": 1,
+          "familySharable": false,
+          "availableInAllTerritories": true,
+          "localizations": {
+            "en-US": { "name": "Pro Monthly", "description": "Unlock all features." },
+            "zh-Hans": { "name": "高级会员（月）", "description": "解锁全部功能。" }
+          },
+          "price": { "baseTerritory": "USA", "baseAmount": "9.99" },
+          "introductoryOffer": {
+            "offerMode": "FREE_TRIAL",
+            "duration": "ONE_WEEK",
+            "numberOfPeriods": 1
+          },
+          "promotionalOffers": [
+            {
+              "referenceName": "Win-back 50off",
+              "offerCode": "WINBACK50",
+              "offerMode": "PAY_AS_YOU_GO",
+              "duration": "ONE_MONTH",
+              "numberOfPeriods": 3,
+              "baseTerritory": "USA",
+              "baseAmount": "4.99"
+            }
+          ],
+          "review": {
+            "screenshot": "data/iap_review/pro_monthly.png",
+            "note": "Monthly auto-renewable subscription. Test: test@example.com / pw"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+完整示例见 `data/iap_packages.example.json`。
+
+**字段说明（一次性 IAP）**：
 - `productId`: IAP Product ID（唯一）
 - `name`: IAP 内部名称（ASC 中显示）
 - `inAppPurchaseType`: IAP 类型（如 `CONSUMABLE` / `NON_CONSUMABLE`）
 - `reviewNote`: 审核备注
 - `availableInAllTerritories`: 是否全地区可售
 - `localizations`: 多语言信息（`name` / `description`）
+
+**字段说明（订阅）**：
+- `referenceName`: 订阅组名称
+- `subscriptionPeriod`: 周期枚举（`ONE_WEEK` / `ONE_MONTH` / `TWO_MONTHS` / `THREE_MONTHS` / `SIX_MONTHS` / `ONE_YEAR`）
+- `groupLevel`: 组内等级（同一组内必须唯一）
+- `price.baseTerritory` + `baseAmount`: 基准价格（工具自动匹配 Price Point）
+- `introductoryOffer`: 入门优惠（可选，`offerMode` 为 `FREE_TRIAL` / `PAY_AS_YOU_GO` / `PAY_UP_FRONT`）
+- `promotionalOffers`: 促销优惠（可选，`offerCode` 同订阅内必须唯一）
+- `review.screenshot` + `review.note`: 审核截图（PNG/JPG，≤5MB）和审核备注（必填）
 
 ### 支持的设备类型
 
