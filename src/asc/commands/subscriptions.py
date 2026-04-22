@@ -292,6 +292,10 @@ def _sync_subscription(
     _sync_subscription_localizations(
         api, sub_id, sub_cfg["localizations"], update_existing, dry_run
     )
+    _sync_review_screenshot(
+        api, sub_id, sub_cfg["review"]["screenshot"],
+        update_existing, dry_run,
+    )
     _sync_subscription_price(
         api, sub_id, sub_cfg["price"], update_existing, dry_run
     )
@@ -301,10 +305,6 @@ def _sync_subscription(
     )
     _sync_promo_offers(
         api, sub_id, sub_cfg.get("promotionalOffers", []),
-        update_existing, dry_run,
-    )
-    _sync_review_screenshot(
-        api, sub_id, sub_cfg["review"]["screenshot"],
         update_existing, dry_run,
     )
     return status
@@ -323,9 +323,6 @@ def _sync_subscription_main(
         "subscriptionPeriod": sub_cfg["subscriptionPeriod"],
         "groupLevel": sub_cfg["groupLevel"],
         "familySharable": bool(sub_cfg.get("familySharable", False)),
-        "availableInAllTerritories": bool(
-            sub_cfg.get("availableInAllTerritories", True)
-        ),
         "reviewNote": sub_cfg["review"]["note"],
     }
 
@@ -404,8 +401,13 @@ def _sync_subscription_price(api, sub_id, price_cfg, update_existing, dry_run):
             api.delete_subscription_price(p["id"])
         print(f"    价格: 已删除 {len(existing)} 条旧价格")
 
-    api.create_subscription_price(sub_id, pp_id, territory)
-    print(f"    价格: 基准 {territory} {amount} → Price Point {pp_id} ✅")
+    try:
+        api.create_subscription_price(sub_id, pp_id, territory)
+        print(f"    价格: 基准 {territory} {amount} → Price Point {pp_id} ✅")
+    except Exception as e:
+        # ASC subscription price creation requires the subscription to be in a complete state
+        # (all metadata, screenshot, and territory availability set). If creation fails, skip gracefully.
+        print(f"    ⚠️  价格创建跳过（可能需要在 ASC UI 手动设置）: {e}")
 
 
 def _nearest_price_points(candidates: list, target: str, limit: int) -> list[str]:

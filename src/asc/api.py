@@ -509,10 +509,9 @@ class AppStoreConnectAPI:
     def find_subscription_price_point(
         self, sub_id: str, territory: str, amount: str
     ) -> str | None:
-        resp = self.get(
-            f"/v1/subscriptions/{sub_id}/pricePoints",
-            **{"filter[territory]": territory, "limit": 200},
-        )
+        # filter[territory] returns 0 for subscriptionPricePoints in ASC API
+        # Query all and filter client-side by price (territory is embedded in price point ID)
+        resp = self.get(f"/v1/subscriptions/{sub_id}/pricePoints", limit=200)
         target = str(amount).strip()
         for pp in resp.get("data", []):
             price = str(pp.get("attributes", {}).get("customerPrice", "")).strip()
@@ -523,10 +522,7 @@ class AppStoreConnectAPI:
     def list_subscription_price_points(
         self, sub_id: str, territory: str
     ) -> list:
-        resp = self.get(
-            f"/v1/subscriptions/{sub_id}/pricePoints",
-            **{"filter[territory]": territory, "limit": 200},
-        )
+        resp = self.get(f"/v1/subscriptions/{sub_id}/pricePoints", limit=200)
         return resp.get("data", [])
 
     def create_subscription_price(

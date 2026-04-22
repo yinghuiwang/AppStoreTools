@@ -147,13 +147,35 @@ def cmd_iap(
         help="Update existing items/subscriptions (default: skip existing)",
     ),
 ):
-    """Upload in-app purchases from JSON file"""
+    """Upload in-app purchases and subscriptions from JSON file"""
+    from asc.commands.subscriptions import _upload_subscriptions_core
+
     config = Config(app)
     api, app_id = make_api_from_config(config)
     iap_path = Path(iap_file)
     if not iap_path.exists():
         typer.echo(f"❌ IAP 配置文件不存在: {iap_path}", err=True)
         raise typer.Exit(1)
-    iap_items = _load_iap_package(str(iap_path))
-    print(f"\n📦 从 IAP 配置读取 {len(iap_items)} 项")
-    _upload_iap_core(api, app_id, iap_items, dry_run, update_existing=update_existing)
+
+    try:
+        items, groups = _load_iap_config(str(iap_path))
+    except ValueError as e:
+        typer.echo(f"❌ {e}", err=True)
+        raise typer.Exit(1)
+
+    exit_code = 0
+    if items:
+        print(f"\n📦 一次性 IAP: {len(items)} 项")
+        _upload_iap_core(api, app_id, items, dry_run, update_existing=update_existing)
+
+    if groups:
+        total_subs = sum(len(g.get("subscriptions", [])) for g in groups)
+        print(f"\n🔁 订阅: {len(groups)} 组 / {total_subs} 商品")
+        failed = _upload_subscriptions_core(
+            api, app_id, groups, update_existing=update_existing, dry_run=dry_run
+        )
+        if failed:
+            exit_code = 1
+
+    if exit_code:
+        raise typer.Exit(exit_code)
