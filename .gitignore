@@ -3,3 +3,7 @@ config/*.p8
 __pycache__/
 *.pyc
 .DS_Store
+.asc/
+*.egg-info/
+dist/
+build/
