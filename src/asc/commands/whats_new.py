@@ -47,18 +47,48 @@ def _parse_whats_new_file(file_path: str) -> dict[str, str]:
 
 def cmd_whats_new(
     text: Optional[str] = typer.Option(
-        None, "--text", help="Release notes text (all locales)"
+        None, "--text", help="Release notes text (applied to all or --locales target locales)"
     ),
     file: Optional[str] = typer.Option(
-        None, "--file", help="Path to multi-locale whats_new.txt"
+        None, "--file", help="Path to multi-locale whats_new.txt file"
     ),
     locales: Optional[str] = typer.Option(
-        None, "--locales", help="Comma-separated locales"
+        None, "--locales",
+        help="Comma-separated target locales (e.g. en-US,zh-CN). "
+             "Only used with --text. If not set, applies to all available locales.",
     ),
-    app: Optional[str] = typer.Option(None, "--app"),
-    dry_run: bool = typer.Option(False, "--dry-run"),
+    app: Optional[str] = typer.Option(None, "--app", help="App profile name"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview without uploading"),
 ):
-    """Update What's New (release notes)"""
+    """Update What's New (release notes) for the current version.
+
+    You can provide release notes via --text (single text for all locales) or
+    --file (multi-locale file with different content per language).
+
+    \b
+    File format (whats_new.txt):
+    en-US:
+    Bug fixes and performance improvements.
+
+    ---
+    zh-CN:
+    错误修复和性能提升。
+
+    ---
+    ja-JP:
+    バグ修正とパフォーマンス向上。
+
+    \b
+    Alternative format (locale: content on same line):
+    en-US: Bug fixes and performance improvements.
+    zh-CN: 错误修复和性能提升。
+
+    \b
+    Example:
+        asc --app myapp whats-new --text "Bug fixes and improvements"
+        asc --app myapp whats-new --text "Bug fixes" --locales en-US,zh-CN
+        asc --app myapp whats-new --file data/whats_new.txt
+    """
     if not text and not file:
         typer.echo("❌ 请指定 --text 或 --file", err=True)
         raise typer.Exit(1)

@@ -199,12 +199,40 @@ def _upload_screenshots_core(
 
 
 def cmd_screenshots(
-    app: Optional[str] = typer.Option(None, "--app"),
-    dry_run: bool = typer.Option(False, "--dry-run"),
-    screenshots: Optional[str] = typer.Option(None, "--screenshots"),
-    display_type: Optional[str] = typer.Option(None, "--display-type"),
+    app: Optional[str] = typer.Option(None, "--app", help="App profile name"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview uploads without sending to App Store"),
+    screenshots: Optional[str] = typer.Option(None, "--screenshots",
+        help="Screenshots directory [default: data/screenshots]"),
+    display_type: Optional[str] = typer.Option(None, "--display-type",
+        help="Device type override (e.g. APP_IPHONE_67, APP_IPAD_PRO_129_EQ, APP_IPHONE_61). "
+             "Auto-detected from image dimensions if not specified.",
+    ),
 ):
-    """Upload screenshots"""
+    """Upload screenshots to App Store Connect.
+
+    Screenshots are uploaded per locale. The tool looks for subfolders in the
+    screenshots directory named after locales (e.g. en-US, zh-CN).
+
+    \b
+    Device types (auto-detected from image dimensions):
+    - APP_IPHONE_67 (iPhone 15 Pro)
+    - APP_IPHONE_61 (iPhone 14)
+    - APP_IPAD_PRO_129_EQ (iPad Pro 12.9")
+    - APP_IPAD_MINI_97 (iPad mini)
+    - APP_IPHONE_55 (iPhone 8 Plus)
+    - etc.
+
+    \b
+    Notes:
+    - Existing screenshots for the same device type are deleted before upload
+    - Screenshots are sorted by filename number in upload order
+
+    \b
+    Example:
+        asc --app myapp screenshots
+        asc --app myapp screenshots --dry-run
+        asc --app myapp screenshots --display-type APP_IPHONE_67
+    """
     config = Config(app)
     api, app_id = make_api_from_config(config)
     screenshots_dir = screenshots or config.screenshots_path

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Optional
 
 import typer
@@ -23,13 +24,40 @@ def version_callback(value: bool):
         raise typer.Exit()
 
 
-@app.callback()
+@app.callback(invoke_without_command=True)
 def main(
     version: Optional[bool] = typer.Option(
-        None, "--version", "-V", callback=version_callback, is_eager=True
+        None, "--version", "-V", callback=version_callback, is_eager=True,
+        help="Show version information",
+    ),
+    app: Optional[str] = typer.Option(
+        None, "--app", help="App profile name (from 'asc app add')",
+        is_eager=True,
     ),
 ):
-    """App Store Connect CLI — upload metadata, screenshots, IAP, and more."""
+    """App Store Connect CLI — upload metadata, screenshots, IAP, and subscriptions.
+
+    This tool helps you manage your App Store Connect content including:
+
+    \b
+    • Metadata: app names, subtitles, descriptions, keywords
+    • URLs: support, marketing, privacy policy
+    • Screenshots for all device types
+    • In-App Purchases (IAP) and Subscriptions
+    • Release notes (What's New)
+
+    \b
+    Configuration priority (highest to lowest):
+    1. CLI arguments (--app, --csv, etc.)
+    2. Local .asc/config.toml
+    3. Global ~/.config/asc/profiles/<name>.toml
+    4. Environment variables
+
+    \b
+    First time? Run 'asc app add' to set up your credentials.
+    """
+    if app:
+        os.environ["_ASC_APP"] = app
 
 
 from asc.commands.metadata import (

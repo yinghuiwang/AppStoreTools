@@ -21,7 +21,8 @@ class Config:
     """Configuration with priority: CLI args > local .asc/config.toml > global profile > env"""
 
     def __init__(self, app_name: str | None = None):
-        self.app_name = app_name
+        # CLI args take priority, then env var, then local config
+        self.app_name = app_name or os.getenv("_ASC_APP")
         self._global_dir = Path.home() / ".config" / "asc"
         self._local_dir = Path.cwd() / ".asc"
         self._data: dict[str, Any] = {}

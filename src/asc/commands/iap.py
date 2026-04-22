@@ -139,15 +139,65 @@ def _upload_iap_core(api, app_id: str, iap_items: list[dict], dry_run: bool = Fa
 
 
 def cmd_iap(
-    iap_file: str = typer.Option(..., "--iap-file", help="IAP JSON config file path"),
-    app: Optional[str] = typer.Option(None, "--app"),
-    dry_run: bool = typer.Option(False, "--dry-run"),
+    iap_file: str = typer.Option(..., "--iap-file",
+        help="Path to IAP JSON config file (see data/iap_packages.example.json for schema)"),
+    app: Optional[str] = typer.Option(None, "--app", help="App profile name"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview without uploading"),
     update_existing: bool = typer.Option(
         False, "--update-existing",
-        help="Update existing items/subscriptions (default: skip existing)",
+        help="Update existing IAP/subscriptions. Default: skip items that already exist.",
     ),
 ):
-    """Upload in-app purchases and subscriptions from JSON file"""
+    """Upload in-app purchases and subscriptions from JSON file.
+
+    Supports both one-time IAP (items array) and auto-renewable subscriptions
+    (subscriptionGroups array). The JSON file can contain one or both.
+
+    \b
+    IAP items structure:
+    [
+      {
+        "productId": "com.example.app.item1",
+        "name": "Item Name",
+        "inAppPurchaseType": "CONSUMABLE",
+        "reviewNote": "This is a test IAP",
+        "localizations": {
+          "en-US": { "name": "Item Name", "description": "Description" },
+          "zh-CN": { "name": "物品名称", "description": "描述" }
+        }
+      }
+    ]
+
+    \b
+    Subscription groups structure:
+    [
+      {
+        "referenceName": "Premium Subscription",
+        "subscriptions": [
+          {
+            "productId": "com.example.app.premium.monthly",
+            "name": "Premium Monthly",
+            "subscriptionPeriod": "ONE_MONTH",
+            "groupLevel": 1,
+            "localizations": {...},
+            "price": { "baseTerritory": "US", "baseAmount": "4.99" },
+            "introductoryOffer": {...},
+            "promotionalOffers": [...],
+            "review": { "note": "Review note", "screenshot": "path/to/screenshot.png" }
+          }
+        ]
+      }
+    ]
+
+    \b
+    Default behavior: creates new items only. Use --update-existing to modify.
+
+    \b
+    Example:
+        asc --app myapp iap --iap-file data/iap_packages.json
+        asc --app myapp iap --iap-file data/iap_packages.json --dry-run
+        asc --app myapp iap --iap-file data/iap_packages.json --update-existing
+    """
     from asc.commands.subscriptions import _upload_subscriptions_core
 
     config = Config(app)

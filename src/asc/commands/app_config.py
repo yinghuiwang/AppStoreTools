@@ -12,9 +12,25 @@ from asc.config import Config
 
 
 def cmd_app_add(
-    name: str = typer.Argument(..., help="Profile name for this app"),
+    name: str = typer.Argument(..., help="Profile name for this app (used with --app)"),
 ):
-    """Interactively add a new app profile"""
+    """Interactively add a new app profile.
+
+    This command guides you through setting up credentials for App Store Connect API.
+    You'll need your App Store Connect API key details (Issuer ID, Key ID, .p8 private key)
+    and your app's numeric ID.
+
+    \b
+    The profile stores:
+    - API credentials (Issuer ID, Key ID, key file path)
+    - Default paths for CSV and screenshots
+    - App ID
+
+    \b
+    Example:
+        asc app add myapp
+        asc app add production-app
+    """
     typer.echo(f"Adding app profile: {name}")
     typer.echo("Enter your App Store Connect credentials:")
 
@@ -52,7 +68,14 @@ def cmd_app_add(
 
 
 def cmd_app_list():
-    """List all configured app profiles"""
+    """List all configured app profiles.
+
+    Shows all app profiles that have been configured via 'asc app add'.
+
+    \b
+    Example:
+        asc app list
+    """
     config = Config()
     apps = config.list_apps()
     if not apps:
@@ -66,9 +89,17 @@ def cmd_app_list():
 
 def cmd_app_remove(
     name: str = typer.Argument(..., help="Profile name to remove"),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
 ):
-    """Remove an app profile"""
+    """Remove an app profile.
+
+    Deletes the profile configuration saved in ~/.config/asc/profiles/.
+
+    \b
+    Example:
+        asc app remove myapp
+        asc app remove myapp --yes
+    """
     if not yes:
         confirmed = typer.confirm(f"Remove app profile '{name}'?")
         if not confirmed:

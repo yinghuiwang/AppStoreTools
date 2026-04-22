@@ -228,14 +228,27 @@ def _update_version_field_core(
 
 def cmd_upload(
     app: Optional[str] = typer.Option(None, "--app", help="App profile name"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Preview without uploading"),
-    csv: Optional[str] = typer.Option(None, "--csv", help="CSV metadata file path"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without uploading"),
+    csv: Optional[str] = typer.Option(None, "--csv", help="CSV metadata file path [default: data/appstore_info.csv]"),
     screenshots: Optional[str] = typer.Option(
-        None, "--screenshots", help="Screenshots directory"
+        None, "--screenshots", help="Screenshots directory [default: data/screenshots]"
     ),
-    display_type: Optional[str] = typer.Option(None, "--display-type"),
+    display_type: Optional[str] = typer.Option(None, "--display-type",
+        help="Device type override (e.g. APP_IPHONE_67, APP_IPAD_PRO_129_EQ)",
+    ),
 ):
-    """Upload all (metadata + screenshots)"""
+    """Upload all content: metadata (from CSV) + screenshots.
+
+    This command uploads metadata from your CSV file and screenshots from
+    the configured directory. Use --dry-run to preview what would be uploaded.
+
+    \b
+    Example:
+        asc --app myapp upload
+        asc --app myapp upload --dry-run
+        asc --app myapp upload --csv custom.csv --screenshots ./screenshots
+        asc --app myapp upload --display-type APP_IPHONE_67
+    """
     from asc.commands.screenshots import _upload_screenshots_core
 
     config = Config(app)
@@ -260,11 +273,20 @@ def cmd_upload(
 
 
 def cmd_metadata(
-    app: Optional[str] = typer.Option(None, "--app"),
-    dry_run: bool = typer.Option(False, "--dry-run"),
-    csv: Optional[str] = typer.Option(None, "--csv"),
+    app: Optional[str] = typer.Option(None, "--app", help="App profile name"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without uploading"),
+    csv: Optional[str] = typer.Option(None, "--csv", help="CSV file path [default: data/appstore_info.csv]"),
 ):
-    """Upload metadata only (name, subtitle, description, keywords, URLs)"""
+    """Upload metadata only: name, subtitle, description, keywords, URLs.
+
+    Metadata is read from the CSV file and uploaded to App Store Connect.
+    The CSV should have columns like: 语言, 应用名称, 副标题, 长描述, 关键子.
+
+    \b
+    Example:
+        asc --app myapp metadata
+        asc --app myapp metadata --csv custom.csv --dry-run
+    """
     config = Config(app)
     api, app_id = make_api_from_config(config)
     csv_path = Path(csv or config.csv_path)
@@ -276,11 +298,20 @@ def cmd_metadata(
 
 
 def cmd_keywords(
-    app: Optional[str] = typer.Option(None, "--app"),
-    dry_run: bool = typer.Option(False, "--dry-run"),
-    csv: Optional[str] = typer.Option(None, "--csv"),
+    app: Optional[str] = typer.Option(None, "--app", help="App profile name"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without uploading"),
+    csv: Optional[str] = typer.Option(None, "--csv", help="CSV file path [default: data/appstore_info.csv]"),
 ):
-    """Upload keywords only"""
+    """Upload keywords only from CSV.
+
+    Reads the '关键词' or '关键子' column from your CSV and updates keywords
+    for all locales in App Store Connect.
+
+    \b
+    Example:
+        asc --app myapp keywords
+        asc --app myapp keywords --dry-run
+    """
     config = Config(app)
     api, app_id = make_api_from_config(config)
     csv_path = Path(csv or config.csv_path)
@@ -294,11 +325,20 @@ def cmd_keywords(
 
 
 def cmd_support_url(
-    app: Optional[str] = typer.Option(None, "--app"),
-    dry_run: bool = typer.Option(False, "--dry-run"),
-    csv: Optional[str] = typer.Option(None, "--csv"),
+    app: Optional[str] = typer.Option(None, "--app", help="App profile name"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without uploading"),
+    csv: Optional[str] = typer.Option(None, "--csv", help="CSV file path [default: data/appstore_info.csv]"),
 ):
-    """Upload support URL from CSV"""
+    """Upload support URL from CSV.
+
+    Reads '技术支持网址' or '技术支持链接' from your metadata CSV and
+    updates the support URL for all locales.
+
+    \b
+    Example:
+        asc --app myapp support-url
+        asc --app myapp support-url --dry-run
+    """
     config = Config(app)
     api, app_id = make_api_from_config(config)
     csv_path = Path(csv or config.csv_path)
@@ -316,11 +356,20 @@ def cmd_support_url(
 
 
 def cmd_marketing_url(
-    app: Optional[str] = typer.Option(None, "--app"),
-    dry_run: bool = typer.Option(False, "--dry-run"),
-    csv: Optional[str] = typer.Option(None, "--csv"),
+    app: Optional[str] = typer.Option(None, "--app", help="App profile name"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without uploading"),
+    csv: Optional[str] = typer.Option(None, "--csv", help="CSV file path [default: data/appstore_info.csv]"),
 ):
-    """Upload marketing URL from CSV"""
+    """Upload marketing URL from CSV.
+
+    Reads '营销网站' or '营销网址' from your metadata CSV and updates the
+    marketing URL for all locales.
+
+    \b
+    Example:
+        asc --app myapp marketing-url
+        asc --app myapp marketing-url --dry-run
+    """
     config = Config(app)
     api, app_id = make_api_from_config(config)
     csv_path = Path(csv or config.csv_path)
@@ -338,11 +387,20 @@ def cmd_marketing_url(
 
 
 def cmd_privacy_policy_url(
-    app: Optional[str] = typer.Option(None, "--app"),
-    dry_run: bool = typer.Option(False, "--dry-run"),
-    csv: Optional[str] = typer.Option(None, "--csv"),
+    app: Optional[str] = typer.Option(None, "--app", help="App profile name"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without uploading"),
+    csv: Optional[str] = typer.Option(None, "--csv", help="CSV file path [default: data/appstore_info.csv]"),
 ):
-    """Upload privacy policy URL from CSV"""
+    """Upload privacy policy URL from CSV.
+
+    Reads '隐私政策网址' or '隐私政策链接' from your metadata CSV and updates
+    the privacy policy URL for all locales.
+
+    \b
+    Example:
+        asc --app myapp privacy-policy-url
+        asc --app myapp privacy-policy-url --dry-run
+    """
     config = Config(app)
     api, app_id = make_api_from_config(config)
     csv_path = Path(csv or config.csv_path)
@@ -360,14 +418,24 @@ def cmd_privacy_policy_url(
 
 
 def cmd_set_support_url(
-    url: str = typer.Option(..., "--text", help="Support URL"),
+    url: str = typer.Option(..., "--text", help="Support URL to set"),
     locales: Optional[str] = typer.Option(
-        None, "--locales", help="Comma-separated locales"
+        None, "--locales", help="Comma-separated locales (e.g. en-US,zh-CN). If not set, updates all locales."
     ),
-    app: Optional[str] = typer.Option(None, "--app"),
-    dry_run: bool = typer.Option(False, "--dry-run"),
+    app: Optional[str] = typer.Option(None, "--app", help="App profile name"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview without uploading"),
 ):
-    """Directly set support URL for all (or specific) locales"""
+    """Set support URL directly (not from CSV).
+
+    Unlike 'support-url' which reads from CSV, this command sets a single URL
+    for all or specific locales directly via --text.
+
+    \b
+    Example:
+        asc --app myapp set-support-url --text "https://example.com/support"
+        asc --app myapp set-support-url --text "https://example.com/support" --locales en-US,zh-CN
+        asc --app myapp set-support-url --text "https://example.com/support" --dry-run
+    """
     config = Config(app)
     api, app_id = make_api_from_config(config)
     locale_list = [l.strip() for l in locales.split(",")] if locales else None
@@ -377,12 +445,22 @@ def cmd_set_support_url(
 
 
 def cmd_set_marketing_url(
-    url: str = typer.Option(..., "--text", help="Marketing URL"),
-    locales: Optional[str] = typer.Option(None, "--locales"),
-    app: Optional[str] = typer.Option(None, "--app"),
-    dry_run: bool = typer.Option(False, "--dry-run"),
+    url: str = typer.Option(..., "--text", help="Marketing URL to set"),
+    locales: Optional[str] = typer.Option(None, "--locales",
+        help="Comma-separated locales (e.g. en-US,zh-CN). If not set, updates all locales."),
+    app: Optional[str] = typer.Option(None, "--app", help="App profile name"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview without uploading"),
 ):
-    """Directly set marketing URL for all (or specific) locales"""
+    """Set marketing URL directly (not from CSV).
+
+    Unlike 'marketing-url' which reads from CSV, this command sets a single URL
+    for all or specific locales directly via --text.
+
+    \b
+    Example:
+        asc --app myapp set-marketing-url --text "https://example.com"
+        asc --app myapp set-marketing-url --text "https://example.com" --locales en-US,zh-CN
+    """
     config = Config(app)
     api, app_id = make_api_from_config(config)
     locale_list = [l.strip() for l in locales.split(",")] if locales else None
@@ -392,12 +470,22 @@ def cmd_set_marketing_url(
 
 
 def cmd_set_privacy_policy_url(
-    url: str = typer.Option(..., "--text", help="Privacy Policy URL"),
-    locales: Optional[str] = typer.Option(None, "--locales"),
-    app: Optional[str] = typer.Option(None, "--app"),
-    dry_run: bool = typer.Option(False, "--dry-run"),
+    url: str = typer.Option(..., "--text", help="Privacy Policy URL to set"),
+    locales: Optional[str] = typer.Option(None, "--locales",
+        help="Comma-separated locales (e.g. en-US,zh-CN). If not set, updates all locales."),
+    app: Optional[str] = typer.Option(None, "--app", help="App profile name"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview without uploading"),
 ):
-    """Directly set privacy policy URL for all (or specific) locales"""
+    """Set privacy policy URL directly (not from CSV).
+
+    Unlike 'privacy-policy-url' which reads from CSV, this command sets a single URL
+    for all or specific locales directly via --text.
+
+    \b
+    Example:
+        asc --app myapp set-privacy-policy-url --text "https://example.com/privacy"
+        asc --app myapp set-privacy-policy-url --text "https://example.com/privacy" --locales en-US
+    """
     config = Config(app)
     api, app_id = make_api_from_config(config)
     locale_list = [l.strip() for l in locales.split(",")] if locales else None
@@ -413,9 +501,17 @@ def cmd_set_privacy_policy_url(
 
 
 def cmd_check(
-    app: Optional[str] = typer.Option(None, "--app"),
+    app: Optional[str] = typer.Option(None, "--app", help="App profile name"),
 ):
-    """Verify environment and API configuration"""
+    """Verify environment and API configuration.
+
+    Checks that your credentials are valid and can connect to App Store Connect.
+    Useful to run before doing actual uploads to ensure everything is configured.
+
+    \b
+    Example:
+        asc --app myapp check
+    """
     config = Config(app)
     api, app_id = make_api_from_config(config)
     print("\n🔐 验证 API 连接...")
