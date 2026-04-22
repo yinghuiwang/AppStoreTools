@@ -1,0 +1,35 @@
+{
+  "subscriptionGroups": [
+    {
+      "referenceName": "Premium Membership",
+      "localizations": {
+        "zh-Hans": { "name": "高级会员" },
+        "en-US": { "name": "Premium" }
+      },
+      "subscriptions": [
+        {
+          "productId": "com.example.premium.monthly",
+          "name": "Premium Monthly",
+          "subscriptionPeriod": "ONE_MONTH",
+          "groupLevel": 1,
+          "familySharable": false,
+          "localizations": {
+            "zh-Hans": { "name": "高级会员（月）", "description": "解锁全部高级功能，无广告。" },
+            "en-US": { "name": "Premium Monthly", "description": "Unlock all premium features, no ads." }
+          },
+          "price": { "baseTerritory": "US", "baseAmount": "9.99" },
+          "introductoryOffer": {
+            "offerMode": "FREE_TRIAL",
+            "duration": "ONE_WEEK",
+            "numberOfPeriods": 1
+          },
+          "promotionalOffers": [],
+          "review": {
+            "screenshot": "data/iap_review/premium_monthly.png",
+            "note": "Auto-renewable subscription. Test account: test@example.com / Test1234"
+          }
+        }
+      ]
+    }
+  ]
+}
