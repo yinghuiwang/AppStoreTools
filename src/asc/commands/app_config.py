@@ -107,3 +107,72 @@ def cmd_app_remove(
     config = Config()
     config.remove_app_profile(name)
     typer.echo(f"✅ App profile '{name}' removed.")
+
+
+def cmd_app_default(
+    name: str = typer.Argument(..., help="Profile name to set as default"),
+):
+    """Set or update the default app profile.
+
+    Writes the default app to .asc/config.toml in the current directory.
+    When no --app is specified, commands will use this default profile.
+
+    \b
+    Example:
+        asc app default myapp
+        asc app default production-app
+    """
+    local_dir = Path.cwd() / ".asc"
+    local_dir.mkdir(parents=True, exist_ok=True)
+    config_file = local_dir / "config.toml"
+
+    # Check if profile exists
+    config = Config()
+    apps = config.list_apps()
+    if name not in apps:
+        typer.echo(f"❌ Profile '{name}' not found. Available profiles:", err=True)
+        for app_name in apps:
+            typer.echo(f"  • {app_name}")
+        raise typer.Exit(1)
+
+    # Read existing config or create new
+    existing = ""
+    if config_file.exists():
+        existing = config_file.read_text()
+
+    # Update or create default_app setting
+    if "[defaults]" in existing:
+        # Update existing section
+        lines = existing.splitlines()
+        new_lines = []
+        found_default = False
+        for line in lines:
+            if line.strip().startswith("default_app"):
+                new_lines.append(f'default_app = "{name}"')
+                found_default = True
+            else:
+                new_lines.append(line)
+        if not found_default:
+            # Insert after [defaults] line
+            result = []
+            for line in new_lines:
+                result.append(line)
+                if line.strip() == "[defaults]":
+                    result.append(f'default_app = "{name}"')
+            existing = "\n".join(result)
+        else:
+            existing = "\n".join(new_lines)
+    else:
+        # Add new section
+        if existing.strip():
+            existing = existing.rstrip() + "\n\n"
+        else:
+            existing = ""
+        existing += """[defaults]
+default_app = "{name}"
+"""
+
+    config_file.write_text(existing.format(name=name))
+    typer.echo(f"✅ Default app profile set to '{name}'")
+    typer.echo(f"   Config written to: {config_file.relative_to(Path.cwd())}")
+    typer.echo(f"   Run 'asc upload' without --app to use this default.")

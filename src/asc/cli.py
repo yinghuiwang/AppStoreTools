@@ -75,7 +75,7 @@ from asc.commands.metadata import (
 from asc.commands.screenshots import cmd_screenshots
 from asc.commands.iap import cmd_iap
 from asc.commands.whats_new import cmd_whats_new
-from asc.commands.app_config import cmd_app_add, cmd_app_list, cmd_app_remove
+from asc.commands.app_config import cmd_app_add, cmd_app_list, cmd_app_remove, cmd_app_default
 
 app.command("upload")(cmd_upload)
 app.command("metadata")(cmd_metadata)
@@ -93,3 +93,4 @@ app.command("check")(cmd_check)
 app_cmd.command("add")(cmd_app_add)
 app_cmd.command("list")(cmd_app_list)
 app_cmd.command("remove")(cmd_app_remove)
+app_cmd.command("default")(cmd_app_default)
