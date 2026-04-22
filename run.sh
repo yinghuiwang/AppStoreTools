@@ -31,8 +31,10 @@ show_help() {
     echo -e "  ${BOLD}keywords${NC}            仅上传关键词 (Keywords)"
     echo -e "  ${BOLD}support-url${NC}         仅上传技术支持链接 (Support URL)"
     echo -e "  ${BOLD}marketing-url${NC}       仅上传营销网站链接 (Marketing URL)"
+    echo -e "  ${BOLD}privacy-policy-url${NC}  仅上传隐私政策网址 (Privacy Policy URL)"
     echo -e "  ${BOLD}set-support-url${NC}     直接设置 Support URL（类似 whats-new）"
     echo -e "  ${BOLD}set-marketing-url${NC}   直接设置 Marketing URL（类似 whats-new）"
+    echo -e "  ${BOLD}set-privacy-policy-url${NC} 直接设置 Privacy Policy URL（类似 whats-new）"
     echo -e "  ${BOLD}screenshots${NC}         仅上传截图"
     echo -e "  ${BOLD}iap${NC}                 仅上传 IAP 包"
     echo -e "  ${BOLD}whats-new${NC}           更新版本描述 (What's New)"
@@ -51,7 +53,7 @@ show_help() {
     echo "  --file PATH           从文件读取多语言更新描述"
     echo "  --locales LOCALES     限定语言，逗号分隔 (如 zh-Hans,en-US)"
     echo ""
-    echo -e "${CYAN}设置 URL (set-support-url / set-marketing-url) 选项:${NC}"
+    echo -e "${CYAN}设置 URL (set-support-url / set-marketing-url / set-privacy-policy-url) 选项:${NC}"
     echo "  --text TEXT           URL 文本"
     echo "  --locales LOCALES     限定语言，逗号分隔 (如 zh-Hans,en-US)"
     echo ""
@@ -62,8 +64,10 @@ show_help() {
     echo "  ./run.sh keywords                         仅上传关键词"
     echo "  ./run.sh support-url                      仅上传技术支持链接"
     echo "  ./run.sh marketing-url                    仅上传营销网站链接"
+    echo "  ./run.sh privacy-policy-url               仅上传隐私政策网址"
     echo "  ./run.sh set-support-url --text \"https://example.com/support\""
     echo "  ./run.sh set-marketing-url --text \"https://example.com\" --locales en-US"
+    echo "  ./run.sh set-privacy-policy-url --text \"https://example.com/privacy\""
     echo "  ./run.sh screenshots                      仅上传截图"
     echo "  ./run.sh iap --iap-file data/iap_packages.json"
     echo "  ./run.sh screenshots --display-type APP_IPHONE_67"
@@ -266,6 +270,10 @@ case "$COMMAND" in
         echo ""
         exec "$PYTHON" "$PYTHON_SCRIPT" --metadata-only --marketing-url-only "$@"
         ;;
+    privacy-policy-url)
+        echo ""
+        exec "$PYTHON" "$PYTHON_SCRIPT" --metadata-only --privacy-policy-url-only "$@"
+        ;;
     set-support-url)
         SET_URL_ARGS=()
         while [ $# -gt 0 ]; do
@@ -293,6 +301,22 @@ case "$COMMAND" in
         done
         if [ ${#SET_URL_ARGS[@]} -eq 0 ]; then
             error "请指定 URL: --text \"https://example.com\""
+            exit 1
+        fi
+        echo ""
+        exec "$PYTHON" "$PYTHON_SCRIPT" "${SET_URL_ARGS[@]}"
+        ;;
+    set-privacy-policy-url)
+        SET_URL_ARGS=()
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                --text)     SET_URL_ARGS+=(--privacy-policy-url "$2"); shift 2 ;;
+                --locales)  SET_URL_ARGS+=(--privacy-policy-url-locales "$2"); shift 2 ;;
+                *)          SET_URL_ARGS+=("$1"); shift ;;
+            esac
+        done
+        if [ ${#SET_URL_ARGS[@]} -eq 0 ]; then
+            error "请指定 URL: --text \"https://example.com/privacy\""
             exit 1
         fi
         echo ""

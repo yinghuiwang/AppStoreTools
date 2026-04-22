@@ -17,6 +17,7 @@ App Store Connect 元数据 & 截图上传工具
   --keywords-only 仅上传关键词 (Keywords)
   --support-url-only 仅上传技术支持链接 (Support URL)
   --marketing-url-only 仅上传营销网站链接 (Marketing URL)
+  --privacy-policy-url-only 仅上传隐私政策网址 (Privacy Policy URL)
   --iap-file      IAP 批量配置 JSON 文件路径
   --iap-only      仅上传 IAP，跳过元数据/截图
 """
@@ -566,6 +567,11 @@ def upload_metadata(
         keywords = meta.get("关键词", "") or meta.get("关键子", "")
         support_url = meta.get("技术支持网址", "") or meta.get("技术支持链接", "")
         marketing_url = meta.get("营销网站", "") or meta.get("营销网址", "")
+        privacy_policy_url = (
+            meta.get("隐私政策网址", "")
+            or meta.get("隐私政策链接", "")
+            or meta.get("隐私政策URL", "")
+        )
 
         ver_attrs = {}
         if description and (include_version_fields is None or "description" in include_version_fields):
@@ -576,6 +582,8 @@ def upload_metadata(
             ver_attrs["supportUrl"] = support_url
         if marketing_url and (include_version_fields is None or "marketingUrl" in include_version_fields):
             ver_attrs["marketingUrl"] = marketing_url
+        if privacy_policy_url and (include_version_fields is None or "privacyPolicyUrl" in include_version_fields):
+            ver_attrs["privacyPolicyUrl"] = privacy_policy_url
 
         if ver_attrs:
             desc_preview = description[:60] + "..." if len(description) > 60 else description
@@ -586,6 +594,8 @@ def upload_metadata(
                 print(f"    技术支持: {support_url}")
             if marketing_url:
                 print(f"    营销网站: {marketing_url}")
+            if privacy_policy_url:
+                print(f"    隐私政策: {privacy_policy_url}")
 
             if not dry_run:
                 if ver_locale in ver_loc_map:
@@ -1056,10 +1066,13 @@ def main():
     parser.add_argument("--keywords-only", action="store_true", help="仅上传关键词 (Keywords)")
     parser.add_argument("--support-url-only", action="store_true", help="仅上传技术支持链接 (Support URL)")
     parser.add_argument("--marketing-url-only", action="store_true", help="仅上传营销网站链接 (Marketing URL)")
+    parser.add_argument("--privacy-policy-url-only", action="store_true", help="仅上传隐私政策网址 (Privacy Policy URL)")
     parser.add_argument("--support-url", help="直接设置 Support URL（对所有语言生效）")
     parser.add_argument("--support-url-locales", help="限定 Support URL 语言，逗号分隔 (如 zh-Hans,en-US)")
     parser.add_argument("--marketing-url", help="直接设置 Marketing URL（对所有语言生效）")
     parser.add_argument("--marketing-url-locales", help="限定 Marketing URL 语言，逗号分隔 (如 zh-Hans,en-US)")
+    parser.add_argument("--privacy-policy-url", help="直接设置 Privacy Policy URL（对所有语言生效）")
+    parser.add_argument("--privacy-policy-url-locales", help="限定 Privacy Policy URL 语言，逗号分隔 (如 zh-Hans,en-US)")
     parser.add_argument("--whats-new", help="设置更新描述 (What's New)，对所有语言生效")
     parser.add_argument("--whats-new-file", help="从文件读取多语言更新描述 (格式见 README)")
     parser.add_argument("--whats-new-locales", help="限定更新描述的语言，逗号分隔 (如 zh-Hans,en-US)")
@@ -1132,9 +1145,10 @@ def main():
     is_whats_new_mode = args.whats_new or args.whats_new_file
     is_support_url_mode = bool(args.support_url)
     is_marketing_url_mode = bool(args.marketing_url)
+    is_privacy_policy_url_mode = bool(args.privacy_policy_url)
     is_iap_mode = bool(args.iap_file)
     include_version_fields = None
-    if args.keywords_only or args.support_url_only or args.marketing_url_only:
+    if args.keywords_only or args.support_url_only or args.marketing_url_only or args.privacy_policy_url_only:
         include_version_fields = set()
         if args.keywords_only:
             include_version_fields.add("keywords")
@@ -1142,6 +1156,8 @@ def main():
             include_version_fields.add("supportUrl")
         if args.marketing_url_only:
             include_version_fields.add("marketingUrl")
+        if args.privacy_policy_url_only:
+            include_version_fields.add("privacyPolicyUrl")
 
     if args.iap_only and not args.iap_file:
         print("❌ 使用 --iap-only 时必须同时指定 --iap-file")
@@ -1187,6 +1203,19 @@ def main():
             locales=locales,
             dry_run=args.dry_run,
         )
+    elif is_privacy_policy_url_mode:
+        locales = None
+        if args.privacy_policy_url_locales:
+            locales = [l.strip() for l in args.privacy_policy_url_locales.split(",")]
+        update_version_field(
+            api,
+            app_id,
+            "privacyPolicyUrl",
+            "Privacy Policy URL",
+            args.privacy_policy_url,
+            locales=locales,
+            dry_run=args.dry_run,
+        )
     elif args.iap_only:
         iap_path = Path(args.iap_file)
         if not iap_path.is_absolute():
@@ -1212,6 +1241,8 @@ def main():
                         selected.append("Support URL")
                     if "marketingUrl" in include_version_fields:
                         selected.append("Marketing URL")
+                    if "privacyPolicyUrl" in include_version_fields:
+                        selected.append("Privacy Policy URL")
                     print(f"  ⚙️  仅上传字段: {', '.join(selected)}")
                 upload_metadata(
                     api,
