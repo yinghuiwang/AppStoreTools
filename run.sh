@@ -1,6 +1,12 @@
 #!/bin/bash
 set -euo pipefail
 
+echo "⚠️  run.sh is deprecated. Install the pip package instead:"
+echo "    pip install asc-appstore-tools"
+echo "    asc app add <name>   # configure credentials"
+echo "    asc --help"
+echo ""
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PYTHON_SCRIPT="$SCRIPT_DIR/upload_to_appstore.py"
 REQUIREMENTS="$SCRIPT_DIR/requirements.txt"
