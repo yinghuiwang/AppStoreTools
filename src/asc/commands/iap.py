@@ -12,22 +12,36 @@ from asc.config import Config
 from asc.utils import make_api_from_config
 
 
-def _load_iap_package(file_path: str) -> list[dict]:
+def _load_iap_config(file_path: str) -> tuple[list[dict], list[dict]]:
+    """Return (iap_items, subscription_groups) from the JSON file."""
     raw = Path(file_path).read_text(encoding="utf-8-sig")
     data = json.loads(raw)
-    if isinstance(data, dict):
-        items = data.get("items", [])
-    elif isinstance(data, list):
-        items = data
-    else:
-        raise ValueError("IAP 配置格式错误：应为数组或包含 items 数组的对象")
 
-    if not isinstance(items, list) or not items:
-        raise ValueError("IAP 配置为空，请至少提供一个 IAP 项")
+    items: list[dict] = []
+    subs: list[dict] = []
+
+    if isinstance(data, list):
+        items = data
+    elif isinstance(data, dict):
+        items = data.get("items", []) or []
+        subs = data.get("subscriptionGroups", []) or []
+    else:
+        raise ValueError("IAP 配置格式错误：应为数组或对象")
+
+    if not items and not subs:
+        raise ValueError("IAP 配置为空 (empty)：请至少提供 items 或 subscriptionGroups")
+    return items, subs
+
+
+def _load_iap_package(file_path: str) -> list[dict]:
+    """Legacy wrapper."""
+    items, _ = _load_iap_config(file_path)
+    if not items:
+        raise ValueError("IAP 配置无 items")
     return items
 
 
-def _upload_iap_core(api, app_id: str, iap_items: list[dict], dry_run: bool = False):
+def _upload_iap_core(api, app_id: str, iap_items: list[dict], dry_run: bool = False, update_existing: bool = False):
     print("\n" + "=" * 60)
     print("🛍️  上传 IAP 包")
     print("=" * 60)
@@ -67,7 +81,10 @@ def _upload_iap_core(api, app_id: str, iap_items: list[dict], dry_run: bool = Fa
 
         if existing:
             iap_id = existing["id"]
-            print(f"    已存在，ID: {iap_id}，执行更新")
+            if not update_existing:
+                print(f"    已存在 (ID: {iap_id})，跳过（使用 --update-existing 以更新）")
+                continue
+            print(f"    已存在 (ID: {iap_id})，执行更新")
             if not dry_run:
                 update_attrs = {k: v for k, v in attrs.items() if k != "productId"}
                 if update_attrs:
@@ -125,6 +142,10 @@ def cmd_iap(
     iap_file: str = typer.Option(..., "--iap-file", help="IAP JSON config file path"),
     app: Optional[str] = typer.Option(None, "--app"),
     dry_run: bool = typer.Option(False, "--dry-run"),
+    update_existing: bool = typer.Option(
+        False, "--update-existing",
+        help="Update existing items/subscriptions (default: skip existing)",
+    ),
 ):
     """Upload in-app purchases from JSON file"""
     config = Config(app)
@@ -135,4 +156,4 @@ def cmd_iap(
         raise typer.Exit(1)
     iap_items = _load_iap_package(str(iap_path))
     print(f"\n📦 从 IAP 配置读取 {len(iap_items)} 项")
-    _upload_iap_core(api, app_id, iap_items, dry_run)
+    _upload_iap_core(api, app_id, iap_items, dry_run, update_existing=update_existing)
