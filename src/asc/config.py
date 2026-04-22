@@ -117,6 +117,8 @@ class Config:
         key_id: str,
         key_file: str,
         app_id: str,
+        csv: str = "data/appstore_info.csv",
+        screenshots: str = "data/screenshots",
     ):
         """Save a new app profile to global config"""
         profiles_dir = self._global_dir / "profiles"
@@ -130,8 +132,8 @@ key_file = "{key_file}"
 app_id = "{app_id}"
 
 [defaults]
-csv = "data/appstore_info.csv"
-screenshots = "data/screenshots"
+csv = "{csv}"
+screenshots = "{screenshots}"
 """
         profile_path.write_text(content)
 

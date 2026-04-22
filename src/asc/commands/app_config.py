@@ -23,6 +23,14 @@ def cmd_app_add(
     key_file_input = typer.prompt("  Path to .p8 private key file")
     app_id = typer.prompt("  App ID (numeric)")
 
+    typer.echo("\nEnter default data paths (press Enter to use defaults):")
+    csv_path = typer.prompt(
+        "  CSV metadata file path", default="data/appstore_info.csv"
+    )
+    screenshots_path = typer.prompt(
+        "  Screenshots directory", default="data/screenshots"
+    )
+
     key_path = Path(key_file_input).expanduser()
     if not key_path.exists():
         typer.echo(f"❌ Key file not found: {key_path}", err=True)
@@ -36,7 +44,9 @@ def cmd_app_add(
         typer.echo(f"  ✅ Key file copied to {dest_key}")
 
     config = Config()
-    config.save_app_profile(name, issuer_id, key_id, str(dest_key), app_id)
+    config.save_app_profile(
+        name, issuer_id, key_id, str(dest_key), app_id, csv_path, screenshots_path
+    )
     typer.echo(f"\n✅ App profile '{name}' saved.")
     typer.echo(f"   Use: asc --app {name} upload")
 
