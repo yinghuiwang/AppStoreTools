@@ -42,16 +42,18 @@ class Config:
         if env_file.exists():
             load_dotenv(env_file)
 
-        # Load local config to find default_app
+        # Load local config
         local_config = self._local_dir / "config.toml"
-        if local_config.exists() and not self.app_name:
+        local_data = {}
+        if local_config.exists():
             try:
                 local_data = self._load_toml(local_config)
                 # Support both top-level default_app and [defaults] section
-                if "default_app" in local_data:
-                    self.app_name = local_data["default_app"]
-                elif "defaults" in local_data and "default_app" in local_data["defaults"]:
-                    self.app_name = local_data["defaults"]["default_app"]
+                if not self.app_name:
+                    if "default_app" in local_data:
+                        self.app_name = local_data["default_app"]
+                    elif "defaults" in local_data and "default_app" in local_data["defaults"]:
+                        self.app_name = local_data["defaults"]["default_app"]
             except Exception:
                 pass
 
@@ -63,6 +65,13 @@ class Config:
                     self._data = self._load_toml(global_profile)
                 except Exception:
                     pass
+
+        # Merge local data (higher priority than global)
+        for k, v in local_data.items():
+            if isinstance(v, dict) and k in self._data and isinstance(self._data[k], dict):
+                self._data[k].update(v)
+            else:
+                self._data[k] = v
 
     def get(self, key: str, default: Any = None, section: str | None = None) -> Any:
         """Get config value with fallback to environment variable"""
@@ -106,6 +115,22 @@ class Config:
     @property
     def screenshots_path(self) -> str:
         return self.get("screenshots", default="data/screenshots", section="defaults")
+
+    @property
+    def build_project(self) -> str | None:
+        return self.get("project", section="build")
+
+    @property
+    def build_scheme(self) -> str | None:
+        return self.get("scheme", section="build")
+
+    @property
+    def build_output(self) -> str:
+        return self.get("output", default="build", section="build")
+
+    @property
+    def build_signing(self) -> str:
+        return self.get("signing", default="auto", section="build")
 
     def list_apps(self) -> list[str]:
         """List all configured app profiles"""
