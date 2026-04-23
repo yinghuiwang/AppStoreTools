@@ -25,17 +25,26 @@ def _parse_whats_new_file(file_path: str) -> dict[str, str]:
                 entries[current_locale] = "\n".join(current_lines).strip()
             current_locale = None
             current_lines = []
-        elif current_locale is None and stripped.endswith(":"):
-            current_locale = stripped[:-1].strip()
-        elif (
-            current_locale is None
-            and ":" in stripped
-            and len(stripped.split(":")[0]) < 20
-        ):
+            continue
+
+        # Detect locale header
+        new_locale = None
+        new_content = None
+
+        if stripped.endswith(":") and len(stripped[:-1].strip()) < 20 and " " not in stripped[:-1].strip():
+            new_locale = stripped[:-1].strip()
+        elif ":" in stripped and len(stripped.split(":")[0]) < 20 and " " not in stripped.split(":")[0].strip():
             parts = stripped.split(":", 1)
-            current_locale = parts[0].strip()
-            if parts[1].strip():
-                current_lines.append(parts[1].strip())
+            new_locale = parts[0].strip()
+            new_content = parts[1].strip()
+
+        if new_locale:
+            if current_locale and current_lines:
+                entries[current_locale] = "\n".join(current_lines).strip()
+            current_locale = new_locale
+            current_lines = []
+            if new_content:
+                current_lines.append(new_content)
         elif current_locale:
             current_lines.append(line.rstrip())
 
