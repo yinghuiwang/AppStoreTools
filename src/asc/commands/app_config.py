@@ -176,3 +176,103 @@ default_app = "{name}"
     typer.echo(f"✅ Default app profile set to '{name}'")
     typer.echo(f"   Config written to: {config_file.relative_to(Path.cwd())}")
     typer.echo(f"   Run 'asc upload' without --app to use this default.")
+
+
+def cmd_install():
+    """引导式项目初始化：检查环境，配置 App profile（可选）。
+
+    适合首次在新项目中使用 asc 时运行。安装 asc 工具本身请先运行 install.sh。
+
+    \b
+    Example:
+        asc install
+    """
+    typer.echo("=" * 52)
+    typer.echo("  App Store Connect Tools — 项目初始化")
+    typer.echo("=" * 52)
+    typer.echo("")
+
+    # ── 检查当前目录是否已配置 ──
+    local_config = Path.cwd() / ".asc" / "config.toml"
+    config = Config()
+    apps = config.list_apps()
+
+    if local_config.exists():
+        content = local_config.read_text()
+        if "default_app" in content:
+            typer.echo("✅ 环境已就绪！当前目录已有默认配置：")
+            typer.echo(f"   {local_config.relative_to(Path.cwd())}")
+            typer.echo("")
+            if apps:
+                typer.echo("已配置的 profiles：")
+                for name in apps:
+                    typer.echo(f"  • {name}")
+            typer.echo("")
+            _print_cheatsheet()
+            return
+
+    # ── 列出已有 profiles ──
+    if apps:
+        typer.echo("已有以下 App profiles：")
+        for name in apps:
+            typer.echo(f"  • {name}")
+        typer.echo("")
+        set_default = typer.confirm("是否将其中一个设为默认？")
+        if set_default:
+            if len(apps) == 1:
+                chosen = apps[0]
+            else:
+                typer.echo("请输入要设为默认的 profile 名称：")
+                for i, name in enumerate(apps, 1):
+                    typer.echo(f"  {i}. {name}")
+                chosen = typer.prompt("Profile 名称")
+                if chosen not in apps:
+                    typer.echo(f"❌ '{chosen}' 不在列表中，跳过", err=True)
+                    chosen = None
+            if chosen:
+                cmd_app_default(chosen)
+                typer.echo("")
+                _print_cheatsheet()
+                return
+
+    # ── 询问是否现在配置 ──
+    typer.echo("尚未配置任何 App profile。")
+    typer.echo("")
+    configure_now = typer.confirm("现在配置 App profile 吗？")
+    if not configure_now:
+        typer.echo("")
+        typer.echo("好的，稍后可运行：")
+        typer.echo("")
+        typer.echo("  asc app add <profile-name>")
+        typer.echo("  asc app default <profile-name>")
+        typer.echo("")
+        _print_cheatsheet()
+        return
+
+    # ── 引导添加 profile ──
+    profile_name = typer.prompt("请为此 App 起一个 profile 名称（如 myapp）")
+    typer.echo("")
+    cmd_app_add(profile_name)
+    typer.echo("")
+
+    set_as_default = typer.confirm(f"将 '{profile_name}' 设为本项目的默认 profile？")
+    if set_as_default:
+        cmd_app_default(profile_name)
+
+    typer.echo("")
+    _print_cheatsheet()
+
+
+def _print_cheatsheet():
+    """Print a quick-reference command cheatsheet."""
+    typer.echo("─" * 52)
+    typer.echo("  常用命令速查")
+    typer.echo("─" * 52)
+    typer.echo("  asc upload                上传元数据 + 截图")
+    typer.echo("  asc metadata              仅上传元数据")
+    typer.echo("  asc screenshots           仅上传截图")
+    typer.echo("  asc whats-new --text '...'  更新版本描述")
+    typer.echo("  asc iap --iap-file <f>    上传 IAP / 订阅")
+    typer.echo("  asc check                 验证 API 连接")
+    typer.echo("  asc app list              查看所有 profiles")
+    typer.echo("─" * 52)
