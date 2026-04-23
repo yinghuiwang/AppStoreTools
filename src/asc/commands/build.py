@@ -72,7 +72,24 @@ def generate_export_options(
     certificate: str | None,
     output_dir: str,
 ) -> str:
-    """Generate ExportOptions.plist and return its path."""
+    """Generate ExportOptions.plist and return its path.
+
+    Args:
+        signing: "auto" or "manual"
+        destination: "appstore" or "testflight" (reserved for future use; both currently use app-store-connect method)
+        profile: Provisioning profile path (required for manual signing)
+        certificate: Certificate name (optional for manual signing)
+        output_dir: Directory to write ExportOptions.plist
+
+    Returns:
+        Path to generated ExportOptions.plist
+
+    Raises:
+        ValueError: If signing is "manual" but profile is None
+    """
+    if signing == "manual" and not profile:
+        raise ValueError("Manual signing requires a provisioning profile")
+
     opts: dict = {
         "method": "app-store-connect",
         "signingStyle": "automatic" if signing == "auto" else "manual",

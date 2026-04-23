@@ -154,3 +154,16 @@ def test_generate_export_options_testflight(tmp_path):
     with open(plist_path, "rb") as f:
         opts = plistlib.load(f)
     assert opts["method"] == "app-store-connect"
+
+
+def test_generate_export_options_manual_requires_profile(tmp_path):
+    """Manual signing without profile raises ValueError."""
+    from asc.commands.build import generate_export_options
+    with pytest.raises(ValueError, match="Manual signing requires a provisioning profile"):
+        generate_export_options(
+            signing="manual",
+            destination="appstore",
+            profile=None,
+            certificate="iPhone Distribution: ACME Corp",
+            output_dir=str(tmp_path),
+        )
