@@ -170,6 +170,30 @@ def cmd_app_default(
     typer.echo(f"   Run 'asc upload' without --app to use this default.")
 
 
+def cmd_app_show(
+    name: str = typer.Argument(..., help="Profile name to display"),
+):
+    """Show all fields of an app profile.
+
+    \b
+    Example:
+        asc app show myapp
+    """
+    config = Config()
+    profile = config.get_app_profile(name)
+    if profile is None:
+        typer.echo(f"❌ Profile '{name}' not found.", err=True)
+        raise typer.Exit(1)
+
+    typer.echo(f"App profile: {name}")
+    typer.echo(f"  Issuer ID:        {profile['issuer_id']}")
+    typer.echo(f"  Key ID:           {profile['key_id']}")
+    typer.echo(f"  Key file:         {profile['key_file']}")
+    typer.echo(f"  App ID:           {profile['app_id']}")
+    typer.echo(f"  CSV path:         {profile['csv']}")
+    typer.echo(f"  Screenshots path: {profile['screenshots']}")
+
+
 def cmd_install():
     """引导式项目初始化：检查环境，配置 App profile（可选）。
 
