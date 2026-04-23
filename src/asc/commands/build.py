@@ -104,3 +104,50 @@ def generate_export_options(
     with open(plist_path, "wb") as f:
         plistlib.dump(opts, f)
     return str(plist_path)
+
+
+def run_xcodebuild_archive(
+    project: str,
+    kind: str,
+    scheme: str,
+    configuration: str,
+    archive_path: str,
+) -> str:
+    """Run xcodebuild archive. Return archive_path on success."""
+    flag = "-workspace" if kind == "workspace" else "-project"
+    cmd = [
+        "xcodebuild",
+        flag, project,
+        "-scheme", scheme,
+        "-configuration", configuration,
+        "-archivePath", archive_path,
+        "archive",
+        "-allowProvisioningUpdates",
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"xcodebuild archive failed:\n{result.stderr}")
+    return archive_path
+
+
+def run_xcodebuild_export(
+    archive_path: str,
+    export_options_path: str,
+    output_dir: str,
+) -> str:
+    """Run xcodebuild -exportArchive. Return path to .ipa file."""
+    cmd = [
+        "xcodebuild",
+        "-exportArchive",
+        "-archivePath", archive_path,
+        "-exportOptionsPlist", export_options_path,
+        "-exportPath", output_dir,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"xcodebuild exportArchive failed:\n{result.stderr}")
+
+    ipas = list(Path(output_dir).glob("*.ipa"))
+    if not ipas:
+        raise RuntimeError(f"No .ipa found in {output_dir} after export")
+    return str(ipas[0])

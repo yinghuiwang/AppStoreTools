@@ -167,3 +167,67 @@ def test_generate_export_options_manual_requires_profile(tmp_path):
             certificate="iPhone Distribution: ACME Corp",
             output_dir=str(tmp_path),
         )
+
+
+# ── run_xcodebuild_archive / export tests ──
+
+def test_run_xcodebuild_archive_calls_correct_command(tmp_path):
+    """Calls xcodebuild archive with correct flags."""
+    from asc.commands.build import run_xcodebuild_archive
+    archive_path = tmp_path / "MyApp.xcarchive"
+
+    with patch("asc.commands.build.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0)
+        # Simulate archive dir creation
+        archive_path.mkdir()
+        result = run_xcodebuild_archive(
+            project="/path/MyApp.xcworkspace",
+            kind="workspace",
+            scheme="MyApp",
+            configuration="Release",
+            archive_path=str(archive_path),
+        )
+
+    cmd = mock_run.call_args[0][0]
+    assert "xcodebuild" in cmd
+    assert "archive" in cmd
+    assert "-workspace" in cmd
+    assert "-scheme" in cmd
+    assert "MyApp" in cmd
+
+
+def test_run_xcodebuild_archive_raises_on_failure(tmp_path):
+    """Raises RuntimeError when xcodebuild returns non-zero."""
+    from asc.commands.build import run_xcodebuild_archive
+    with patch("asc.commands.build.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=1, stderr="Build FAILED")
+        with pytest.raises(RuntimeError, match="xcodebuild archive failed"):
+            run_xcodebuild_archive(
+                project="/path/MyApp.xcworkspace",
+                kind="workspace",
+                scheme="MyApp",
+                configuration="Release",
+                archive_path=str(tmp_path / "MyApp.xcarchive"),
+            )
+
+
+def test_run_xcodebuild_export_calls_correct_command(tmp_path):
+    """Calls xcodebuild -exportArchive with correct flags."""
+    from asc.commands.build import run_xcodebuild_export
+    export_dir = tmp_path / "export"
+    export_dir.mkdir()
+    ipa = export_dir / "MyApp.ipa"
+    ipa.write_bytes(b"fake")
+
+    with patch("asc.commands.build.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0)
+        result = run_xcodebuild_export(
+            archive_path=str(tmp_path / "MyApp.xcarchive"),
+            export_options_path="/tmp/ExportOptions.plist",
+            output_dir=str(export_dir),
+        )
+
+    cmd = mock_run.call_args[0][0]
+    assert "-exportArchive" in cmd
+    assert "-exportOptionsPlist" in cmd
+    assert result == str(ipa)
