@@ -100,6 +100,8 @@ def generate_export_options(
         if certificate:
             opts["signingCertificate"] = certificate
         if profile:
+            # Empty-string key is a wildcard; real manual signing needs the bundle ID here.
+            # For single-target apps this typically works; multi-target requires explicit mapping.
             opts["provisioningProfiles"] = {"": profile}
 
     plist_path = Path(output_dir) / "ExportOptions.plist"
@@ -269,8 +271,10 @@ def upload_ipa(
 ) -> None:
     """Upload .ipa using xcrun altool.
 
-    Note: destination parameter is reserved for future use.
-    Currently both testflight and appstore use the same upload method.
+    Note: xcrun notarytool is for notarizing macOS binaries, not iOS IPA uploads.
+    xcrun altool --upload-app is the correct tool for iOS App Store Connect submissions.
+    Note: destination parameter is reserved for future use (both TestFlight and App Store
+    use the same altool upload path; App Store Connect routes the build based on version state).
     """
     cmd = [
         "xcrun", "altool", "--upload-app",
