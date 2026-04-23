@@ -265,3 +265,72 @@ def test_cmd_build_non_macos():
         mock_sys.platform = "linux"
         result = runner.invoke(app, ["build", "--scheme", "MyApp"])
     assert result.exit_code == 2
+
+
+# ── upload_ipa / deploy_core / cmd_deploy tests ──
+
+def test_upload_ipa_uses_notarytool(tmp_path):
+    """upload_ipa calls xcrun notarytool when available."""
+    from asc.commands.build import upload_ipa
+    ipa = tmp_path / "MyApp.ipa"
+    ipa.write_bytes(b"fake")
+
+    with patch("asc.commands.build.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="")
+        upload_ipa(
+            ipa_path=str(ipa),
+            issuer_id="issuer-123",
+            key_id="key-456",
+            key_file="/path/to/key.p8",
+            destination="testflight",
+        )
+
+    cmd = mock_run.call_args[0][0]
+    assert "xcrun" in cmd
+    # notarytool or altool
+    assert "notarytool" in cmd or "altool" in cmd
+
+
+def test_upload_ipa_raises_on_failure(tmp_path):
+    """upload_ipa raises RuntimeError on non-zero returncode."""
+    from asc.commands.build import upload_ipa
+    ipa = tmp_path / "MyApp.ipa"
+    ipa.write_bytes(b"fake")
+
+    with patch("asc.commands.build.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=1, stderr="Upload failed")
+        with pytest.raises(RuntimeError, match="Upload failed"):
+            upload_ipa(
+                ipa_path=str(ipa),
+                issuer_id="issuer-123",
+                key_id="key-456",
+                key_file="/path/to/key.p8",
+                destination="testflight",
+            )
+
+
+def test_cmd_deploy_non_macos():
+    """asc deploy on non-macOS exits with code 2."""
+    with patch("asc.commands.build.sys") as mock_sys:
+        mock_sys.platform = "linux"
+        result = runner.invoke(app, ["deploy", "--ipa", "MyApp.ipa"])
+    assert result.exit_code == 2
+
+
+def test_deploy_core_dry_run(tmp_path, capsys):
+    """deploy_core with dry_run=True prints info without uploading."""
+    from asc.commands.build import deploy_core
+    ipa = tmp_path / "MyApp.ipa"
+    ipa.write_bytes(b"fake")
+
+    deploy_core(
+        ipa_path=str(ipa),
+        issuer_id="issuer-123",
+        key_id="key-456",
+        key_file="/path/to/key.p8",
+        destination="testflight",
+        dry_run=True,
+    )
+    captured = capsys.readouterr()
+    assert "MyApp.ipa" in captured.out
+    assert "[预览]" in captured.out or "dry" in captured.out.lower()

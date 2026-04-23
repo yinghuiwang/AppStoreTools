@@ -258,3 +258,101 @@ def cmd_build(
     )
     if ipa:
         typer.echo(f"\n✅ 构建完成: {ipa}")
+
+
+def upload_ipa(
+    ipa_path: str,
+    issuer_id: str,
+    key_id: str,
+    key_file: str,
+    destination: str,
+) -> None:
+    """Upload .ipa using xcrun notarytool (preferred) or altool."""
+    cmd = [
+        "xcrun", "notarytool", "submit", ipa_path,
+        "--issuer-id", issuer_id,
+        "--key-id", key_id,
+        "--key", key_file,
+        "--wait",
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        # Fallback to altool
+        alt_cmd = [
+            "xcrun", "altool", "--upload-app",
+            "-f", ipa_path,
+            "--apiKey", key_id,
+            "--apiIssuer", issuer_id,
+            "-t", "ios",
+        ]
+        alt_result = subprocess.run(alt_cmd, capture_output=True, text=True)
+        if alt_result.returncode != 0:
+            raise RuntimeError(f"Upload failed:\n{alt_result.stderr}")
+
+
+def deploy_core(
+    ipa_path: str,
+    issuer_id: str,
+    key_id: str,
+    key_file: str,
+    destination: str,
+    dry_run: bool,
+) -> None:
+    """Core deploy logic."""
+    typer.echo(f"\n{'='*56}")
+    typer.echo("  asc deploy")
+    typer.echo(f"{'='*56}")
+    typer.echo(f"  IPA: {ipa_path}")
+    typer.echo(f"  目标: {destination}")
+
+    if not Path(ipa_path).exists():
+        typer.echo(f"❌ IPA 文件不存在: {ipa_path}", err=True)
+        raise typer.Exit(1)
+
+    if dry_run:
+        typer.echo("\n[预览] 将上传：")
+        typer.echo(f"  xcrun notarytool submit {ipa_path} --wait")
+        return
+
+    typer.echo("\n  正在上传...")
+    upload_ipa(ipa_path, issuer_id, key_id, key_file, destination)
+    typer.echo("  ✅ 上传成功")
+
+
+def cmd_deploy(
+    ipa: str = typer.Option(..., "--ipa", help=".ipa 文件路径"),
+    destination: str | None = typer.Option(None, "--destination", help="上传目标：testflight 或 appstore（默认 testflight）"),
+    app: str | None = typer.Option(None, "--app", help="App profile 名称"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="预览但不实际上传"),
+):
+    """上传 .ipa 到 TestFlight 或 App Store。
+
+    \b
+    Example:
+        asc deploy --ipa build/export/MyApp.ipa
+        asc deploy --ipa MyApp.ipa --destination appstore
+        asc deploy --ipa MyApp.ipa --dry-run
+    """
+    _require_macos()
+    config = Config(app)
+
+    issuer_id = config.issuer_id
+    key_id = config.key_id
+    key_file = config.key_file
+
+    if not all([issuer_id, key_id, key_file]):
+        typer.echo("❌ 缺少 API 凭证，请运行 asc app add 配置", err=True)
+        raise typer.Exit(1)
+
+    try:
+        deploy_core(
+            ipa_path=ipa,
+            issuer_id=issuer_id,
+            key_id=key_id,
+            key_file=key_file,
+            destination=destination or "testflight",
+            dry_run=dry_run,
+        )
+    except RuntimeError as e:
+        typer.echo(f"❌ {e}", err=True)
+        raise typer.Exit(1)
