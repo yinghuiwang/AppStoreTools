@@ -54,6 +54,7 @@ Source lives in `src/asc/`. Key modules:
 - **`commands/subscriptions.py`** — subscription bulk upload: groups, subscriptions, localizations, prices, intro/promo offers, review screenshots.
 - **`commands/whats_new.py`** — `whatsNew` field update with multi-locale file format.
 - **`commands/app_config.py`** — `asc app add/list/remove` profile management.
+- **`commands/build.py`** — `build_core()`, `deploy_core()`, `upload_ipa()`; `asc build/deploy/release` subcommands.
 - **`cli.py`** — typer app wiring all subcommands.
 
 ## Data Files
