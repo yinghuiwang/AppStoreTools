@@ -103,3 +103,54 @@ def test_list_schemes_raises_on_failure():
         mock_run.return_value = MagicMock(stdout="", stderr="error: invalid project", returncode=1)
         with pytest.raises(RuntimeError, match="xcodebuild -list failed"):
             list_schemes("/invalid/path", "workspace")
+
+
+# ── generate_export_options tests ──
+
+def test_generate_export_options_auto_appstore(tmp_path):
+    """Auto signing, appstore destination generates correct plist."""
+    from asc.commands.build import generate_export_options
+    plist_path = generate_export_options(
+        signing="auto",
+        destination="appstore",
+        profile=None,
+        certificate=None,
+        output_dir=str(tmp_path),
+    )
+    with open(plist_path, "rb") as f:
+        opts = plistlib.load(f)
+    assert opts["method"] == "app-store-connect"
+    assert opts["signingStyle"] == "automatic"
+    assert "provisioningProfiles" not in opts
+
+
+def test_generate_export_options_manual(tmp_path):
+    """Manual signing generates provisioningProfiles and signingCertificate."""
+    from asc.commands.build import generate_export_options
+    plist_path = generate_export_options(
+        signing="manual",
+        destination="testflight",
+        profile="/path/to/profile.mobileprovision",
+        certificate="iPhone Distribution: ACME Corp",
+        output_dir=str(tmp_path),
+    )
+    with open(plist_path, "rb") as f:
+        opts = plistlib.load(f)
+    assert opts["method"] == "app-store-connect"
+    assert opts["signingStyle"] == "manual"
+    assert opts["signingCertificate"] == "iPhone Distribution: ACME Corp"
+
+
+def test_generate_export_options_testflight(tmp_path):
+    """testflight destination uses app-store-connect method."""
+    from asc.commands.build import generate_export_options
+    plist_path = generate_export_options(
+        signing="auto",
+        destination="testflight",
+        profile=None,
+        certificate=None,
+        output_dir=str(tmp_path),
+    )
+    with open(plist_path, "rb") as f:
+        opts = plistlib.load(f)
+    assert opts["method"] == "app-store-connect"

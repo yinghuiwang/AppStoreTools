@@ -1,6 +1,7 @@
 """Build, deploy, and release commands for asc CLI."""
 from __future__ import annotations
 
+import plistlib
 import subprocess
 import sys
 from pathlib import Path
@@ -62,3 +63,27 @@ def list_schemes(project_path: str, kind: str) -> list[str]:
             elif stripped.endswith(":") and stripped != "Schemes:":
                 break
     return schemes
+
+
+def generate_export_options(
+    signing: str,
+    destination: str,
+    profile: str | None,
+    certificate: str | None,
+    output_dir: str,
+) -> str:
+    """Generate ExportOptions.plist and return its path."""
+    opts: dict = {
+        "method": "app-store-connect",
+        "signingStyle": "automatic" if signing == "auto" else "manual",
+    }
+    if signing == "manual":
+        if certificate:
+            opts["signingCertificate"] = certificate
+        if profile:
+            opts["provisioningProfiles"] = {"": profile}
+
+    plist_path = Path(output_dir) / "ExportOptions.plist"
+    with open(plist_path, "wb") as f:
+        plistlib.dump(opts, f)
+    return str(plist_path)
