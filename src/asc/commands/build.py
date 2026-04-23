@@ -350,3 +350,59 @@ def cmd_deploy(
     except RuntimeError as e:
         typer.echo(f"❌ {e}", err=True)
         raise typer.Exit(1)
+
+
+def cmd_release(
+    project: str | None = typer.Option(None, "--project", help="Xcode 项目路径"),
+    scheme: str | None = typer.Option(None, "--scheme", help="Xcode Scheme 名称"),
+    destination: str | None = typer.Option(None, "--destination", help="发布目标：testflight 或 appstore（默认 testflight）"),
+    signing: str | None = typer.Option(None, "--signing", help="签名方式：auto 或 manual（默认 auto）"),
+    profile: str | None = typer.Option(None, "--profile", help="Provisioning Profile 路径"),
+    certificate: str | None = typer.Option(None, "--certificate", help="证书名称"),
+    output: str | None = typer.Option(None, "--output", help="输出目录（默认 ./build）"),
+    app: str | None = typer.Option(None, "--app", help="App profile 名称"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="预览但不执行"),
+):
+    """一键构建并发布到 TestFlight 或 App Store。
+
+    \b
+    Example:
+        asc release --scheme MyApp
+        asc release --destination appstore
+        asc release --dry-run
+    """
+    _require_macos()
+    config = Config(app)
+
+    issuer_id = config.issuer_id
+    key_id = config.key_id
+    key_file = config.key_file
+
+    try:
+        ipa_path = build_core(
+            project=project or config.build_project,
+            scheme=scheme or config.build_scheme,
+            configuration="Release",
+            output=output or config.build_output,
+            signing=signing or config.build_signing,
+            profile=profile,
+            certificate=certificate,
+            destination=destination or "testflight",
+            dry_run=dry_run,
+        )
+
+        if ipa_path:
+            deploy_core(
+                ipa_path=ipa_path,
+                issuer_id=issuer_id or "",
+                key_id=key_id or "",
+                key_file=key_file or "",
+                destination=destination or "testflight",
+                dry_run=dry_run,
+            )
+    except RuntimeError as e:
+        typer.echo(f"❌ {e}", err=True)
+        raise typer.Exit(1)
+
+    if not dry_run:
+        typer.echo("\n🎉 发布完成！")

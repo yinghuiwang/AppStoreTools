@@ -335,3 +335,43 @@ def test_deploy_core_dry_run(tmp_path, capsys):
     captured = capsys.readouterr()
     assert "MyApp.ipa" in captured.out
     assert "[预览]" in captured.out or "dry" in captured.out.lower()
+
+
+# ── cmd_release tests ──
+
+def test_cmd_release_non_macos():
+    """asc release on non-macOS exits with code 2."""
+    with patch("asc.commands.build.sys") as mock_sys:
+        mock_sys.platform = "linux"
+        result = runner.invoke(app, ["release", "--scheme", "MyApp"])
+    assert result.exit_code == 2
+
+
+def test_release_calls_build_and_deploy(tmp_path, monkeypatch):
+    """asc release calls build_core then deploy_core."""
+    from asc.commands import build as build_mod
+    monkeypatch.chdir(tmp_path)
+    ws = tmp_path / "MyApp.xcworkspace"
+    ws.mkdir()
+
+    with patch.object(build_mod, "build_core", return_value="/tmp/MyApp.ipa") as mock_build, \
+         patch.object(build_mod, "deploy_core") as mock_deploy, \
+         patch.object(build_mod, "sys") as mock_sys:
+        mock_sys.platform = "darwin"
+        result = runner.invoke(app, [
+            "release",
+            "--project", str(ws),
+            "--scheme", "MyApp",
+            "--destination", "testflight",
+        ])
+
+    assert mock_build.called
+    assert mock_deploy.called
+
+
+def test_asc_help_shows_build_deploy_release():
+    """asc --help lists build, deploy, release commands."""
+    result = runner.invoke(app, ["--help"])
+    assert "build" in result.output
+    assert "deploy" in result.output
+    assert "release" in result.output
