@@ -1,4 +1,4 @@
-"""Tests for cmd_app_show and cmd_app_edit."""
+"""Tests for app_config commands (show, edit, and Config.get_app_profile)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -108,4 +108,4 @@ def test_cmd_app_show_missing_profile_exits_1():
         result = runner.invoke(app, ["app", "show", "ghost"])
 
     assert result.exit_code == 1
-    assert "not found" in result.output.lower() or "找不到" in result.output
+    assert "not found" in result.output.lower()
