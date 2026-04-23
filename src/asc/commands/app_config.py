@@ -142,7 +142,6 @@ def cmd_app_default(
 
     # Update or create default_app setting
     if "[defaults]" in existing:
-        # Update existing section
         lines = existing.splitlines()
         new_lines = []
         found_default = False
@@ -153,7 +152,6 @@ def cmd_app_default(
             else:
                 new_lines.append(line)
         if not found_default:
-            # Insert after [defaults] line
             result = []
             for line in new_lines:
                 result.append(line)
@@ -163,16 +161,10 @@ def cmd_app_default(
         else:
             existing = "\n".join(new_lines)
     else:
-        # Add new section
-        if existing.strip():
-            existing = existing.rstrip() + "\n\n"
-        else:
-            existing = ""
-        existing += """[defaults]
-default_app = "{name}"
-"""
+        prefix = existing.rstrip() + "\n\n" if existing.strip() else ""
+        existing = prefix + f'[defaults]\ndefault_app = "{name}"\n'
 
-    config_file.write_text(existing.format(name=name))
+    config_file.write_text(existing)
     typer.echo(f"✅ Default app profile set to '{name}'")
     typer.echo(f"   Config written to: {config_file.relative_to(Path.cwd())}")
     typer.echo(f"   Run 'asc upload' without --app to use this default.")
@@ -221,6 +213,10 @@ def cmd_install():
         if set_default:
             if len(apps) == 1:
                 chosen = apps[0]
+                cmd_app_default(chosen)
+                typer.echo("")
+                _print_cheatsheet()
+                return
             else:
                 typer.echo("请输入要设为默认的 profile 名称：")
                 for i, name in enumerate(apps, 1):
@@ -228,8 +224,9 @@ def cmd_install():
                 chosen = typer.prompt("Profile 名称")
                 if chosen not in apps:
                     typer.echo(f"❌ '{chosen}' 不在列表中，跳过", err=True)
-                    chosen = None
-            if chosen:
+                    typer.echo("")
+                    _print_cheatsheet()
+                    return
                 cmd_app_default(chosen)
                 typer.echo("")
                 _print_cheatsheet()

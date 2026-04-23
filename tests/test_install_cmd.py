@@ -27,7 +27,7 @@ def test_install_already_configured(tmp_path, monkeypatch):
         result = runner.invoke(app, ["install"])
 
     assert result.exit_code == 0
-    assert "已就绪" in result.output or "ready" in result.output.lower()
+    assert "已就绪" in result.output
 
 
 def test_install_no_profiles_user_skips(tmp_path, monkeypatch):
@@ -43,21 +43,6 @@ def test_install_no_profiles_user_skips(tmp_path, monkeypatch):
 
     assert result.exit_code == 0
     assert "asc app add" in result.output
-
-
-def test_install_shows_cheatsheet_on_completion(tmp_path, monkeypatch):
-    """After setup (skip), a command cheatsheet is printed."""
-    monkeypatch.chdir(tmp_path)
-
-    with patch("asc.commands.app_config.Config") as MockConfig:
-        mock_cfg = MagicMock()
-        mock_cfg.list_apps.return_value = []
-        MockConfig.return_value = mock_cfg
-
-        result = runner.invoke(app, ["install"], input="n\n")
-
-    assert result.exit_code == 0
-    assert "asc upload" in result.output
 
 
 def test_install_has_profiles_user_sets_default(tmp_path, monkeypatch):
@@ -92,4 +77,22 @@ def test_install_has_profiles_user_declines_default(tmp_path, monkeypatch):
     assert "asc app default" in result.output
     assert "asc upload" in result.output
     # Should NOT print misleading "尚未配置" message
+    assert "尚未配置" not in result.output
+
+
+def test_install_has_profiles_invalid_name_shows_cheatsheet(tmp_path, monkeypatch):
+    """When user enters invalid profile name, show cheatsheet and return."""
+    monkeypatch.chdir(tmp_path)
+
+    with patch("asc.commands.app_config.Config") as MockConfig:
+        mock_cfg = MagicMock()
+        mock_cfg.list_apps.return_value = ["myapp", "otherapp"]
+        MockConfig.return_value = mock_cfg
+
+        # User says yes to set default, but enters invalid name
+        result = runner.invoke(app, ["install"], input="y\nbadname\n")
+
+    assert result.exit_code == 0
+    assert "不在列表中" in result.output
+    assert "asc upload" in result.output
     assert "尚未配置" not in result.output
