@@ -8,13 +8,10 @@
 # 1. 安装
 pip install asc-appstore-tools
 
-# 2. 添加应用配置（交互式）
-asc app add myapp
+# 2. 初始化项目（引导式配置凭证 + 设默认 profile）
+asc install
 
-# 3. 设置为默认配置（可省略 --app）
-asc app default myapp
-
-# 4. 运行
+# 3. 运行
 asc upload
 ```
 
@@ -88,6 +85,14 @@ asc app add myapp
 ## 用法
 
 ```bash
+# ── 安装与初始化 ──
+
+# 全新机器：运行环境安装脚本（检查 Python/pip/git，安装 asc 工具）
+bash install.sh
+
+# 在项目目录中初始化（引导配置 App profile，设置默认）
+asc install
+
 # 完整上传（元数据 + 截图）
 asc --app myapp upload
 
