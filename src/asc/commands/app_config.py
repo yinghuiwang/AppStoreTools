@@ -234,6 +234,13 @@ def cmd_install():
                 typer.echo("")
                 _print_cheatsheet()
                 return
+        else:
+            typer.echo("")
+            typer.echo("好的，稍后可运行：")
+            typer.echo("  asc app default <profile-name>")
+            typer.echo("")
+            _print_cheatsheet()
+            return
 
     # ── 询问是否现在配置 ──
     typer.echo("尚未配置任何 App profile。")

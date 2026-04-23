@@ -58,3 +58,38 @@ def test_install_shows_cheatsheet_on_completion(tmp_path, monkeypatch):
 
     assert result.exit_code == 0
     assert "asc upload" in result.output
+
+
+def test_install_has_profiles_user_sets_default(tmp_path, monkeypatch):
+    """When profiles exist and user sets one as default, cheatsheet is printed."""
+    monkeypatch.chdir(tmp_path)
+
+    with patch("asc.commands.app_config.Config") as MockConfig, \
+         patch("asc.commands.app_config.cmd_app_default") as mock_default:
+        mock_cfg = MagicMock()
+        mock_cfg.list_apps.return_value = ["myapp"]
+        MockConfig.return_value = mock_cfg
+
+        result = runner.invoke(app, ["install"], input="y\n")
+
+    assert result.exit_code == 0
+    mock_default.assert_called_once_with("myapp")
+    assert "asc upload" in result.output
+
+
+def test_install_has_profiles_user_declines_default(tmp_path, monkeypatch):
+    """When profiles exist but user declines setting default, show hint and cheatsheet."""
+    monkeypatch.chdir(tmp_path)
+
+    with patch("asc.commands.app_config.Config") as MockConfig:
+        mock_cfg = MagicMock()
+        mock_cfg.list_apps.return_value = ["myapp"]
+        MockConfig.return_value = mock_cfg
+
+        result = runner.invoke(app, ["install"], input="n\n")
+
+    assert result.exit_code == 0
+    assert "asc app default" in result.output
+    assert "asc upload" in result.output
+    # Should NOT print misleading "尚未配置" message
+    assert "尚未配置" not in result.output
