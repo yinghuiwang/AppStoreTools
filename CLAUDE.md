@@ -31,6 +31,9 @@ asc --app myapp set-support-url --text "https://example.com/support"
 asc --app myapp set-marketing-url --text "https://example.com" --locales en-US
 asc --app myapp set-privacy-policy-url --text "https://example.com/privacy"
 asc --app myapp check                                     # Validate environment only
+asc build --scheme MyApp                                  # Build .xcarchive + export .ipa
+asc deploy --ipa build/export/MyApp.ipa                  # Upload .ipa to TestFlight/App Store
+asc release --scheme MyApp --destination testflight      # Build + upload in one step
 asc app list
 asc app remove myapp
 ```

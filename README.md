@@ -93,6 +93,20 @@ bash install.sh
 # 在项目目录中初始化（引导配置 App profile，设置默认）
 asc install
 
+# ── 构建与发布 ──
+
+# 构建 .xcarchive + 导出 .ipa
+asc build --scheme MyApp
+asc build --project MyApp.xcworkspace --scheme MyApp --destination testflight
+
+# 上传已有 .ipa 到 TestFlight
+asc deploy --ipa build/export/MyApp.ipa
+asc deploy --ipa MyApp.ipa --destination appstore
+
+# 一键构建 + 发布
+asc release --scheme MyApp --destination testflight
+asc release --dry-run
+
 # 完整上传（元数据 + 截图）
 asc --app myapp upload
 
@@ -143,6 +157,24 @@ asc --app myapp check
 asc app list
 asc app default myapp   # 设置默认 profile
 asc app remove myapp
+```
+
+### 构建配置（`.asc/config.toml`）
+
+可在 `.asc/config.toml` 中保存构建默认值，避免每次重复输入：
+
+```toml
+[build]
+project = "MyApp.xcworkspace"
+scheme = "MyApp"
+output = "build"
+signing = "auto"
+```
+
+配置后最短用法：
+
+```bash
+asc release --destination testflight
 ```
 
 ### 设置默认 App（省略 `--app`）
