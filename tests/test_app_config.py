@@ -35,6 +35,7 @@ def test_get_app_profile_returns_dict(tmp_path):
     config = Config.__new__(Config)
     config._global_dir = tmp_path
     config._data = {}
+    config.app_name = None
 
     result = config.get_app_profile("myapp")
 
@@ -52,6 +53,21 @@ def test_get_app_profile_missing_returns_none(tmp_path):
     config = Config.__new__(Config)
     config._global_dir = tmp_path
     config._data = {}
+    config.app_name = None
 
     result = config.get_app_profile("nonexistent")
+    assert result is None
+
+
+def test_get_app_profile_malformed_toml_returns_none(tmp_path):
+    profiles_dir = tmp_path / "profiles"
+    profiles_dir.mkdir(parents=True, exist_ok=True)
+    (profiles_dir / "bad.toml").write_text("this is not valid toml ][[[")
+
+    config = Config.__new__(Config)
+    config._global_dir = tmp_path
+    config._data = {}
+    config.app_name = None
+
+    result = config.get_app_profile("bad")
     assert result is None

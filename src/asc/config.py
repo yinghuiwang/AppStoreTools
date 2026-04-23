@@ -173,11 +173,14 @@ screenshots = "{screenshots}"
             profile_path.unlink()
 
     def get_app_profile(self, app_name: str) -> dict | None:
-        """Return raw profile fields for app_name, or None if not found."""
+        """Return raw profile fields for app_name, or None if not found or unreadable."""
         profile_path = self._global_dir / "profiles" / f"{app_name}.toml"
         if not profile_path.exists():
             return None
-        data = self._load_toml(profile_path)
+        try:
+            data = self._load_toml(profile_path)
+        except Exception:
+            return None
         creds = data.get("credentials", {})
         defaults = data.get("defaults", {})
         return {
