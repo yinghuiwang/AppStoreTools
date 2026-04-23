@@ -267,27 +267,21 @@ def upload_ipa(
     key_file: str,
     destination: str,
 ) -> None:
-    """Upload .ipa using xcrun notarytool (preferred) or altool."""
+    """Upload .ipa using xcrun altool.
+
+    Note: destination parameter is reserved for future use.
+    Currently both testflight and appstore use the same upload method.
+    """
     cmd = [
-        "xcrun", "notarytool", "submit", ipa_path,
-        "--issuer-id", issuer_id,
-        "--key-id", key_id,
-        "--key", key_file,
-        "--wait",
+        "xcrun", "altool", "--upload-app",
+        "-f", ipa_path,
+        "--apiKey", key_id,
+        "--apiIssuer", issuer_id,
+        "-t", "ios",
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        # Fallback to altool
-        alt_cmd = [
-            "xcrun", "altool", "--upload-app",
-            "-f", ipa_path,
-            "--apiKey", key_id,
-            "--apiIssuer", issuer_id,
-            "-t", "ios",
-        ]
-        alt_result = subprocess.run(alt_cmd, capture_output=True, text=True)
-        if alt_result.returncode != 0:
-            raise RuntimeError(f"Upload failed:\n{alt_result.stderr}")
+        raise RuntimeError(f"Upload failed:\n{result.stderr}")
 
 
 def deploy_core(
@@ -311,7 +305,7 @@ def deploy_core(
 
     if dry_run:
         typer.echo("\n[预览] 将上传：")
-        typer.echo(f"  xcrun notarytool submit {ipa_path} --wait")
+        typer.echo(f"  xcrun altool --upload-app -f {ipa_path}")
         return
 
     typer.echo("\n  正在上传...")

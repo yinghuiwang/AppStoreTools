@@ -269,8 +269,8 @@ def test_cmd_build_non_macos():
 
 # ── upload_ipa / deploy_core / cmd_deploy tests ──
 
-def test_upload_ipa_uses_notarytool(tmp_path):
-    """upload_ipa calls xcrun notarytool when available."""
+def test_upload_ipa_uses_altool(tmp_path):
+    """upload_ipa calls xcrun altool for iOS uploads."""
     from asc.commands.build import upload_ipa
     ipa = tmp_path / "MyApp.ipa"
     ipa.write_bytes(b"fake")
@@ -287,8 +287,9 @@ def test_upload_ipa_uses_notarytool(tmp_path):
 
     cmd = mock_run.call_args[0][0]
     assert "xcrun" in cmd
-    # notarytool or altool
-    assert "notarytool" in cmd or "altool" in cmd
+    assert "altool" in cmd
+    assert "--upload-app" in cmd
+    assert mock_run.call_count == 1
 
 
 def test_upload_ipa_raises_on_failure(tmp_path):
