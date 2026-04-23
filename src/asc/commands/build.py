@@ -5,7 +5,6 @@ import plistlib
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
 
 import typer
 
@@ -225,15 +224,15 @@ def build_core(
 
 
 def cmd_build(
-    project: Optional[str] = typer.Option(None, "--project", help="Xcode 项目路径（.xcodeproj 或 .xcworkspace）"),
-    scheme: Optional[str] = typer.Option(None, "--scheme", help="Xcode Scheme 名称"),
-    configuration: str = typer.Option("Release", "--configuration", help="构建配置"),
-    output: Optional[str] = typer.Option(None, "--output", help="输出目录（默认 ./build）"),
-    signing: str = typer.Option("auto", "--signing", help="签名方式：auto 或 manual"),
-    profile: Optional[str] = typer.Option(None, "--profile", help="手动签名：Provisioning Profile 路径"),
-    certificate: Optional[str] = typer.Option(None, "--certificate", help="手动签名：证书名称"),
-    destination: str = typer.Option("appstore", "--destination", help="导出类型：appstore 或 testflight"),
-    app: Optional[str] = typer.Option(None, "--app", help="App profile 名称"),
+    project: str | None = typer.Option(None, "--project", help="Xcode 项目路径（.xcodeproj 或 .xcworkspace）"),
+    scheme: str | None = typer.Option(None, "--scheme", help="Xcode Scheme 名称"),
+    configuration: str | None = typer.Option(None, "--configuration", help="构建配置（默认 Release）"),
+    output: str | None = typer.Option(None, "--output", help="输出目录（默认 ./build）"),
+    signing: str | None = typer.Option(None, "--signing", help="签名方式：auto 或 manual（默认 auto）"),
+    profile: str | None = typer.Option(None, "--profile", help="手动签名：Provisioning Profile 路径"),
+    certificate: str | None = typer.Option(None, "--certificate", help="手动签名：证书名称"),
+    destination: str | None = typer.Option(None, "--destination", help="导出类型：appstore 或 testflight（默认 appstore）"),
+    app: str | None = typer.Option(None, "--app", help="App profile 名称"),
     dry_run: bool = typer.Option(False, "--dry-run", help="预览命令但不执行"),
 ):
     """构建 Xcode 项目并导出 .ipa 文件。
@@ -249,12 +248,12 @@ def cmd_build(
     ipa = build_core(
         project=project or config.build_project,
         scheme=scheme or config.build_scheme,
-        configuration=configuration,
+        configuration=configuration or "Release",
         output=output or config.build_output,
         signing=signing or config.build_signing,
         profile=profile,
         certificate=certificate,
-        destination=destination,
+        destination=destination or "appstore",
         dry_run=dry_run,
     )
     if ipa:
