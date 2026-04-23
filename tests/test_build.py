@@ -94,3 +94,12 @@ Information about project "MyApp":
         mock_run.return_value = MagicMock(stdout=fake_output, returncode=0)
         schemes = list_schemes("/path/to/MyApp.xcworkspace", "workspace")
     assert schemes == ["MyApp", "MyAppTests", "MyAppUITests"]
+
+
+def test_list_schemes_raises_on_failure():
+    """Raises RuntimeError when xcodebuild fails."""
+    from asc.commands.build import list_schemes
+    with patch("asc.commands.build.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(stdout="", stderr="error: invalid project", returncode=1)
+        with pytest.raises(RuntimeError, match="xcodebuild -list failed"):
+            list_schemes("/invalid/path", "workspace")

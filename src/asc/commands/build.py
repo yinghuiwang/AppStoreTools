@@ -1,17 +1,11 @@
 """Build, deploy, and release commands for asc CLI."""
 from __future__ import annotations
 
-import plistlib
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
-from typing import Optional
 
 import typer
-
-from asc.config import Config
-from asc.utils import make_api_from_config
 
 
 def _require_macos() -> None:
@@ -52,6 +46,9 @@ def list_schemes(project_path: str, kind: str) -> list[str]:
         ["xcodebuild", flag, project_path, "-list"],
         capture_output=True, text=True,
     )
+    if result.returncode != 0:
+        raise RuntimeError(f"xcodebuild -list failed:\n{result.stderr}")
+
     schemes: list[str] = []
     in_schemes = False
     for line in result.stdout.splitlines():
