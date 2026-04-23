@@ -171,3 +171,20 @@ screenshots = "{screenshots}"
         profile_path = self._global_dir / "profiles" / f"{app_name}.toml"
         if profile_path.exists():
             profile_path.unlink()
+
+    def get_app_profile(self, app_name: str) -> dict | None:
+        """Return raw profile fields for app_name, or None if not found."""
+        profile_path = self._global_dir / "profiles" / f"{app_name}.toml"
+        if not profile_path.exists():
+            return None
+        data = self._load_toml(profile_path)
+        creds = data.get("credentials", {})
+        defaults = data.get("defaults", {})
+        return {
+            "issuer_id": creds.get("issuer_id", ""),
+            "key_id": creds.get("key_id", ""),
+            "key_file": creds.get("key_file", ""),
+            "app_id": creds.get("app_id", ""),
+            "csv": defaults.get("csv", "data/appstore_info.csv"),
+            "screenshots": defaults.get("screenshots", "data/screenshots"),
+        }
