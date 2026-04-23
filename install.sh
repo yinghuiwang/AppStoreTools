@@ -31,7 +31,7 @@ for cmd in python3 python; do
   if command -v "$cmd" &>/dev/null; then
     MAJOR=$("$cmd" -c 'import sys; print(sys.version_info.major)' 2>/dev/null || true)
     MINOR=$("$cmd" -c 'import sys; print(sys.version_info.minor)' 2>/dev/null || true)
-    if [ "${MAJOR:-0}" -ge 3 ] && [ "${MINOR:-0}" -ge 9 ]; then
+    if [ "${MAJOR:-0}" -gt 3 ] || { [ "${MAJOR:-0}" -eq 3 ] && [ "${MINOR:-0}" -ge 9 ]; }; then
       PYTHON="$cmd"
       break
     fi
@@ -88,6 +88,9 @@ echo ""
 echo "正在安装 asc-appstore-tools ..."
 if "$PYTHON" -m pip install asc-appstore-tools; then
   info "asc-appstore-tools 安装成功"
+elif "$PYTHON" -m pip install --user asc-appstore-tools; then
+  info "asc-appstore-tools 安装成功（--user 模式）"
+  warn "如果 asc 命令不在 PATH 中，请将 pip 用户 bin 目录添加到 PATH"
 else
   fatal "pip install 失败，请检查网络或权限后重试"
 fi
