@@ -194,6 +194,53 @@ def cmd_app_show(
     typer.echo(f"  Screenshots path: {profile['screenshots']}")
 
 
+def cmd_app_edit(
+    name: str = typer.Argument(..., help="Profile name to edit"),
+):
+    """Interactively re-edit an existing app profile.
+
+    Re-prompts all fields with current values as defaults.
+    Press Enter to keep the existing value for any field.
+
+    \b
+    Example:
+        asc app edit myapp
+    """
+    config = Config()
+    profile = config.get_app_profile(name)
+    if profile is None:
+        typer.echo(f"❌ Profile '{name}' not found.", err=True)
+        raise typer.Exit(1)
+
+    typer.echo(f"Editing app profile: {name}")
+    typer.echo("Press Enter to keep the current value.\n")
+
+    issuer_id = typer.prompt("  Issuer ID", default=profile["issuer_id"])
+    key_id = typer.prompt("  Key ID", default=profile["key_id"])
+    key_file_input = typer.prompt("  Path to .p8 private key file", default=profile["key_file"])
+    app_id = typer.prompt("  App ID (numeric)", default=profile["app_id"])
+    csv_path = typer.prompt("  CSV metadata file path", default=profile["csv"])
+    screenshots_path = typer.prompt("  Screenshots directory", default=profile["screenshots"])
+
+    # Only copy key file if user provided a new path
+    if key_file_input != profile["key_file"]:
+        new_key_path = Path(key_file_input).expanduser()
+        if not new_key_path.exists():
+            typer.echo(f"❌ Key file not found: {new_key_path}", err=True)
+            raise typer.Exit(1)
+        global_keys_dir = config._global_dir / "keys"
+        global_keys_dir.mkdir(parents=True, exist_ok=True)
+        dest_key = global_keys_dir / new_key_path.name
+        shutil.copy2(new_key_path, dest_key)
+        typer.echo(f"  ✅ Key file copied to {dest_key}")
+        final_key_file = str(dest_key)
+    else:
+        final_key_file = profile["key_file"]
+
+    config.save_app_profile(name, issuer_id, key_id, final_key_file, app_id, csv_path, screenshots_path)
+    typer.echo(f"\n✅ App profile '{name}' updated.")
+
+
 def cmd_install():
     """引导式项目初始化：检查环境，配置 App profile（可选）。
 
