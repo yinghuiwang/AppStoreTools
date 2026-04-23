@@ -231,6 +231,8 @@ def cmd_app_edit(
         global_keys_dir = config._global_dir / "keys"
         global_keys_dir.mkdir(parents=True, exist_ok=True)
         dest_key = global_keys_dir / new_key_path.name
+        if dest_key.exists():
+            typer.echo(f"  ⚠️  Overwriting existing key file at {dest_key}")
         shutil.copy2(new_key_path, dest_key)
         typer.echo(f"  ✅ Key file copied to {dest_key}")
         final_key_file = str(dest_key)

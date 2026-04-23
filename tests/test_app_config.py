@@ -120,6 +120,7 @@ def test_cmd_app_edit_missing_profile_exits_1():
         result = runner.invoke(app, ["app", "edit", "ghost"])
 
     assert result.exit_code == 1
+    assert "not found" in result.output.lower()
 
 
 def test_cmd_app_edit_keeps_existing_values_on_enter(tmp_path):
@@ -133,7 +134,7 @@ def test_cmd_app_edit_keeps_existing_values_on_enter(tmp_path):
         "screenshots": "data/screenshots",
     }
     # Simulate user pressing Enter for every field (keep defaults)
-    user_input = "\n\n\n\n\n\n"
+    user_input = "\n\n\n\n\n\n"  # 6 fields: issuer_id, key_id, key_file, app_id, csv, screenshots
 
     with patch("asc.commands.app_config.Config") as MockConfig, \
          patch("asc.commands.app_config.shutil") as mock_shutil:
@@ -181,6 +182,8 @@ def test_cmd_app_edit_new_key_file_is_copied(tmp_path):
     mock_cfg.save_app_profile.assert_called_once()
     call_args = mock_cfg.save_app_profile.call_args[0]
     assert call_args[3] == str(expected_dest)
+    assert expected_dest.exists()
+    assert expected_dest.read_text() == "fake key content"
 
 
 def test_cmd_app_edit_new_key_file_not_found_exits_1(tmp_path):
