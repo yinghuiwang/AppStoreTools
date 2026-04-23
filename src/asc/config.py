@@ -47,8 +47,11 @@ class Config:
         if local_config.exists() and not self.app_name:
             try:
                 local_data = self._load_toml(local_config)
+                # Support both top-level default_app and [defaults] section
                 if "default_app" in local_data:
                     self.app_name = local_data["default_app"]
+                elif "defaults" in local_data and "default_app" in local_data["defaults"]:
+                    self.app_name = local_data["defaults"]["default_app"]
             except Exception:
                 pass
 
