@@ -11,8 +11,11 @@ pip install asc-appstore-tools
 # 2. 添加应用配置（交互式）
 asc app add myapp
 
-# 3. 运行
-asc --app myapp upload
+# 3. 设置为默认配置（可省略 --app）
+asc app default myapp
+
+# 4. 运行
+asc upload
 ```
 
 ## 目录结构
@@ -133,22 +136,30 @@ asc --app myapp check
 
 # 管理应用配置
 asc app list
+asc app default myapp   # 设置默认 profile
 asc app remove myapp
 ```
 
-### 使用本地 `.asc/config.toml` 省略 `--app`
+### 设置默认 App（省略 `--app`）
 
-在项目目录创建 `.asc/config.toml`：
+```bash
+# 方法一：命令行设置
+asc app default myapp
+
+# 方法二：手动创建 .asc/config.toml
+```
 
 ```toml
+[defaults]
 default_app = "myapp"
 ```
 
-之后可以省略 `--app` 参数：
+设置后可省略 `--app` 参数：
 
 ```bash
 asc upload
 asc screenshots
+asc check
 ```
 
 ### 更新描述文件格式 (`whats_new.txt`)
