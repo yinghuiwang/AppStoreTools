@@ -231,3 +231,37 @@ def test_run_xcodebuild_export_calls_correct_command(tmp_path):
     assert "-exportArchive" in cmd
     assert "-exportOptionsPlist" in cmd
     assert result == str(ipa)
+
+
+# ── build_core / cmd_build tests ──
+
+def test_build_core_dry_run(tmp_path, monkeypatch, capsys):
+    """build_core with dry_run=True prints command info without running."""
+    from asc.commands.build import build_core
+    monkeypatch.chdir(tmp_path)
+    ws = tmp_path / "MyApp.xcworkspace"
+    ws.mkdir()
+
+    ipa_path = build_core(
+        project=str(ws),
+        scheme="MyApp",
+        configuration="Release",
+        output=str(tmp_path / "build"),
+        signing="auto",
+        profile=None,
+        certificate=None,
+        destination="appstore",
+        dry_run=True,
+    )
+    assert ipa_path is None
+    captured = capsys.readouterr()
+    assert "MyApp" in captured.out
+    assert "[预览]" in captured.out or "dry" in captured.out.lower()
+
+
+def test_cmd_build_non_macos():
+    """asc build on non-macOS exits with code 2."""
+    with patch("asc.commands.build.sys") as mock_sys:
+        mock_sys.platform = "linux"
+        result = runner.invoke(app, ["build", "--scheme", "MyApp"])
+    assert result.exit_code == 2
