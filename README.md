@@ -4,8 +4,27 @@
 
 ## 快速开始
 
+### 方式一：一键安装（推荐）
+
 ```bash
-# 1. 安装
+# 1. 克隆仓库
+git clone https://github.com/yinghuiwang/AppStoreTools.git
+cd AppStoreTools
+
+# 2. 运行安装脚本（自动检查环境并安装工具）
+bash install.sh
+
+# 3. 初始化项目（引导式配置凭证）
+asc install
+
+# 4. 运行
+asc upload
+```
+
+### 方式二：手动安装
+
+```bash
+# 1. 从 PyPI 安装
 pip install asc-appstore-tools
 
 # 或从 GitHub 安装最新版本
