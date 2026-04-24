@@ -82,3 +82,42 @@ def test_get_public_ip_failure(tmp_path):
             g = Guard()
             ip = g._get_public_ip()
             assert ip == "unknown"
+
+
+def test_bind_creates_entries(tmp_path):
+    from asc.guard import Guard
+    guard_file = tmp_path / "guard.json"
+    with patch("asc.guard.GUARD_FILE", guard_file), \
+         patch.object(Guard, "_get_machine_fingerprint", return_value="fp123"), \
+         patch.object(Guard, "_get_public_ip", return_value="1.2.3.4"):
+        g = Guard()
+        g.bind(app_id="com.ex.app", app_name="myapp", key_id="KEY1", issuer_id="ISS1")
+        data = json.loads(guard_file.read_text())
+        assert "fp123" in data["bindings"]["machine"]
+        assert "1.2.3.4" in data["bindings"]["ip"]
+        assert "KEY1" in data["bindings"]["credential"]
+        assert data["bindings"]["machine"]["fp123"]["app_id"] == "com.ex.app"
+
+
+def test_unbind_removes_entry(tmp_path):
+    from asc.guard import Guard
+    guard_file = tmp_path / "guard.json"
+    with patch("asc.guard.GUARD_FILE", guard_file), \
+         patch.object(Guard, "_get_machine_fingerprint", return_value="fp123"), \
+         patch.object(Guard, "_get_public_ip", return_value="1.2.3.4"):
+        g = Guard()
+        g.bind(app_id="com.ex.app", app_name="myapp", key_id="KEY1", issuer_id="ISS1")
+        g.unbind("machine", "fp123")
+        data = json.loads(guard_file.read_text())
+        assert "fp123" not in data["bindings"]["machine"]
+
+
+def test_enable_disable(tmp_path):
+    from asc.guard import Guard
+    guard_file = tmp_path / "guard.json"
+    with patch("asc.guard.GUARD_FILE", guard_file):
+        g = Guard()
+        g.disable()
+        assert g.is_enabled() is False
+        g.enable()
+        assert g.is_enabled() is True

@@ -106,3 +106,29 @@ class Guard:
 
     def get_status(self) -> dict:
         return self._data
+
+    def _now(self) -> str:
+        return datetime.now(timezone.utc).isoformat()
+
+    def bind(self, app_id: str, app_name: str, key_id: str, issuer_id: str) -> None:
+        fp = self._get_machine_fingerprint()
+        ip = self._get_public_ip()
+        now = self._now()
+        b = self._data["bindings"]
+        b["machine"][fp] = {"app_id": app_id, "app_name": app_name, "bound_at": now, "last_checked": now}
+        if ip != "unknown":
+            b["ip"][ip] = {"app_id": app_id, "app_name": app_name, "bound_at": now, "last_checked": now}
+        b["credential"][key_id] = {"app_id": app_id, "app_name": app_name, "issuer_id": issuer_id, "bound_at": now, "last_checked": now}
+        self._save()
+
+    def unbind(self, target: str, value: str) -> None:
+        self._data["bindings"].get(target, {}).pop(value, None)
+        self._save()
+
+    def enable(self) -> None:
+        self._data["enabled"] = True
+        self._save()
+
+    def disable(self) -> None:
+        self._data["enabled"] = False
+        self._save()
