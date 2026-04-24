@@ -155,6 +155,7 @@ def test_conflict_user_confirms(tmp_path):
     with patch("asc.guard.GUARD_FILE", guard_file), \
          patch.object(Guard, "_get_machine_fingerprint", return_value="fp1"), \
          patch.object(Guard, "_get_public_ip", return_value="1.1.1.1"), \
+         patch("sys.stdin.isatty", return_value=True), \
          patch("typer.prompt", return_value="yes"):
         g = Guard()
         g.bind("com.ex.other", "otherapp", "K1", "I1")
@@ -170,6 +171,7 @@ def test_conflict_user_denies(tmp_path):
     with patch("asc.guard.GUARD_FILE", guard_file), \
          patch.object(Guard, "_get_machine_fingerprint", return_value="fp1"), \
          patch.object(Guard, "_get_public_ip", return_value="1.1.1.1"), \
+         patch("sys.stdin.isatty", return_value=True), \
          patch("typer.prompt", return_value="no"):
         g = Guard()
         g.bind("com.ex.other", "otherapp", "K1", "I1")
@@ -184,8 +186,7 @@ def test_conflict_non_interactive(tmp_path):
     with patch("asc.guard.GUARD_FILE", guard_file), \
          patch.object(Guard, "_get_machine_fingerprint", return_value="fp1"), \
          patch.object(Guard, "_get_public_ip", return_value="1.1.1.1"), \
-         patch("sys.stdin") as mock_stdin:
-        mock_stdin.isatty.return_value = False
+         patch("sys.stdin.isatty", return_value=False):
         g = Guard()
         g.bind("com.ex.other", "otherapp", "K1", "I1")
         with pytest.raises(GuardViolationError):
@@ -199,6 +200,7 @@ def test_conflict_keyboard_interrupt(tmp_path):
     with patch("asc.guard.GUARD_FILE", guard_file), \
          patch.object(Guard, "_get_machine_fingerprint", return_value="fp1"), \
          patch.object(Guard, "_get_public_ip", return_value="1.1.1.1"), \
+         patch("sys.stdin.isatty", return_value=True), \
          patch("typer.prompt", side_effect=KeyboardInterrupt):
         g = Guard()
         g.bind("com.ex.other", "otherapp", "K1", "I1")

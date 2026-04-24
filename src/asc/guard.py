@@ -197,14 +197,16 @@ class Guard:
         typer.echo("此限制旨在防止意外使用同一环境发布多个 App。", err=True)
         typer.echo("如需继续，请输入 'yes' 确认，或使用 'asc guard unbind' 解除绑定。\n", err=True)
 
+        if not sys.stdin.isatty():
+            typer.echo("\n❌ 检测到绑定冲突且当前为非交互式环境，操作终止", err=True)
+            raise GuardViolationError("非交互式环境中检测到绑定冲突")
+
         try:
             answer = typer.prompt("是否继续? [yes/no]")
         except KeyboardInterrupt:
             typer.echo("\n❌ 操作已取消", err=True)
             raise GuardViolationError("用户取消操作")
-        except (EOFError, click.exceptions.Abort, TypeError):
-            typer.echo("\n❌ 检测到非交互式环境，操作终止", err=True)
-            raise GuardViolationError("非交互式环境中检测到绑定冲突")
+
         if answer.strip().lower() != "yes":
             raise GuardViolationError("用户拒绝继续操作")
 
