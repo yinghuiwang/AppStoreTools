@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import copy
+import typer
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -33,7 +35,7 @@ class Guard:
         if os.getenv("ASC_GUARD_DISABLE", "").strip() == "1":
             return {"enabled": False, "bindings": {"machine": {}, "ip": {}, "credential": {}}}
         if not self._file.exists():
-            return dict(_EMPTY)
+            return copy.deepcopy(_EMPTY)
         try:
             data = json.loads(self._file.read_text())
             data.setdefault("bindings", {})
@@ -46,9 +48,8 @@ class Guard:
                 shutil.copy(self._file, backup)
             except Exception:
                 pass
-            import typer
             typer.echo(f"⚠️  守卫配置文件损坏，已重置。旧文件备份至 {backup}", err=True)
-            return dict(_EMPTY)
+            return copy.deepcopy(_EMPTY)
 
     def _save(self) -> None:
         self._file.parent.mkdir(parents=True, exist_ok=True)
