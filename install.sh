@@ -85,10 +85,11 @@ fi
 
 # ── 6. 安装 asc-appstore-tools ──
 echo ""
-echo "正在安装 asc-appstore-tools ..."
-if "$PYTHON" -m pip install asc-appstore-tools; then
+echo "正在从 GitHub 安装 asc-appstore-tools ..."
+GITHUB_URL="git+https://github.com/yinghuiwang/AppStoreTools.git"
+if "$PYTHON" -m pip install "$GITHUB_URL"; then
   info "asc-appstore-tools 安装成功"
-elif "$PYTHON" -m pip install --user asc-appstore-tools; then
+elif "$PYTHON" -m pip install --user "$GITHUB_URL"; then
   info "asc-appstore-tools 安装成功（--user 模式）"
   warn "如果 asc 命令不在 PATH 中，请将 pip 用户 bin 目录添加到 PATH"
 else
