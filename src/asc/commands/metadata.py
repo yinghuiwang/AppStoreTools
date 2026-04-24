@@ -434,6 +434,18 @@ def cmd_support_url(
         asc --app myapp support-url --dry-run
     """
     config = Config(app)
+    guard = Guard()
+    if guard.is_enabled():
+        try:
+            guard.check_and_enforce(
+                app_id=config.app_id or "",
+                app_name=config.app_name or app or "",
+                key_id=config.key_id or "",
+                issuer_id=config.issuer_id or "",
+            )
+        except GuardViolationError as e:
+            typer.echo(f"❌ {e}", err=True)
+            raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
     csv_path = Path(csv or config.csv_path)
     if not csv_path.exists():
@@ -465,6 +477,18 @@ def cmd_marketing_url(
         asc --app myapp marketing-url --dry-run
     """
     config = Config(app)
+    guard = Guard()
+    if guard.is_enabled():
+        try:
+            guard.check_and_enforce(
+                app_id=config.app_id or "",
+                app_name=config.app_name or app or "",
+                key_id=config.key_id or "",
+                issuer_id=config.issuer_id or "",
+            )
+        except GuardViolationError as e:
+            typer.echo(f"❌ {e}", err=True)
+            raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
     csv_path = Path(csv or config.csv_path)
     if not csv_path.exists():
@@ -496,6 +520,18 @@ def cmd_privacy_policy_url(
         asc --app myapp privacy-policy-url --dry-run
     """
     config = Config(app)
+    guard = Guard()
+    if guard.is_enabled():
+        try:
+            guard.check_and_enforce(
+                app_id=config.app_id or "",
+                app_name=config.app_name or app or "",
+                key_id=config.key_id or "",
+                issuer_id=config.issuer_id or "",
+            )
+        except GuardViolationError as e:
+            typer.echo(f"❌ {e}", err=True)
+            raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
     csv_path = Path(csv or config.csv_path)
     if not csv_path.exists():

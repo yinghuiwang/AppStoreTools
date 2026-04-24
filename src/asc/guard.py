@@ -135,10 +135,8 @@ class Guard:
         self._data["enabled"] = False
         self._save()
 
-    def _collect_conflicts(self, app_id: str, key_id: str) -> list[dict]:
+    def _collect_conflicts(self, app_id: str, key_id: str, fp: str, ip: str) -> list[dict]:
         """返回所有绑定到不同 App 的冲突条目列表。"""
-        fp = self._get_machine_fingerprint()
-        ip = self._get_public_ip()
         b = self._data["bindings"]
         conflicts = []
         checks = [
@@ -159,9 +157,7 @@ class Guard:
                 })
         return conflicts
 
-    def _update_last_checked(self, app_id: str, key_id: str) -> None:
-        fp = self._get_machine_fingerprint()
-        ip = self._get_public_ip()
+    def _update_last_checked(self, app_id: str, key_id: str, fp: str, ip: str) -> None:
         now = self._now()
         b = self._data["bindings"]
         for btype, bkey in [("machine", fp), ("ip", ip), ("credential", key_id)]:
@@ -174,17 +170,20 @@ class Guard:
             typer.echo("⚠️  缺少 App ID 或凭证信息，跳过守卫检查", err=True)
             return
 
-        conflicts = self._collect_conflicts(app_id, key_id)
+        # 只调用一次，避免重复网络请求
+        fp = self._get_machine_fingerprint()
+        ip = self._get_public_ip()
+
+        conflicts = self._collect_conflicts(app_id, key_id, fp, ip)
 
         if not conflicts:
-            fp = self._get_machine_fingerprint()
             b = self._data["bindings"]
             first_bind = fp not in b.get("machine", {})
             if first_bind:
                 self.bind(app_id, app_name, key_id, issuer_id)
                 typer.echo(f"ℹ️  已绑定当前环境到 App: {app_name}", err=True)
             else:
-                self._update_last_checked(app_id, key_id)
+                self._update_last_checked(app_id, key_id, fp, ip)
             return
 
         typer.echo("\n⚠️  检测到 App 绑定冲突：\n", err=True)
