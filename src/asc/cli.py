@@ -101,3 +101,6 @@ app.command("install")(cmd_install)
 app.command("build")(cmd_build)
 app.command("deploy")(cmd_deploy)
 app.command("release")(cmd_release)
+
+from asc.commands.guard_cmd import guard_app
+app.add_typer(guard_app, name="guard")
