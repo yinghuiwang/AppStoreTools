@@ -34,6 +34,10 @@ asc --app myapp check                                     # Validate environment
 asc build --scheme MyApp                                  # Build .xcarchive + export .ipa
 asc deploy --ipa build/export/MyApp.ipa                  # Upload .ipa to TestFlight/App Store
 asc release --scheme MyApp --destination testflight      # Build + upload in one step
+asc guard status                                          # 查看绑定状态
+asc guard disable                                         # 禁用守卫
+asc guard unbind --current                                # 解除当前环境绑定
+asc guard reset                                           # 清除所有绑定
 asc app list
 asc app remove myapp
 ```
@@ -55,6 +59,8 @@ Source lives in `src/asc/`. Key modules:
 - **`commands/whats_new.py`** — `whatsNew` field update with multi-locale file format.
 - **`commands/app_config.py`** — `asc app add/list/remove` profile management.
 - **`commands/build.py`** — `build_core()`, `deploy_core()`, `upload_ipa()`; `asc build/deploy/release` subcommands.
+- **`guard.py`** — `Guard` 类实现机器/IP/凭证三重绑定守卫。绑定记录存储在 `~/.config/asc/guard.json`；默认启用,可通过 `asc guard disable` 或 `ASC_GUARD_DISABLE=1` 关闭。
+- **`commands/guard_cmd.py`** — `asc guard` 子命令组（`status`, `enable`, `disable`, `unbind`, `reset`）。
 - **`cli.py`** — typer app wiring all subcommands.
 
 ## Data Files
