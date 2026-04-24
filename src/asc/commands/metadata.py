@@ -8,6 +8,7 @@ from typing import Optional
 import typer
 
 from asc.config import Config
+from asc.guard import Guard, GuardViolationError
 from asc.utils import make_api_from_config, parse_csv, resolve_locale
 
 
@@ -63,14 +64,31 @@ def _upload_metadata_core(
 
         name = meta.get("应用名称", "")
         subtitle = meta.get("副标题", "")
-        if (name or subtitle) and include_version_fields is None:
-            info_attrs = {}
+        privacy_policy_url = (
+            meta.get("隐私政策网址", "")
+            or meta.get("隐私政策链接", "")
+            or meta.get("隐私政策URL", "")
+        )
+
+        # appInfoLocalizations fields: name, subtitle, privacyPolicyUrl
+        info_attrs = {}
+        if name and include_version_fields is None:
+            info_attrs["name"] = name
+        if subtitle and include_version_fields is None:
+            info_attrs["subtitle"] = subtitle
+        if privacy_policy_url and (
+            include_version_fields is None
+            or "privacyPolicyUrl" in include_version_fields
+        ):
+            info_attrs["privacyPolicyUrl"] = privacy_policy_url
+
+        if info_attrs:
             if name:
-                info_attrs["name"] = name
+                print(f"    应用名称: {name}")
             if subtitle:
-                info_attrs["subtitle"] = subtitle
-            print(f"    应用名称: {name}")
-            print(f"    副标题: {subtitle}")
+                print(f"    副标题: {subtitle}")
+            if privacy_policy_url:
+                print(f"    隐私政策: {privacy_policy_url}")
 
             if not dry_run:
                 if info_locale in info_loc_map:
@@ -89,11 +107,6 @@ def _upload_metadata_core(
         keywords = meta.get("关键词", "") or meta.get("关键子", "")
         support_url = meta.get("技术支持网址", "") or meta.get("技术支持链接", "")
         marketing_url = meta.get("营销网站", "") or meta.get("营销网址", "")
-        privacy_policy_url = (
-            meta.get("隐私政策网址", "")
-            or meta.get("隐私政策链接", "")
-            or meta.get("隐私政策URL", "")
-        )
 
         ver_attrs = {}
         if description and (
@@ -112,11 +125,6 @@ def _upload_metadata_core(
             include_version_fields is None or "marketingUrl" in include_version_fields
         ):
             ver_attrs["marketingUrl"] = marketing_url
-        if privacy_policy_url and (
-            include_version_fields is None
-            or "privacyPolicyUrl" in include_version_fields
-        ):
-            ver_attrs["privacyPolicyUrl"] = privacy_policy_url
 
         if ver_attrs:
             desc_preview = (
@@ -131,8 +139,6 @@ def _upload_metadata_core(
                 print(f"    技术支持: {support_url}")
             if marketing_url:
                 print(f"    营销网站: {marketing_url}")
-            if privacy_policy_url:
-                print(f"    隐私政策: {privacy_policy_url}")
 
             if not dry_run:
                 if ver_locale in ver_loc_map:
@@ -164,6 +170,58 @@ def _upload_metadata_core(
                             raise
 
     print("\n✅ 元数据上传完成")
+
+
+def _update_app_info_field_core(
+    api,
+    app_id: str,
+    field_key: str,
+    field_label: str,
+    field_value: str,
+    locales: list[str] | None = None,
+    dry_run: bool = False,
+):
+    """Core implementation for set-*-url commands that target appInfoLocalizations"""
+    print("\n" + "=" * 60)
+    print(f"🔧 更新 App 信息字段 ({field_label})")
+    print("=" * 60)
+
+    app_infos = api.get_app_infos(app_id)
+    if not app_infos:
+        print("❌ 找不到 App 信息")
+        return
+    app_info_id = app_infos[0]["id"]
+
+    info_locs = api.get_app_info_localizations(app_info_id)
+    if not info_locs:
+        print("❌ 该 App 没有本地化信息")
+        return
+
+    target_locs = info_locs
+    if locales:
+        target_locs = [
+            loc for loc in info_locs if loc["attributes"]["locale"] in locales
+        ]
+        if not target_locs:
+            available = [loc["attributes"]["locale"] for loc in info_locs]
+            print(f"❌ 指定的语言不存在，可用语言: {available}")
+            return
+
+    preview = field_value[:80] + "..." if len(field_value) > 80 else field_value
+    print(f"  {field_label}: {preview}")
+    print(f"  目标语言: {[loc['attributes']['locale'] for loc in target_locs]}")
+
+    if dry_run:
+        print("  ⚠️  预览模式，不实际更新")
+        return
+
+    for loc in target_locs:
+        locale = loc["attributes"]["locale"]
+        loc_id = loc["id"]
+        api.update_app_info_localization(loc_id, {field_key: field_value})
+        print(f"  ✅ {locale}: 已更新")
+
+    print(f"\n✅ {field_label} 更新完成")
 
 
 def _update_version_field_core(
@@ -252,6 +310,18 @@ def cmd_upload(
     from asc.commands.screenshots import _upload_screenshots_core
 
     config = Config(app)
+    guard = Guard()
+    if guard.is_enabled():
+        try:
+            guard.check_and_enforce(
+                app_id=config.app_id or "",
+                app_name=config.app_name or app or "",
+                key_id=config.key_id or "",
+                issuer_id=config.issuer_id or "",
+            )
+        except GuardViolationError as e:
+            typer.echo(f"❌ {e}", err=True)
+            raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
     csv_path = Path(csv or config.csv_path)
     if csv_path.exists():
@@ -288,6 +358,18 @@ def cmd_metadata(
         asc --app myapp metadata --csv custom.csv --dry-run
     """
     config = Config(app)
+    guard = Guard()
+    if guard.is_enabled():
+        try:
+            guard.check_and_enforce(
+                app_id=config.app_id or "",
+                app_name=config.app_name or app or "",
+                key_id=config.key_id or "",
+                issuer_id=config.issuer_id or "",
+            )
+        except GuardViolationError as e:
+            typer.echo(f"❌ {e}", err=True)
+            raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
     csv_path = Path(csv or config.csv_path)
     if not csv_path.exists():
@@ -313,6 +395,18 @@ def cmd_keywords(
         asc --app myapp keywords --dry-run
     """
     config = Config(app)
+    guard = Guard()
+    if guard.is_enabled():
+        try:
+            guard.check_and_enforce(
+                app_id=config.app_id or "",
+                app_name=config.app_name or app or "",
+                key_id=config.key_id or "",
+                issuer_id=config.issuer_id or "",
+            )
+        except GuardViolationError as e:
+            typer.echo(f"❌ {e}", err=True)
+            raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
     csv_path = Path(csv or config.csv_path)
     if not csv_path.exists():
@@ -437,6 +531,18 @@ def cmd_set_support_url(
         asc --app myapp set-support-url --text "https://example.com/support" --dry-run
     """
     config = Config(app)
+    guard = Guard()
+    if guard.is_enabled():
+        try:
+            guard.check_and_enforce(
+                app_id=config.app_id or "",
+                app_name=config.app_name or app or "",
+                key_id=config.key_id or "",
+                issuer_id=config.issuer_id or "",
+            )
+        except GuardViolationError as e:
+            typer.echo(f"❌ {e}", err=True)
+            raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
     locale_list = [l.strip() for l in locales.split(",")] if locales else None
     _update_version_field_core(
@@ -462,6 +568,18 @@ def cmd_set_marketing_url(
         asc --app myapp set-marketing-url --text "https://example.com" --locales en-US,zh-CN
     """
     config = Config(app)
+    guard = Guard()
+    if guard.is_enabled():
+        try:
+            guard.check_and_enforce(
+                app_id=config.app_id or "",
+                app_name=config.app_name or app or "",
+                key_id=config.key_id or "",
+                issuer_id=config.issuer_id or "",
+            )
+        except GuardViolationError as e:
+            typer.echo(f"❌ {e}", err=True)
+            raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
     locale_list = [l.strip() for l in locales.split(",")] if locales else None
     _update_version_field_core(
@@ -487,9 +605,21 @@ def cmd_set_privacy_policy_url(
         asc --app myapp set-privacy-policy-url --text "https://example.com/privacy" --locales en-US
     """
     config = Config(app)
+    guard = Guard()
+    if guard.is_enabled():
+        try:
+            guard.check_and_enforce(
+                app_id=config.app_id or "",
+                app_name=config.app_name or app or "",
+                key_id=config.key_id or "",
+                issuer_id=config.issuer_id or "",
+            )
+        except GuardViolationError as e:
+            typer.echo(f"❌ {e}", err=True)
+            raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
     locale_list = [l.strip() for l in locales.split(",")] if locales else None
-    _update_version_field_core(
+    _update_app_info_field_core(
         api,
         app_id,
         "privacyPolicyUrl",

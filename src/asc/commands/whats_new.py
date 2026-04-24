@@ -8,6 +8,7 @@ from typing import Optional
 import typer
 
 from asc.config import Config
+from asc.guard import Guard, GuardViolationError
 from asc.utils import make_api_from_config, resolve_locale
 
 
@@ -103,6 +104,18 @@ def cmd_whats_new(
         raise typer.Exit(1)
 
     config = Config(app)
+    guard = Guard()
+    if guard.is_enabled():
+        try:
+            guard.check_and_enforce(
+                app_id=config.app_id or "",
+                app_name=config.app_name or app or "",
+                key_id=config.key_id or "",
+                issuer_id=config.issuer_id or "",
+            )
+        except GuardViolationError as e:
+            typer.echo(f"❌ {e}", err=True)
+            raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
 
     version = api.get_editable_version(app_id)

@@ -12,6 +12,7 @@ from PIL import Image
 
 from asc.config import Config
 from asc.constants import DISPLAY_TYPE_BY_SIZE, SCREENSHOT_FOLDER_TO_LOCALE
+from asc.guard import Guard, GuardViolationError
 from asc.utils import make_api_from_config, md5_of_file, resolve_locale
 
 
@@ -234,6 +235,18 @@ def cmd_screenshots(
         asc --app myapp screenshots --display-type APP_IPHONE_67
     """
     config = Config(app)
+    guard = Guard()
+    if guard.is_enabled():
+        try:
+            guard.check_and_enforce(
+                app_id=config.app_id or "",
+                app_name=config.app_name or app or "",
+                key_id=config.key_id or "",
+                issuer_id=config.issuer_id or "",
+            )
+        except GuardViolationError as e:
+            typer.echo(f"❌ {e}", err=True)
+            raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
     screenshots_dir = screenshots or config.screenshots_path
     _upload_screenshots_core(api, app_id, screenshots_dir, display_type, dry_run)

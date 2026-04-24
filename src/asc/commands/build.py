@@ -9,6 +9,7 @@ from pathlib import Path
 import typer
 
 from asc.config import Config
+from asc.guard import Guard, GuardViolationError
 
 
 def _require_macos() -> None:
@@ -334,6 +335,18 @@ def cmd_deploy(
     """
     _require_macos()
     config = Config(app)
+    guard = Guard()
+    if guard.is_enabled():
+        try:
+            guard.check_and_enforce(
+                app_id=config.app_id or "",
+                app_name=app or "",
+                key_id=config.key_id or "",
+                issuer_id=config.issuer_id or "",
+            )
+        except GuardViolationError as e:
+            typer.echo(f"❌ {e}", err=True)
+            raise typer.Exit(1)
 
     issuer_id = config.issuer_id
     key_id = config.key_id
@@ -378,6 +391,18 @@ def cmd_release(
     """
     _require_macos()
     config = Config(app)
+    guard = Guard()
+    if guard.is_enabled():
+        try:
+            guard.check_and_enforce(
+                app_id=config.app_id or "",
+                app_name=app or "",
+                key_id=config.key_id or "",
+                issuer_id=config.issuer_id or "",
+            )
+        except GuardViolationError as e:
+            typer.echo(f"❌ {e}", err=True)
+            raise typer.Exit(1)
 
     issuer_id = config.issuer_id
     key_id = config.key_id
