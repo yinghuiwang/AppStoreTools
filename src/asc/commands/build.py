@@ -281,6 +281,7 @@ def upload_ipa(
         "-f", ipa_path,
         "--apiKey", key_id,
         "--apiIssuer", issuer_id,
+        "--p8-file-path", key_file,
         "-t", "ios",
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
