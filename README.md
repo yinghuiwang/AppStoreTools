@@ -4,7 +4,20 @@
 
 ## 快速开始
 
-### 方式一：一键安装（推荐）
+### 方式一：curl 一键安装（最快）
+
+```bash
+# 下载并运行安装脚本
+curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh | bash
+
+# 初始化项目
+asc install
+
+# 开始使用
+asc upload
+```
+
+### 方式二：克隆仓库安装
 
 ```bash
 # 1. 克隆仓库
@@ -21,7 +34,7 @@ asc install
 asc upload
 ```
 
-### 方式二：手动安装
+### 方式三：手动安装
 
 ```bash
 # 1. 从 PyPI 安装
