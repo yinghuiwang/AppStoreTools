@@ -1,15 +1,15 @@
 {
   "subscriptionGroups": [
     {
-      "referenceName": "Premium Membership",
+      "referenceName": "Premium Membership1",
       "localizations": {
         "zh-Hans": { "name": "高级会员" },
         "en-US": { "name": "Premium" }
       },
       "subscriptions": [
         {
-          "productId": "com.example.premium.monthly",
-          "name": "Premium Monthly",
+          "productId": "com.example.premium.monthly1",
+          "name": "Premium Monthly1",
           "subscriptionPeriod": "ONE_MONTH",
           "groupLevel": 1,
           "familySharable": false,

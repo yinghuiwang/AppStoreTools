@@ -509,9 +509,12 @@ class AppStoreConnectAPI:
     def find_subscription_price_point(
         self, sub_id: str, territory: str, amount: str
     ) -> str | None:
-        # filter[territory] returns 0 for subscriptionPricePoints in ASC API
-        # Query all and filter client-side by price (territory is embedded in price point ID)
-        resp = self.get(f"/v1/subscriptions/{sub_id}/pricePoints", limit=200)
+        # filter[territory] is required to get territory-specific price points
+        resp = self.get(
+            f"/v1/subscriptions/{sub_id}/pricePoints",
+            limit=200,
+            **{"filter[territory]": territory},
+        )
         target = str(amount).strip()
         for pp in resp.get("data", []):
             price = str(pp.get("attributes", {}).get("customerPrice", "")).strip()
@@ -522,7 +525,11 @@ class AppStoreConnectAPI:
     def list_subscription_price_points(
         self, sub_id: str, territory: str
     ) -> list:
-        resp = self.get(f"/v1/subscriptions/{sub_id}/pricePoints", limit=200)
+        resp = self.get(
+            f"/v1/subscriptions/{sub_id}/pricePoints",
+            limit=200,
+            **{"filter[territory]": territory},
+        )
         return resp.get("data", [])
 
     def create_subscription_price(
@@ -571,7 +578,7 @@ class AppStoreConnectAPI:
         return resp.get("data", [])
 
     def create_subscription_intro_offer(
-        self, sub_id: str, attrs: dict, price_point_id: str | None = None
+        self, sub_id: str, attrs: dict, price_point_id: str | None = None, territory: str | None = None
     ) -> dict:
         relationships = {
             "subscription": {"data": {"type": "subscriptions", "id": sub_id}}
@@ -579,6 +586,10 @@ class AppStoreConnectAPI:
         if price_point_id:
             relationships["subscriptionPricePoint"] = {
                 "data": {"type": "subscriptionPricePoints", "id": price_point_id}
+            }
+        if territory:
+            relationships["territory"] = {
+                "data": {"type": "territories", "id": territory}
             }
         return self.post(
             "/v1/subscriptionIntroductoryOffers",

@@ -436,8 +436,8 @@ def _sync_intro_offer(api, sub_id, offer_cfg, update_existing, dry_run):
         return
 
     pp_id = None
+    territory = offer_cfg.get("baseTerritory")
     if offer_cfg["offerMode"] != "FREE_TRIAL":
-        territory = offer_cfg["baseTerritory"]
         amount = offer_cfg["baseAmount"]
         pp_id = api.find_subscription_price_point(sub_id, territory, amount)
         if pp_id is None:
@@ -458,9 +458,7 @@ def _sync_intro_offer(api, sub_id, offer_cfg, update_existing, dry_run):
         "duration": offer_cfg["duration"],
         "numberOfPeriods": offer_cfg["numberOfPeriods"],
     }
-    if "territories" in offer_cfg:
-        attrs["territories"] = offer_cfg["territories"]
-    api.create_subscription_intro_offer(sub_id, attrs, pp_id)
+    api.create_subscription_intro_offer(sub_id, attrs, pp_id, territory)
     print(f"    入门优惠: {attrs['offerMode']} / {attrs['duration']} ✅")
 
 

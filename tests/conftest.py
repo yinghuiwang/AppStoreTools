@@ -129,8 +129,8 @@ class FakeAPI:
     def list_subscription_intro_offers(self, sub_id):
         return [{"id": o["id"], "attributes": o} for o in self.intro_offers.get(sub_id, [])]
 
-    def create_subscription_intro_offer(self, sub_id, attrs, price_point_id=None):
-        self.calls.append(("create_subscription_intro_offer", sub_id, attrs, price_point_id))
+    def create_subscription_intro_offer(self, sub_id, attrs, price_point_id=None, territory=None):
+        self.calls.append(("create_subscription_intro_offer", sub_id, attrs, price_point_id, territory))
         oid = self._nid("intro")
         self.intro_offers.setdefault(sub_id, []).append({"id": oid, **attrs})
         return {"data": {"id": oid}}
