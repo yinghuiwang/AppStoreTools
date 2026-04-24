@@ -286,8 +286,11 @@ def upload_ipa(
         "-t", "ios",
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise RuntimeError(f"Upload failed:\n{result.stderr}")
+    output = result.stdout + result.stderr
+    if result.returncode != 0 or "UPLOAD FAILED" in output or "ERROR:" in output:
+        raise RuntimeError(f"Upload failed:\n{output}")
+    if result.stdout.strip():
+        typer.echo(result.stdout.strip())
 
 
 def deploy_core(
