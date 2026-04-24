@@ -8,6 +8,9 @@
 # 1. 安装
 pip install asc-appstore-tools
 
+# 或从 GitHub 安装最新版本
+pip install git+https://github.com/yinghuiwang/AppStoreTools.git
+
 # 2. 初始化项目（引导式配置凭证 + 设默认 profile）
 asc install
 
