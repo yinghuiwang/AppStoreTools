@@ -121,3 +121,86 @@ def test_enable_disable(tmp_path):
         assert g.is_enabled() is False
         g.enable()
         assert g.is_enabled() is True
+
+
+def test_no_conflict_first_bind(tmp_path):
+    """首次使用，无冲突，自动绑定并静默通过"""
+    from asc.guard import Guard
+    guard_file = tmp_path / "guard.json"
+    with patch("asc.guard.GUARD_FILE", guard_file), \
+         patch.object(Guard, "_get_machine_fingerprint", return_value="fp1"), \
+         patch.object(Guard, "_get_public_ip", return_value="1.1.1.1"):
+        g = Guard()
+        g.check_and_enforce(app_id="com.ex.app", app_name="myapp", key_id="K1", issuer_id="I1")
+        data = json.loads(guard_file.read_text())
+        assert data["bindings"]["machine"]["fp1"]["app_id"] == "com.ex.app"
+
+
+def test_no_conflict_same_app(tmp_path):
+    """已绑定，操作同一 App，不产生冲突"""
+    from asc.guard import Guard
+    guard_file = tmp_path / "guard.json"
+    with patch("asc.guard.GUARD_FILE", guard_file), \
+         patch.object(Guard, "_get_machine_fingerprint", return_value="fp1"), \
+         patch.object(Guard, "_get_public_ip", return_value="1.1.1.1"):
+        g = Guard()
+        g.bind("com.ex.app", "myapp", "K1", "I1")
+        g.check_and_enforce(app_id="com.ex.app", app_name="myapp", key_id="K1", issuer_id="I1")
+
+
+def test_conflict_user_confirms(tmp_path):
+    """冲突时用户输入 yes，更新绑定后继续"""
+    from asc.guard import Guard
+    guard_file = tmp_path / "guard.json"
+    with patch("asc.guard.GUARD_FILE", guard_file), \
+         patch.object(Guard, "_get_machine_fingerprint", return_value="fp1"), \
+         patch.object(Guard, "_get_public_ip", return_value="1.1.1.1"), \
+         patch("typer.prompt", return_value="yes"):
+        g = Guard()
+        g.bind("com.ex.other", "otherapp", "K1", "I1")
+        g.check_and_enforce(app_id="com.ex.app", app_name="myapp", key_id="K1", issuer_id="I1")
+        data = json.loads(guard_file.read_text())
+        assert data["bindings"]["credential"]["K1"]["app_id"] == "com.ex.app"
+
+
+def test_conflict_user_denies(tmp_path):
+    """冲突时用户输入 no，抛出 GuardViolationError"""
+    from asc.guard import Guard, GuardViolationError
+    guard_file = tmp_path / "guard.json"
+    with patch("asc.guard.GUARD_FILE", guard_file), \
+         patch.object(Guard, "_get_machine_fingerprint", return_value="fp1"), \
+         patch.object(Guard, "_get_public_ip", return_value="1.1.1.1"), \
+         patch("typer.prompt", return_value="no"):
+        g = Guard()
+        g.bind("com.ex.other", "otherapp", "K1", "I1")
+        with pytest.raises(GuardViolationError):
+            g.check_and_enforce(app_id="com.ex.app", app_name="myapp", key_id="K1", issuer_id="I1")
+
+
+def test_conflict_non_interactive(tmp_path):
+    """非交互式环境冲突时直接抛出 GuardViolationError"""
+    from asc.guard import Guard, GuardViolationError
+    guard_file = tmp_path / "guard.json"
+    with patch("asc.guard.GUARD_FILE", guard_file), \
+         patch.object(Guard, "_get_machine_fingerprint", return_value="fp1"), \
+         patch.object(Guard, "_get_public_ip", return_value="1.1.1.1"), \
+         patch("sys.stdin") as mock_stdin:
+        mock_stdin.isatty.return_value = False
+        g = Guard()
+        g.bind("com.ex.other", "otherapp", "K1", "I1")
+        with pytest.raises(GuardViolationError):
+            g.check_and_enforce(app_id="com.ex.app", app_name="myapp", key_id="K1", issuer_id="I1")
+
+
+def test_conflict_keyboard_interrupt(tmp_path):
+    """Ctrl+C 时视为拒绝，抛出 GuardViolationError"""
+    from asc.guard import Guard, GuardViolationError
+    guard_file = tmp_path / "guard.json"
+    with patch("asc.guard.GUARD_FILE", guard_file), \
+         patch.object(Guard, "_get_machine_fingerprint", return_value="fp1"), \
+         patch.object(Guard, "_get_public_ip", return_value="1.1.1.1"), \
+         patch("typer.prompt", side_effect=KeyboardInterrupt):
+        g = Guard()
+        g.bind("com.ex.other", "otherapp", "K1", "I1")
+        with pytest.raises(GuardViolationError):
+            g.check_and_enforce(app_id="com.ex.app", app_name="myapp", key_id="K1", issuer_id="I1")

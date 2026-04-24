@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import shutil
 import copy
 import typer
+import click
 import hashlib
 import platform
 import subprocess
@@ -132,3 +134,78 @@ class Guard:
     def disable(self) -> None:
         self._data["enabled"] = False
         self._save()
+
+    def _collect_conflicts(self, app_id: str, key_id: str) -> list[dict]:
+        """返回所有绑定到不同 App 的冲突条目列表。"""
+        fp = self._get_machine_fingerprint()
+        ip = self._get_public_ip()
+        b = self._data["bindings"]
+        conflicts = []
+        checks = [
+            ("machine", fp, f"机器指纹 ({fp[:8]}...)"),
+            ("ip", ip, f"IP 地址 ({ip})"),
+            ("credential", key_id, f"API 凭证 ({key_id})"),
+        ]
+        for btype, bkey, label in checks:
+            if bkey == "unknown":
+                continue
+            entry = b.get(btype, {}).get(bkey)
+            if entry and entry.get("app_id") != app_id:
+                conflicts.append({
+                    "type": btype,
+                    "key": bkey,
+                    "label": label,
+                    "entry": entry,
+                })
+        return conflicts
+
+    def _update_last_checked(self, app_id: str, key_id: str) -> None:
+        fp = self._get_machine_fingerprint()
+        ip = self._get_public_ip()
+        now = self._now()
+        b = self._data["bindings"]
+        for btype, bkey in [("machine", fp), ("ip", ip), ("credential", key_id)]:
+            if bkey != "unknown" and bkey in b.get(btype, {}):
+                b[btype][bkey]["last_checked"] = now
+        self._save()
+
+    def check_and_enforce(self, app_id: str, app_name: str, key_id: str, issuer_id: str) -> None:
+        if not app_id or not key_id:
+            typer.echo("⚠️  缺少 App ID 或凭证信息，跳过守卫检查", err=True)
+            return
+
+        conflicts = self._collect_conflicts(app_id, key_id)
+
+        if not conflicts:
+            fp = self._get_machine_fingerprint()
+            b = self._data["bindings"]
+            first_bind = fp not in b.get("machine", {})
+            if first_bind:
+                self.bind(app_id, app_name, key_id, issuer_id)
+                typer.echo(f"ℹ️  已绑定当前环境到 App: {app_name}", err=True)
+            else:
+                self._update_last_checked(app_id, key_id)
+            return
+
+        typer.echo("\n⚠️  检测到 App 绑定冲突：\n", err=True)
+        for c in conflicts:
+            entry = c["entry"]
+            bound_at = entry.get("bound_at", "未知")[:19].replace("T", " ")
+            typer.echo(f"  • {c['label']} 已绑定到: {entry['app_id']} ({entry.get('app_name', '')})", err=True)
+            typer.echo(f"    绑定时间: {bound_at}\n", err=True)
+        typer.echo(f"当前尝试操作的 App: {app_id} ({app_name})\n", err=True)
+        typer.echo("此限制旨在防止意外使用同一环境发布多个 App。", err=True)
+        typer.echo("如需继续，请输入 'yes' 确认，或使用 'asc guard unbind' 解除绑定。\n", err=True)
+
+        try:
+            answer = typer.prompt("是否继续? [yes/no]")
+        except KeyboardInterrupt:
+            typer.echo("\n❌ 操作已取消", err=True)
+            raise GuardViolationError("用户取消操作")
+        except (EOFError, click.exceptions.Abort, TypeError):
+            typer.echo("\n❌ 检测到非交互式环境，操作终止", err=True)
+            raise GuardViolationError("非交互式环境中检测到绑定冲突")
+        if answer.strip().lower() != "yes":
+            raise GuardViolationError("用户拒绝继续操作")
+
+        self.bind(app_id, app_name, key_id, issuer_id)
