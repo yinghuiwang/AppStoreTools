@@ -6,12 +6,40 @@ import os
 import shutil
 import copy
 import typer
+import hashlib
+import platform
+import subprocess
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 GUARD_FILE = Path.home() / ".config" / "asc" / "guard.json"
 
 _EMPTY = {"enabled": True, "bindings": {"machine": {}, "ip": {}, "credential": {}}}
+
+
+def _get_machine_fingerprint_macos() -> str:
+    result = subprocess.run(
+        ["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
+        capture_output=True, text=True, timeout=5,
+    )
+    for line in result.stdout.splitlines():
+        if "IOPlatformUUID" in line:
+            parts = line.split('"')
+            if len(parts) >= 4:
+                return parts[-2]
+    raise RuntimeError("IOPlatformUUID not found")
+
+
+def _fetch_public_ip() -> str:
+    import urllib.request
+    for url in ("https://api.ipify.org", "https://ifconfig.me/ip"):
+        try:
+            with urllib.request.urlopen(url, timeout=5) as resp:
+                return resp.read().decode().strip()
+        except Exception:
+            continue
+    raise RuntimeError("All IP endpoints failed")
 
 
 class GuardError(Exception):
@@ -61,6 +89,20 @@ class Guard:
 
     def is_enabled(self) -> bool:
         return bool(self._data.get("enabled", True))
+
+    def _get_machine_fingerprint(self) -> str:
+        try:
+            raw = _get_machine_fingerprint_macos()
+        except Exception:
+            raw = f"{platform.node()}-{uuid.getnode()}"
+        return hashlib.sha256(raw.encode()).hexdigest()
+
+    def _get_public_ip(self) -> str:
+        try:
+            return _fetch_public_ip()
+        except Exception:
+            typer.echo("⚠️  无法获取公网 IP，跳过 IP 绑定检查", err=True)
+            return "unknown"
 
     def get_status(self) -> dict:
         return self._data
