@@ -87,29 +87,62 @@ fi
 echo ""
 echo "正在从 GitHub 安装 asc-appstore-tools ..."
 GITHUB_URL="git+https://github.com/yinghuiwang/AppStoreTools.git"
-if "$PYTHON" -m pip install "$GITHUB_URL"; then
+if "$PYTHON" -m pip install "$GITHUB_URL" 2>/dev/null; then
   info "asc-appstore-tools 安装成功"
 elif "$PYTHON" -m pip install --user "$GITHUB_URL"; then
   info "asc-appstore-tools 安装成功（--user 模式）"
-  warn "如果 asc 命令不在 PATH 中，请将 pip 用户 bin 目录添加到 PATH"
 else
   fatal "pip install 失败，请检查网络或权限后重试"
 fi
 
-# ── 7. 验证安装 ──
-if ! command -v asc &>/dev/null; then
-  warn "asc 命令未在 PATH 中找到，可能需要重新打开终端或添加 pip bin 到 PATH"
-  echo "  尝试：$PYTHON -m asc --version"
-else
-  info "asc $(asc --version 2>/dev/null || echo '')"
+# ── 7. 检测 pip bin 目录并写入 PATH ──
+USER_BIN=$("$PYTHON" -m site --user-base 2>/dev/null)/bin
+if [ -d "$USER_BIN" ] && [[ ":$PATH:" != *":$USER_BIN:"* ]]; then
+  # 写入 shell 配置文件
+  SHELL_NAME="$(basename "${SHELL:-bash}")"
+  if [ "$SHELL_NAME" = "zsh" ]; then
+    RC_FILE="$HOME/.zshrc"
+  elif [ "$SHELL_NAME" = "bash" ]; then
+    RC_FILE="$HOME/.bash_profile"
+  else
+    RC_FILE="$HOME/.profile"
+  fi
+
+  EXPORT_LINE="export PATH=\"$USER_BIN:\$PATH\""
+  if ! grep -qF "$USER_BIN" "$RC_FILE" 2>/dev/null; then
+    echo "" >> "$RC_FILE"
+    echo "# Added by asc-appstore-tools installer" >> "$RC_FILE"
+    echo "$EXPORT_LINE" >> "$RC_FILE"
+    info "已将 $USER_BIN 写入 $RC_FILE"
+  fi
+
+  # 当前会话立即生效
+  export PATH="$USER_BIN:$PATH"
 fi
 
-# ── 8. 收尾 ──
+# ── 8. 验证安装 ──
+if command -v asc &>/dev/null; then
+  info "asc 命令可用：$(command -v asc)"
+else
+  warn "asc 命令在当前会话不可用，请运行："
+  echo "  source $RC_FILE"
+  echo "  或重新打开终端"
+fi
+
+# ── 9. 收尾 ──
 echo ""
 echo "================================================"
 echo -e "  ${GREEN}安装完成！${NC}"
 echo "================================================"
 echo ""
+if [ -n "${RC_FILE:-}" ]; then
+  echo -e "  ${YELLOW}重要：${NC}请执行以下命令使 asc 立即可用："
+  echo ""
+  echo "    source $RC_FILE"
+  echo ""
+  echo "  或重新打开终端后直接使用 asc 命令。"
+  echo ""
+fi
 echo "下一步：在你的项目目录中运行："
 echo ""
 echo "  asc install"
