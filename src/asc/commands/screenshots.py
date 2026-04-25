@@ -16,7 +16,7 @@ from asc.guard import Guard, GuardViolationError
 from asc.utils import make_api_from_config, md5_of_file, resolve_locale
 
 
-def _detect_display_type(image_path: Path) -> str | None:
+def _detect_display_type(image_path: Path) -> Optional[str]:
     with Image.open(image_path) as img:
         size = img.size
     display_type = DISPLAY_TYPE_BY_SIZE.get(size)
@@ -45,7 +45,7 @@ def _upload_screenshots_core(
     api,
     app_id: str,
     screenshots_dir: str,
-    display_type_override: str | None = None,
+    display_type_override: Optional[str] = None,
     dry_run: bool = False,
 ):
     """Core screenshots upload logic"""

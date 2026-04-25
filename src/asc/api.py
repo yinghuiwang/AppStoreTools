@@ -1,6 +1,7 @@
 """App Store Connect API client"""
 
 from __future__ import annotations
+from typing import Optional
 
 import time
 from datetime import datetime, timedelta, timezone
@@ -135,7 +136,7 @@ class AppStoreConnectAPI:
 
     # ── 版本信息 ──
 
-    def get_editable_version(self, app_id: str, platform: str = "IOS") -> dict | None:
+    def get_editable_version(self, app_id: str, platform: str = "IOS") -> Optional[dict]:
         resp = self.get(
             f"/v1/apps/{app_id}/appStoreVersions", **{"filter[platform]": platform}
         )
@@ -398,7 +399,7 @@ class AppStoreConnectAPI:
         return resp.get("data", [])
 
     def create_subscription_group_localization(
-        self, group_id: str, locale: str, name: str, custom_app_name: str | None = None
+        self, group_id: str, locale: str, name: str, custom_app_name: Optional[str] = None
     ) -> dict:
         attrs = {"locale": locale, "name": name}
         if custom_app_name:
@@ -508,7 +509,7 @@ class AppStoreConnectAPI:
 
     def find_subscription_price_point(
         self, sub_id: str, territory: str, amount: str
-    ) -> str | None:
+    ) -> Optional[str]:
         # filter[territory] is required to get territory-specific price points
         resp = self.get(
             f"/v1/subscriptions/{sub_id}/pricePoints",
@@ -533,7 +534,7 @@ class AppStoreConnectAPI:
         return resp.get("data", [])
 
     def create_subscription_price(
-        self, sub_id: str, price_point_id: str, territory: str, start_date: str | None = None
+        self, sub_id: str, price_point_id: str, territory: str, start_date: Optional[str] = None
     ) -> dict:
         attrs = {}
         if start_date:
@@ -578,7 +579,7 @@ class AppStoreConnectAPI:
         return resp.get("data", [])
 
     def create_subscription_intro_offer(
-        self, sub_id: str, attrs: dict, price_point_id: str | None = None, territory: str | None = None
+        self, sub_id: str, attrs: dict, price_point_id: Optional[str] = None, territory: Optional[str] = None
     ) -> dict:
         relationships = {
             "subscription": {"data": {"type": "subscriptions", "id": sub_id}}

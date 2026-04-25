@@ -17,7 +17,7 @@ def _upload_metadata_core(
     app_id: str,
     metadata_list: list[dict],
     dry_run: bool = False,
-    include_version_fields: set[str] | None = None,
+    include_version_fields: Optional[set[str]] = None,
 ):
     """Core metadata upload logic"""
     print("\n" + "=" * 60)
@@ -178,7 +178,7 @@ def _update_app_info_field_core(
     field_key: str,
     field_label: str,
     field_value: str,
-    locales: list[str] | None = None,
+    locales: Optional[list[str]] = None,
     dry_run: bool = False,
 ):
     """Core implementation for set-*-url commands that target appInfoLocalizations"""
@@ -230,7 +230,7 @@ def _update_version_field_core(
     field_key: str,
     field_label: str,
     field_value: str,
-    locales: list[str] | None = None,
+    locales: Optional[list[str]] = None,
     dry_run: bool = False,
 ):
     """Core implementation for set-*-url commands"""

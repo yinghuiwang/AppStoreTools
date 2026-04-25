@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional, Tuple
 
 
 VALID_PERIODS = {
@@ -197,7 +197,7 @@ def _print_summary(stats: dict, failures: list) -> None:
 
 def _sync_group(
     api, app_id: str, group_cfg: dict, update_existing: bool, dry_run: bool
-) -> tuple[str | None, str]:
+) -> Tuple[Optional[str], str]:
     ref_name = group_cfg["referenceName"]
     existing_groups = api.list_subscription_groups(app_id)
     existing_by_ref = {
@@ -312,7 +312,7 @@ def _sync_subscription(
 
 def _sync_subscription_main(
     api, group_id: str, sub_cfg: dict, update_existing: bool, dry_run: bool
-) -> tuple[str | None, str]:
+) -> Tuple[Optional[str], str]:
     pid = sub_cfg["productId"]
     existing_subs = api.list_subscriptions(group_id)
     by_pid = {s["attributes"]["productId"]: s for s in existing_subs}

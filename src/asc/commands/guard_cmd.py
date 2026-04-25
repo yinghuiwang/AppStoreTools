@@ -1,5 +1,6 @@
 # src/asc/commands/guard_cmd.py
 from __future__ import annotations
+from typing import Optional
 
 import typer
 from asc.guard import Guard
@@ -79,9 +80,9 @@ def cmd_guard_reset():
 
 @guard_app.command("unbind")
 def cmd_guard_unbind(
-    machine: str | None = typer.Option(None, "--machine", help="按机器指纹解绑"),
-    ip: str | None = typer.Option(None, "--ip", help="按 IP 地址解绑"),
-    credential: str | None = typer.Option(None, "--credential", help="按 API key_id 解绑"),
+    machine: Optional[str] = typer.Option(None, "--machine", help="按机器指纹解绑"),
+    ip: Optional[str] = typer.Option(None, "--ip", help="按 IP 地址解绑"),
+    credential: Optional[str] = typer.Option(None, "--credential", help="按 API key_id 解绑"),
     current: bool = typer.Option(False, "--current", help="解除当前机器/IP/凭证的绑定"),
 ):
     """解除指定绑定。"""

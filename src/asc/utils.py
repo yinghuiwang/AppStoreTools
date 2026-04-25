@@ -47,7 +47,7 @@ def parse_csv(csv_path: str) -> list[dict]:
     return results
 
 
-def resolve_locale(csv_locale: str, existing_locales: list[str]) -> str | None:
+def resolve_locale(csv_locale: str, existing_locales: list[str]) -> Optional[str]:
     """将 CSV 中的语言代码映射到 ASC 中实际存在的 locale"""
     csv_locale = normalize_locale_code(csv_locale)
 

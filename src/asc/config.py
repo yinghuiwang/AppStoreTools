@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 try:
     import tomllib
@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 class Config:
     """Configuration with priority: CLI args > local .asc/config.toml > global profile > env"""
 
-    def __init__(self, app_name: str | None = None):
+    def __init__(self, app_name: Optional[str] = None):
         # CLI args take priority, then env var, then local config
         self.app_name = app_name or os.getenv("_ASC_APP")
         self._global_dir = Path.home() / ".config" / "asc"
@@ -73,7 +73,7 @@ class Config:
             else:
                 self._data[k] = v
 
-    def get(self, key: str, default: Any = None, section: str | None = None) -> Any:
+    def get(self, key: str, default: Any = None, section: Optional[str] = None) -> Any:
         """Get config value with fallback to environment variable"""
         if section and section in self._data:
             value = self._data[section].get(key)
@@ -90,22 +90,22 @@ class Config:
         return default
 
     @property
-    def issuer_id(self) -> str | None:
+    def issuer_id(self) -> Optional[str]:
         return self.get("issuer_id", section="credentials") or os.getenv("ISSUER_ID")
 
     @property
-    def key_id(self) -> str | None:
+    def key_id(self) -> Optional[str]:
         return self.get("key_id", section="credentials") or os.getenv("KEY_ID")
 
     @property
-    def key_file(self) -> str | None:
+    def key_file(self) -> Optional[str]:
         key_file = self.get("key_file", section="credentials") or os.getenv("KEY_FILE")
         if key_file and key_file.startswith("~"):
             return str(Path(key_file).expanduser())
         return key_file
 
     @property
-    def app_id(self) -> str | None:
+    def app_id(self) -> Optional[str]:
         return self.get("app_id", section="credentials") or os.getenv("APP_ID")
 
     @property
@@ -117,11 +117,11 @@ class Config:
         return self.get("screenshots", default="data/screenshots", section="defaults")
 
     @property
-    def build_project(self) -> str | None:
+    def build_project(self) -> Optional[str]:
         return self.get("project", section="build")
 
     @property
-    def build_scheme(self) -> str | None:
+    def build_scheme(self) -> Optional[str]:
         return self.get("scheme", section="build")
 
     @property
@@ -172,7 +172,7 @@ screenshots = "{screenshots}"
         if profile_path.exists():
             profile_path.unlink()
 
-    def get_app_profile(self, app_name: str) -> dict | None:
+    def get_app_profile(self, app_name: str) -> Optional[dict]:
         """Return raw profile fields for app_name, or None if not found or unreadable."""
         profile_path = self._global_dir / "profiles" / f"{app_name}.toml"
         if not profile_path.exists():

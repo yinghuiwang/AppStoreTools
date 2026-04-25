@@ -1,5 +1,6 @@
 """Build, deploy, and release commands for asc CLI."""
 from __future__ import annotations
+from typing import Optional
 
 import plistlib
 import subprocess
@@ -71,8 +72,8 @@ def list_schemes(project_path: str, kind: str) -> list[str]:
 def generate_export_options(
     signing: str,
     destination: str,
-    profile: str | None,
-    certificate: str | None,
+    profile: Optional[str],
+    certificate: Optional[str],
     output_dir: str,
 ) -> str:
     """Generate ExportOptions.plist and return its path.
@@ -159,16 +160,16 @@ def run_xcodebuild_export(
 
 
 def build_core(
-    project: str | None,
-    scheme: str | None,
+    project: Optional[str],
+    scheme: Optional[str],
     configuration: str,
     output: str,
     signing: str,
-    profile: str | None,
-    certificate: str | None,
+    profile: Optional[str],
+    certificate: Optional[str],
     destination: str,
     dry_run: bool,
-) -> str | None:
+) -> Optional[str]:
     """Core build logic. Returns .ipa path, or None if dry_run."""
     project_path, kind = detect_project(project or ".")
     typer.echo(f"\n{'='*56}")
@@ -227,15 +228,15 @@ def build_core(
 
 
 def cmd_build(
-    project: str | None = typer.Option(None, "--project", help="Xcode 项目路径（.xcodeproj 或 .xcworkspace）"),
-    scheme: str | None = typer.Option(None, "--scheme", help="Xcode Scheme 名称"),
-    configuration: str | None = typer.Option(None, "--configuration", help="构建配置（默认 Release）"),
-    output: str | None = typer.Option(None, "--output", help="输出目录（默认 ./build）"),
-    signing: str | None = typer.Option(None, "--signing", help="签名方式：auto 或 manual（默认 auto）"),
-    profile: str | None = typer.Option(None, "--profile", help="手动签名：Provisioning Profile 路径"),
-    certificate: str | None = typer.Option(None, "--certificate", help="手动签名：证书名称"),
-    destination: str | None = typer.Option(None, "--destination", help="导出类型：appstore 或 testflight（默认 appstore）"),
-    app: str | None = typer.Option(None, "--app", help="App profile 名称"),
+    project: Optional[str] = typer.Option(None, "--project", help="Xcode 项目路径（.xcodeproj 或 .xcworkspace）"),
+    scheme: Optional[str] = typer.Option(None, "--scheme", help="Xcode Scheme 名称"),
+    configuration: Optional[str] = typer.Option(None, "--configuration", help="构建配置（默认 Release）"),
+    output: Optional[str] = typer.Option(None, "--output", help="输出目录（默认 ./build）"),
+    signing: Optional[str] = typer.Option(None, "--signing", help="签名方式：auto 或 manual（默认 auto）"),
+    profile: Optional[str] = typer.Option(None, "--profile", help="手动签名：Provisioning Profile 路径"),
+    certificate: Optional[str] = typer.Option(None, "--certificate", help="手动签名：证书名称"),
+    destination: Optional[str] = typer.Option(None, "--destination", help="导出类型：appstore 或 testflight（默认 appstore）"),
+    app: Optional[str] = typer.Option(None, "--app", help="App profile 名称"),
     dry_run: bool = typer.Option(False, "--dry-run", help="预览命令但不执行"),
 ):
     """构建 Xcode 项目并导出 .ipa 文件。
@@ -324,8 +325,8 @@ def deploy_core(
 
 def cmd_deploy(
     ipa: str = typer.Option(..., "--ipa", help=".ipa 文件路径"),
-    destination: str | None = typer.Option(None, "--destination", help="上传目标：testflight 或 appstore（默认 testflight）"),
-    app: str | None = typer.Option(None, "--app", help="App profile 名称"),
+    destination: Optional[str] = typer.Option(None, "--destination", help="上传目标：testflight 或 appstore（默认 testflight）"),
+    app: Optional[str] = typer.Option(None, "--app", help="App profile 名称"),
     dry_run: bool = typer.Option(False, "--dry-run", help="预览但不实际上传"),
 ):
     """上传 .ipa 到 TestFlight 或 App Store。
@@ -374,14 +375,14 @@ def cmd_deploy(
 
 
 def cmd_release(
-    project: str | None = typer.Option(None, "--project", help="Xcode 项目路径"),
-    scheme: str | None = typer.Option(None, "--scheme", help="Xcode Scheme 名称"),
-    destination: str | None = typer.Option(None, "--destination", help="发布目标：testflight 或 appstore（默认 testflight）"),
-    signing: str | None = typer.Option(None, "--signing", help="签名方式：auto 或 manual（默认 auto）"),
-    profile: str | None = typer.Option(None, "--profile", help="Provisioning Profile 路径"),
-    certificate: str | None = typer.Option(None, "--certificate", help="证书名称"),
-    output: str | None = typer.Option(None, "--output", help="输出目录（默认 ./build）"),
-    app: str | None = typer.Option(None, "--app", help="App profile 名称"),
+    project: Optional[str] = typer.Option(None, "--project", help="Xcode 项目路径"),
+    scheme: Optional[str] = typer.Option(None, "--scheme", help="Xcode Scheme 名称"),
+    destination: Optional[str] = typer.Option(None, "--destination", help="发布目标：testflight 或 appstore（默认 testflight）"),
+    signing: Optional[str] = typer.Option(None, "--signing", help="签名方式：auto 或 manual（默认 auto）"),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Provisioning Profile 路径"),
+    certificate: Optional[str] = typer.Option(None, "--certificate", help="证书名称"),
+    output: Optional[str] = typer.Option(None, "--output", help="输出目录（默认 ./build）"),
+    app: Optional[str] = typer.Option(None, "--app", help="App profile 名称"),
     dry_run: bool = typer.Option(False, "--dry-run", help="预览但不执行"),
 ):
     """一键构建并发布到 TestFlight 或 App Store。
