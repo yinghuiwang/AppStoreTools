@@ -11,6 +11,7 @@ import typer
 from asc.config import Config
 from asc.guard import Guard, GuardViolationError
 from asc.utils import make_api_from_config
+from asc.i18n import t, HELP
 
 
 def _load_iap_config(file_path: str) -> tuple[list[dict], list[dict]]:
@@ -140,13 +141,13 @@ def _upload_iap_core(api, app_id: str, iap_items: list[dict], dry_run: bool = Fa
 
 
 def cmd_iap(
-    iap_file: str = typer.Option(..., "--iap-file",
-        help="Path to IAP JSON config file (see data/iap_packages.example.json for schema)"),
-    app: Optional[str] = typer.Option(None, "--app", help="App profile name"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Preview without uploading"),
+    iap_file: str = typer.Option(..., "--iap-file", "-f",
+        help=t(HELP['iap_file'])),
+    app: Optional[str] = typer.Option(None, "--app", "-a", help=t(HELP['app_profile_name'])),
+    dry_run: bool = typer.Option(False, "--dry-run", "-d", help=t(HELP['preview_without_upload'])),
     update_existing: bool = typer.Option(
-        False, "--update-existing",
-        help="Update existing IAP/subscriptions. Default: skip items that already exist.",
+        False, "--update-existing", "-u",
+        help=t(HELP['update_existing']),
     ),
 ):
     """Upload in-app purchases and subscriptions from JSON file.

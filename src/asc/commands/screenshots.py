@@ -13,7 +13,8 @@ from PIL import Image
 from asc.config import Config
 from asc.constants import DISPLAY_TYPE_BY_SIZE, SCREENSHOT_FOLDER_TO_LOCALE
 from asc.guard import Guard, GuardViolationError
-from asc.utils import make_api_from_config, md5_of_file, resolve_locale
+from asc.utils import make_api_from_config
+from asc.i18n import t, HELP
 
 
 def _detect_display_type(image_path: Path) -> Optional[str]:
@@ -200,13 +201,12 @@ def _upload_screenshots_core(
 
 
 def cmd_screenshots(
-    app: Optional[str] = typer.Option(None, "--app", help="App profile name"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Preview uploads without sending to App Store"),
-    screenshots: Optional[str] = typer.Option(None, "--screenshots",
-        help="Screenshots directory [default: data/screenshots]"),
+    app: Optional[str] = typer.Option(None, "--app", "-a", help=t(HELP['app_profile_name'])),
+    dry_run: bool = typer.Option(False, "--dry-run", "-d", help=t(HELP['preview_uploads'])),
+    screenshots: Optional[str] = typer.Option(None, "--screenshots", "-s",
+        help=t(HELP['screenshots_dir'])),
     display_type: Optional[str] = typer.Option(None, "--display-type",
-        help="Device type override (e.g. APP_IPHONE_67, APP_IPAD_PRO_129_EQ, APP_IPHONE_61). "
-             "Auto-detected from image dimensions if not specified.",
+        help=t(HELP['screenshots_display_type']),
     ),
 ):
     """Upload screenshots to App Store Connect.

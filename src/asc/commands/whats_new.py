@@ -10,6 +10,7 @@ import typer
 from asc.config import Config
 from asc.guard import Guard, GuardViolationError
 from asc.utils import make_api_from_config, resolve_locale
+from asc.i18n import t, HELP
 
 
 def _parse_whats_new_file(file_path: str) -> dict[str, str]:
@@ -57,18 +58,17 @@ def _parse_whats_new_file(file_path: str) -> dict[str, str]:
 
 def cmd_whats_new(
     text: Optional[str] = typer.Option(
-        None, "--text", help="Release notes text (applied to all or --locales target locales)"
+        None, "--text", "-t", help=t(HELP['release_notes_text'])
     ),
     file: Optional[str] = typer.Option(
-        None, "--file", help="Path to multi-locale whats_new.txt file"
+        None, "--file", "-f", help=t(HELP['whats_new_file'])
     ),
     locales: Optional[str] = typer.Option(
-        None, "--locales",
-        help="Comma-separated target locales (e.g. en-US,zh-CN). "
-             "Only used with --text. If not set, applies to all available locales.",
+        None, "--locales", "-l",
+        help=t(HELP['whats_new_locales']),
     ),
-    app: Optional[str] = typer.Option(None, "--app", help="App profile name"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Preview without uploading"),
+    app: Optional[str] = typer.Option(None, "--app", "-a", help=t(HELP['app_profile_name'])),
+    dry_run: bool = typer.Option(False, "--dry-run", "-d", help=t(HELP['preview_without_upload'])),
 ):
     """Update What's New (release notes) for the current version.
 

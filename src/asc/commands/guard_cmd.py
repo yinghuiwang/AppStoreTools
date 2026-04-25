@@ -4,8 +4,9 @@ from typing import Optional
 
 import typer
 from asc.guard import Guard
+from asc.i18n import t, HELP
 
-guard_app = typer.Typer(help="管理 App 绑定守卫功能", no_args_is_help=True)
+guard_app = typer.Typer(help=t(HELP['cmd_guard']), no_args_is_help=True)
 
 
 @guard_app.command("status")

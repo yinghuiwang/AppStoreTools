@@ -10,6 +10,7 @@ import typer
 from asc.config import Config
 from asc.guard import Guard, GuardViolationError
 from asc.utils import make_api_from_config, parse_csv, resolve_locale
+from asc.i18n import t, HELP
 
 
 def _upload_metadata_core(
@@ -285,14 +286,14 @@ def _update_version_field_core(
 
 
 def cmd_upload(
-    app: Optional[str] = typer.Option(None, "--app", help="App profile name"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without uploading"),
-    csv: Optional[str] = typer.Option(None, "--csv", help="CSV metadata file path [default: data/appstore_info.csv]"),
+    app: Optional[str] = typer.Option(None, "--app", "-a", help=t(HELP['app_profile_name'])),
+    dry_run: bool = typer.Option(False, "--dry-run", "-d", help=t(HELP['dry_run'])),
+    csv: Optional[str] = typer.Option(None, "--csv", "-c", help=t(HELP['csv_file'])),
     screenshots: Optional[str] = typer.Option(
-        None, "--screenshots", help="Screenshots directory [default: data/screenshots]"
+        None, "--screenshots", "-s", help=t(HELP['screenshots_dir'])
     ),
     display_type: Optional[str] = typer.Option(None, "--display-type",
-        help="Device type override (e.g. APP_IPHONE_67, APP_IPAD_PRO_129_EQ)",
+        help=t(HELP['display_type']),
     ),
 ):
     """Upload all content: metadata (from CSV) + screenshots.
@@ -343,9 +344,9 @@ def cmd_upload(
 
 
 def cmd_metadata(
-    app: Optional[str] = typer.Option(None, "--app", help="App profile name"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without uploading"),
-    csv: Optional[str] = typer.Option(None, "--csv", help="CSV file path [default: data/appstore_info.csv]"),
+    app: Optional[str] = typer.Option(None, "--app", "-a", help=t(HELP['app_profile_name'])),
+    dry_run: bool = typer.Option(False, "--dry-run", "-d", help=t(HELP['dry_run'])),
+    csv: Optional[str] = typer.Option(None, "--csv", "-c", help=t(HELP['csv_file_short'])),
 ):
     """Upload metadata only: name, subtitle, description, keywords, URLs.
 
@@ -380,9 +381,9 @@ def cmd_metadata(
 
 
 def cmd_keywords(
-    app: Optional[str] = typer.Option(None, "--app", help="App profile name"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without uploading"),
-    csv: Optional[str] = typer.Option(None, "--csv", help="CSV file path [default: data/appstore_info.csv]"),
+    app: Optional[str] = typer.Option(None, "--app", "-a", help=t(HELP['app_profile_name'])),
+    dry_run: bool = typer.Option(False, "--dry-run", "-d", help=t(HELP['dry_run'])),
+    csv: Optional[str] = typer.Option(None, "--csv", "-c", help=t(HELP['csv_file_short'])),
 ):
     """Upload keywords only from CSV.
 
@@ -419,9 +420,9 @@ def cmd_keywords(
 
 
 def cmd_support_url(
-    app: Optional[str] = typer.Option(None, "--app", help="App profile name"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without uploading"),
-    csv: Optional[str] = typer.Option(None, "--csv", help="CSV file path [default: data/appstore_info.csv]"),
+    app: Optional[str] = typer.Option(None, "--app", "-a", help=t(HELP['app_profile_name'])),
+    dry_run: bool = typer.Option(False, "--dry-run", "-d", help=t(HELP['dry_run'])),
+    csv: Optional[str] = typer.Option(None, "--csv", "-c", help=t(HELP['csv_file_short'])),
 ):
     """Upload support URL from CSV.
 
@@ -462,9 +463,9 @@ def cmd_support_url(
 
 
 def cmd_marketing_url(
-    app: Optional[str] = typer.Option(None, "--app", help="App profile name"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without uploading"),
-    csv: Optional[str] = typer.Option(None, "--csv", help="CSV file path [default: data/appstore_info.csv]"),
+    app: Optional[str] = typer.Option(None, "--app", "-a", help=t(HELP['app_profile_name'])),
+    dry_run: bool = typer.Option(False, "--dry-run", "-d", help=t(HELP['dry_run'])),
+    csv: Optional[str] = typer.Option(None, "--csv", "-c", help=t(HELP['csv_file_short'])),
 ):
     """Upload marketing URL from CSV.
 
@@ -505,9 +506,9 @@ def cmd_marketing_url(
 
 
 def cmd_privacy_policy_url(
-    app: Optional[str] = typer.Option(None, "--app", help="App profile name"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without uploading"),
-    csv: Optional[str] = typer.Option(None, "--csv", help="CSV file path [default: data/appstore_info.csv]"),
+    app: Optional[str] = typer.Option(None, "--app", "-a", help=t(HELP['app_profile_name'])),
+    dry_run: bool = typer.Option(False, "--dry-run", "-d", help=t(HELP['dry_run'])),
+    csv: Optional[str] = typer.Option(None, "--csv", "-c", help=t(HELP['csv_file_short'])),
 ):
     """Upload privacy policy URL from CSV.
 
@@ -548,12 +549,12 @@ def cmd_privacy_policy_url(
 
 
 def cmd_set_support_url(
-    url: str = typer.Option(..., "--text", help="Support URL to set"),
+    url: str = typer.Option(..., "--text", "-t", help=t(HELP['support_url'])),
     locales: Optional[str] = typer.Option(
-        None, "--locales", help="Comma-separated locales (e.g. en-US,zh-CN). If not set, updates all locales."
+        None, "--locales", "-l", help=t(HELP['locales_option'])
     ),
-    app: Optional[str] = typer.Option(None, "--app", help="App profile name"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Preview without uploading"),
+    app: Optional[str] = typer.Option(None, "--app", "-a", help=t(HELP['app_profile_name'])),
+    dry_run: bool = typer.Option(False, "--dry-run", "-d", help=t(HELP['preview_without_upload'])),
 ):
     """Set support URL directly (not from CSV).
 
@@ -587,11 +588,11 @@ def cmd_set_support_url(
 
 
 def cmd_set_marketing_url(
-    url: str = typer.Option(..., "--text", help="Marketing URL to set"),
-    locales: Optional[str] = typer.Option(None, "--locales",
-        help="Comma-separated locales (e.g. en-US,zh-CN). If not set, updates all locales."),
-    app: Optional[str] = typer.Option(None, "--app", help="App profile name"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Preview without uploading"),
+    url: str = typer.Option(..., "--text", "-t", help=t(HELP['marketing_url'])),
+    locales: Optional[str] = typer.Option(None, "--locales", "-l",
+        help=t(HELP['locales_option'])),
+    app: Optional[str] = typer.Option(None, "--app", "-a", help=t(HELP['app_profile_name'])),
+    dry_run: bool = typer.Option(False, "--dry-run", "-d", help=t(HELP['preview_without_upload'])),
 ):
     """Set marketing URL directly (not from CSV).
 
@@ -624,11 +625,11 @@ def cmd_set_marketing_url(
 
 
 def cmd_set_privacy_policy_url(
-    url: str = typer.Option(..., "--text", help="Privacy Policy URL to set"),
-    locales: Optional[str] = typer.Option(None, "--locales",
-        help="Comma-separated locales (e.g. en-US,zh-CN). If not set, updates all locales."),
-    app: Optional[str] = typer.Option(None, "--app", help="App profile name"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Preview without uploading"),
+    url: str = typer.Option(..., "--text", "-t", help=t(HELP['privacy_policy_url'])),
+    locales: Optional[str] = typer.Option(None, "--locales", "-l",
+        help=t(HELP['locales_option'])),
+    app: Optional[str] = typer.Option(None, "--app", "-a", help=t(HELP['app_profile_name'])),
+    dry_run: bool = typer.Option(False, "--dry-run", "-d", help=t(HELP['preview_without_upload'])),
 ):
     """Set privacy policy URL directly (not from CSV).
 
@@ -667,7 +668,7 @@ def cmd_set_privacy_policy_url(
 
 
 def cmd_check(
-    app: Optional[str] = typer.Option(None, "--app", help="App profile name"),
+    app: Optional[str] = typer.Option(None, "--app", "-a", help=t(HELP['app_profile_name'])),
 ):
     """Verify environment and API configuration.
 
