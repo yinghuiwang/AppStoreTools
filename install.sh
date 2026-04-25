@@ -136,12 +136,16 @@ echo -e "  ${GREEN}安装完成！${NC}"
 echo "================================================"
 echo ""
 if [ -n "${RC_FILE:-}" ]; then
-  echo -e "  ${YELLOW}重要：${NC}请执行以下命令使 asc 立即可用："
-  echo ""
-  echo "    source $RC_FILE"
-  echo ""
-  echo "  或重新打开终端后直接使用 asc 命令。"
-  echo ""
+  if command -v asc &>/dev/null; then
+    info "asc 命令已在当前 shell 可用"
+  else
+    echo -e "  ${YELLOW}提示：${NC}如果 asc 命令还不可用，请执行："
+    echo ""
+    echo "    source $RC_FILE"
+    echo ""
+    echo "  或重新打开终端。"
+    echo ""
+  fi
 fi
 echo "下一步：在你的项目目录中运行："
 echo ""

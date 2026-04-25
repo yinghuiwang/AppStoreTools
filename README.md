@@ -7,8 +7,8 @@
 ### 方式一：curl 一键安装（最快）
 
 ```bash
-# 下载并运行安装脚本
-curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh | bash
+# 下载并运行安装脚本（source 方式可让 asc 命令立即生效）
+source <(curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh)
 
 # 初始化项目
 asc install
