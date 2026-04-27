@@ -288,6 +288,10 @@ HELP = {
         'en': 'Interactively re-edit an existing app profile.',
         'zh': '交互式编辑已有的 App 配置。',
     },
+    'cmd_app_import': {
+        'en': 'Import app profile from project AppStore/Config/.env.',
+        'zh': '从项目 AppStore/Config/.env 自动导入 App 配置。',
+    },
 }
 
 _COMPLETION_INSTALL = {
