@@ -292,6 +292,10 @@ HELP = {
         'en': 'Import app profile from project AppStore/Config/.env.',
         'zh': '从项目 AppStore/Config/.env 自动导入 App 配置。',
     },
+    'cmd_init': {
+        'en': 'Scaffold AppStore/ template directory in an Xcode project.',
+        'zh': '在 Xcode 项目根目录创建 AppStore/ 模板目录结构。',
+    },
 }
 
 _COMPLETION_INSTALL = {

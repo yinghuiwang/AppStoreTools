@@ -79,7 +79,7 @@ from asc.commands.metadata import (
 from asc.commands.screenshots import cmd_screenshots
 from asc.commands.iap import cmd_iap
 from asc.commands.whats_new import cmd_whats_new
-from asc.commands.app_config import cmd_app_add, cmd_app_list, cmd_app_remove, cmd_app_default, cmd_install, cmd_app_show, cmd_app_edit, cmd_app_import
+from asc.commands.app_config import cmd_app_add, cmd_app_list, cmd_app_remove, cmd_app_default, cmd_install, cmd_app_show, cmd_app_edit, cmd_app_import, cmd_init
 from asc.commands.build import cmd_build, cmd_deploy, cmd_release
 
 app.command("upload",              help=t(HELP['cmd_upload']))(cmd_upload)
@@ -103,6 +103,7 @@ app_cmd.command("show",            help=t(HELP['cmd_app_show']))(cmd_app_show)
 app_cmd.command("edit",            help=t(HELP['cmd_app_edit']))(cmd_app_edit)
 app_cmd.command("import",          help=t(HELP['cmd_app_import']))(cmd_app_import)
 app.command("install",             help=t(HELP['cmd_install']))(cmd_install)
+app.command("init",                help=t(HELP['cmd_init']))(cmd_init)
 app.command("build",               help=t(HELP['cmd_build']))(cmd_build)
 app.command("deploy",              help=t(HELP['cmd_deploy']))(cmd_deploy)
 app.command("release",             help=t(HELP['cmd_release']))(cmd_release)

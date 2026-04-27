@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.resources
 import shutil
 from pathlib import Path
 from typing import Optional
@@ -464,6 +465,141 @@ def cmd_app_import(
         local_config_file = local_dir / "config.toml"
         typer.echo(f"✅ 默认 profile 已设为 '{profile_name}'")
         typer.echo(f"   配置写入：{local_config_file.relative_to(project_root)}")
+
+
+_ENV_EXAMPLE = """\
+# App Store Connect API credentials
+# Copy this file to .env and fill in the values.
+# NEVER commit .env to version control.
+
+ISSUER_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+KEY_ID=XXXXXXXXXX
+KEY_FILE=AuthKey_XXXXXXXXXX.p8
+APP_ID=0000000000
+"""
+
+_CSV_TEMPLATE = (
+    '"语言",应用名称,副标题,"长描述","关键子","技术支持链接",营销网站\n'
+    '简体中文(zh-Hans),应用名称,副标题,"在这里填写应用的完整描述","关键词1,关键词2",,\n'
+    '英文(en-US),App Name,Subtitle,"Write your full app description here","keyword1,keyword2",,\n'
+)
+
+_GITIGNORE = ".env\n"
+
+
+def _read_template(relative: str) -> bytes:
+    """Return the raw bytes of a bundled template file."""
+    return importlib.resources.files("asc.templates").joinpath(relative).read_bytes()
+
+
+def _scaffold_appstore_dir(project_root: Path) -> bool:
+    """Create AppStore/ template structure under project_root.
+
+    Returns True if any new file/dir was created, False if everything already existed.
+    """
+    appstore = project_root / "AppStore"
+    config_dir = appstore / "Config"
+    data_dir = appstore / "data"
+    screenshots_dir = data_dir / "screenshots"
+    iap_review_dir = data_dir / "iap_review"
+
+    created: list[str] = []
+
+    for d in (appstore, config_dir, data_dir, screenshots_dir, iap_review_dir):
+        if not d.exists():
+            d.mkdir(parents=True, exist_ok=True)
+            created.append(str(d.relative_to(project_root)))
+
+    env_example = config_dir / ".env.example"
+    if not env_example.exists():
+        env_example.write_text(_ENV_EXAMPLE, encoding="utf-8")
+        created.append(str(env_example.relative_to(project_root)))
+
+    gitignore = config_dir / ".gitignore"
+    if not gitignore.exists():
+        gitignore.write_text(_GITIGNORE, encoding="utf-8")
+        created.append(str(gitignore.relative_to(project_root)))
+
+    csv_file = data_dir / "appstore_info.csv"
+    if not csv_file.exists():
+        csv_file.write_text(_CSV_TEMPLATE, encoding="utf-8")
+        created.append(str(csv_file.relative_to(project_root)))
+
+    iap_json = data_dir / "iap_packages.json"
+    if not iap_json.exists():
+        iap_json.write_bytes(_read_template("iap_packages.json"))
+        created.append(str(iap_json.relative_to(project_root)))
+
+    iap_img_dst = iap_review_dir / "premium_monthly.png"
+    if not iap_img_dst.exists():
+        iap_img_dst.write_bytes(_read_template("iap_review/premium_monthly.png"))
+        created.append(str(iap_img_dst.relative_to(project_root)))
+
+    for item in created:
+        typer.echo(f"  ✅ 已创建: {item}")
+
+    return bool(created)
+
+
+def cmd_init(
+    path: Optional[str] = typer.Option(
+        None, "--path", "-p",
+        help="项目根路径（默认：当前目录）",
+    ),
+):
+    """在 Xcode 项目根目录初始化 AppStore/ 模板目录结构。
+
+    检测当前目录（或 --path）是否包含 .xcodeproj / .xcworkspace，
+    若是则在该目录下创建 AppStore/ 及内部模板文件与子目录。
+    若 AppStore/ 已存在，仅补全缺失的子目录/文件（幂等）。
+
+    \b
+    创建的文件结构：
+        AppStore/
+          Config/
+            .env.example          ← 填写凭证模板（勿提交 .env）
+            .gitignore            ← 自动忽略 .env
+          data/
+            appstore_info.csv     ← 元数据模板（多语言）
+            iap_packages.json     ← IAP/订阅配置模板
+            screenshots/          ← 按语言放截图
+            iap_review/           ← IAP 审核截图示例
+
+    \b
+    Example:
+        asc init
+        asc init --path /path/to/MyApp
+    """
+    project_root = Path(path).expanduser().resolve() if path else Path.cwd()
+
+    has_xcodeproj = any(project_root.glob("*.xcodeproj"))
+    has_xcworkspace = any(project_root.glob("*.xcworkspace"))
+    if not has_xcodeproj and not has_xcworkspace:
+        typer.echo(
+            "❌ 未检测到 Xcode 项目（.xcodeproj 或 .xcworkspace）。\n"
+            "   请在 Xcode 项目根目录运行 asc init。",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    appstore = project_root / "AppStore"
+    typer.echo(f"初始化 AppStore 目录结构：{project_root}")
+
+    if appstore.exists():
+        typer.echo("  ℹ️  AppStore/ 已存在，补全缺失文件…")
+
+    any_created = _scaffold_appstore_dir(project_root)
+
+    if not any_created:
+        typer.echo("✅ AppStore/ 已存在且完整，无需变更。")
+        return
+
+    typer.echo("")
+    typer.echo("✅ 初始化完成！下一步：")
+    typer.echo("  1. 将 AppStore/Config/.env.example 复制为 AppStore/Config/.env")
+    typer.echo("     并填入真实凭证（ISSUER_ID, KEY_ID, KEY_FILE, APP_ID）")
+    typer.echo("  2. 运行：asc app import  ← 自动读取 .env 创建 profile")
+    typer.echo("  3. 运行：asc upload      ← 上传元数据 + 截图")
 
 
 def _print_cheatsheet():
