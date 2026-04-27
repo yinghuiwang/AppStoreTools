@@ -340,6 +340,140 @@ def cmd_install():
     _print_cheatsheet()
 
 
+def cmd_app_import(
+    path: Optional[str] = typer.Option(
+        None, "--path", "-p",
+        help="项目根路径（默认：当前目录）",
+    ),
+    name: Optional[str] = typer.Option(
+        None, "--name", "-n",
+        help="Profile 名称（默认：项目目录名）",
+    ),
+):
+    """从项目 AppStore/Config/.env 读取凭证，自动创建 app profile。
+
+    在项目根目录的 AppStore/Config/.env 中读取以下字段：
+    ISSUER_ID, KEY_ID, KEY_FILE, APP_ID。
+
+    KEY_FILE 若为纯文件名，会在 AppStore/Config/ 下查找并拷贝到全局
+    ~/.config/asc/keys/（已存在则跳过）。
+
+    csv 和 screenshots 路径根据 AppStore/data/ 目录内容自动推断。
+
+    \b
+    Example:
+        asc app import
+        asc app import --path /path/to/MyProject
+        asc app import --path /path/to/MyProject --name myapp
+    """
+    project_root = Path(path).expanduser().resolve() if path else Path.cwd()
+    env_file = project_root / "AppStore" / "Config" / ".env"
+
+    if not env_file.exists():
+        typer.echo(f"❌ 未找到配置文件：{env_file}", err=True)
+        typer.echo("   请确保项目目录下有 AppStore/Config/.env 文件。", err=True)
+        raise typer.Exit(1)
+
+    # 解析 .env（仅读取不 load_dotenv 以避免污染进程环境）
+    env_vars: dict[str, str] = {}
+    for line in env_file.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        env_vars[k.strip()] = v.strip()
+
+    required = ["ISSUER_ID", "KEY_ID", "KEY_FILE", "APP_ID"]
+    missing = [f for f in required if not env_vars.get(f)]
+    if missing:
+        typer.echo(f"❌ .env 缺少必填字段：{', '.join(missing)}", err=True)
+        raise typer.Exit(1)
+
+    issuer_id = env_vars["ISSUER_ID"]
+    key_id = env_vars["KEY_ID"]
+    key_file_val = env_vars["KEY_FILE"]
+    app_id = env_vars["APP_ID"]
+
+    # 处理 KEY_FILE：纯文件名则在 AppStore/Config/ 下查找
+    key_path = Path(key_file_val).expanduser()
+    if not key_path.is_absolute():
+        key_path = project_root / "AppStore" / "Config" / key_file_val
+    if not key_path.exists():
+        typer.echo(f"❌ 找不到 .p8 密钥文件：{key_path}", err=True)
+        raise typer.Exit(1)
+
+    global_keys_dir = Path.home() / ".config" / "asc" / "keys"
+    global_keys_dir.mkdir(parents=True, exist_ok=True)
+    dest_key = global_keys_dir / key_path.name
+    if dest_key.exists():
+        typer.echo(f"  ℹ️  密钥文件已存在，跳过拷贝：{dest_key}")
+    else:
+        shutil.copy2(key_path, dest_key)
+        typer.echo(f"  ✅ 密钥文件已拷贝到 {dest_key}")
+
+    # 自动推断 csv 和 screenshots 路径（相对于 project_root）
+    data_dir = project_root / "AppStore" / "data"
+    csv_path = "data/appstore_info.csv"
+    screenshots_path = "data/screenshots"
+    if data_dir.exists():
+        csv_files = sorted(data_dir.glob("*.csv"))
+        if csv_files:
+            csv_path = str(csv_files[0].relative_to(project_root))
+        screenshots_candidate = data_dir / "screenshots"
+        if screenshots_candidate.exists():
+            screenshots_path = str(screenshots_candidate.relative_to(project_root))
+
+    # Profile 名称：--name 优先，否则用目录名
+    profile_name = name or project_root.name
+
+    config = Config()
+    config.save_app_profile(
+        profile_name,
+        issuer_id,
+        key_id,
+        str(dest_key),
+        app_id,
+        csv_path,
+        screenshots_path,
+    )
+    typer.echo(f"\n✅ App profile '{profile_name}' 已创建。")
+    typer.echo(f"   Issuer ID:  {issuer_id}")
+    typer.echo(f"   Key ID:     {key_id}")
+    typer.echo(f"   App ID:     {app_id}")
+    typer.echo(f"   CSV:        {csv_path}")
+    typer.echo(f"   截图路径:   {screenshots_path}")
+
+    # 询问是否设为默认
+    set_default = typer.confirm(f"\n将 '{profile_name}' 设为 {project_root.name} 的默认 profile？")
+    if set_default:
+        local_dir = project_root / ".asc"
+        local_dir.mkdir(parents=True, exist_ok=True)
+        local_config_file = local_dir / "config.toml"
+        existing = local_config_file.read_text() if local_config_file.exists() else ""
+
+        if "default_app" in existing:
+            lines = existing.splitlines()
+            new_lines = [
+                f'default_app = "{profile_name}"' if l.strip().startswith("default_app") else l
+                for l in lines
+            ]
+            local_config_file.write_text("\n".join(new_lines))
+        elif "[defaults]" in existing:
+            lines = existing.splitlines()
+            result_lines = []
+            for l in lines:
+                result_lines.append(l)
+                if l.strip() == "[defaults]":
+                    result_lines.append(f'default_app = "{profile_name}"')
+            local_config_file.write_text("\n".join(result_lines))
+        else:
+            prefix = existing.rstrip() + "\n\n" if existing.strip() else ""
+            local_config_file.write_text(prefix + f'[defaults]\ndefault_app = "{profile_name}"\n')
+
+        typer.echo(f"✅ 默认 profile 已设为 '{profile_name}'")
+        typer.echo(f"   配置写入：{local_config_file.relative_to(project_root)}")
+
+
 def _print_cheatsheet():
     """Print a quick-reference command cheatsheet."""
     typer.echo("─" * 52)
