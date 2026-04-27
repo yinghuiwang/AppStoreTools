@@ -39,7 +39,24 @@ asc upload
 
 1. 在 App Store Connect 创建 API Key（建议 App Manager 权限）
 2. 记录 `Issuer ID`、`Key ID` 并下载 `.p8` 私钥
-3. 通过 `asc app add myapp` 配置 profile
+3. 配置 App profile（三种方式）：
+
+**方式 A — 全新 Xcode 项目一键初始化（推荐）：**
+
+```bash
+cd /path/to/MyXcodeProject
+asc init                  # 生成 AppStore/ 模板目录结构
+# 填写 AppStore/Config/.env，然后：
+asc app import            # 自动读取 .env 创建 profile
+```
+
+**方式 B — 项目已有 AppStore/Config/.env：**
+
+```bash
+asc app import --path /path/to/MyProject --name myapp
+```
+
+**方式 C — 交互式手动配置：**
 
 ```bash
 asc app add myapp
@@ -84,6 +101,15 @@ asc app default myapp
 asc app show myapp
 asc app edit myapp
 asc app remove myapp
+asc app import                          # 从 AppStore/Config/.env 自动导入
+asc app import --path /path/to/project --name myapp
+```
+
+## 项目初始化
+
+```bash
+asc init                                # 在 Xcode 项目目录创建 AppStore/ 模板结构
+asc init --path /path/to/MyApp
 ```
 
 ## Guard 命令
@@ -149,10 +175,11 @@ source ~/.zshrc
 source ~/.bash_profile
 ```
 
-### `install.sh` 与 `asc install` 的区别
+### `install.sh`、`asc install` 与 `asc init` 的区别
 
-- `install.sh`：安装 CLI 工具本体
-- `asc install`：初始化当前项目配置
+- `install.sh`：安装 CLI 工具本体（Python 环境 + `asc` 命令）
+- `asc install`：引导式项目初始化，检查环境并配置 App profile
+- `asc init`：在 Xcode 项目目录生成 `AppStore/` 模板目录结构（每个项目运行一次）
 
 ---
 

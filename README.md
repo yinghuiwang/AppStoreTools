@@ -81,6 +81,23 @@ In App Store Connect, open your app and copy the numeric Apple ID from the app U
 
 ### 3) Add an app profile
 
+**Option A — Scaffold a new project first (recommended for Xcode projects):**
+
+```bash
+cd /path/to/MyXcodeProject
+asc init                  # creates AppStore/ template structure
+# fill in AppStore/Config/.env, then:
+asc app import            # reads .env and creates the profile automatically
+```
+
+**Option B — Import from an existing project with AppStore/Config/.env:**
+
+```bash
+asc app import --path /path/to/MyProject --name myapp
+```
+
+**Option C — Interactive setup:**
+
 ```bash
 asc app add myapp
 # Fill in Issuer ID / Key ID / .p8 path / App ID / data paths
@@ -163,6 +180,12 @@ asc app default myapp
 asc app show myapp
 asc app edit myapp
 asc app remove myapp
+asc app import                          # import profile from AppStore/Config/.env
+asc app import --path /path/to/project --name myapp
+
+# Project scaffold
+asc init                                # create AppStore/ template in Xcode project dir
+asc init --path /path/to/MyApp
 
 # Guard
 asc guard status
@@ -265,10 +288,11 @@ If you use bash:
 source ~/.bash_profile
 ```
 
-### Difference between `install.sh` and `asc install`
+### Difference between `install.sh`, `asc install`, and `asc init`
 
-- `install.sh`: installs the CLI tool itself
-- `asc install`: initializes current project/profile settings
+- `install.sh`: installs the CLI tool itself (Python env + `asc` command)
+- `asc install`: interactive guided setup — checks environment and configures app profile
+- `asc init`: scaffolds `AppStore/` template directory in an Xcode project (run once per project)
 
 ### Version is not editable
 
