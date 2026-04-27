@@ -141,30 +141,7 @@ def cmd_app_default(
         existing = config_file.read_text()
 
     # Update or create default_app setting
-    if "[defaults]" in existing:
-        lines = existing.splitlines()
-        new_lines = []
-        found_default = False
-        for line in lines:
-            if line.strip().startswith("default_app"):
-                new_lines.append(f'default_app = "{name}"')
-                found_default = True
-            else:
-                new_lines.append(line)
-        if not found_default:
-            result = []
-            for line in new_lines:
-                result.append(line)
-                if line.strip() == "[defaults]":
-                    result.append(f'default_app = "{name}"')
-            existing = "\n".join(result)
-        else:
-            existing = "\n".join(new_lines)
-    else:
-        prefix = existing.rstrip() + "\n\n" if existing.strip() else ""
-        existing = prefix + f'[defaults]\ndefault_app = "{name}"\n'
-
-    config_file.write_text(existing)
+    _write_local_default(local_dir, name)
     typer.echo(f"✅ Default app profile set to '{name}'")
     typer.echo(f"   Config written to: {config_file.relative_to(Path.cwd())}")
     typer.echo(f"   Run 'asc upload' without --app to use this default.")
@@ -340,6 +317,41 @@ def cmd_install():
     _print_cheatsheet()
 
 
+def _write_local_default(local_dir: Path, profile_name: str) -> None:
+    """Write or update default_app in {local_dir}/config.toml."""
+    local_dir.mkdir(parents=True, exist_ok=True)
+    config_file = local_dir / "config.toml"
+    existing = config_file.read_text() if config_file.exists() else ""
+
+    if "[defaults]" in existing:
+        lines = existing.splitlines()
+        new_lines = []
+        found = False
+        in_defaults = False
+        for line in lines:
+            stripped = line.strip()
+            if stripped == "[defaults]":
+                in_defaults = True
+            elif stripped.startswith("[") and stripped != "[defaults]":
+                in_defaults = False
+            if in_defaults and stripped.startswith("default_app"):
+                new_lines.append(f'default_app = "{profile_name}"')
+                found = True
+            else:
+                new_lines.append(line)
+        if not found:
+            result = []
+            for line in new_lines:
+                result.append(line)
+                if line.strip() == "[defaults]":
+                    result.append(f'default_app = "{profile_name}"')
+            new_lines = result
+        config_file.write_text("\n".join(new_lines) + "\n")
+    else:
+        prefix = existing.rstrip() + "\n\n" if existing.strip() else ""
+        config_file.write_text(prefix + f'[defaults]\ndefault_app = "{profile_name}"\n')
+
+
 def cmd_app_import(
     path: Optional[str] = typer.Option(
         None, "--path", "-p",
@@ -381,7 +393,11 @@ def cmd_app_import(
         if not line or line.startswith("#") or "=" not in line:
             continue
         k, _, v = line.partition("=")
-        env_vars[k.strip()] = v.strip()
+        v = v.strip()
+        # Strip surrounding quotes (common in .env files)
+        if len(v) >= 2 and v[0] == v[-1] and v[0] in ('"', "'"):
+            v = v[1:-1]
+        env_vars[k.strip()] = v
 
     required = ["ISSUER_ID", "KEY_ID", "KEY_FILE", "APP_ID"]
     missing = [f for f in required if not env_vars.get(f)]
@@ -427,6 +443,9 @@ def cmd_app_import(
     profile_name = name or project_root.name
 
     config = Config()
+    existing_apps = config.list_apps()
+    if profile_name in existing_apps:
+        typer.echo(f"  ⚠️  Profile '{profile_name}' already exists and will be overwritten.")
     config.save_app_profile(
         profile_name,
         issuer_id,
@@ -447,29 +466,8 @@ def cmd_app_import(
     set_default = typer.confirm(f"\n将 '{profile_name}' 设为 {project_root.name} 的默认 profile？")
     if set_default:
         local_dir = project_root / ".asc"
-        local_dir.mkdir(parents=True, exist_ok=True)
+        _write_local_default(local_dir, profile_name)
         local_config_file = local_dir / "config.toml"
-        existing = local_config_file.read_text() if local_config_file.exists() else ""
-
-        if "default_app" in existing:
-            lines = existing.splitlines()
-            new_lines = [
-                f'default_app = "{profile_name}"' if l.strip().startswith("default_app") else l
-                for l in lines
-            ]
-            local_config_file.write_text("\n".join(new_lines))
-        elif "[defaults]" in existing:
-            lines = existing.splitlines()
-            result_lines = []
-            for l in lines:
-                result_lines.append(l)
-                if l.strip() == "[defaults]":
-                    result_lines.append(f'default_app = "{profile_name}"')
-            local_config_file.write_text("\n".join(result_lines))
-        else:
-            prefix = existing.rstrip() + "\n\n" if existing.strip() else ""
-            local_config_file.write_text(prefix + f'[defaults]\ndefault_app = "{profile_name}"\n')
-
         typer.echo(f"✅ 默认 profile 已设为 '{profile_name}'")
         typer.echo(f"   配置写入：{local_config_file.relative_to(project_root)}")
 

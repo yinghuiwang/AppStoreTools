@@ -152,3 +152,33 @@ def test_import_missing_field_exits_nonzero(tmp_path, isolated_global_dir):
     )
     assert result.exit_code == 1
     assert "APP_ID" in result.output
+
+
+def test_import_strips_quoted_values(tmp_path, isolated_global_dir):
+    """Values wrapped in double or single quotes are unquoted properly"""
+    config_dir = tmp_path / "AppStore" / "Config"
+    config_dir.mkdir(parents=True)
+    key_file = config_dir / "AuthKey_QUOTED.p8"
+    key_file.write_text("fake")
+    env_content = (
+        'ISSUER_ID="aaaa-bbbb-cccc-dddd"\n'
+        "KEY_ID='QUOTEDKEY'\n"
+        "KEY_FILE=AuthKey_QUOTED.p8\n"
+        'APP_ID="1111111111"\n'
+    )
+    (config_dir / ".env").write_text(env_content)
+    result = runner.invoke(
+        app,
+        ["app", "import", "--path", str(tmp_path), "--name", "quotedapp"],
+        input="n\n",
+    )
+    assert result.exit_code == 0, result.output
+    profile_path = isolated_global_dir / ".config" / "asc" / "profiles" / "quotedapp.toml"
+    content = profile_path.read_text()
+    # Values should be stored without double-quoting (TOML wraps in quotes naturally)
+    assert '""aaaa-bbbb-cccc-dddd""' not in content
+    assert 'issuer_id = "aaaa-bbbb-cccc-dddd"' in content
+    assert "''QUOTEDKEY''" not in content
+    assert 'key_id = "QUOTEDKEY"' in content
+    assert '""1111111111""' not in content
+    assert 'app_id = "1111111111"' in content
