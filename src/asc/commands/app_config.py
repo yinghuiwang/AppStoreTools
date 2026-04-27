@@ -135,12 +135,6 @@ def cmd_app_default(
             typer.echo(f"  • {app_name}")
         raise typer.Exit(1)
 
-    # Read existing config or create new
-    existing = ""
-    if config_file.exists():
-        existing = config_file.read_text()
-
-    # Update or create default_app setting
     _write_local_default(local_dir, name)
     typer.echo(f"✅ Default app profile set to '{name}'")
     typer.echo(f"   Config written to: {config_file.relative_to(Path.cwd())}")
