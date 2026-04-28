@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# When sourced, set -euo pipefail would leak into the caller's shell and cause
+# any subsequent failed command (e.g. a typo) to silently kill the session.
+# Save current options and restore them at the end of this script.
+_asc_saved_opts="$-"
 set -euo pipefail
 
 RED='\033[0;31m'
@@ -9,7 +13,8 @@ NC='\033[0m'
 info()    { echo -e "${GREEN}[✓]${NC} $*"; }
 warn()    { echo -e "${YELLOW}[!]${NC} $*"; }
 error()   { echo -e "${RED}[✗]${NC} $*" >&2; }
-fatal()   { error "$*"; exit 1; }
+# Use 'return' instead of 'exit' so sourcing this script doesn't kill the shell.
+fatal()   { error "$*"; return 1; }
 
 echo "================================================"
 echo "  App Store Connect Tools — 安装程序"
@@ -47,7 +52,7 @@ if [ -z "$PYTHON" ]; then
     echo "  安装方式：sudo apt install python3  （Debian/Ubuntu）"
     echo "  或使用 pyenv：https://github.com/pyenv/pyenv"
   fi
-  exit 1
+  return 1
 fi
 info "Python: $($PYTHON --version)"
 
@@ -59,7 +64,7 @@ if ! "$PYTHON" -m pip --version &>/dev/null; then
   else
     error "pip 安装失败，请手动安装："
     echo "  https://pip.pypa.io/en/stable/installation/"
-    exit 1
+    return 1
   fi
 else
   info "pip: $($PYTHON -m pip --version | cut -d' ' -f1-2)"
@@ -97,6 +102,7 @@ fi
 
 # ── 7. 检测 pip bin 目录并写入 PATH ──
 USER_BIN=$("$PYTHON" -m site --user-base 2>/dev/null)/bin
+_asc_need_path_export=0
 if [ -d "$USER_BIN" ] && [[ ":$PATH:" != *":$USER_BIN:"* ]]; then
   # 写入 shell 配置文件
   SHELL_NAME="$(basename "${SHELL:-bash}")"
@@ -116,8 +122,8 @@ if [ -d "$USER_BIN" ] && [[ ":$PATH:" != *":$USER_BIN:"* ]]; then
     info "已将 $USER_BIN 写入 $RC_FILE"
   fi
 
-  # 当前会话立即生效
-  export PATH="$USER_BIN:$PATH"
+  # 标记需要在父 shell 中 export（不能在这里做，因为下面要恢复 set 选项）
+  _asc_need_path_export=1
 fi
 
 # ── 8. 验证安装 ──
@@ -152,3 +158,19 @@ echo ""
 echo "  asc install"
 echo ""
 echo "这将引导你配置 App Store Connect 凭证。"
+
+# ── 10. 恢复调用方 shell 的选项，并应用 PATH ──
+# Restore the caller's shell options that were active before this script ran.
+# This prevents set -euo pipefail from leaking into the interactive shell when
+# the script is sourced (source <(...)), which would cause any mistyped command
+# to terminate the entire shell session.
+[[ "$_asc_saved_opts" != *e* ]] && set +e
+[[ "$_asc_saved_opts" != *u* ]] && set +u
+set +o pipefail 2>/dev/null || true
+unset _asc_saved_opts
+
+# Apply PATH to the current (parent) shell now that options are safe again.
+if [ "${_asc_need_path_export:-0}" = "1" ] && [ -d "${USER_BIN:-}" ]; then
+  export PATH="$USER_BIN:$PATH"
+fi
+unset _asc_need_path_export
