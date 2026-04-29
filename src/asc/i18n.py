@@ -296,6 +296,10 @@ HELP = {
         'en': 'Scaffold AppStore/ template directory in an Xcode project.',
         'zh': '在 Xcode 项目根目录创建 AppStore/ 模板目录结构。',
     },
+    'cmd_update': {
+        'en': 'Check for updates and install the latest version.',
+        'zh': '检查更新并安装最新版本。',
+    },
 }
 
 _COMPLETION_INSTALL = {
