@@ -107,9 +107,12 @@ else
   echo "正在从 GitHub 安装 asc-appstore-tools (main) ..."
 fi
 
-if "$PYTHON" -m pip install --upgrade "$GITHUB_URL" 2>/dev/null; then
+# 先卸载旧版本，避免旧版 pip 因版本号相同而跳过升级
+"$PYTHON" -m pip uninstall -y asc-appstore-tools 2>/dev/null || true
+
+if "$PYTHON" -m pip install "$GITHUB_URL" 2>/dev/null; then
   info "asc-appstore-tools 安装成功"
-elif "$PYTHON" -m pip install --upgrade --user "$GITHUB_URL"; then
+elif "$PYTHON" -m pip install --user "$GITHUB_URL"; then
   info "asc-appstore-tools 安装成功（--user 模式）"
 else
   fatal "pip install 失败，请检查网络或权限后重试"
