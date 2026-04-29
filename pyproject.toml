@@ -1,6 +1,6 @@
 [project]
 name = "asc-appstore-tools"
-version = "0.1.4"
+version = "0.1.5"
 description = "CLI tool for bulk-uploading App Store Connect metadata"
 readme = "README.md"
 requires-python = ">=3.9"
