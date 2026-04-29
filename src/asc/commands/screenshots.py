@@ -13,7 +13,7 @@ from PIL import Image
 from asc.config import Config
 from asc.constants import DISPLAY_TYPE_BY_SIZE, SCREENSHOT_FOLDER_TO_LOCALE
 from asc.guard import Guard, GuardViolationError
-from asc.utils import make_api_from_config, resolve_locale
+from asc.utils import make_api_from_config, resolve_locale, md5_of_file
 from asc.i18n import t, HELP
 
 
