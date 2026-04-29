@@ -300,6 +300,10 @@ HELP = {
         'en': 'Check for updates and install the latest version.',
         'zh': '检查更新并安装最新版本。',
     },
+    'cmd_uninstall': {
+        'en': 'Uninstall asc-appstore-tools from this system.',
+        'zh': '从系统中卸载 asc-appstore-tools。',
+    },
 }
 
 _COMPLETION_INSTALL = {

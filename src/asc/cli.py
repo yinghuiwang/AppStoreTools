@@ -82,6 +82,7 @@ from asc.commands.whats_new import cmd_whats_new
 from asc.commands.app_config import cmd_app_add, cmd_app_list, cmd_app_remove, cmd_app_default, cmd_install, cmd_app_show, cmd_app_edit, cmd_app_import, cmd_init
 from asc.commands.build import cmd_build, cmd_deploy, cmd_release
 from asc.commands.update_cmd import cmd_update
+from asc.commands.uninstall_cmd import cmd_uninstall
 
 app.command("upload",              help=t(HELP['cmd_upload']))(cmd_upload)
 app.command("metadata",            help=t(HELP['cmd_metadata']))(cmd_metadata)
@@ -109,6 +110,7 @@ app.command("build",               help=t(HELP['cmd_build']))(cmd_build)
 app.command("deploy",              help=t(HELP['cmd_deploy']))(cmd_deploy)
 app.command("release",             help=t(HELP['cmd_release']))(cmd_release)
 app.command("update",              help=t(HELP['cmd_update']))(cmd_update)
+app.command("uninstall",           help=t(HELP['cmd_uninstall']))(cmd_uninstall)
 
 from asc.commands.guard_cmd import guard_app
 app.add_typer(guard_app, name="guard")
