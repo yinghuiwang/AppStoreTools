@@ -90,11 +90,26 @@ fi
 
 # ── 6. 安装 asc-appstore-tools ──
 echo ""
-echo "正在从 GitHub 安装 asc-appstore-tools ..."
-GITHUB_URL="git+https://github.com/yinghuiwang/AppStoreTools.git"
-if "$PYTHON" -m pip install "$GITHUB_URL" 2>/dev/null; then
+echo "正在获取最新版本信息..."
+
+# 通过 GitHub Releases API 获取最新 tag
+LATEST_TAG=""
+if command -v curl &>/dev/null; then
+  LATEST_TAG=$(curl -fsSL "https://api.github.com/repos/yinghuiwang/AppStoreTools/releases/latest" 2>/dev/null \
+    | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print(d.get('tag_name',''))" 2>/dev/null || true)
+fi
+
+if [ -n "$LATEST_TAG" ]; then
+  GITHUB_URL="git+https://github.com/yinghuiwang/AppStoreTools.git@${LATEST_TAG}"
+  echo "正在从 GitHub 安装 asc-appstore-tools ${LATEST_TAG} ..."
+else
+  GITHUB_URL="git+https://github.com/yinghuiwang/AppStoreTools.git"
+  echo "正在从 GitHub 安装 asc-appstore-tools (main) ..."
+fi
+
+if "$PYTHON" -m pip install --upgrade "$GITHUB_URL" 2>/dev/null; then
   info "asc-appstore-tools 安装成功"
-elif "$PYTHON" -m pip install --user "$GITHUB_URL"; then
+elif "$PYTHON" -m pip install --upgrade --user "$GITHUB_URL"; then
   info "asc-appstore-tools 安装成功（--user 模式）"
 else
   fatal "pip install 失败，请检查网络或权限后重试"
