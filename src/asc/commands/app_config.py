@@ -48,7 +48,9 @@ def cmd_app_add(
         "  Screenshots directory", default="data/screenshots"
     )
 
-    key_path = Path(key_file_input).expanduser()
+    # Strip quotes and whitespace from path input
+    key_file_clean = key_file_input.strip().strip("'\"")
+    key_path = Path(key_file_clean).expanduser()
     if not key_path.exists():
         typer.echo(f"❌ Key file not found: {key_path}", err=True)
         raise typer.Exit(1)
