@@ -356,6 +356,7 @@ def cmd_metadata(
     \b
     Example:
         asc --app myapp metadata
+        asc --app myapp metadata --csv custom.csv
         asc --app myapp metadata --csv custom.csv --dry-run
     """
     config = Config(app)

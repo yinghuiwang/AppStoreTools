@@ -232,7 +232,9 @@ def cmd_screenshots(
     Example:
         asc --app myapp screenshots
         asc --app myapp screenshots --dry-run
+        asc --app myapp screenshots --screenshots ./custom_screenshots/
         asc --app myapp screenshots --display-type APP_IPHONE_67
+        asc --app myapp screenshots --screenshots ./custom_screenshots/ --display-type APP_IPHONE_67
     """
     config = Config(app)
     guard = Guard()

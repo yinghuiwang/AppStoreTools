@@ -60,8 +60,8 @@ HELP = {
         'zh': 'CSV 文件路径 [默认: data/appstore_info.csv]'
     },
     'screenshots_dir': {
-        'en': 'Screenshots directory [default: data/screenshots]',
-        'zh': '截图目录 [默认: data/screenshots]'
+        'en': 'Screenshots directory path [default: data/screenshots]',
+        'zh': '截图目录路径 [默认: data/screenshots]'
     },
     'display_type': {
         'en': 'Device type override (e.g. APP_IPHONE_67, APP_IPAD_PRO_129_EQ)',
