@@ -83,9 +83,11 @@ def cmd_app_list():
         typer.echo("No app profiles configured.")
         typer.echo("Run: asc app add <name>")
         return
+    default = config.app_name
     typer.echo("Configured app profiles:")
     for app_name in apps:
-        typer.echo(f"  • {app_name}")
+        marker = " (default)" if app_name == default else ""
+        typer.echo(f"  • {app_name}{marker}")
 
 
 def cmd_app_remove(

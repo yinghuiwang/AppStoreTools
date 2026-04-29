@@ -19,11 +19,14 @@ def _upload_metadata_core(
     metadata_list: list[dict],
     dry_run: bool = False,
     include_version_fields: Optional[set[str]] = None,
+    app_profile: str = "",
 ):
     """Core metadata upload logic"""
     print("\n" + "=" * 60)
     print("📝 上传元数据")
     print("=" * 60)
+    if app_profile:
+        print(f"  App Profile: {app_profile}")
 
     app_infos = api.get_app_infos(app_id)
     if not app_infos:
@@ -328,7 +331,7 @@ def cmd_upload(
     if csv_path.exists():
         metadata_list = parse_csv(str(csv_path))
         print(f"\n📄 从 CSV 读取了 {len(metadata_list)} 个语言的元数据")
-        _upload_metadata_core(api, app_id, metadata_list, dry_run=dry_run)
+        _upload_metadata_core(api, app_id, metadata_list, dry_run=dry_run, app_profile=app or "")
     else:
         print(f"\n⚠️  CSV 文件不存在: {csv_path}")
     screenshots_path = Path(screenshots or config.screenshots_path)
@@ -378,7 +381,7 @@ def cmd_metadata(
         typer.echo(f"❌ CSV 文件不存在: {csv_path}", err=True)
         raise typer.Exit(1)
     metadata_list = parse_csv(str(csv_path))
-    _upload_metadata_core(api, app_id, metadata_list, dry_run=dry_run)
+    _upload_metadata_core(api, app_id, metadata_list, dry_run=dry_run, app_profile=app or "")
 
 
 def cmd_keywords(
@@ -416,7 +419,7 @@ def cmd_keywords(
         raise typer.Exit(1)
     metadata_list = parse_csv(str(csv_path))
     _upload_metadata_core(
-        api, app_id, metadata_list, dry_run=dry_run, include_version_fields={"keywords"}
+        api, app_id, metadata_list, dry_run=dry_run, include_version_fields={"keywords"}, app_profile=app or ""
     )
 
 
@@ -460,6 +463,7 @@ def cmd_support_url(
         metadata_list,
         dry_run=dry_run,
         include_version_fields={"supportUrl"},
+        app_profile=app or "",
     )
 
 
@@ -503,6 +507,7 @@ def cmd_marketing_url(
         metadata_list,
         dry_run=dry_run,
         include_version_fields={"marketingUrl"},
+        app_profile=app or "",
     )
 
 
@@ -546,6 +551,7 @@ def cmd_privacy_policy_url(
         metadata_list,
         dry_run=dry_run,
         include_version_fields={"privacyPolicyUrl"},
+        app_profile=app or "",
     )
 
 
