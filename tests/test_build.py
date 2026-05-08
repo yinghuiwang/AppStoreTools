@@ -135,9 +135,26 @@ def test_generate_export_options_auto_appstore(tmp_path):
     assert "provisioningProfiles" not in opts
 
 
-def test_generate_export_options_manual(tmp_path):
-    """Manual signing generates provisioningProfiles and signingCertificate."""
+def test_generate_export_options_manual(tmp_path, monkeypatch):
+    """Manual signing generates provisioningProfiles (bundle_id → UUID) and signingCertificate."""
     from asc.commands.build import generate_export_options
+    from asc.commands.build_inputs import ProfileInfo
+    from datetime import datetime, timezone, timedelta
+
+    fake_info = ProfileInfo(
+        path="/path/to/profile.mobileprovision",
+        uuid="ABC-123-UUID",
+        name="AppStore_ACME",
+        team_id="TEAM",
+        bundle_id="com.acme.app",
+        expiration=datetime.now(timezone.utc) + timedelta(days=30),
+        cert_sha1s=[],
+    )
+    monkeypatch.setattr(
+        "asc.commands.build_inputs.parse_mobileprovision",
+        lambda _: fake_info,
+    )
+
     plist_path = generate_export_options(
         signing="manual",
         destination="testflight",
@@ -151,6 +168,8 @@ def test_generate_export_options_manual(tmp_path):
     assert opts["method"] == "app-store-connect"
     assert opts["signingStyle"] == "manual"
     assert opts["signingCertificate"] == "iPhone Distribution: ACME Corp"
+    # Critical: value must be UUID (or Name), NOT the file path.
+    assert opts["provisioningProfiles"] == {"com.acme.app": "ABC-123-UUID"}
 
 
 def test_generate_export_options_testflight(tmp_path):

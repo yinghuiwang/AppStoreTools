@@ -100,8 +100,11 @@ def generate_export_options(
         if certificate:
             opts["signingCertificate"] = certificate
         if profile:
-            bid = bundle_id or parse_bundle_id_from_profile(profile)
-            opts["provisioningProfiles"] = {bid: profile}
+            from asc.commands.build_inputs import parse_mobileprovision
+            info = parse_mobileprovision(profile)
+            bid = bundle_id or info.bundle_id
+            # ExportOptions expects profile UUID (or Name), NOT the file path.
+            opts["provisioningProfiles"] = {bid: info.uuid}
 
     plist_path = Path(output_dir) / "ExportOptions.plist"
     with open(plist_path, "wb") as f:
