@@ -66,7 +66,18 @@ asc --app myapp set-privacy-policy-url --text "https://example.com/privacy"
 asc build --scheme MyApp                                  # Build .xcarchive + export .ipa
 asc deploy --ipa build/export/MyApp.ipa                   # Upload .ipa to TestFlight/App Store
 asc release --scheme MyApp --destination testflight       # Build + upload in one step
+```
 
+**New (0.1.6):** `asc build` and `asc release` now auto-detect project, scheme,
+bundle ID, certificate, and provisioning profile when not provided via CLI.
+Detected/selected values are cached in `.asc/config.toml [build]` so subsequent
+runs need no input. Use `--no-interactive` in CI to fail fast instead of
+prompting; use `--interactive` to force interactive mode in non-TTY shells.
+Profiles are scanned from both Xcode 16's
+`~/Library/Developer/Xcode/UserData/Provisioning Profiles/` and the legacy
+`~/Library/MobileDevice/Provisioning Profiles/`.
+
+```bash
 # Guard commands
 asc guard status                                          # 查看绑定状态
 asc guard enable                                          # 启用守卫

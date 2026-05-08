@@ -1,0 +1,557 @@
+"""Auto-detect, cache, and interactively resolve build/deploy/release inputs."""
+from __future__ import annotations
+
+import hashlib
+import plistlib
+import re
+import subprocess
+import sys
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Callable, List, Optional, Sequence, TypeVar
+
+import typer
+
+
+@dataclass
+class BuildInputsCLI:
+    project: Optional[str] = None
+    scheme: Optional[str] = None
+    signing: Optional[str] = None
+    profile: Optional[str] = None
+    certificate: Optional[str] = None
+    destination: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class ResolvedInputs:
+    project_path: str
+    project_kind: str
+    scheme: str
+    bundle_id: str
+    signing: str
+    certificate: Optional[str]
+    profile: Optional[str]
+    destination: str
+
+
+@dataclass(frozen=True)
+class ProfileInfo:
+    path: str
+    uuid: str
+    name: str
+    team_id: str
+    bundle_id: str
+    expiration: datetime
+    cert_sha1s: List[str]
+
+    @property
+    def is_expired(self) -> bool:
+        now = datetime.now(timezone.utc)
+        exp = self.expiration
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        return exp <= now
+
+
+def _decode_profile_plist(path) -> dict:
+    """Run `security cms -D -i <path>` and parse the resulting plist."""
+    result = subprocess.run(
+        ["security", "cms", "-D", "-i", str(path)],
+        capture_output=True,
+    )
+    if result.returncode != 0 or not result.stdout:
+        raise RuntimeError(f"security cms failed for {path}")
+    return plistlib.loads(result.stdout)
+
+
+def _cert_sha1(cert_bytes: bytes) -> str:
+    return hashlib.sha1(cert_bytes).hexdigest().upper()
+
+
+def parse_mobileprovision(path) -> ProfileInfo:
+    plist = _decode_profile_plist(path)
+    entitlements = plist.get("Entitlements") or {}
+    app_id = entitlements.get("application-identifier", "")
+    bundle_id = app_id.split(".", 1)[1] if "." in app_id else ""
+    team_id = (plist.get("TeamIdentifier") or [""])[0]
+    cert_blobs = plist.get("DeveloperCertificates") or []
+    expiration = plist.get("ExpirationDate")
+    if expiration is None:
+        raise RuntimeError(f"Provisioning profile missing ExpirationDate: {path}")
+    return ProfileInfo(
+        path=str(path),
+        uuid=plist.get("UUID", ""),
+        name=plist.get("Name", ""),
+        team_id=team_id,
+        bundle_id=bundle_id,
+        expiration=expiration,
+        cert_sha1s=[_cert_sha1(b) for b in cert_blobs],
+    )
+
+
+PROFILE_DIRS = [
+    Path.home() / "Library/Developer/Xcode/UserData/Provisioning Profiles",
+    Path.home() / "Library/MobileDevice/Provisioning Profiles",
+]
+
+
+def scan_profiles(dirs=None) -> List[ProfileInfo]:
+    """Walk known profile dirs in order; first occurrence of each UUID wins."""
+    seen: dict = {}
+    for d in (dirs if dirs is not None else PROFILE_DIRS):
+        if not Path(d).is_dir():
+            continue
+        for path in sorted(Path(d).glob("*.mobileprovision")):
+            try:
+                info = parse_mobileprovision(path)
+            except Exception:
+                continue
+            if info.uuid and info.uuid not in seen:
+                seen[info.uuid] = info
+    return list(seen.values())
+
+
+def detect_profiles(bundle_id: str, cert_sha1: Optional[str]) -> List[ProfileInfo]:
+    """Filter discovered profiles by bundle ID, expiration, and (optionally) cert match."""
+    out: List[ProfileInfo] = []
+    for p in scan_profiles():
+        if p.bundle_id != bundle_id:
+            continue
+        if p.is_expired:
+            continue
+        if cert_sha1 is not None and cert_sha1.upper() not in {s.upper() for s in p.cert_sha1s}:
+            continue
+        out.append(p)
+    return out
+
+
+@dataclass(frozen=True)
+class Certificate:
+    sha1: str
+    name: str
+
+
+_IDENTITY_RE = re.compile(r'^\s*\d+\)\s+([A-F0-9]{40})\s+"([^"]+)"\s*$')
+_DISTRIBUTION_RE = re.compile(r"(Apple|iPhone)\s+Distribution:")
+
+
+def detect_certificates() -> List[Certificate]:
+    result = subprocess.run(
+        ["security", "find-identity", "-v", "-p", "codesigning"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        return []
+    out: List[Certificate] = []
+    for line in result.stdout.splitlines():
+        m = _IDENTITY_RE.match(line)
+        if not m:
+            continue
+        sha1, name = m.group(1), m.group(2)
+        if _DISTRIBUTION_RE.search(name):
+            out.append(Certificate(sha1=sha1, name=name))
+    return out
+
+
+_BUNDLE_ID_RE = re.compile(r"^\s*PRODUCT_BUNDLE_IDENTIFIER\s*=\s*(\S+)\s*$")
+
+
+def detect_bundle_id(project: str, kind: str, scheme: str) -> Optional[str]:
+    flag = "-workspace" if kind == "workspace" else "-project"
+    result = subprocess.run(
+        ["xcodebuild", "-showBuildSettings", flag, project, "-scheme", scheme],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        return None
+    for line in result.stdout.splitlines():
+        m = _BUNDLE_ID_RE.match(line)
+        if m:
+            return m.group(1)
+    return None
+
+
+_MARKETING_VERSION_RE = re.compile(r"^\s*MARKETING_VERSION\s*=\s*(\S+)\s*$")
+_CURRENT_PROJECT_VERSION_RE = re.compile(r"^\s*CURRENT_PROJECT_VERSION\s*=\s*(\S+)\s*$")
+
+
+def detect_versions(project: str, kind: str, scheme: str) -> Optional[tuple]:
+    """Return (marketing_version, build_number) from xcodebuild, or None if either is missing.
+
+    Used to match existing .xcarchive bundles against the current source tree.
+    Returns None (rather than raising) when xcodebuild fails or a value is absent,
+    so callers can simply skip archive-reuse in that case.
+    """
+    flag = "-workspace" if kind == "workspace" else "-project"
+    result = subprocess.run(
+        ["xcodebuild", "-showBuildSettings", flag, project, "-scheme", scheme],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        return None
+    marketing = None
+    build_num = None
+    for line in result.stdout.splitlines():
+        if marketing is None:
+            m = _MARKETING_VERSION_RE.match(line)
+            if m:
+                marketing = m.group(1)
+                continue
+        if build_num is None:
+            m = _CURRENT_PROJECT_VERSION_RE.match(line)
+            if m:
+                build_num = m.group(1)
+                continue
+        if marketing and build_num:
+            break
+    if not marketing or not build_num:
+        return None
+    return (marketing, build_num)
+
+
+def validate_cache_entry(field: str, value: str) -> bool:
+    """Return False if cached value is no longer usable; True otherwise.
+
+    Unknown fields pass through unchecked (caller decides).
+    """
+    if not value:
+        return False
+    if field == "project":
+        return Path(value).exists()
+    if field == "certificate":
+        return any(c.name == value for c in detect_certificates())
+    if field == "profile":
+        if not Path(value).exists():
+            return False
+        try:
+            info = parse_mobileprovision(value)
+        except Exception:
+            return False
+        return not info.is_expired
+    return True
+
+
+T = TypeVar("T")
+
+
+def _pick_one(
+    items: Sequence[T],
+    *,
+    label: str,
+    interactive: bool,
+    render: Optional[Callable[[T], str]] = None,
+) -> T:
+    if not items:
+        raise RuntimeError(f"找不到可用的{label}")
+    if len(items) == 1:
+        return items[0]
+    if not interactive:
+        raise RuntimeError(
+            f"发现多个{label}，请用 CLI 参数指定，或加 --interactive"
+        )
+    typer.echo(f"\n请选择{label}：")
+    for i, item in enumerate(items, 1):
+        text = render(item) if render else str(item)
+        typer.echo(f"  [{i}] {text}")
+    while True:
+        raw = typer.prompt("编号")
+        try:
+            idx = int(raw)
+            if 1 <= idx <= len(items):
+                return items[idx - 1]
+        except ValueError:
+            pass
+        typer.echo(f"❌ 无效编号，请输入 1-{len(items)}")
+
+
+def detect_project(path: str) -> tuple[str, str]:
+    """Return (project_path, kind) where kind is 'workspace' or 'project'.
+
+    If path points directly to a .xcworkspace or .xcodeproj, return it.
+    Otherwise search the directory for one, preferring .xcworkspace.
+    """
+    p = Path(path)
+
+    if p.suffix == ".xcworkspace":
+        return str(p), "workspace"
+    if p.suffix == ".xcodeproj":
+        return str(p), "project"
+
+    # Search directory
+    workspaces = list(p.glob("*.xcworkspace"))
+    if workspaces:
+        return str(workspaces[0]), "workspace"
+
+    projects = list(p.glob("*.xcodeproj"))
+    if projects:
+        return str(projects[0]), "project"
+
+    raise ValueError(f"No Xcode project or workspace found in: {path}")
+
+
+def list_schemes(project_path: str, kind: str) -> list[str]:
+    """Return list of scheme names from xcodebuild -list."""
+    flag = "-workspace" if kind == "workspace" else "-project"
+    result = subprocess.run(
+        ["xcodebuild", flag, project_path, "-list"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"xcodebuild -list failed:\n{result.stderr}")
+
+    schemes: list[str] = []
+    in_schemes = False
+    for line in result.stdout.splitlines():
+        stripped = line.strip()
+        if stripped == "Schemes:":
+            in_schemes = True
+            continue
+        if in_schemes:
+            if stripped and not stripped.endswith(":"):
+                schemes.append(stripped)
+            elif stripped.endswith(":") and stripped != "Schemes:":
+                break
+    return schemes
+
+
+def prepare_build_inputs(
+    cli: BuildInputsCLI,
+    config,  # asc.config.Config
+    *, interactive: bool,
+) -> ResolvedInputs:
+    cache: dict = {}
+
+    # 1. project / kind
+    if cli.project:
+        project_path, project_kind = detect_project(cli.project)
+        cache["project"] = project_path
+    else:
+        cached_project = config.build_project
+        if cached_project and Path(cached_project).exists():
+            project_path, project_kind = detect_project(cached_project)
+        else:
+            project_path, project_kind = detect_project(".")
+            cache["project"] = project_path
+
+    # 2. scheme
+    if cli.scheme:
+        scheme = cli.scheme
+        cache["scheme"] = scheme
+    elif config.build_scheme:
+        scheme = config.build_scheme
+    else:
+        schemes = list_schemes(project_path, project_kind)
+        scheme = _pick_one(schemes, label="Scheme", interactive=interactive)
+        cache["scheme"] = scheme
+
+    # 3. bundle_id
+    bundle_id = config.build_bundle_id
+    if not bundle_id:
+        bundle_id = detect_bundle_id(project_path, project_kind, scheme)
+        if not bundle_id and cli.profile:
+            from asc.commands.build import parse_bundle_id_from_profile
+            bundle_id = parse_bundle_id_from_profile(cli.profile)
+        if not bundle_id:
+            raise RuntimeError(
+                "无法确定 bundle ID：xcodebuild 解析失败且未提供 --profile"
+            )
+        cache["bundle_id"] = bundle_id
+
+    # 4. destination
+    destination = cli.destination or config.build_destination or "appstore"
+    if cli.destination:
+        cache["destination"] = destination
+
+    # 5. signing
+    signing = cli.signing or config.build_signing or "auto"
+    if cli.signing:
+        cache["signing"] = signing
+
+    certificate: Optional[str] = None
+    profile: Optional[str] = None
+
+    if signing == "manual":
+        # 6. certificate
+        if cli.certificate:
+            certificate = cli.certificate
+            cache["certificate"] = certificate
+        elif config.build_certificate and validate_cache_entry("certificate", config.build_certificate):
+            certificate = config.build_certificate
+        else:
+            certs = detect_certificates()
+            chosen = _pick_one(certs, label="证书", interactive=interactive,
+                               render=lambda c: c.name)
+            certificate = chosen.name
+            cache["certificate"] = certificate
+
+        # Determine cert_sha1 for profile filtering
+        cert_sha1 = next(
+            (c.sha1 for c in detect_certificates() if c.name == certificate),
+            None,
+        )
+
+        # 7. profile
+        if cli.profile:
+            profile = cli.profile
+            cache["profile"] = profile
+        elif config.build_profile and validate_cache_entry("profile", config.build_profile):
+            profile = config.build_profile
+        else:
+            profiles = detect_profiles(bundle_id, cert_sha1)
+            chosen_p = _pick_one(
+                profiles, label="描述文件", interactive=interactive,
+                render=lambda p: f"{p.name} (team: {p.team_id}, expires: {p.expiration:%Y-%m-%d})",
+            )
+            profile = chosen_p.path
+            cache["profile"] = profile
+
+    if cache:
+        try:
+            config.update_local_build_section(cache)
+        except Exception as e:
+            typer.echo(f"⚠️ 无法保存到 .asc/config.toml，本次设置不会被记住：{e}", err=True)
+
+    return ResolvedInputs(
+        project_path=project_path,
+        project_kind=project_kind,
+        scheme=scheme,
+        bundle_id=bundle_id,
+        signing=signing,
+        certificate=certificate,
+        profile=profile,
+        destination=destination,
+    )
+
+
+def resolve_interactive(cli_value: Optional[bool]) -> bool:
+    if cli_value is not None:
+        return cli_value
+    return sys.stdin.isatty()
+
+
+@dataclass(frozen=True)
+class ArchiveInfo:
+    path: str
+    bundle_id: str
+    marketing_version: str
+    build_number: str
+    created: datetime
+
+
+def read_archive_info(xcarchive_path) -> Optional[ArchiveInfo]:
+    """Parse an .xcarchive bundle's Info.plist. Returns None if unusable.
+
+    An archive is considered unusable if:
+    - Info.plist is missing or invalid
+    - ApplicationProperties lacks any of bundle_id / version / build
+    - The inner Products/Applications/*.app bundle is missing (archive is corrupt)
+    """
+    arc = Path(xcarchive_path)
+    info_plist = arc / "Info.plist"
+    if not info_plist.is_file():
+        return None
+
+    # Ensure the inner app bundle exists
+    apps_dir = arc / "Products" / "Applications"
+    if not apps_dir.is_dir() or not any(apps_dir.glob("*.app")):
+        return None
+
+    try:
+        with open(info_plist, "rb") as f:
+            plist = plistlib.load(f)
+    except Exception:
+        return None
+
+    props = plist.get("ApplicationProperties") or {}
+    bundle_id = props.get("CFBundleIdentifier")
+    marketing = props.get("CFBundleShortVersionString")
+    build_num = props.get("CFBundleVersion")
+    if not (bundle_id and marketing and build_num):
+        return None
+
+    created = plist.get("CreationDate")
+    if created is None:
+        created = datetime.fromtimestamp(arc.stat().st_mtime, tz=timezone.utc)
+    elif created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)
+
+    return ArchiveInfo(
+        path=str(arc),
+        bundle_id=bundle_id,
+        marketing_version=marketing,
+        build_number=build_num,
+        created=created,
+    )
+
+
+XCODE_ARCHIVES_ROOT = Path.home() / "Library" / "Developer" / "Xcode" / "Archives"
+
+
+def scan_archives(output_dir: str, scheme: str) -> List[ArchiveInfo]:
+    """Return all valid .xcarchive bundles, newest first, deduped by resolved path.
+
+    Searches two locations:
+    1. <output_dir>/<scheme>.xcarchive  (project-local build output)
+    2. XCODE_ARCHIVES_ROOT/<YYYY-MM-DD>/*.xcarchive  (Xcode's own archive organiser)
+    """
+    seen: dict = {}
+
+    candidates = []
+
+    # Location 1: project-local output
+    local = Path(output_dir) / f"{scheme}.xcarchive"
+    if local.is_dir():
+        candidates.append(local)
+
+    # Location 2: Xcode Archives organiser
+    root = Path(XCODE_ARCHIVES_ROOT)
+    if root.is_dir():
+        for date_dir in sorted(root.iterdir()):
+            if not date_dir.is_dir():
+                continue
+            for arc in sorted(date_dir.glob("*.xcarchive")):
+                candidates.append(arc)
+
+    for arc in candidates:
+        key = str(arc.resolve())
+        if key in seen:
+            continue
+        info = read_archive_info(arc)
+        if info is None:
+            continue
+        seen[key] = info
+
+    return sorted(seen.values(), key=lambda a: a.created, reverse=True)
+
+
+def find_matching_archive(
+    archives: List[ArchiveInfo],
+    bundle_id: str,
+    marketing_version: str,
+    build_number: str,
+) -> Optional[ArchiveInfo]:
+    """Return the newest archive that matches all three identifiers, or None."""
+    for arc in archives:  # already sorted newest-first
+        if (
+            arc.bundle_id == bundle_id
+            and arc.marketing_version == marketing_version
+            and arc.build_number == build_number
+        ):
+            return arc
+    return None
+
+
+def prompt_reuse_archive(archive: ArchiveInfo, *, interactive: bool) -> bool:
+    """Ask user whether to reuse an existing archive. Non-interactive → False."""
+    if not interactive:
+        return False
+    typer.echo(f"\n✅ 检测到匹配的 archive:")
+    typer.echo(f"   {archive.path}")
+    typer.echo(
+        f"   版本: {archive.marketing_version} ({archive.build_number})    "
+        f"创建于: {archive.created:%Y-%m-%d %H:%M}"
+    )
+    raw = typer.prompt("是否复用以跳过 archive 步骤？[Y/n]", default="Y")
+    return raw.strip().lower() in ("", "y", "yes")

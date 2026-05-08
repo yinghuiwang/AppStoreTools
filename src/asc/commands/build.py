@@ -13,6 +13,19 @@ from asc.config import Config
 from asc.guard import Guard, GuardViolationError
 from asc.i18n import t, HELP
 
+from asc.commands.build_inputs import (
+    BuildInputsCLI,
+    detect_project,
+    detect_versions,
+    find_matching_archive,
+    list_schemes,
+    prepare_build_inputs,
+    prompt_reuse_archive,
+    resolve_interactive,
+    ResolvedInputs,
+    scan_archives,
+)
+
 
 def _require_macos() -> None:
     if sys.platform != "darwin":
@@ -20,54 +33,35 @@ def _require_macos() -> None:
         raise typer.Exit(2)
 
 
-def detect_project(path: str) -> tuple[str, str]:
-    """Return (project_path, kind) where kind is 'workspace' or 'project'.
+def parse_bundle_id_from_profile(profile_path: str) -> str:
+    """Extract the bundle identifier from a .mobileprovision file.
 
-    If path points directly to a .xcworkspace or .xcodeproj, return it.
-    Otherwise search the directory for one, preferring .xcworkspace.
+    Reads `Entitlements.application-identifier` (e.g. "TEAMID.com.example.app")
+    and strips the TeamID prefix.
     """
-    p = Path(path)
-
-    if p.suffix == ".xcworkspace":
-        return str(p), "workspace"
-    if p.suffix == ".xcodeproj":
-        return str(p), "project"
-
-    # Search directory
-    workspaces = list(p.glob("*.xcworkspace"))
-    if workspaces:
-        return str(workspaces[0]), "workspace"
-
-    projects = list(p.glob("*.xcodeproj"))
-    if projects:
-        return str(projects[0]), "project"
-
-    raise ValueError(f"No Xcode project or workspace found in: {path}")
-
-
-def list_schemes(project_path: str, kind: str) -> list[str]:
-    """Return list of scheme names from xcodebuild -list."""
-    flag = "-workspace" if kind == "workspace" else "-project"
-    result = subprocess.run(
-        ["xcodebuild", flag, project_path, "-list"],
-        capture_output=True, text=True,
+    cms = subprocess.run(
+        ["security", "cms", "-D", "-i", profile_path],
+        capture_output=True,
     )
-    if result.returncode != 0:
-        raise RuntimeError(f"xcodebuild -list failed:\n{result.stderr}")
+    if cms.returncode != 0 or not cms.stdout:
+        raise RuntimeError(
+            f"Failed to decode provisioning profile {profile_path}:\n"
+            f"{cms.stderr.decode('utf-8', errors='replace')}"
+        )
 
-    schemes: list[str] = []
-    in_schemes = False
-    for line in result.stdout.splitlines():
-        stripped = line.strip()
-        if stripped == "Schemes:":
-            in_schemes = True
-            continue
-        if in_schemes:
-            if stripped and not stripped.endswith(":"):
-                schemes.append(stripped)
-            elif stripped.endswith(":") and stripped != "Schemes:":
-                break
-    return schemes
+    try:
+        plist = plistlib.loads(cms.stdout)
+    except Exception as e:
+        raise RuntimeError(f"Provisioning profile is not a valid plist: {e}")
+
+    app_id = (plist.get("Entitlements") or {}).get("application-identifier")
+    if not app_id or "." not in app_id:
+        raise RuntimeError(
+            "Provisioning profile is missing Entitlements.application-identifier "
+            "or its value is malformed"
+        )
+    # "TEAMID.com.example.app" -> "com.example.app"
+    return app_id.split(".", 1)[1]
 
 
 def generate_export_options(
@@ -76,6 +70,7 @@ def generate_export_options(
     profile: Optional[str],
     certificate: Optional[str],
     output_dir: str,
+    bundle_id: Optional[str] = None,
 ) -> str:
     """Generate ExportOptions.plist and return its path.
 
@@ -85,6 +80,8 @@ def generate_export_options(
         profile: Provisioning profile path (required for manual signing)
         certificate: Certificate name (optional for manual signing)
         output_dir: Directory to write ExportOptions.plist
+        bundle_id: Bundle identifier override. If provided and signing is manual,
+            uses this instead of parsing from the profile file.
 
     Returns:
         Path to generated ExportOptions.plist
@@ -103,9 +100,11 @@ def generate_export_options(
         if certificate:
             opts["signingCertificate"] = certificate
         if profile:
-            # Empty-string key is a wildcard; real manual signing needs the bundle ID here.
-            # For single-target apps this typically works; multi-target requires explicit mapping.
-            opts["provisioningProfiles"] = {"": profile}
+            from asc.commands.build_inputs import parse_mobileprovision
+            info = parse_mobileprovision(profile)
+            bid = bundle_id or info.bundle_id
+            # ExportOptions expects profile UUID (or Name), NOT the file path.
+            opts["provisioningProfiles"] = {bid: info.uuid}
 
     plist_path = Path(output_dir) / "ExportOptions.plist"
     with open(plist_path, "wb") as f:
@@ -161,43 +160,30 @@ def run_xcodebuild_export(
 
 
 def build_core(
-    project: Optional[str],
-    scheme: Optional[str],
-    configuration: str,
+    resolved: "ResolvedInputs",
     output: str,
-    signing: str,
-    profile: Optional[str],
-    certificate: Optional[str],
-    destination: str,
-    dry_run: bool,
+    *,
+    configuration: str = "Release",
+    dry_run: bool = False,
+    reuse_archive: Optional[bool] = None,
+    interactive: bool = False,
 ) -> Optional[str]:
     """Core build logic. Returns .ipa path, or None if dry_run."""
-    project_path, kind = detect_project(project or ".")
     typer.echo(f"\n{'='*56}")
     typer.echo("  asc build")
     typer.echo(f"{'='*56}")
-    typer.echo(f"  项目: {project_path}")
-
-    if not scheme:
-        schemes = list_schemes(project_path, kind)
-        if not schemes:
-            typer.echo("❌ 未找到任何 Scheme", err=True)
-            raise typer.Exit(1)
-        if len(schemes) == 1:
-            scheme = schemes[0]
-        else:
-            typer.echo("可用 Scheme：")
-            for s in schemes:
-                typer.echo(f"  • {s}")
-            scheme = typer.prompt("请选择 Scheme")
-
-    typer.echo(f"  Scheme: {scheme}")
+    typer.echo(f"  项目: {resolved.project_path}")
+    typer.echo(f"  Scheme: {resolved.scheme}")
     typer.echo(f"  配置: {configuration}")
-    typer.echo(f"  签名: {signing}")
-    typer.echo(f"  目标: {destination}")
+    typer.echo(f"  签名: {resolved.signing}")
+    typer.echo(f"  目标: {resolved.destination}")
+    if resolved.signing == "manual":
+        typer.echo(f"  Bundle ID: {resolved.bundle_id}")
+        typer.echo(f"  证书: {resolved.certificate}")
+        typer.echo(f"  描述文件: {resolved.profile}")
 
     output_dir = Path(output)
-    archive_path = str(output_dir / f"{scheme}.xcarchive")
+    archive_path = str(output_dir / f"{resolved.scheme}.xcarchive")
     export_dir = str(output_dir / "export")
 
     if dry_run:
@@ -209,18 +195,44 @@ def build_core(
     output_dir.mkdir(parents=True, exist_ok=True)
     Path(export_dir).mkdir(parents=True, exist_ok=True)
 
+    # === Step 0: archive reuse check ===
+    reuse_path: Optional[str] = None
+    if reuse_archive is not False:  # explicit False = forced rebuild
+        versions = detect_versions(resolved.project_path, resolved.project_kind, resolved.scheme)
+        if versions:
+            mv, bn = versions
+            archives = scan_archives(output, resolved.scheme)
+            match = find_matching_archive(
+                archives,
+                bundle_id=resolved.bundle_id,
+                marketing_version=mv,
+                build_number=bn,
+            )
+            if match:
+                if reuse_archive is True:
+                    reuse_path = match.path
+                    typer.echo(f"\n♻️  复用 archive: {reuse_path}")
+                else:
+                    if prompt_reuse_archive(match, interactive=interactive):
+                        reuse_path = match.path
+
     typer.echo("\n  ── 步骤 1/3：生成 ExportOptions.plist ──")
     export_options = generate_export_options(
-        signing=signing,
-        destination=destination,
-        profile=profile,
-        certificate=certificate,
-        output_dir=str(output_dir),
+        signing=resolved.signing, destination=resolved.destination,
+        profile=resolved.profile, certificate=resolved.certificate,
+        output_dir=str(output_dir), bundle_id=resolved.bundle_id,
     )
 
-    typer.echo("  ── 步骤 2/3：构建 Archive ──")
-    run_xcodebuild_archive(project_path, kind, scheme, configuration, archive_path)
-    typer.echo(f"  ✅ Archive: {archive_path}")
+    if reuse_path:
+        archive_path = reuse_path
+        typer.echo(f"  ── 步骤 2/3：跳过 archive（复用: {archive_path}） ──")
+    else:
+        typer.echo("  ── 步骤 2/3：构建 Archive ──")
+        run_xcodebuild_archive(
+            resolved.project_path, resolved.project_kind, resolved.scheme,
+            configuration, archive_path,
+        )
+        typer.echo(f"  ✅ Archive: {archive_path}")
 
     typer.echo("  ── 步骤 3/3：导出 IPA ──")
     ipa_path = run_xcodebuild_export(archive_path, export_options, export_dir)
@@ -239,6 +251,14 @@ def cmd_build(
     destination: Optional[str] = typer.Option(None, "--destination", help=t(HELP['destination'])),
     app: Optional[str] = typer.Option(None, "--app", "-a", help=t(HELP['app_profile_name'])),
     dry_run: bool = typer.Option(False, "--dry-run", "-d", help=t(HELP['preview_command'])),
+    interactive: Optional[bool] = typer.Option(
+        None, "--interactive/--no-interactive",
+        help="强制开/关交互；不传则按 TTY 自动判断",
+    ),
+    reuse_archive: Optional[bool] = typer.Option(
+        None, "--reuse-archive/--rebuild",
+        help="复用同版本 archive / 强制重打；不传则在交互模式下询问",
+    ),
 ):
     """构建 Xcode 项目并导出 .ipa 文件。
 
@@ -250,17 +270,31 @@ def cmd_build(
     """
     _require_macos()
     config = Config(app)
-    ipa = build_core(
-        project=project or config.build_project,
-        scheme=scheme or config.build_scheme,
-        configuration=configuration or "Release",
-        output=output or config.build_output,
-        signing=signing or config.build_signing,
-        profile=profile,
-        certificate=certificate,
-        destination=destination or "appstore",
-        dry_run=dry_run,
+    cli = BuildInputsCLI(
+        project=project, scheme=scheme, signing=signing,
+        profile=profile, certificate=certificate, destination=destination,
     )
+    try:
+        resolved = prepare_build_inputs(
+            cli, config, interactive=resolve_interactive(interactive),
+        )
+    except RuntimeError as e:
+        typer.echo(f"❌ {e}", err=True)
+        raise typer.Exit(1)
+
+    try:
+        ipa = build_core(
+            resolved,
+            output=output or config.build_output,
+            configuration=configuration or "Release",
+            dry_run=dry_run,
+            reuse_archive=reuse_archive,
+            interactive=resolve_interactive(interactive),
+        )
+    except RuntimeError as e:
+        typer.echo(f"❌ {e}", err=True)
+        raise typer.Exit(1)
+
     if ipa:
         typer.echo(f"\n✅ 构建完成: {ipa}")
 
@@ -385,6 +419,14 @@ def cmd_release(
     output: Optional[str] = typer.Option(None, "--output", "-o", help=t(HELP['output_dir'])),
     app: Optional[str] = typer.Option(None, "--app", "-a", help=t(HELP['app_profile_name'])),
     dry_run: bool = typer.Option(False, "--dry-run", "-d", help=t(HELP['preview_without_execute'])),
+    interactive: Optional[bool] = typer.Option(
+        None, "--interactive/--no-interactive",
+        help="强制开/关交互；不传则按 TTY 自动判断",
+    ),
+    reuse_archive: Optional[bool] = typer.Option(
+        None, "--reuse-archive/--rebuild",
+        help="复用同版本 archive / 强制重打；不传则在交互模式下询问",
+    ),
 ):
     """一键构建并发布到 TestFlight 或 App Store。
 
@@ -413,26 +455,37 @@ def cmd_release(
     key_id = config.key_id
     key_file = config.key_file
 
+    # Release defaults to testflight if nothing is specified anywhere
+    effective_destination = destination or config.build_destination or "testflight"
+    cli = BuildInputsCLI(
+        project=project, scheme=scheme, signing=signing,
+        profile=profile, certificate=certificate,
+        destination=effective_destination,
+    )
+    try:
+        resolved = prepare_build_inputs(
+            cli, config, interactive=resolve_interactive(interactive),
+        )
+    except RuntimeError as e:
+        typer.echo(f"❌ {e}", err=True)
+        raise typer.Exit(1)
+
     try:
         ipa_path = build_core(
-            project=project or config.build_project,
-            scheme=scheme or config.build_scheme,
-            configuration="Release",
+            resolved,
             output=output or config.build_output,
-            signing=signing or config.build_signing,
-            profile=profile,
-            certificate=certificate,
-            destination=destination or "testflight",
+            configuration="Release",
             dry_run=dry_run,
+            reuse_archive=reuse_archive,
+            interactive=resolve_interactive(interactive),
         )
-
         if ipa_path:
             deploy_core(
                 ipa_path=ipa_path,
                 issuer_id=issuer_id or "",
                 key_id=key_id or "",
                 key_file=key_file or "",
-                destination=destination or "testflight",
+                destination=resolved.destination,
                 dry_run=dry_run,
             )
     except RuntimeError as e:

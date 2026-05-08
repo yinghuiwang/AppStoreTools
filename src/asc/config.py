@@ -132,6 +132,22 @@ class Config:
     def build_signing(self) -> str:
         return self.get("signing", default="auto", section="build")
 
+    @property
+    def build_bundle_id(self) -> Optional[str]:
+        return self.get("bundle_id", section="build")
+
+    @property
+    def build_certificate(self) -> Optional[str]:
+        return self.get("certificate", section="build")
+
+    @property
+    def build_profile(self) -> Optional[str]:
+        return self.get("profile", section="build")
+
+    @property
+    def build_destination(self) -> Optional[str]:
+        return self.get("destination", section="build")
+
     def list_apps(self) -> list[str]:
         """List all configured app profiles"""
         profiles_dir = self._global_dir / "profiles"
@@ -165,6 +181,43 @@ csv = "{csv}"
 screenshots = "{screenshots}"
 """
         profile_path.write_text(content)
+
+    def update_local_build_section(self, updates: dict) -> None:
+        """Merge `updates` into [build] of ./.asc/config.toml; create if missing.
+
+        Preserves all other sections and keys verbatim. Only string values supported.
+        None values are skipped.
+        """
+        if tomllib is None:
+            raise ImportError("tomllib/tomli not available")
+
+        self._local_dir.mkdir(parents=True, exist_ok=True)
+        cfg_path = self._local_dir / "config.toml"
+
+        data: dict = {}
+        if cfg_path.exists():
+            try:
+                data = self._load_toml(cfg_path)
+            except Exception:
+                data = {}
+
+        build = dict(data.get("build", {}))
+        for k, v in updates.items():
+            if v is None:
+                continue
+            build[k] = str(v)
+        data["build"] = build
+
+        lines: list[str] = []
+        for section, items in data.items():
+            if not isinstance(items, dict):
+                continue
+            lines.append(f"[{section}]")
+            for k, v in items.items():
+                escaped = str(v).replace("\\", "\\\\").replace('"', '\\"')
+                lines.append(f'{k} = "{escaped}"')
+            lines.append("")
+        cfg_path.write_text("\n".join(lines).rstrip() + "\n")
 
     def remove_app_profile(self, app_name: str):
         """Remove an app profile from global config"""
