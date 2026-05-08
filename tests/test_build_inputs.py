@@ -295,3 +295,60 @@ def test_detect_bundle_id_returns_none_when_setting_absent(monkeypatch):
         lambda *a, **kw: FakeRun(),
     )
     assert detect_bundle_id("/x.xcodeproj", "project", "X") is None
+
+
+import os
+from asc.config import Config
+
+
+def test_update_local_build_section_creates_file(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    cfg = Config()
+    cfg.update_local_build_section({
+        "project": "/abs/MyApp.xcodeproj",
+        "scheme": "MyApp",
+        "signing": "manual",
+    })
+
+    text = (tmp_path / ".asc" / "config.toml").read_text()
+    assert "[build]" in text
+    assert 'project = "/abs/MyApp.xcodeproj"' in text
+    assert 'scheme = "MyApp"' in text
+    assert 'signing = "manual"' in text
+
+
+def test_update_local_build_section_merges_with_existing(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    asc_dir = tmp_path / ".asc"
+    asc_dir.mkdir()
+    (asc_dir / "config.toml").write_text(
+        '[credentials]\nissuer_id = "x"\n\n[build]\nproject = "old.xcodeproj"\n'
+    )
+
+    cfg = Config()
+    cfg.update_local_build_section({"scheme": "New"})
+
+    text = (asc_dir / "config.toml").read_text()
+    assert 'issuer_id = "x"' in text
+    assert 'project = "old.xcodeproj"' in text
+    assert 'scheme = "New"' in text
+
+
+def test_update_local_build_section_skips_none_values(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    cfg = Config()
+    cfg.update_local_build_section({"scheme": "X", "profile": None})
+    text = (tmp_path / ".asc" / "config.toml").read_text()
+    assert 'scheme = "X"' in text
+    assert "profile" not in text
+
+
+def test_update_local_build_section_escapes_quotes_and_backslashes(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    cfg = Config()
+    cfg.update_local_build_section({"certificate": 'Apple "Distribution"', "profile": "C:\\path"})
+    text = (tmp_path / ".asc" / "config.toml").read_text()
+    # Re-parse and verify roundtrip integrity
+    cfg2 = Config()
+    assert cfg2.get("certificate", section="build") == 'Apple "Distribution"'
+    assert cfg2.get("profile", section="build") == "C:\\path"
