@@ -132,6 +132,22 @@ class Config:
     def build_signing(self) -> str:
         return self.get("signing", default="auto", section="build")
 
+    @property
+    def build_bundle_id(self) -> Optional[str]:
+        return self.get("bundle_id", section="build")
+
+    @property
+    def build_certificate(self) -> Optional[str]:
+        return self.get("certificate", section="build")
+
+    @property
+    def build_profile(self) -> Optional[str]:
+        return self.get("profile", section="build")
+
+    @property
+    def build_destination(self) -> Optional[str]:
+        return self.get("destination", section="build")
+
     def list_apps(self) -> list[str]:
         """List all configured app profiles"""
         profiles_dir = self._global_dir / "profiles"

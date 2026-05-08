@@ -352,3 +352,43 @@ def test_update_local_build_section_escapes_quotes_and_backslashes(tmp_path, mon
     cfg2 = Config()
     assert cfg2.get("certificate", section="build") == 'Apple "Distribution"'
     assert cfg2.get("profile", section="build") == "C:\\path"
+
+
+def test_config_build_properties_read_local_toml(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    asc_dir = tmp_path / ".asc"
+    asc_dir.mkdir()
+    (asc_dir / "config.toml").write_text(
+        '[build]\n'
+        'bundle_id = "com.x.y"\n'
+        'certificate = "Apple Distribution: x"\n'
+        'profile = "/p/abc.mobileprovision"\n'
+        'destination = "appstore"\n'
+    )
+    cfg = Config()
+    assert cfg.build_bundle_id == "com.x.y"
+    assert cfg.build_certificate == "Apple Distribution: x"
+    assert cfg.build_profile == "/p/abc.mobileprovision"
+    assert cfg.build_destination == "appstore"
+
+
+def test_config_build_destination_falls_back_to_global(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", lambda: home)
+    profiles_dir = home / ".config" / "asc" / "profiles"
+    profiles_dir.mkdir(parents=True)
+    (profiles_dir / "myapp.toml").write_text('[build]\ndestination = "testflight"\n')
+
+    cfg = Config(app_name="myapp")
+    assert cfg.build_destination == "testflight"
+
+
+def test_config_build_properties_return_none_when_missing(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    cfg = Config()
+    assert cfg.build_bundle_id is None
+    assert cfg.build_certificate is None
+    assert cfg.build_profile is None
+    assert cfg.build_destination is None
