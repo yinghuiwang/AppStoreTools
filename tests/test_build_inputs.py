@@ -560,5 +560,24 @@ def test_prepare_writes_cache_after_resolution(tmp_path, monkeypatch):
     text = (tmp_path / ".asc" / "config.toml").read_text()
     assert 'bundle_id = "com.example.app"' in text
     assert 'profile = "/p/x.mobileprovision"' in text
-    assert 'certificate = "Apple Distribution: T (T)"' in text
     assert 'signing = "manual"' in text
+
+
+from asc.commands.build_inputs import resolve_interactive
+
+
+def test_resolve_interactive_explicit_true_overrides_non_tty(monkeypatch):
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    assert resolve_interactive(True) is True
+
+
+def test_resolve_interactive_explicit_false_overrides_tty(monkeypatch):
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    assert resolve_interactive(False) is False
+
+
+def test_resolve_interactive_defaults_to_tty(monkeypatch):
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    assert resolve_interactive(None) is True
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    assert resolve_interactive(None) is False

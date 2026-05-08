@@ -5,6 +5,7 @@ import hashlib
 import plistlib
 import re
 import subprocess
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -338,3 +339,9 @@ def prepare_build_inputs(
         profile=profile,
         destination=destination,
     )
+
+
+def resolve_interactive(cli_value: Optional[bool]) -> bool:
+    if cli_value is not None:
+        return cli_value
+    return sys.stdin.isatty()
