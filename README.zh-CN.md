@@ -1,8 +1,25 @@
 # App Store Connect 上传工具
 
-[English](README.md)
+[English](README.md) | [使用教程](docs/tutorials/README.zh-CN.md)
 
 `asc` 是一个面向 App Store Connect 的发布 CLI，覆盖从素材上传到发布的完整流程：上传元数据/截图/IAP 与订阅、管理多语言 What’s New 与商店 URL、以及构建并分发 `.ipa` 到 TestFlight 或 App Store。
+
+## 使用教程
+
+每个主要工作流的分步指南：
+
+| # | 教程 | 主题 |
+|---|------|------|
+| 01 | [安装与项目初始化](docs/tutorials/01-install-and-init.zh-CN.md) | 安装 `asc`、创建 API Key、初始化项目、添加 App Profile |
+| 02 | [元数据与截图上传](docs/tutorials/02-metadata-and-screenshots.zh-CN.md) | 填写 CSV、命名截图文件夹、运行 `upload` / `metadata` / `screenshots` |
+| 03 | [IAP 与订阅上传](docs/tutorials/03-iap-and-subscriptions.zh-CN.md) | 编写 `iap_packages.json`、上传一次性内购和订阅 |
+| 04 | [What's New 与商店 URL](docs/tutorials/04-whats-new-and-urls.zh-CN.md) | 更新版本说明和支持/营销/隐私政策 URL |
+| 05 | [构建与发布](docs/tutorials/05-build-and-deploy.zh-CN.md) | `asc build`、`asc deploy`、`asc release`、TestFlight 与 App Store |
+| 06 | [多 App Profile 管理](docs/tutorials/06-multi-app-profiles.zh-CN.md) | 管理多个 App、设置默认 App、在项目间切换 |
+| 07 | [Guard 安全守卫](docs/tutorials/07-guard-security.zh-CN.md) | 机器/IP/凭证绑定、冲突处理、CI 环境关闭守卫 |
+| 08 | [CI/CD 自动化](docs/tutorials/08-ci-cd.zh-CN.md) | GitHub Actions 示例、通过环境变量注入凭证 |
+
+→ [完整教程索引](docs/tutorials/README.zh-CN.md)
 
 ## 快速开始
 

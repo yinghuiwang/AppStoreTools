@@ -1,8 +1,25 @@
 # App Store Connect Upload Tool
 
-[中文文档](README.zh-CN.md)
+[中文文档](README.zh-CN.md) | [Tutorials](docs/tutorials/README.md)
 
 `asc` is an App Store Connect CLI for end-to-end release operations: upload metadata/screenshots/IAP subscriptions, manage localized "What's New" and store URLs, and build/deploy `.ipa` to TestFlight or App Store.
+
+## Tutorials
+
+Step-by-step guides for every major workflow:
+
+| # | Tutorial | Topic |
+|---|----------|-------|
+| 01 | [Install & Project Init](docs/tutorials/01-install-and-init.md) | Install `asc`, create API key, scaffold project, add app profile |
+| 02 | [Metadata & Screenshots](docs/tutorials/02-metadata-and-screenshots.md) | Fill CSV, name screenshot folders, run `upload` / `metadata` / `screenshots` |
+| 03 | [IAP & Subscriptions](docs/tutorials/03-iap-and-subscriptions.md) | Structure `iap_packages.json`, upload one-time IAP and subscriptions |
+| 04 | [What's New & Store URLs](docs/tutorials/04-whats-new-and-urls.md) | Update release notes and support / marketing / privacy URLs |
+| 05 | [Build & Deploy](docs/tutorials/05-build-and-deploy.md) | `asc build`, `asc deploy`, `asc release`, TestFlight vs App Store |
+| 06 | [Multi-App Profiles](docs/tutorials/06-multi-app-profiles.md) | Manage multiple apps, set a default, switch between projects |
+| 07 | [Guard Security](docs/tutorials/07-guard-security.md) | Machine / IP / credential binding, conflict resolution, CI bypass |
+| 08 | [CI/CD Automation](docs/tutorials/08-ci-cd.md) | GitHub Actions example, inject credentials via env vars |
+
+→ [Full tutorials index](docs/tutorials/README.md)
 
 ## Quick Start
 
