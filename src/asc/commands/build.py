@@ -1,6 +1,6 @@
 """Build, deploy, and release commands for asc CLI."""
 from __future__ import annotations
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import plistlib
 import subprocess
@@ -12,6 +12,9 @@ import typer
 from asc.config import Config
 from asc.guard import Guard, GuardViolationError
 from asc.i18n import t, HELP
+
+if TYPE_CHECKING:
+    from asc.commands.build_inputs import ResolvedInputs
 
 
 def _require_macos() -> None:
@@ -107,6 +110,7 @@ def generate_export_options(
     profile: Optional[str],
     certificate: Optional[str],
     output_dir: str,
+    bundle_id: Optional[str] = None,
 ) -> str:
     """Generate ExportOptions.plist and return its path.
 
@@ -116,6 +120,8 @@ def generate_export_options(
         profile: Provisioning profile path (required for manual signing)
         certificate: Certificate name (optional for manual signing)
         output_dir: Directory to write ExportOptions.plist
+        bundle_id: Bundle identifier override. If provided and signing is manual,
+            uses this instead of parsing from the profile file.
 
     Returns:
         Path to generated ExportOptions.plist
@@ -134,8 +140,8 @@ def generate_export_options(
         if certificate:
             opts["signingCertificate"] = certificate
         if profile:
-            bundle_id = parse_bundle_id_from_profile(profile)
-            opts["provisioningProfiles"] = {bundle_id: profile}
+            bid = bundle_id or parse_bundle_id_from_profile(profile)
+            opts["provisioningProfiles"] = {bid: profile}
 
     plist_path = Path(output_dir) / "ExportOptions.plist"
     with open(plist_path, "wb") as f:
@@ -191,43 +197,28 @@ def run_xcodebuild_export(
 
 
 def build_core(
-    project: Optional[str],
-    scheme: Optional[str],
-    configuration: str,
+    resolved: "ResolvedInputs",
     output: str,
-    signing: str,
-    profile: Optional[str],
-    certificate: Optional[str],
-    destination: str,
-    dry_run: bool,
+    *,
+    configuration: str = "Release",
+    dry_run: bool = False,
 ) -> Optional[str]:
     """Core build logic. Returns .ipa path, or None if dry_run."""
-    project_path, kind = detect_project(project or ".")
     typer.echo(f"\n{'='*56}")
     typer.echo("  asc build")
     typer.echo(f"{'='*56}")
-    typer.echo(f"  项目: {project_path}")
-
-    if not scheme:
-        schemes = list_schemes(project_path, kind)
-        if not schemes:
-            typer.echo("❌ 未找到任何 Scheme", err=True)
-            raise typer.Exit(1)
-        if len(schemes) == 1:
-            scheme = schemes[0]
-        else:
-            typer.echo("可用 Scheme：")
-            for s in schemes:
-                typer.echo(f"  • {s}")
-            scheme = typer.prompt("请选择 Scheme")
-
-    typer.echo(f"  Scheme: {scheme}")
+    typer.echo(f"  项目: {resolved.project_path}")
+    typer.echo(f"  Scheme: {resolved.scheme}")
     typer.echo(f"  配置: {configuration}")
-    typer.echo(f"  签名: {signing}")
-    typer.echo(f"  目标: {destination}")
+    typer.echo(f"  签名: {resolved.signing}")
+    typer.echo(f"  目标: {resolved.destination}")
+    if resolved.signing == "manual":
+        typer.echo(f"  Bundle ID: {resolved.bundle_id}")
+        typer.echo(f"  证书: {resolved.certificate}")
+        typer.echo(f"  描述文件: {resolved.profile}")
 
     output_dir = Path(output)
-    archive_path = str(output_dir / f"{scheme}.xcarchive")
+    archive_path = str(output_dir / f"{resolved.scheme}.xcarchive")
     export_dir = str(output_dir / "export")
 
     if dry_run:
@@ -241,15 +232,19 @@ def build_core(
 
     typer.echo("\n  ── 步骤 1/3：生成 ExportOptions.plist ──")
     export_options = generate_export_options(
-        signing=signing,
-        destination=destination,
-        profile=profile,
-        certificate=certificate,
+        signing=resolved.signing,
+        destination=resolved.destination,
+        profile=resolved.profile,
+        certificate=resolved.certificate,
         output_dir=str(output_dir),
+        bundle_id=resolved.bundle_id,
     )
 
     typer.echo("  ── 步骤 2/3：构建 Archive ──")
-    run_xcodebuild_archive(project_path, kind, scheme, configuration, archive_path)
+    run_xcodebuild_archive(
+        resolved.project_path, resolved.project_kind, resolved.scheme,
+        configuration, archive_path,
+    )
     typer.echo(f"  ✅ Archive: {archive_path}")
 
     typer.echo("  ── 步骤 3/3：导出 IPA ──")

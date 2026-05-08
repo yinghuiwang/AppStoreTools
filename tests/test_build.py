@@ -10,8 +10,19 @@ from typer.testing import CliRunner
 
 from asc.cli import app
 from asc.config import Config
+from asc.commands.build_inputs import ResolvedInputs
 
 runner = CliRunner()
+
+
+def _resolved(**overrides):
+    base = dict(
+        project_path="/tmp/x.xcodeproj", project_kind="project",
+        scheme="X", bundle_id="com.x", signing="auto",
+        certificate=None, profile=None, destination="appstore",
+    )
+    base.update(overrides)
+    return ResolvedInputs(**base)
 
 
 # ── Config tests ──
@@ -133,6 +144,7 @@ def test_generate_export_options_manual(tmp_path):
         profile="/path/to/profile.mobileprovision",
         certificate="iPhone Distribution: ACME Corp",
         output_dir=str(tmp_path),
+        bundle_id="com.acme.app",
     )
     with open(plist_path, "rb") as f:
         opts = plistlib.load(f)
@@ -242,15 +254,13 @@ def test_build_core_dry_run(tmp_path, monkeypatch, capsys):
     ws = tmp_path / "MyApp.xcworkspace"
     ws.mkdir()
 
+    resolved = _resolved(
+        project_path=str(ws), project_kind="workspace",
+        scheme="MyApp", signing="auto", destination="appstore",
+    )
     ipa_path = build_core(
-        project=str(ws),
-        scheme="MyApp",
-        configuration="Release",
-        output=str(tmp_path / "build"),
-        signing="auto",
-        profile=None,
-        certificate=None,
-        destination="appstore",
+        resolved,
+        str(tmp_path / "build"),
         dry_run=True,
     )
     assert ipa_path is None
