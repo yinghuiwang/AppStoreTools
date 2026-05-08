@@ -448,3 +448,36 @@ def test_validate_cache_entry_unknown_field_passes_through():
 def test_validate_cache_entry_empty_value_false():
     assert validate_cache_entry("project", "") is False
     assert validate_cache_entry("certificate", "") is False
+
+
+from asc.commands.build_inputs import _pick_one
+
+
+def test_pick_one_zero_raises():
+    with pytest.raises(RuntimeError, match="找不到"):
+        _pick_one([], label="证书", interactive=True)
+
+
+def test_pick_one_single_silent():
+    result = _pick_one(["only"], label="证书", interactive=True)
+    assert result == "only"
+
+
+def test_pick_one_multi_non_interactive_raises():
+    with pytest.raises(RuntimeError, match="多个"):
+        _pick_one(["a", "b"], label="证书", interactive=False)
+
+
+def test_pick_one_multi_interactive_prompts(monkeypatch):
+    monkeypatch.setattr("typer.prompt", lambda *a, **kw: "2")
+    result = _pick_one(["a", "b", "c"], label="证书", interactive=True)
+    assert result == "b"
+
+
+def test_pick_one_multi_interactive_uses_renderer(monkeypatch, capsys):
+    monkeypatch.setattr("typer.prompt", lambda *a, **kw: "1")
+    items = [{"name": "X"}, {"name": "Y"}]
+    result = _pick_one(items, label="X", interactive=True, render=lambda d: d["name"])
+    assert result == items[0]
+    captured = capsys.readouterr()
+    assert "X" in captured.out and "Y" in captured.out

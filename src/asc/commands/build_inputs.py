@@ -8,7 +8,9 @@ import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import Callable, List, Optional, Sequence, TypeVar
+
+import typer
 
 
 @dataclass
@@ -190,3 +192,36 @@ def validate_cache_entry(field: str, value: str) -> bool:
             return False
         return not info.is_expired
     return True
+
+
+T = TypeVar("T")
+
+
+def _pick_one(
+    items: Sequence[T],
+    *,
+    label: str,
+    interactive: bool,
+    render: Optional[Callable[[T], str]] = None,
+) -> T:
+    if not items:
+        raise RuntimeError(f"找不到可用的{label}")
+    if len(items) == 1:
+        return items[0]
+    if not interactive:
+        raise RuntimeError(
+            f"发现多个{label}，请用 CLI 参数指定，或加 --interactive"
+        )
+    typer.echo(f"\n请选择{label}：")
+    for i, item in enumerate(items, 1):
+        text = render(item) if render else str(item)
+        typer.echo(f"  [{i}] {text}")
+    while True:
+        raw = typer.prompt("编号")
+        try:
+            idx = int(raw)
+            if 1 <= idx <= len(items):
+                return items[idx - 1]
+        except ValueError:
+            pass
+        typer.echo(f"❌ 无效编号，请输入 1-{len(items)}")
