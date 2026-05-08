@@ -77,6 +77,14 @@ Profiles are scanned from both Xcode 16's
 `~/Library/Developer/Xcode/UserData/Provisioning Profiles/` and the legacy
 `~/Library/MobileDevice/Provisioning Profiles/`.
 
+**New (0.1.7):** Long-running subprocesses (`xcodebuild archive`,
+`xcodebuild -exportArchive`, `xcrun altool --upload-app`) now show a spinner
+with elapsed timer instead of silent waiting. Full output is tee'd to
+`build/build.log`, `build/export.log`, and `build/upload.log`. On failure the
+last 20 log lines are printed automatically. Use `--verbose` / `-v` on
+`asc build`, `asc deploy`, or `asc release` to stream raw subprocess output
+in real time.
+
 ```bash
 # Guard commands
 asc guard status                                          # 查看绑定状态
