@@ -176,6 +176,7 @@ def build_core(
     dry_run: bool = False,
     reuse_archive: Optional[bool] = None,
     interactive: bool = False,
+    verbose: bool = False,
 ) -> Optional[str]:
     """Core build logic. Returns .ipa path, or None if dry_run."""
     typer.echo(f"\n{'='*56}")
@@ -240,11 +241,12 @@ def build_core(
         run_xcodebuild_archive(
             resolved.project_path, resolved.project_kind, resolved.scheme,
             configuration, archive_path,
+            verbose=verbose,
         )
         typer.echo(f"  ✅ Archive: {archive_path}")
 
     typer.echo("  ── 步骤 3/3：导出 IPA ──")
-    ipa_path = run_xcodebuild_export(archive_path, export_options, export_dir)
+    ipa_path = run_xcodebuild_export(archive_path, export_options, export_dir, verbose=verbose)
     typer.echo(f"  ✅ IPA: {ipa_path}")
     return ipa_path
 
@@ -267,6 +269,10 @@ def cmd_build(
     reuse_archive: Optional[bool] = typer.Option(
         None, "--reuse-archive/--rebuild",
         help="复用同版本 archive / 强制重打；不传则在交互模式下询问",
+    ),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v",
+        help="实时显示子进程原始输出（默认显示 spinner + 阶段总结）",
     ),
 ):
     """构建 Xcode 项目并导出 .ipa 文件。
@@ -299,6 +305,7 @@ def cmd_build(
             dry_run=dry_run,
             reuse_archive=reuse_archive,
             interactive=resolve_interactive(interactive),
+            verbose=verbose,
         )
     except RuntimeError as e:
         typer.echo(f"❌ {e}", err=True)
@@ -346,6 +353,8 @@ def deploy_core(
     key_file: str,
     destination: str,
     dry_run: bool,
+    *,
+    verbose: bool = False,
 ) -> None:
     """Core deploy logic."""
     typer.echo(f"\n{'='*56}")
@@ -364,7 +373,7 @@ def deploy_core(
         return
 
     typer.echo("\n  正在上传...")
-    upload_ipa(ipa_path, issuer_id, key_id, key_file, destination)
+    upload_ipa(ipa_path, issuer_id, key_id, key_file, destination, verbose=verbose)
     typer.echo("  ✅ 上传成功")
 
 
@@ -373,6 +382,10 @@ def cmd_deploy(
     destination: Optional[str] = typer.Option(None, "--destination", help=t(HELP['upload_destination'])),
     app: Optional[str] = typer.Option(None, "--app", "-a", help=t(HELP['app_profile_name'])),
     dry_run: bool = typer.Option(False, "--dry-run", "-d", help=t(HELP['preview_without_actual_upload'])),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v",
+        help="实时显示子进程原始输出（默认显示 spinner + 阶段总结）",
+    ),
 ):
     """上传 .ipa 到 TestFlight 或 App Store。
 
@@ -413,6 +426,7 @@ def cmd_deploy(
             key_file=key_file,
             destination=destination or "testflight",
             dry_run=dry_run,
+            verbose=verbose,
         )
     except RuntimeError as e:
         typer.echo(f"❌ {e}", err=True)
@@ -436,6 +450,10 @@ def cmd_release(
     reuse_archive: Optional[bool] = typer.Option(
         None, "--reuse-archive/--rebuild",
         help="复用同版本 archive / 强制重打；不传则在交互模式下询问",
+    ),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v",
+        help="实时显示子进程原始输出（默认显示 spinner + 阶段总结）",
     ),
 ):
     """一键构建并发布到 TestFlight 或 App Store。
@@ -488,6 +506,7 @@ def cmd_release(
             dry_run=dry_run,
             reuse_archive=reuse_archive,
             interactive=resolve_interactive(interactive),
+            verbose=verbose,
         )
         if ipa_path:
             deploy_core(
@@ -497,6 +516,7 @@ def cmd_release(
                 key_file=key_file or "",
                 destination=resolved.destination,
                 dry_run=dry_run,
+                verbose=verbose,
             )
     except RuntimeError as e:
         typer.echo(f"❌ {e}", err=True)

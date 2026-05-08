@@ -527,6 +527,34 @@ def test_cmd_build_passes_cli_signing_and_profile(monkeypatch, tmp_path):
     assert captured["cli"].certificate == "Apple Distribution: foo"
 
 
+def test_cmd_build_passes_verbose_flag(monkeypatch, tmp_path):
+    """--verbose flag flows from CLI through build_core to subprocess wrappers."""
+    captured = {}
+    from asc.commands.build_inputs import ResolvedInputs
+
+    def fake_prepare(cli, config, *, interactive):
+        return ResolvedInputs(
+            project_path=str(tmp_path / "x.xcodeproj"), project_kind="project",
+            scheme="X", bundle_id="com.x", signing="auto",
+            certificate=None, profile=None, destination="appstore",
+        )
+
+    def fake_build_core(*args, **kwargs):
+        captured["verbose"] = kwargs.get("verbose")
+        return None
+
+    monkeypatch.setattr("asc.commands.build.prepare_build_inputs", fake_prepare)
+    monkeypatch.setattr("asc.commands.build.build_core", fake_build_core)
+    monkeypatch.setattr("asc.commands.build._require_macos", lambda: None)
+
+    from typer.testing import CliRunner
+    from asc.cli import app
+    runner = CliRunner()
+    result = runner.invoke(app, ["build", "--verbose", "--no-interactive", "--dry-run"])
+    assert result.exit_code == 0, result.output
+    assert captured["verbose"] is True
+
+
 # ── A4: archive reuse step-0 tests ──
 
 from asc.commands.build_inputs import (
@@ -567,7 +595,7 @@ def test_build_core_reuses_matching_archive_when_reuse_true(monkeypatch, tmp_pat
     def fake_archive(*a, **kw):
         archive_called["called"] = True
         return a[-1]
-    def fake_export(archive_path, opts, out):
+    def fake_export(archive_path, opts, out, **kw):
         export_called["called"] = True
         return str(tmp_path / "X.ipa")
 
