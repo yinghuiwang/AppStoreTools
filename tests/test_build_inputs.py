@@ -392,3 +392,59 @@ def test_config_build_properties_return_none_when_missing(tmp_path, monkeypatch)
     assert cfg.build_certificate is None
     assert cfg.build_profile is None
     assert cfg.build_destination is None
+
+
+from asc.commands.build_inputs import validate_cache_entry
+
+
+def test_validate_cache_entry_project_path(tmp_path):
+    real = tmp_path / "x.xcodeproj"
+    real.mkdir()
+    assert validate_cache_entry("project", str(real)) is True
+    assert validate_cache_entry("project", str(tmp_path / "missing")) is False
+
+
+def test_validate_cache_entry_certificate(monkeypatch):
+    monkeypatch.setattr(
+        "asc.commands.build_inputs.detect_certificates",
+        lambda: [Certificate(sha1="X", name="Apple Distribution: yiqi bai (T)")],
+    )
+    assert validate_cache_entry("certificate", "Apple Distribution: yiqi bai (T)") is True
+    assert validate_cache_entry("certificate", "Apple Distribution: gone") is False
+
+
+def test_validate_cache_entry_profile(tmp_path, monkeypatch):
+    p = tmp_path / "ok.mobileprovision"
+    p.write_bytes(b"")
+    valid = ProfileInfo(
+        path=str(p), uuid="U", name="N", team_id="T",
+        bundle_id="b",
+        expiration=datetime.now(timezone.utc) + timedelta(days=10),
+        cert_sha1s=[],
+    )
+    monkeypatch.setattr("asc.commands.build_inputs.parse_mobileprovision", lambda _: valid)
+    assert validate_cache_entry("profile", str(p)) is True
+    assert validate_cache_entry("profile", str(tmp_path / "missing.mobileprovision")) is False
+
+
+def test_validate_cache_entry_profile_expired(tmp_path, monkeypatch):
+    p = tmp_path / "exp.mobileprovision"
+    p.write_bytes(b"")
+    expired = ProfileInfo(
+        path=str(p), uuid="U", name="N", team_id="T",
+        bundle_id="b",
+        expiration=datetime.now(timezone.utc) - timedelta(days=1),
+        cert_sha1s=[],
+    )
+    monkeypatch.setattr("asc.commands.build_inputs.parse_mobileprovision", lambda _: expired)
+    assert validate_cache_entry("profile", str(p)) is False
+
+
+def test_validate_cache_entry_unknown_field_passes_through():
+    assert validate_cache_entry("scheme", "anything") is True
+    assert validate_cache_entry("bundle_id", "com.x") is True
+
+
+def test_validate_cache_entry_empty_value_false():
+    assert validate_cache_entry("project", "") is False
+    assert validate_cache_entry("certificate", "") is False

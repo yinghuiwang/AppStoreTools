@@ -168,3 +168,25 @@ def detect_bundle_id(project: str, kind: str, scheme: str) -> Optional[str]:
         if m:
             return m.group(1)
     return None
+
+
+def validate_cache_entry(field: str, value: str) -> bool:
+    """Return False if cached value is no longer usable; True otherwise.
+
+    Unknown fields pass through unchecked (caller decides).
+    """
+    if not value:
+        return False
+    if field == "project":
+        return Path(value).exists()
+    if field == "certificate":
+        return any(c.name == value for c in detect_certificates())
+    if field == "profile":
+        if not Path(value).exists():
+            return False
+        try:
+            info = parse_mobileprovision(value)
+        except Exception:
+            return False
+        return not info.is_expired
+    return True
