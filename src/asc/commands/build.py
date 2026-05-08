@@ -70,6 +70,37 @@ def list_schemes(project_path: str, kind: str) -> list[str]:
     return schemes
 
 
+def parse_bundle_id_from_profile(profile_path: str) -> str:
+    """Extract the bundle identifier from a .mobileprovision file.
+
+    Reads `Entitlements.application-identifier` (e.g. "TEAMID.com.example.app")
+    and strips the TeamID prefix.
+    """
+    cms = subprocess.run(
+        ["security", "cms", "-D", "-i", profile_path],
+        capture_output=True,
+    )
+    if cms.returncode != 0 or not cms.stdout:
+        raise RuntimeError(
+            f"Failed to decode provisioning profile {profile_path}:\n"
+            f"{cms.stderr.decode('utf-8', errors='replace')}"
+        )
+
+    try:
+        plist = plistlib.loads(cms.stdout)
+    except Exception as e:
+        raise RuntimeError(f"Provisioning profile is not a valid plist: {e}")
+
+    app_id = (plist.get("Entitlements") or {}).get("application-identifier")
+    if not app_id or "." not in app_id:
+        raise RuntimeError(
+            "Provisioning profile is missing Entitlements.application-identifier "
+            "or its value is malformed"
+        )
+    # "TEAMID.com.example.app" -> "com.example.app"
+    return app_id.split(".", 1)[1]
+
+
 def generate_export_options(
     signing: str,
     destination: str,
@@ -103,9 +134,8 @@ def generate_export_options(
         if certificate:
             opts["signingCertificate"] = certificate
         if profile:
-            # Empty-string key is a wildcard; real manual signing needs the bundle ID here.
-            # For single-target apps this typically works; multi-target requires explicit mapping.
-            opts["provisioningProfiles"] = {"": profile}
+            bundle_id = parse_bundle_id_from_profile(profile)
+            opts["provisioningProfiles"] = {bundle_id: profile}
 
     plist_path = Path(output_dir) / "ExportOptions.plist"
     with open(plist_path, "wb") as f:
