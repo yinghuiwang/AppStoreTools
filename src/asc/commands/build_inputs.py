@@ -429,3 +429,58 @@ def resolve_interactive(cli_value: Optional[bool]) -> bool:
     if cli_value is not None:
         return cli_value
     return sys.stdin.isatty()
+
+
+@dataclass(frozen=True)
+class ArchiveInfo:
+    path: str
+    bundle_id: str
+    marketing_version: str
+    build_number: str
+    created: datetime
+
+
+def read_archive_info(xcarchive_path) -> Optional[ArchiveInfo]:
+    """Parse an .xcarchive bundle's Info.plist. Returns None if unusable.
+
+    An archive is considered unusable if:
+    - Info.plist is missing or invalid
+    - ApplicationProperties lacks any of bundle_id / version / build
+    - The inner Products/Applications/*.app bundle is missing (archive is corrupt)
+    """
+    arc = Path(xcarchive_path)
+    info_plist = arc / "Info.plist"
+    if not info_plist.is_file():
+        return None
+
+    # Ensure the inner app bundle exists
+    apps_dir = arc / "Products" / "Applications"
+    if not apps_dir.is_dir() or not any(apps_dir.glob("*.app")):
+        return None
+
+    try:
+        with open(info_plist, "rb") as f:
+            plist = plistlib.load(f)
+    except Exception:
+        return None
+
+    props = plist.get("ApplicationProperties") or {}
+    bundle_id = props.get("CFBundleIdentifier")
+    marketing = props.get("CFBundleShortVersionString")
+    build_num = props.get("CFBundleVersion")
+    if not (bundle_id and marketing and build_num):
+        return None
+
+    created = plist.get("CreationDate")
+    if created is None:
+        created = datetime.fromtimestamp(arc.stat().st_mtime, tz=timezone.utc)
+    elif created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)
+
+    return ArchiveInfo(
+        path=str(arc),
+        bundle_id=bundle_id,
+        marketing_version=marketing,
+        build_number=build_num,
+        created=created,
+    )

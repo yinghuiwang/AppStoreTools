@@ -668,3 +668,69 @@ def test_detect_versions_returns_none_on_xcodebuild_failure(monkeypatch):
         lambda *a, **kw: FakeRun(),
     )
     assert detect_versions("/x.xcodeproj", "project", "X") is None
+
+
+from asc.commands.build_inputs import read_archive_info, ArchiveInfo
+
+
+def _make_xcarchive(tmp_path, *, bundle_id="com.x", marketing="1.0", build="1",
+                    created=None, missing_app=False):
+    """Create a minimal .xcarchive directory with Info.plist and optional .app."""
+    arc = tmp_path / f"{bundle_id}.xcarchive"
+    arc.mkdir()
+    (arc / "Products" / "Applications").mkdir(parents=True)
+    if not missing_app:
+        app = arc / "Products" / "Applications" / "X.app"
+        app.mkdir()
+    plist_data = {
+        "ApplicationProperties": {
+            "CFBundleIdentifier": bundle_id,
+            "CFBundleShortVersionString": marketing,
+            "CFBundleVersion": build,
+        },
+    }
+    if created is not None:
+        plist_data["CreationDate"] = created
+    with open(arc / "Info.plist", "wb") as f:
+        plistlib.dump(plist_data, f)
+    return arc
+
+
+def test_read_archive_info_happy_path(tmp_path):
+    arc = _make_xcarchive(tmp_path, bundle_id="com.baiyiqi.pokevid",
+                          marketing="1.2.3", build="45",
+                          created=datetime(2026, 5, 8, 14, 11, 44, tzinfo=timezone.utc))
+    info = read_archive_info(arc)
+    assert isinstance(info, ArchiveInfo)
+    assert info.bundle_id == "com.baiyiqi.pokevid"
+    assert info.marketing_version == "1.2.3"
+    assert info.build_number == "45"
+    assert info.created.year == 2026
+
+
+def test_read_archive_info_missing_creation_date_falls_back_to_mtime(tmp_path):
+    arc = _make_xcarchive(tmp_path, bundle_id="com.x")
+    info = read_archive_info(arc)
+    assert info.created is not None  # falls back to file mtime
+
+
+def test_read_archive_info_returns_none_if_app_missing(tmp_path):
+    arc = _make_xcarchive(tmp_path, missing_app=True)
+    assert read_archive_info(arc) is None
+
+
+def test_read_archive_info_returns_none_on_invalid_plist(tmp_path):
+    arc = tmp_path / "broken.xcarchive"
+    arc.mkdir()
+    (arc / "Products" / "Applications" / "X.app").mkdir(parents=True)
+    (arc / "Info.plist").write_bytes(b"not a valid plist")
+    assert read_archive_info(arc) is None
+
+
+def test_read_archive_info_returns_none_if_plist_missing_keys(tmp_path):
+    arc = tmp_path / "a.xcarchive"
+    arc.mkdir()
+    (arc / "Products" / "Applications" / "X.app").mkdir(parents=True)
+    with open(arc / "Info.plist", "wb") as f:
+        plistlib.dump({"ApplicationProperties": {"CFBundleIdentifier": "com.x"}}, f)
+    assert read_archive_info(arc) is None
