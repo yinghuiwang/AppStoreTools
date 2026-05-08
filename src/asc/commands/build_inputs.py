@@ -1,8 +1,13 @@
 """Auto-detect, cache, and interactively resolve build/deploy/release inputs."""
 from __future__ import annotations
 
+import hashlib
+import plistlib
+import subprocess
 from dataclasses import dataclass
-from typing import Optional
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import List, Optional
 
 
 @dataclass
@@ -25,14 +30,6 @@ class ResolvedInputs:
     certificate: Optional[str]
     profile: Optional[str]
     destination: str
-
-
-import hashlib
-import plistlib
-import subprocess
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import List
 
 
 @dataclass(frozen=True)
@@ -76,12 +73,15 @@ def parse_mobileprovision(path) -> ProfileInfo:
     bundle_id = app_id.split(".", 1)[1] if "." in app_id else ""
     team_id = (plist.get("TeamIdentifier") or [""])[0]
     cert_blobs = plist.get("DeveloperCertificates") or []
+    expiration = plist.get("ExpirationDate")
+    if expiration is None:
+        raise RuntimeError(f"Provisioning profile missing ExpirationDate: {path}")
     return ProfileInfo(
         path=str(path),
         uuid=plist.get("UUID", ""),
         name=plist.get("Name", ""),
         team_id=team_id,
         bundle_id=bundle_id,
-        expiration=plist.get("ExpirationDate"),
+        expiration=expiration,
         cert_sha1s=[_cert_sha1(b) for b in cert_blobs],
     )

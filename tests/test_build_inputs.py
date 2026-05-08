@@ -1,4 +1,15 @@
-from asc.commands.build_inputs import BuildInputsCLI, ResolvedInputs
+import plistlib
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import pytest
+
+from asc.commands.build_inputs import (
+    BuildInputsCLI,
+    ProfileInfo,
+    ResolvedInputs,
+    parse_mobileprovision,
+)
 
 
 def test_build_inputs_cli_defaults_to_none():
@@ -24,13 +35,6 @@ def test_resolved_inputs_required_fields():
     )
     assert r.scheme == "MyApp"
     assert r.certificate is None
-
-
-import plistlib
-from pathlib import Path
-from datetime import datetime, timezone, timedelta
-
-from asc.commands.build_inputs import parse_mobileprovision, ProfileInfo
 
 
 def _make_profile(tmp_path, *, bundle_id="com.example.app", expired=False, cert_sha1="ABC123"):
@@ -72,3 +76,17 @@ def test_parse_mobileprovision_detects_expired(tmp_path, monkeypatch):
     monkeypatch.setattr("asc.commands.build_inputs._cert_sha1", lambda b: "X")
     info = parse_mobileprovision(profile_path)
     assert info.is_expired is True
+
+
+def test_parse_mobileprovision_raises_when_expiration_missing(tmp_path, monkeypatch):
+    import pytest
+    p = tmp_path / "bad.mobileprovision"
+    p.write_bytes(b"")
+    monkeypatch.setattr(
+        "asc.commands.build_inputs._decode_profile_plist",
+        lambda _: {"UUID": "U", "Name": "N", "TeamIdentifier": ["T"],
+                   "Entitlements": {"application-identifier": "T.com.x"},
+                   "DeveloperCertificates": []},
+    )
+    with pytest.raises(RuntimeError, match="ExpirationDate"):
+        parse_mobileprovision(p)
