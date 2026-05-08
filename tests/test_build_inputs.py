@@ -183,3 +183,48 @@ def test_detect_profiles_case_insensitive_sha1(monkeypatch):
     monkeypatch.setattr("asc.commands.build_inputs.scan_profiles", lambda: pool)
     result = detect_profiles(bundle_id="com.a", cert_sha1="AABBCC")
     assert len(result) == 1
+
+
+from asc.commands.build_inputs import detect_certificates, Certificate
+
+
+SECURITY_OUTPUT = """\
+Policy: Code Signing
+  Matching identities
+  1) A6D6D6EE49D04E2EE9F8E7FF6EED2A461ACE0BCA "Apple Distribution: yiqi bai (2T6LGHS8XQ)"
+  2) DEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEF "Apple Development: dev (XYZ)"
+  3) CAFECAFECAFECAFECAFECAFECAFECAFECAFECAFE "iPhone Distribution: ACME Inc (ABCDEF1234)"
+     3 identities found
+"""
+
+
+def test_detect_certificates_keeps_distribution_only(monkeypatch):
+    class FakeRun:
+        returncode = 0
+        stdout = SECURITY_OUTPUT
+        stderr = ""
+
+    monkeypatch.setattr(
+        "asc.commands.build_inputs.subprocess.run",
+        lambda *a, **kw: FakeRun(),
+    )
+    certs = detect_certificates()
+    names = [c.name for c in certs]
+    assert names == [
+        "Apple Distribution: yiqi bai (2T6LGHS8XQ)",
+        "iPhone Distribution: ACME Inc (ABCDEF1234)",
+    ]
+    assert certs[0].sha1 == "A6D6D6EE49D04E2EE9F8E7FF6EED2A461ACE0BCA"
+
+
+def test_detect_certificates_returns_empty_when_security_fails(monkeypatch):
+    class FakeRun:
+        returncode = 1
+        stdout = ""
+        stderr = "err"
+
+    monkeypatch.setattr(
+        "asc.commands.build_inputs.subprocess.run",
+        lambda *a, **kw: FakeRun(),
+    )
+    assert detect_certificates() == []

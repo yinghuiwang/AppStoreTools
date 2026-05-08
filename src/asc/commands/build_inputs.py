@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import plistlib
+import re
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -120,4 +121,32 @@ def detect_profiles(bundle_id: str, cert_sha1: Optional[str]) -> List[ProfileInf
         if cert_sha1 is not None and cert_sha1.upper() not in {s.upper() for s in p.cert_sha1s}:
             continue
         out.append(p)
+    return out
+
+
+@dataclass(frozen=True)
+class Certificate:
+    sha1: str
+    name: str
+
+
+_IDENTITY_RE = re.compile(r'^\s*\d+\)\s+([A-F0-9]{40})\s+"([^"]+)"\s*$')
+_DISTRIBUTION_RE = re.compile(r"(Apple|iPhone)\s+Distribution:")
+
+
+def detect_certificates() -> List[Certificate]:
+    result = subprocess.run(
+        ["security", "find-identity", "-v", "-p", "codesigning"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        return []
+    out: List[Certificate] = []
+    for line in result.stdout.splitlines():
+        m = _IDENTITY_RE.match(line)
+        if not m:
+            continue
+        sha1, name = m.group(1), m.group(2)
+        if _DISTRIBUTION_RE.search(name):
+            out.append(Certificate(sha1=sha1, name=name))
     return out
