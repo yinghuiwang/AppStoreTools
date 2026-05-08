@@ -16,10 +16,14 @@ from asc.i18n import t, HELP
 from asc.commands.build_inputs import (
     BuildInputsCLI,
     detect_project,
+    detect_versions,
+    find_matching_archive,
     list_schemes,
     prepare_build_inputs,
+    prompt_reuse_archive,
     resolve_interactive,
     ResolvedInputs,
+    scan_archives,
 )
 
 
@@ -158,6 +162,8 @@ def build_core(
     *,
     configuration: str = "Release",
     dry_run: bool = False,
+    reuse_archive: Optional[bool] = None,
+    interactive: bool = False,
 ) -> Optional[str]:
     """Core build logic. Returns .ipa path, or None if dry_run."""
     typer.echo(f"\n{'='*56}")
@@ -186,22 +192,44 @@ def build_core(
     output_dir.mkdir(parents=True, exist_ok=True)
     Path(export_dir).mkdir(parents=True, exist_ok=True)
 
+    # === Step 0: archive reuse check ===
+    reuse_path: Optional[str] = None
+    if reuse_archive is not False:  # explicit False = forced rebuild
+        versions = detect_versions(resolved.project_path, resolved.project_kind, resolved.scheme)
+        if versions:
+            mv, bn = versions
+            archives = scan_archives(output, resolved.scheme)
+            match = find_matching_archive(
+                archives,
+                bundle_id=resolved.bundle_id,
+                marketing_version=mv,
+                build_number=bn,
+            )
+            if match:
+                if reuse_archive is True:
+                    reuse_path = match.path
+                    typer.echo(f"\n♻️  复用 archive: {reuse_path}")
+                else:
+                    if prompt_reuse_archive(match, interactive=interactive):
+                        reuse_path = match.path
+
     typer.echo("\n  ── 步骤 1/3：生成 ExportOptions.plist ──")
     export_options = generate_export_options(
-        signing=resolved.signing,
-        destination=resolved.destination,
-        profile=resolved.profile,
-        certificate=resolved.certificate,
-        output_dir=str(output_dir),
-        bundle_id=resolved.bundle_id,
+        signing=resolved.signing, destination=resolved.destination,
+        profile=resolved.profile, certificate=resolved.certificate,
+        output_dir=str(output_dir), bundle_id=resolved.bundle_id,
     )
 
-    typer.echo("  ── 步骤 2/3：构建 Archive ──")
-    run_xcodebuild_archive(
-        resolved.project_path, resolved.project_kind, resolved.scheme,
-        configuration, archive_path,
-    )
-    typer.echo(f"  ✅ Archive: {archive_path}")
+    if reuse_path:
+        archive_path = reuse_path
+        typer.echo(f"  ── 步骤 2/3：跳过 archive（复用: {archive_path}） ──")
+    else:
+        typer.echo("  ── 步骤 2/3：构建 Archive ──")
+        run_xcodebuild_archive(
+            resolved.project_path, resolved.project_kind, resolved.scheme,
+            configuration, archive_path,
+        )
+        typer.echo(f"  ✅ Archive: {archive_path}")
 
     typer.echo("  ── 步骤 3/3：导出 IPA ──")
     ipa_path = run_xcodebuild_export(archive_path, export_options, export_dir)
@@ -223,6 +251,10 @@ def cmd_build(
     interactive: Optional[bool] = typer.Option(
         None, "--interactive/--no-interactive",
         help="强制开/关交互；不传则按 TTY 自动判断",
+    ),
+    reuse_archive: Optional[bool] = typer.Option(
+        None, "--reuse-archive/--rebuild",
+        help="复用同版本 archive / 强制重打；不传则在交互模式下询问",
     ),
 ):
     """构建 Xcode 项目并导出 .ipa 文件。
@@ -253,6 +285,8 @@ def cmd_build(
             output=output or config.build_output,
             configuration=configuration or "Release",
             dry_run=dry_run,
+            reuse_archive=reuse_archive,
+            interactive=resolve_interactive(interactive),
         )
     except RuntimeError as e:
         typer.echo(f"❌ {e}", err=True)
@@ -386,6 +420,10 @@ def cmd_release(
         None, "--interactive/--no-interactive",
         help="强制开/关交互；不传则按 TTY 自动判断",
     ),
+    reuse_archive: Optional[bool] = typer.Option(
+        None, "--reuse-archive/--rebuild",
+        help="复用同版本 archive / 强制重打；不传则在交互模式下询问",
+    ),
 ):
     """一键构建并发布到 TestFlight 或 App Store。
 
@@ -435,6 +473,8 @@ def cmd_release(
             output=output or config.build_output,
             configuration="Release",
             dry_run=dry_run,
+            reuse_archive=reuse_archive,
+            interactive=resolve_interactive(interactive),
         )
         if ipa_path:
             deploy_core(

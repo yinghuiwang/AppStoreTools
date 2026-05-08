@@ -541,3 +541,17 @@ def find_matching_archive(
         ):
             return arc
     return None
+
+
+def prompt_reuse_archive(archive: ArchiveInfo, *, interactive: bool) -> bool:
+    """Ask user whether to reuse an existing archive. Non-interactive → False."""
+    if not interactive:
+        return False
+    typer.echo(f"\n✅ 检测到匹配的 archive:")
+    typer.echo(f"   {archive.path}")
+    typer.echo(
+        f"   版本: {archive.marketing_version} ({archive.build_number})    "
+        f"创建于: {archive.created:%Y-%m-%d %H:%M}"
+    )
+    raw = typer.prompt("是否复用以跳过 archive 步骤？[Y/n]", default="Y")
+    return raw.strip().lower() in ("", "y", "yes")

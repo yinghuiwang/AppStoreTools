@@ -448,3 +448,140 @@ def test_cmd_build_passes_cli_signing_and_profile(monkeypatch, tmp_path):
     assert captured["cli"].signing == "manual"
     assert captured["cli"].profile == "/some/path.mobileprovision"
     assert captured["cli"].certificate == "Apple Distribution: foo"
+
+
+# ── A4: archive reuse step-0 tests ──
+
+from asc.commands.build_inputs import (
+    ArchiveInfo as _ArchiveInfo,
+    ResolvedInputs as _ResolvedInputs,
+)
+from datetime import datetime, timezone
+
+
+def _make_resolved(**overrides):
+    base = dict(
+        project_path="/tmp/x.xcodeproj", project_kind="project",
+        scheme="X", bundle_id="com.x", signing="auto",
+        certificate=None, profile=None, destination="appstore",
+    )
+    base.update(overrides)
+    return _ResolvedInputs(**base)
+
+
+def test_build_core_reuses_matching_archive_when_reuse_true(monkeypatch, tmp_path):
+    """When a matching archive exists and reuse=True, archive step is skipped."""
+    from asc.commands.build import build_core
+    arc_info = _ArchiveInfo(
+        path=str(tmp_path / "X.xcarchive"),
+        bundle_id="com.x", marketing_version="1.0", build_number="1",
+        created=datetime.now(timezone.utc),
+    )
+    archive_called = {"called": False}
+    export_called = {"called": False}
+
+    monkeypatch.setattr("asc.commands.build.detect_versions",
+                        lambda *a, **kw: ("1.0", "1"))
+    monkeypatch.setattr("asc.commands.build.scan_archives",
+                        lambda *a, **kw: [arc_info])
+    monkeypatch.setattr("asc.commands.build.find_matching_archive",
+                        lambda *a, **kw: arc_info)
+
+    def fake_archive(*a, **kw):
+        archive_called["called"] = True
+        return a[-1]
+    def fake_export(archive_path, opts, out):
+        export_called["called"] = True
+        return str(tmp_path / "X.ipa")
+
+    monkeypatch.setattr("asc.commands.build.run_xcodebuild_archive", fake_archive)
+    monkeypatch.setattr("asc.commands.build.run_xcodebuild_export", fake_export)
+    monkeypatch.setattr("asc.commands.build.generate_export_options",
+                        lambda **kw: str(tmp_path / "ExportOptions.plist"))
+
+    resolved = _make_resolved()
+    ipa = build_core(resolved, output=str(tmp_path), reuse_archive=True, dry_run=False)
+
+    assert archive_called["called"] is False, "archive step should be skipped"
+    assert export_called["called"] is True
+
+
+def test_build_core_runs_archive_when_reuse_false(monkeypatch, tmp_path):
+    """Even with a matching archive present, reuse=False forces re-archive."""
+    from asc.commands.build import build_core
+    arc_info = _ArchiveInfo(
+        path=str(tmp_path / "X.xcarchive"),
+        bundle_id="com.x", marketing_version="1.0", build_number="1",
+        created=datetime.now(timezone.utc),
+    )
+    archive_called = {"called": False}
+
+    monkeypatch.setattr("asc.commands.build.detect_versions",
+                        lambda *a, **kw: ("1.0", "1"))
+    monkeypatch.setattr("asc.commands.build.scan_archives",
+                        lambda *a, **kw: [arc_info])
+    monkeypatch.setattr("asc.commands.build.find_matching_archive",
+                        lambda *a, **kw: arc_info)
+
+    def fake_archive(*a, **kw):
+        archive_called["called"] = True
+        return a[-1]
+    monkeypatch.setattr("asc.commands.build.run_xcodebuild_archive", fake_archive)
+    monkeypatch.setattr("asc.commands.build.run_xcodebuild_export",
+                        lambda *a, **kw: str(tmp_path / "X.ipa"))
+    monkeypatch.setattr("asc.commands.build.generate_export_options",
+                        lambda **kw: str(tmp_path / "ExportOptions.plist"))
+
+    resolved = _make_resolved()
+    build_core(resolved, output=str(tmp_path), reuse_archive=False, dry_run=False)
+    assert archive_called["called"] is True
+
+
+def test_build_core_no_matching_archive_runs_archive(monkeypatch, tmp_path):
+    """No matching archive → always archives."""
+    from asc.commands.build import build_core
+    archive_called = {"called": False}
+
+    monkeypatch.setattr("asc.commands.build.detect_versions",
+                        lambda *a, **kw: ("1.0", "1"))
+    monkeypatch.setattr("asc.commands.build.scan_archives",
+                        lambda *a, **kw: [])
+    monkeypatch.setattr("asc.commands.build.find_matching_archive",
+                        lambda *a, **kw: None)
+
+    def fake_archive(*a, **kw):
+        archive_called["called"] = True
+        return a[-1]
+    monkeypatch.setattr("asc.commands.build.run_xcodebuild_archive", fake_archive)
+    monkeypatch.setattr("asc.commands.build.run_xcodebuild_export",
+                        lambda *a, **kw: str(tmp_path / "X.ipa"))
+    monkeypatch.setattr("asc.commands.build.generate_export_options",
+                        lambda **kw: str(tmp_path / "ExportOptions.plist"))
+
+    resolved = _make_resolved()
+    build_core(resolved, output=str(tmp_path), reuse_archive=None, dry_run=False)
+    assert archive_called["called"] is True
+
+
+def test_build_core_versions_unavailable_skips_reuse_check(monkeypatch, tmp_path):
+    """If detect_versions returns None, scan_archives is not even called."""
+    from asc.commands.build import build_core
+    scan_called = {"called": False}
+
+    monkeypatch.setattr("asc.commands.build.detect_versions",
+                        lambda *a, **kw: None)
+
+    def fake_scan(*a, **kw):
+        scan_called["called"] = True
+        return []
+    monkeypatch.setattr("asc.commands.build.scan_archives", fake_scan)
+    monkeypatch.setattr("asc.commands.build.run_xcodebuild_archive",
+                        lambda *a, **kw: a[-1])
+    monkeypatch.setattr("asc.commands.build.run_xcodebuild_export",
+                        lambda *a, **kw: str(tmp_path / "X.ipa"))
+    monkeypatch.setattr("asc.commands.build.generate_export_options",
+                        lambda **kw: str(tmp_path / "ExportOptions.plist"))
+
+    resolved = _make_resolved()
+    build_core(resolved, output=str(tmp_path), reuse_archive=None, dry_run=False)
+    assert scan_called["called"] is False
