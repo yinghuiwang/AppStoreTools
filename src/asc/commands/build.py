@@ -12,6 +12,7 @@ import typer
 from asc.config import Config
 from asc.guard import Guard, GuardViolationError
 from asc.i18n import t, HELP
+from asc.progress import Spinner
 
 from asc.commands.build_inputs import (
     BuildInputsCLI,
@@ -118,6 +119,8 @@ def run_xcodebuild_archive(
     scheme: str,
     configuration: str,
     archive_path: str,
+    *,
+    verbose: bool = False,
 ) -> str:
     """Run xcodebuild archive. Return archive_path on success."""
     flag = "-workspace" if kind == "workspace" else "-project"
@@ -130,9 +133,11 @@ def run_xcodebuild_archive(
         "archive",
         "-allowProvisioningUpdates",
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    log_path = Path(archive_path).parent / "build.log"
+    sp = Spinner("构建 Archive", log_path=str(log_path), verbose=verbose)
+    result = sp.run(cmd)
     if result.returncode != 0:
-        raise RuntimeError(f"xcodebuild archive failed:\n{result.stderr}")
+        raise RuntimeError(f"xcodebuild archive failed (see {log_path})")
     return archive_path
 
 
@@ -140,6 +145,8 @@ def run_xcodebuild_export(
     archive_path: str,
     export_options_path: str,
     output_dir: str,
+    *,
+    verbose: bool = False,
 ) -> str:
     """Run xcodebuild -exportArchive. Return path to .ipa file."""
     cmd = [
@@ -149,9 +156,11 @@ def run_xcodebuild_export(
         "-exportOptionsPlist", export_options_path,
         "-exportPath", output_dir,
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    log_path = Path(output_dir).parent / "export.log"
+    sp = Spinner("导出 IPA", log_path=str(log_path), verbose=verbose)
+    result = sp.run(cmd)
     if result.returncode != 0:
-        raise RuntimeError(f"xcodebuild exportArchive failed:\n{result.stderr}")
+        raise RuntimeError(f"xcodebuild exportArchive failed (see {log_path})")
 
     ipas = list(Path(output_dir).glob("*.ipa"))
     if not ipas:
@@ -167,6 +176,7 @@ def build_core(
     dry_run: bool = False,
     reuse_archive: Optional[bool] = None,
     interactive: bool = False,
+    verbose: bool = False,
 ) -> Optional[str]:
     """Core build logic. Returns .ipa path, or None if dry_run."""
     typer.echo(f"\n{'='*56}")
@@ -231,11 +241,12 @@ def build_core(
         run_xcodebuild_archive(
             resolved.project_path, resolved.project_kind, resolved.scheme,
             configuration, archive_path,
+            verbose=verbose,
         )
         typer.echo(f"  ✅ Archive: {archive_path}")
 
     typer.echo("  ── 步骤 3/3：导出 IPA ──")
-    ipa_path = run_xcodebuild_export(archive_path, export_options, export_dir)
+    ipa_path = run_xcodebuild_export(archive_path, export_options, export_dir, verbose=verbose)
     typer.echo(f"  ✅ IPA: {ipa_path}")
     return ipa_path
 
@@ -258,6 +269,10 @@ def cmd_build(
     reuse_archive: Optional[bool] = typer.Option(
         None, "--reuse-archive/--rebuild",
         help="复用同版本 archive / 强制重打；不传则在交互模式下询问",
+    ),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v",
+        help="实时显示子进程原始输出（默认显示 spinner + 阶段总结）",
     ),
 ):
     """构建 Xcode 项目并导出 .ipa 文件。
@@ -290,6 +305,7 @@ def cmd_build(
             dry_run=dry_run,
             reuse_archive=reuse_archive,
             interactive=resolve_interactive(interactive),
+            verbose=verbose,
         )
     except RuntimeError as e:
         typer.echo(f"❌ {e}", err=True)
@@ -305,6 +321,8 @@ def upload_ipa(
     key_id: str,
     key_file: str,
     destination: str,
+    *,
+    verbose: bool = False,
 ) -> None:
     """Upload .ipa using xcrun altool.
 
@@ -321,12 +339,11 @@ def upload_ipa(
         "--p8-file-path", key_file,
         "-t", "ios",
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    output = result.stdout + result.stderr
-    if result.returncode != 0 or "UPLOAD FAILED" in output or "ERROR:" in output:
-        raise RuntimeError(f"Upload failed:\n{output}")
-    if result.stdout.strip():
-        typer.echo(result.stdout.strip())
+    log_path = Path(ipa_path).parent / "upload.log"
+    sp = Spinner("上传到 App Store Connect", log_path=str(log_path), verbose=verbose)
+    result = sp.run(cmd)
+    if result.returncode != 0:
+        raise RuntimeError(f"Upload failed (see {log_path})")
 
 
 def deploy_core(
@@ -336,6 +353,8 @@ def deploy_core(
     key_file: str,
     destination: str,
     dry_run: bool,
+    *,
+    verbose: bool = False,
 ) -> None:
     """Core deploy logic."""
     typer.echo(f"\n{'='*56}")
@@ -354,7 +373,7 @@ def deploy_core(
         return
 
     typer.echo("\n  正在上传...")
-    upload_ipa(ipa_path, issuer_id, key_id, key_file, destination)
+    upload_ipa(ipa_path, issuer_id, key_id, key_file, destination, verbose=verbose)
     typer.echo("  ✅ 上传成功")
 
 
@@ -363,6 +382,10 @@ def cmd_deploy(
     destination: Optional[str] = typer.Option(None, "--destination", help=t(HELP['upload_destination'])),
     app: Optional[str] = typer.Option(None, "--app", "-a", help=t(HELP['app_profile_name'])),
     dry_run: bool = typer.Option(False, "--dry-run", "-d", help=t(HELP['preview_without_actual_upload'])),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v",
+        help="实时显示子进程原始输出（默认显示 spinner + 阶段总结）",
+    ),
 ):
     """上传 .ipa 到 TestFlight 或 App Store。
 
@@ -403,6 +426,7 @@ def cmd_deploy(
             key_file=key_file,
             destination=destination or "testflight",
             dry_run=dry_run,
+            verbose=verbose,
         )
     except RuntimeError as e:
         typer.echo(f"❌ {e}", err=True)
@@ -426,6 +450,10 @@ def cmd_release(
     reuse_archive: Optional[bool] = typer.Option(
         None, "--reuse-archive/--rebuild",
         help="复用同版本 archive / 强制重打；不传则在交互模式下询问",
+    ),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v",
+        help="实时显示子进程原始输出（默认显示 spinner + 阶段总结）",
     ),
 ):
     """一键构建并发布到 TestFlight 或 App Store。
@@ -478,6 +506,7 @@ def cmd_release(
             dry_run=dry_run,
             reuse_archive=reuse_archive,
             interactive=resolve_interactive(interactive),
+            verbose=verbose,
         )
         if ipa_path:
             deploy_core(
@@ -487,6 +516,7 @@ def cmd_release(
                 key_file=key_file or "",
                 destination=resolved.destination,
                 dry_run=dry_run,
+                verbose=verbose,
             )
     except RuntimeError as e:
         typer.echo(f"❌ {e}", err=True)
