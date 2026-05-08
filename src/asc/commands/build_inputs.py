@@ -85,3 +85,25 @@ def parse_mobileprovision(path) -> ProfileInfo:
         expiration=expiration,
         cert_sha1s=[_cert_sha1(b) for b in cert_blobs],
     )
+
+
+PROFILE_DIRS = [
+    Path.home() / "Library/Developer/Xcode/UserData/Provisioning Profiles",
+    Path.home() / "Library/MobileDevice/Provisioning Profiles",
+]
+
+
+def scan_profiles(dirs=None) -> List[ProfileInfo]:
+    """Walk known profile dirs in order; first occurrence of each UUID wins."""
+    seen: dict = {}
+    for d in (dirs if dirs is not None else PROFILE_DIRS):
+        if not Path(d).is_dir():
+            continue
+        for path in sorted(Path(d).glob("*.mobileprovision")):
+            try:
+                info = parse_mobileprovision(path)
+            except Exception:
+                continue
+            if info.uuid and info.uuid not in seen:
+                seen[info.uuid] = info
+    return list(seen.values())

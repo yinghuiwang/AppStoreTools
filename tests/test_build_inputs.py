@@ -90,3 +90,60 @@ def test_parse_mobileprovision_raises_when_expiration_missing(tmp_path, monkeypa
     )
     with pytest.raises(RuntimeError, match="ExpirationDate"):
         parse_mobileprovision(p)
+
+
+from asc.commands.build_inputs import scan_profiles
+
+
+def test_scan_profiles_dedupes_by_uuid(tmp_path, monkeypatch):
+    new_dir = tmp_path / "new"
+    old_dir = tmp_path / "old"
+    new_dir.mkdir(); old_dir.mkdir()
+
+    same_uuid = "AAAA"
+    import datetime as _dt
+
+    def info_for(path, name):
+        return ProfileInfo(
+            path=str(path), uuid=same_uuid, name=name, team_id="T",
+            bundle_id="com.x", expiration=_dt.datetime.now(),
+            cert_sha1s=[],
+        )
+
+    new_file = new_dir / "a.mobileprovision"
+    old_file = old_dir / "a.mobileprovision"
+    new_file.write_bytes(b""); old_file.write_bytes(b"")
+
+    fake_parsed = {
+        str(new_file): info_for(new_file, "NEW"),
+        str(old_file): info_for(old_file, "OLD"),
+    }
+    monkeypatch.setattr(
+        "asc.commands.build_inputs.parse_mobileprovision",
+        lambda p: fake_parsed[str(p)],
+    )
+
+    result = scan_profiles(dirs=[new_dir, old_dir])
+    assert len(result) == 1
+    assert result[0].name == "NEW"
+
+
+def test_scan_profiles_skips_unreadable(tmp_path, monkeypatch):
+    d = tmp_path / "p"
+    d.mkdir()
+    (d / "broken.mobileprovision").write_bytes(b"")
+
+    def boom(_):
+        raise RuntimeError("decode failed")
+
+    monkeypatch.setattr("asc.commands.build_inputs.parse_mobileprovision", boom)
+    result = scan_profiles(dirs=[d])
+    assert result == []
+
+
+def test_scan_profiles_skips_missing_dirs(tmp_path, monkeypatch):
+    existing = tmp_path / "exists"
+    existing.mkdir()
+    missing = tmp_path / "never-created"
+    result = scan_profiles(dirs=[missing, existing])
+    assert result == []
