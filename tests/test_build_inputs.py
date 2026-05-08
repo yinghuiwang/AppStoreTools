@@ -228,3 +228,70 @@ def test_detect_certificates_returns_empty_when_security_fails(monkeypatch):
         lambda *a, **kw: FakeRun(),
     )
     assert detect_certificates() == []
+
+
+from asc.commands.build_inputs import detect_bundle_id
+
+
+XCODEBUILD_OUTPUT = """\
+Build settings for action build and target PokeVid:
+    PRODUCT_BUNDLE_IDENTIFIER = com.baiyiqi.pokevid
+    PRODUCT_NAME = PokeVid
+"""
+
+
+def test_detect_bundle_id_parses_product_bundle_identifier(monkeypatch):
+    class FakeRun:
+        returncode = 0
+        stdout = XCODEBUILD_OUTPUT
+        stderr = ""
+
+    monkeypatch.setattr(
+        "asc.commands.build_inputs.subprocess.run",
+        lambda *a, **kw: FakeRun(),
+    )
+    assert detect_bundle_id("/x.xcodeproj", "project", "PokeVid") == "com.baiyiqi.pokevid"
+
+
+def test_detect_bundle_id_workspace_passes_workspace_flag(monkeypatch):
+    captured = {}
+
+    class FakeRun:
+        returncode = 0
+        stdout = XCODEBUILD_OUTPUT
+        stderr = ""
+
+    def fake_run(cmd, **kw):
+        captured["cmd"] = cmd
+        return FakeRun()
+
+    monkeypatch.setattr("asc.commands.build_inputs.subprocess.run", fake_run)
+    detect_bundle_id("/x.xcworkspace", "workspace", "X")
+    assert "-workspace" in captured["cmd"]
+    assert "-project" not in captured["cmd"]
+
+
+def test_detect_bundle_id_returns_none_on_failure(monkeypatch):
+    class FakeRun:
+        returncode = 1
+        stdout = ""
+        stderr = "error"
+
+    monkeypatch.setattr(
+        "asc.commands.build_inputs.subprocess.run",
+        lambda *a, **kw: FakeRun(),
+    )
+    assert detect_bundle_id("/x.xcodeproj", "project", "X") is None
+
+
+def test_detect_bundle_id_returns_none_when_setting_absent(monkeypatch):
+    class FakeRun:
+        returncode = 0
+        stdout = "Build settings...\n    OTHER_SETTING = foo\n"
+        stderr = ""
+
+    monkeypatch.setattr(
+        "asc.commands.build_inputs.subprocess.run",
+        lambda *a, **kw: FakeRun(),
+    )
+    assert detect_bundle_id("/x.xcodeproj", "project", "X") is None

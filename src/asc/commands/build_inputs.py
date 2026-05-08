@@ -150,3 +150,21 @@ def detect_certificates() -> List[Certificate]:
         if _DISTRIBUTION_RE.search(name):
             out.append(Certificate(sha1=sha1, name=name))
     return out
+
+
+_BUNDLE_ID_RE = re.compile(r"^\s*PRODUCT_BUNDLE_IDENTIFIER\s*=\s*(\S+)\s*$")
+
+
+def detect_bundle_id(project: str, kind: str, scheme: str) -> Optional[str]:
+    flag = "-workspace" if kind == "workspace" else "-project"
+    result = subprocess.run(
+        ["xcodebuild", "-showBuildSettings", flag, project, "-scheme", scheme],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        return None
+    for line in result.stdout.splitlines():
+        m = _BUNDLE_ID_RE.match(line)
+        if m:
+            return m.group(1)
+    return None
