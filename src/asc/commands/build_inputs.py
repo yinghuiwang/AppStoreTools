@@ -225,3 +225,116 @@ def _pick_one(
         except ValueError:
             pass
         typer.echo(f"❌ 无效编号，请输入 1-{len(items)}")
+
+
+# Re-export helpers from build.py so they can be monkeypatched via this module.
+from asc.commands.build import detect_project, list_schemes  # noqa: E402
+
+
+def prepare_build_inputs(
+    cli: BuildInputsCLI,
+    config,  # asc.config.Config
+    *, interactive: bool,
+) -> ResolvedInputs:
+    cache: dict = {}
+
+    # 1. project / kind
+    if cli.project:
+        project_path, project_kind = detect_project(cli.project)
+        cache["project"] = project_path
+    else:
+        cached_project = config.build_project
+        if cached_project and Path(cached_project).exists():
+            project_path, project_kind = detect_project(cached_project)
+        else:
+            project_path, project_kind = detect_project(".")
+            cache["project"] = project_path
+
+    # 2. scheme
+    if cli.scheme:
+        scheme = cli.scheme
+        cache["scheme"] = scheme
+    elif config.build_scheme:
+        scheme = config.build_scheme
+    else:
+        schemes = list_schemes(project_path, project_kind)
+        scheme = _pick_one(schemes, label="Scheme", interactive=interactive)
+        cache["scheme"] = scheme
+
+    # 3. bundle_id
+    bundle_id = config.build_bundle_id
+    if not bundle_id:
+        bundle_id = detect_bundle_id(project_path, project_kind, scheme)
+        if not bundle_id and cli.profile:
+            from asc.commands.build import parse_bundle_id_from_profile
+            bundle_id = parse_bundle_id_from_profile(cli.profile)
+        if not bundle_id:
+            raise RuntimeError(
+                "无法确定 bundle ID：xcodebuild 解析失败且未提供 --profile"
+            )
+        cache["bundle_id"] = bundle_id
+
+    # 4. destination
+    destination = cli.destination or config.build_destination or "appstore"
+    if cli.destination:
+        cache["destination"] = destination
+
+    # 5. signing
+    signing = cli.signing or config.build_signing or "auto"
+    if cli.signing:
+        cache["signing"] = signing
+
+    certificate: Optional[str] = None
+    profile: Optional[str] = None
+
+    if signing == "manual":
+        # 6. certificate
+        if cli.certificate:
+            certificate = cli.certificate
+            cache["certificate"] = certificate
+        elif config.build_certificate and validate_cache_entry("certificate", config.build_certificate):
+            certificate = config.build_certificate
+        else:
+            certs = detect_certificates()
+            chosen = _pick_one(certs, label="证书", interactive=interactive,
+                               render=lambda c: c.name)
+            certificate = chosen.name
+            cache["certificate"] = certificate
+
+        # Determine cert_sha1 for profile filtering
+        cert_sha1 = next(
+            (c.sha1 for c in detect_certificates() if c.name == certificate),
+            None,
+        )
+
+        # 7. profile
+        if cli.profile:
+            profile = cli.profile
+            cache["profile"] = profile
+        elif config.build_profile and validate_cache_entry("profile", config.build_profile):
+            profile = config.build_profile
+        else:
+            profiles = detect_profiles(bundle_id, cert_sha1)
+            chosen_p = _pick_one(
+                profiles, label="描述文件", interactive=interactive,
+                render=lambda p: f"{p.name} (team: {p.team_id}, expires: {p.expiration:%Y-%m-%d})",
+            )
+            profile = chosen_p.path
+            cache["profile"] = profile
+
+    if cache:
+        try:
+            config.update_local_build_section(cache)
+        except Exception as e:
+            typer.echo(f"⚠️ 无法保存到 .asc/config.toml，本次设置不会被记住：{e}", err=True)
+
+    return ResolvedInputs(
+        project_path=project_path,
+        project_kind=project_kind,
+        scheme=scheme,
+        bundle_id=bundle_id,
+        signing=signing,
+        certificate=certificate,
+        profile=profile,
+        destination=destination,
+    )

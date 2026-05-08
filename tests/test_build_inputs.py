@@ -481,3 +481,84 @@ def test_pick_one_multi_interactive_uses_renderer(monkeypatch, capsys):
     assert result == items[0]
     captured = capsys.readouterr()
     assert "X" in captured.out and "Y" in captured.out
+
+
+from asc.commands.build_inputs import prepare_build_inputs, BuildInputsCLI
+
+
+def _make_config(monkeypatch, tmp_path, build_section=None):
+    monkeypatch.chdir(tmp_path)
+    if build_section:
+        (tmp_path / ".asc").mkdir(exist_ok=True)
+        lines = ["[build]"] + [f'{k} = "{v}"' for k, v in build_section.items()]
+        (tmp_path / ".asc" / "config.toml").write_text("\n".join(lines) + "\n")
+    return Config()
+
+
+def _patch_detection(monkeypatch, **overrides):
+    defaults = dict(
+        detect_project=("/abs/X.xcodeproj", "project"),
+        list_schemes=["MyApp"],
+        detect_bundle_id="com.example.app",
+        detect_certificates=[Certificate(sha1="AAA", name="Apple Distribution: T (T)")],
+        detect_profiles=[ProfileInfo(
+            path="/p/x.mobileprovision", uuid="U", name="P", team_id="T",
+            bundle_id="com.example.app",
+            expiration=datetime.now(timezone.utc) + timedelta(days=30),
+            cert_sha1s=["AAA"],
+        )],
+    )
+    defaults.update(overrides)
+    monkeypatch.setattr("asc.commands.build_inputs.detect_project",
+                        lambda *a, **kw: defaults["detect_project"])
+    monkeypatch.setattr("asc.commands.build_inputs.list_schemes",
+                        lambda *a, **kw: defaults["list_schemes"])
+    monkeypatch.setattr("asc.commands.build_inputs.detect_bundle_id",
+                        lambda *a, **kw: defaults["detect_bundle_id"])
+    monkeypatch.setattr("asc.commands.build_inputs.detect_certificates",
+                        lambda: defaults["detect_certificates"])
+    monkeypatch.setattr("asc.commands.build_inputs.detect_profiles",
+                        lambda *a, **kw: defaults["detect_profiles"])
+
+
+def test_prepare_auto_signing_skips_cert_and_profile(tmp_path, monkeypatch):
+    _patch_detection(monkeypatch)
+    cfg = _make_config(monkeypatch, tmp_path)
+    cli = BuildInputsCLI(signing="auto")
+    r = prepare_build_inputs(cli, cfg, interactive=False)
+    assert r.signing == "auto"
+    assert r.certificate is None
+    assert r.profile is None
+    assert r.destination == "appstore"
+    assert r.bundle_id == "com.example.app"
+
+
+def test_prepare_manual_signing_resolves_cert_and_profile(tmp_path, monkeypatch):
+    _patch_detection(monkeypatch)
+    cfg = _make_config(monkeypatch, tmp_path)
+    cli = BuildInputsCLI(signing="manual")
+    r = prepare_build_inputs(cli, cfg, interactive=False)
+    assert r.signing == "manual"
+    assert r.certificate == "Apple Distribution: T (T)"
+    assert r.profile == "/p/x.mobileprovision"
+
+
+def test_prepare_uses_cli_over_cache(tmp_path, monkeypatch):
+    _patch_detection(monkeypatch)
+    cfg = _make_config(monkeypatch, tmp_path,
+                       build_section={"scheme": "Cached", "signing": "auto"})
+    cli = BuildInputsCLI(scheme="FromCLI", signing="auto")
+    r = prepare_build_inputs(cli, cfg, interactive=False)
+    assert r.scheme == "FromCLI"
+
+
+def test_prepare_writes_cache_after_resolution(tmp_path, monkeypatch):
+    _patch_detection(monkeypatch)
+    cfg = _make_config(monkeypatch, tmp_path)
+    cli = BuildInputsCLI(signing="manual")
+    prepare_build_inputs(cli, cfg, interactive=False)
+    text = (tmp_path / ".asc" / "config.toml").read_text()
+    assert 'bundle_id = "com.example.app"' in text
+    assert 'profile = "/p/x.mobileprovision"' in text
+    assert 'certificate = "Apple Distribution: T (T)"' in text
+    assert 'signing = "manual"' in text
