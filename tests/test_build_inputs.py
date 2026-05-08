@@ -24,3 +24,51 @@ def test_resolved_inputs_required_fields():
     )
     assert r.scheme == "MyApp"
     assert r.certificate is None
+
+
+import plistlib
+from pathlib import Path
+from datetime import datetime, timezone, timedelta
+
+from asc.commands.build_inputs import parse_mobileprovision, ProfileInfo
+
+
+def _make_profile(tmp_path, *, bundle_id="com.example.app", expired=False, cert_sha1="ABC123"):
+    plist = {
+        "UUID": "11111111-2222-3333-4444-555555555555",
+        "Name": "Test Profile",
+        "TeamIdentifier": ["TEAMID"],
+        "ExpirationDate": datetime.now(timezone.utc) + (timedelta(days=-1) if expired else timedelta(days=365)),
+        "Entitlements": {"application-identifier": f"TEAMID.{bundle_id}"},
+        "DeveloperCertificates": [b"<fake-cert-bytes>"],
+    }
+    p = tmp_path / "test.mobileprovision"
+    p.write_bytes(plistlib.dumps(plist))
+    return p, cert_sha1
+
+
+def test_parse_mobileprovision_extracts_fields(tmp_path, monkeypatch):
+    profile_path, cert_sha1 = _make_profile(tmp_path)
+
+    def fake_decode(path):
+        return plistlib.loads(Path(path).read_bytes())
+
+    monkeypatch.setattr("asc.commands.build_inputs._decode_profile_plist", fake_decode)
+    monkeypatch.setattr("asc.commands.build_inputs._cert_sha1", lambda b: cert_sha1)
+
+    info = parse_mobileprovision(profile_path)
+    assert isinstance(info, ProfileInfo)
+    assert info.bundle_id == "com.example.app"
+    assert info.uuid == "11111111-2222-3333-4444-555555555555"
+    assert info.team_id == "TEAMID"
+    assert info.cert_sha1s == [cert_sha1]
+    assert info.is_expired is False
+
+
+def test_parse_mobileprovision_detects_expired(tmp_path, monkeypatch):
+    profile_path, _ = _make_profile(tmp_path, expired=True)
+    monkeypatch.setattr("asc.commands.build_inputs._decode_profile_plist",
+                        lambda path: plistlib.loads(Path(path).read_bytes()))
+    monkeypatch.setattr("asc.commands.build_inputs._cert_sha1", lambda b: "X")
+    info = parse_mobileprovision(profile_path)
+    assert info.is_expired is True

@@ -25,3 +25,63 @@ class ResolvedInputs:
     certificate: Optional[str]
     profile: Optional[str]
     destination: str
+
+
+import hashlib
+import plistlib
+import subprocess
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import List
+
+
+@dataclass(frozen=True)
+class ProfileInfo:
+    path: str
+    uuid: str
+    name: str
+    team_id: str
+    bundle_id: str
+    expiration: datetime
+    cert_sha1s: List[str]
+
+    @property
+    def is_expired(self) -> bool:
+        now = datetime.now(timezone.utc)
+        exp = self.expiration
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        return exp <= now
+
+
+def _decode_profile_plist(path) -> dict:
+    """Run `security cms -D -i <path>` and parse the resulting plist."""
+    result = subprocess.run(
+        ["security", "cms", "-D", "-i", str(path)],
+        capture_output=True,
+    )
+    if result.returncode != 0 or not result.stdout:
+        raise RuntimeError(f"security cms failed for {path}")
+    return plistlib.loads(result.stdout)
+
+
+def _cert_sha1(cert_bytes: bytes) -> str:
+    return hashlib.sha1(cert_bytes).hexdigest().upper()
+
+
+def parse_mobileprovision(path) -> ProfileInfo:
+    plist = _decode_profile_plist(path)
+    entitlements = plist.get("Entitlements") or {}
+    app_id = entitlements.get("application-identifier", "")
+    bundle_id = app_id.split(".", 1)[1] if "." in app_id else ""
+    team_id = (plist.get("TeamIdentifier") or [""])[0]
+    cert_blobs = plist.get("DeveloperCertificates") or []
+    return ProfileInfo(
+        path=str(path),
+        uuid=plist.get("UUID", ""),
+        name=plist.get("Name", ""),
+        team_id=team_id,
+        bundle_id=bundle_id,
+        expiration=plist.get("ExpirationDate"),
+        cert_sha1s=[_cert_sha1(b) for b in cert_blobs],
+    )
