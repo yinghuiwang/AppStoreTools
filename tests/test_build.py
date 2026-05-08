@@ -1,6 +1,7 @@
 """Tests for build/deploy/release commands."""
 from __future__ import annotations
 
+import subprocess
 import sys
 import plistlib
 from pathlib import Path
@@ -13,6 +14,27 @@ from asc.config import Config
 from asc.commands.build_inputs import ResolvedInputs
 
 runner = CliRunner()
+
+
+class _FakeSpinner:
+    """Fake Spinner for tests. Configure via class attrs before use."""
+    returncode: int = 0
+    stderr: str = ""
+
+    def __init__(self, label, *, log_path, verbose=False, tty=None):
+        self.label = label
+        self.log_path = log_path
+
+    def run(self, cmd):
+        # Write a minimal log file so helpers that read it don't error
+        Path(self.log_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(self.log_path).write_text(self.__class__.stderr or "")
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=self.__class__.returncode,
+            stdout="",
+            stderr=self.__class__.stderr,
+        )
 
 
 def _resolved(**overrides):
@@ -202,24 +224,32 @@ def test_generate_export_options_manual_requires_profile(tmp_path):
 
 # ── run_xcodebuild_archive / export tests ──
 
-def test_run_xcodebuild_archive_calls_correct_command(tmp_path):
+def test_run_xcodebuild_archive_calls_correct_command(tmp_path, monkeypatch):
     """Calls xcodebuild archive with correct flags."""
     from asc.commands.build import run_xcodebuild_archive
     archive_path = tmp_path / "MyApp.xcarchive"
+    archive_path.mkdir()
 
-    with patch("asc.commands.build.subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=0)
-        # Simulate archive dir creation
-        archive_path.mkdir()
-        result = run_xcodebuild_archive(
-            project="/path/MyApp.xcworkspace",
-            kind="workspace",
-            scheme="MyApp",
-            configuration="Release",
-            archive_path=str(archive_path),
-        )
+    captured_cmd = {}
 
-    cmd = mock_run.call_args[0][0]
+    class _TrackingSpinner(_FakeSpinner):
+        def run(self, cmd):
+            captured_cmd["cmd"] = cmd
+            return super().run(cmd)
+
+    _TrackingSpinner.returncode = 0
+    _TrackingSpinner.stderr = ""
+    monkeypatch.setattr("asc.commands.build.Spinner", _TrackingSpinner)
+
+    result = run_xcodebuild_archive(
+        project="/path/MyApp.xcworkspace",
+        kind="workspace",
+        scheme="MyApp",
+        configuration="Release",
+        archive_path=str(archive_path),
+    )
+
+    cmd = captured_cmd["cmd"]
     assert "xcodebuild" in cmd
     assert "archive" in cmd
     assert "-workspace" in cmd
@@ -227,22 +257,28 @@ def test_run_xcodebuild_archive_calls_correct_command(tmp_path):
     assert "MyApp" in cmd
 
 
-def test_run_xcodebuild_archive_raises_on_failure(tmp_path):
+def test_run_xcodebuild_archive_raises_on_failure(tmp_path, monkeypatch):
     """Raises RuntimeError when xcodebuild returns non-zero."""
     from asc.commands.build import run_xcodebuild_archive
-    with patch("asc.commands.build.subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=1, stderr="Build FAILED")
-        with pytest.raises(RuntimeError, match="xcodebuild archive failed"):
-            run_xcodebuild_archive(
-                project="/path/MyApp.xcworkspace",
-                kind="workspace",
-                scheme="MyApp",
-                configuration="Release",
-                archive_path=str(tmp_path / "MyApp.xcarchive"),
-            )
+
+    _FakeSpinner.returncode = 1
+    _FakeSpinner.stderr = "Build FAILED"
+    monkeypatch.setattr("asc.commands.build.Spinner", _FakeSpinner)
+
+    with pytest.raises(RuntimeError, match="xcodebuild archive failed"):
+        run_xcodebuild_archive(
+            project="/path/MyApp.xcworkspace",
+            kind="workspace",
+            scheme="MyApp",
+            configuration="Release",
+            archive_path=str(tmp_path / "MyApp.xcarchive"),
+        )
+
+    _FakeSpinner.returncode = 0
+    _FakeSpinner.stderr = ""
 
 
-def test_run_xcodebuild_export_calls_correct_command(tmp_path):
+def test_run_xcodebuild_export_calls_correct_command(tmp_path, monkeypatch):
     """Calls xcodebuild -exportArchive with correct flags."""
     from asc.commands.build import run_xcodebuild_export
     export_dir = tmp_path / "export"
@@ -250,15 +286,24 @@ def test_run_xcodebuild_export_calls_correct_command(tmp_path):
     ipa = export_dir / "MyApp.ipa"
     ipa.write_bytes(b"fake")
 
-    with patch("asc.commands.build.subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=0)
-        result = run_xcodebuild_export(
-            archive_path=str(tmp_path / "MyApp.xcarchive"),
-            export_options_path="/tmp/ExportOptions.plist",
-            output_dir=str(export_dir),
-        )
+    captured_cmd = {}
 
-    cmd = mock_run.call_args[0][0]
+    class _TrackingSpinner(_FakeSpinner):
+        def run(self, cmd):
+            captured_cmd["cmd"] = cmd
+            return super().run(cmd)
+
+    _TrackingSpinner.returncode = 0
+    _TrackingSpinner.stderr = ""
+    monkeypatch.setattr("asc.commands.build.Spinner", _TrackingSpinner)
+
+    result = run_xcodebuild_export(
+        archive_path=str(tmp_path / "MyApp.xcarchive"),
+        export_options_path="/tmp/ExportOptions.plist",
+        output_dir=str(export_dir),
+    )
+
+    cmd = captured_cmd["cmd"]
     assert "-exportArchive" in cmd
     assert "-exportOptionsPlist" in cmd
     assert result == str(ipa)
@@ -298,14 +343,48 @@ def test_cmd_build_non_macos():
 
 # ── upload_ipa / deploy_core / cmd_deploy tests ──
 
-def test_upload_ipa_uses_altool(tmp_path):
+def test_upload_ipa_uses_altool(tmp_path, monkeypatch):
     """upload_ipa calls xcrun altool for iOS uploads."""
     from asc.commands.build import upload_ipa
     ipa = tmp_path / "MyApp.ipa"
     ipa.write_bytes(b"fake")
 
-    with patch("asc.commands.build.subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=0, stdout="")
+    captured_cmd = {}
+
+    class _TrackingSpinner(_FakeSpinner):
+        def run(self, cmd):
+            captured_cmd["cmd"] = cmd
+            return super().run(cmd)
+
+    _TrackingSpinner.returncode = 0
+    _TrackingSpinner.stderr = ""
+    monkeypatch.setattr("asc.commands.build.Spinner", _TrackingSpinner)
+
+    upload_ipa(
+        ipa_path=str(ipa),
+        issuer_id="issuer-123",
+        key_id="key-456",
+        key_file="/path/to/key.p8",
+        destination="testflight",
+    )
+
+    cmd = captured_cmd["cmd"]
+    assert "xcrun" in cmd
+    assert "altool" in cmd
+    assert "--upload-app" in cmd
+
+
+def test_upload_ipa_raises_on_failure(tmp_path, monkeypatch):
+    """upload_ipa raises RuntimeError on non-zero returncode."""
+    from asc.commands.build import upload_ipa
+    ipa = tmp_path / "MyApp.ipa"
+    ipa.write_bytes(b"fake")
+
+    _FakeSpinner.returncode = 1
+    _FakeSpinner.stderr = "Upload failed"
+    monkeypatch.setattr("asc.commands.build.Spinner", _FakeSpinner)
+
+    with pytest.raises(RuntimeError, match="Upload failed"):
         upload_ipa(
             ipa_path=str(ipa),
             issuer_id="issuer-123",
@@ -314,29 +393,8 @@ def test_upload_ipa_uses_altool(tmp_path):
             destination="testflight",
         )
 
-    cmd = mock_run.call_args[0][0]
-    assert "xcrun" in cmd
-    assert "altool" in cmd
-    assert "--upload-app" in cmd
-    assert mock_run.call_count == 1
-
-
-def test_upload_ipa_raises_on_failure(tmp_path):
-    """upload_ipa raises RuntimeError on non-zero returncode."""
-    from asc.commands.build import upload_ipa
-    ipa = tmp_path / "MyApp.ipa"
-    ipa.write_bytes(b"fake")
-
-    with patch("asc.commands.build.subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=1, stderr="Upload failed")
-        with pytest.raises(RuntimeError, match="Upload failed"):
-            upload_ipa(
-                ipa_path=str(ipa),
-                issuer_id="issuer-123",
-                key_id="key-456",
-                key_file="/path/to/key.p8",
-                destination="testflight",
-            )
+    _FakeSpinner.returncode = 0
+    _FakeSpinner.stderr = ""
 
 
 def test_cmd_deploy_non_macos():

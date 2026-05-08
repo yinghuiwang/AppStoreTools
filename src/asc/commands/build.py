@@ -12,6 +12,7 @@ import typer
 from asc.config import Config
 from asc.guard import Guard, GuardViolationError
 from asc.i18n import t, HELP
+from asc.progress import Spinner
 
 from asc.commands.build_inputs import (
     BuildInputsCLI,
@@ -118,6 +119,8 @@ def run_xcodebuild_archive(
     scheme: str,
     configuration: str,
     archive_path: str,
+    *,
+    verbose: bool = False,
 ) -> str:
     """Run xcodebuild archive. Return archive_path on success."""
     flag = "-workspace" if kind == "workspace" else "-project"
@@ -130,9 +133,11 @@ def run_xcodebuild_archive(
         "archive",
         "-allowProvisioningUpdates",
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    log_path = Path(archive_path).parent / "build.log"
+    sp = Spinner("构建 Archive", log_path=str(log_path), verbose=verbose)
+    result = sp.run(cmd)
     if result.returncode != 0:
-        raise RuntimeError(f"xcodebuild archive failed:\n{result.stderr}")
+        raise RuntimeError(f"xcodebuild archive failed (see {log_path})")
     return archive_path
 
 
@@ -140,6 +145,8 @@ def run_xcodebuild_export(
     archive_path: str,
     export_options_path: str,
     output_dir: str,
+    *,
+    verbose: bool = False,
 ) -> str:
     """Run xcodebuild -exportArchive. Return path to .ipa file."""
     cmd = [
@@ -149,9 +156,11 @@ def run_xcodebuild_export(
         "-exportOptionsPlist", export_options_path,
         "-exportPath", output_dir,
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    log_path = Path(output_dir).parent / "export.log"
+    sp = Spinner("导出 IPA", log_path=str(log_path), verbose=verbose)
+    result = sp.run(cmd)
     if result.returncode != 0:
-        raise RuntimeError(f"xcodebuild exportArchive failed:\n{result.stderr}")
+        raise RuntimeError(f"xcodebuild exportArchive failed (see {log_path})")
 
     ipas = list(Path(output_dir).glob("*.ipa"))
     if not ipas:
@@ -305,6 +314,8 @@ def upload_ipa(
     key_id: str,
     key_file: str,
     destination: str,
+    *,
+    verbose: bool = False,
 ) -> None:
     """Upload .ipa using xcrun altool.
 
@@ -321,12 +332,11 @@ def upload_ipa(
         "--p8-file-path", key_file,
         "-t", "ios",
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    output = result.stdout + result.stderr
-    if result.returncode != 0 or "UPLOAD FAILED" in output or "ERROR:" in output:
-        raise RuntimeError(f"Upload failed:\n{output}")
-    if result.stdout.strip():
-        typer.echo(result.stdout.strip())
+    log_path = Path(ipa_path).parent / "upload.log"
+    sp = Spinner("上传到 App Store Connect", log_path=str(log_path), verbose=verbose)
+    result = sp.run(cmd)
+    if result.returncode != 0:
+        raise RuntimeError(f"Upload failed (see {log_path})")
 
 
 def deploy_core(
