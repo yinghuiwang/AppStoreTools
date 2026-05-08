@@ -674,9 +674,9 @@ from asc.commands.build_inputs import read_archive_info, ArchiveInfo
 
 
 def _make_xcarchive(tmp_path, *, bundle_id="com.x", marketing="1.0", build="1",
-                    created=None, missing_app=False):
+                    created=None, missing_app=False, name=None):
     """Create a minimal .xcarchive directory with Info.plist and optional .app."""
-    arc = tmp_path / f"{bundle_id}.xcarchive"
+    arc = tmp_path / (name if name else f"{bundle_id}.xcarchive")
     arc.mkdir()
     (arc / "Products" / "Applications").mkdir(parents=True)
     if not missing_app:
@@ -734,3 +734,100 @@ def test_read_archive_info_returns_none_if_plist_missing_keys(tmp_path):
     with open(arc / "Info.plist", "wb") as f:
         plistlib.dump({"ApplicationProperties": {"CFBundleIdentifier": "com.x"}}, f)
     assert read_archive_info(arc) is None
+
+
+# ---------------------------------------------------------------------------
+# scan_archives / find_matching_archive
+# ---------------------------------------------------------------------------
+
+def test_scan_archives_finds_project_output_and_xcode_archives(tmp_path, monkeypatch):
+    from asc.commands.build_inputs import scan_archives
+
+    # Archive in output_dir (project-local)
+    output_dir = tmp_path / "build"
+    output_dir.mkdir()
+    arc1 = _make_xcarchive(output_dir, name="MyApp.xcarchive",
+                           bundle_id="com.example.app", marketing="2.0", build="10")
+
+    # Archive under XCODE_ARCHIVES_ROOT/<date>/
+    fake_root = tmp_path / "XcodeArchives"
+    date_dir = fake_root / "2026-05-08"
+    date_dir.mkdir(parents=True)
+    arc2 = _make_xcarchive(date_dir, name="MyApp 2026-05-08.xcarchive",
+                           bundle_id="com.example.other", marketing="1.0", build="5")
+
+    monkeypatch.setattr("asc.commands.build_inputs.XCODE_ARCHIVES_ROOT", fake_root)
+
+    results = scan_archives(output_dir=str(output_dir), scheme="MyApp")
+    bundle_ids = {r.bundle_id for r in results}
+    assert "com.example.app" in bundle_ids
+    assert "com.example.other" in bundle_ids
+
+
+def test_scan_archives_ignores_corrupt(tmp_path, monkeypatch):
+    from asc.commands.build_inputs import scan_archives
+
+    output_dir = tmp_path / "build"
+    output_dir.mkdir()
+
+    # Corrupt archive: no Info.plist, no Products
+    corrupt = output_dir / "Bad.xcarchive"
+    corrupt.mkdir()
+
+    fake_root = tmp_path / "XcodeArchives"
+    fake_root.mkdir()
+    monkeypatch.setattr("asc.commands.build_inputs.XCODE_ARCHIVES_ROOT", fake_root)
+
+    results = scan_archives(output_dir=str(output_dir), scheme="Bad")
+    assert results == []
+
+
+def test_find_matching_archive_strict_triple(tmp_path, monkeypatch):
+    from asc.commands.build_inputs import scan_archives, find_matching_archive
+
+    output_dir = tmp_path / "build"
+    output_dir.mkdir()
+    _make_xcarchive(output_dir, name="App.xcarchive",
+                    bundle_id="com.x", marketing="1.0", build="42")
+
+    fake_root = tmp_path / "XcodeArchives"
+    fake_root.mkdir()
+    monkeypatch.setattr("asc.commands.build_inputs.XCODE_ARCHIVES_ROOT", fake_root)
+
+    archives = scan_archives(output_dir=str(output_dir), scheme="App")
+
+    # Exact match
+    assert find_matching_archive(archives, "com.x", "1.0", "42") is not None
+    # Wrong build number
+    assert find_matching_archive(archives, "com.x", "1.0", "99") is None
+    # Wrong marketing version
+    assert find_matching_archive(archives, "com.x", "2.0", "42") is None
+    # Wrong bundle_id
+    assert find_matching_archive(archives, "com.y", "1.0", "42") is None
+
+
+def test_find_matching_archive_returns_newest_when_duplicates(tmp_path, monkeypatch):
+    from asc.commands.build_inputs import scan_archives, find_matching_archive
+
+    output_dir = tmp_path / "build"
+    output_dir.mkdir()
+
+    older_dir = tmp_path / "XcodeArchives" / "2026-05-07"
+    newer_dir = tmp_path / "XcodeArchives" / "2026-05-08"
+    older_dir.mkdir(parents=True)
+    newer_dir.mkdir(parents=True)
+
+    _make_xcarchive(older_dir, name="App.xcarchive",
+                    bundle_id="com.x", marketing="1.0", build="42",
+                    created=datetime(2026, 5, 7, 10, 0, 0, tzinfo=timezone.utc))
+    _make_xcarchive(newer_dir, name="App.xcarchive",
+                    bundle_id="com.x", marketing="1.0", build="42",
+                    created=datetime(2026, 5, 8, 10, 0, 0, tzinfo=timezone.utc))
+
+    fake_root = tmp_path / "XcodeArchives"
+    monkeypatch.setattr("asc.commands.build_inputs.XCODE_ARCHIVES_ROOT", fake_root)
+
+    archives = scan_archives(output_dir=str(output_dir), scheme="App")
+    match = find_matching_archive(archives, "com.x", "1.0", "42")
+    assert match is not None
+    assert match.created == datetime(2026, 5, 8, 10, 0, 0, tzinfo=timezone.utc)

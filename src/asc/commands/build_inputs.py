@@ -484,3 +484,60 @@ def read_archive_info(xcarchive_path) -> Optional[ArchiveInfo]:
         build_number=build_num,
         created=created,
     )
+
+
+XCODE_ARCHIVES_ROOT = Path.home() / "Library" / "Developer" / "Xcode" / "Archives"
+
+
+def scan_archives(output_dir: str, scheme: str) -> List[ArchiveInfo]:
+    """Return all valid .xcarchive bundles, newest first, deduped by resolved path.
+
+    Searches two locations:
+    1. <output_dir>/<scheme>.xcarchive  (project-local build output)
+    2. XCODE_ARCHIVES_ROOT/<YYYY-MM-DD>/*.xcarchive  (Xcode's own archive organiser)
+    """
+    seen: dict = {}
+
+    candidates = []
+
+    # Location 1: project-local output
+    local = Path(output_dir) / f"{scheme}.xcarchive"
+    if local.is_dir():
+        candidates.append(local)
+
+    # Location 2: Xcode Archives organiser
+    root = Path(XCODE_ARCHIVES_ROOT)
+    if root.is_dir():
+        for date_dir in sorted(root.iterdir()):
+            if not date_dir.is_dir():
+                continue
+            for arc in sorted(date_dir.glob("*.xcarchive")):
+                candidates.append(arc)
+
+    for arc in candidates:
+        key = str(arc.resolve())
+        if key in seen:
+            continue
+        info = read_archive_info(arc)
+        if info is None:
+            continue
+        seen[key] = info
+
+    return sorted(seen.values(), key=lambda a: a.created, reverse=True)
+
+
+def find_matching_archive(
+    archives: List[ArchiveInfo],
+    bundle_id: str,
+    marketing_version: str,
+    build_number: str,
+) -> Optional[ArchiveInfo]:
+    """Return the newest archive that matches all three identifiers, or None."""
+    for arc in archives:  # already sorted newest-first
+        if (
+            arc.bundle_id == bundle_id
+            and arc.marketing_version == marketing_version
+            and arc.build_number == build_number
+        ):
+            return arc
+    return None
