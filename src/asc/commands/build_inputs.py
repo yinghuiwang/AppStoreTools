@@ -173,6 +173,44 @@ def detect_bundle_id(project: str, kind: str, scheme: str) -> Optional[str]:
     return None
 
 
+_MARKETING_VERSION_RE = re.compile(r"^\s*MARKETING_VERSION\s*=\s*(\S+)\s*$")
+_CURRENT_PROJECT_VERSION_RE = re.compile(r"^\s*CURRENT_PROJECT_VERSION\s*=\s*(\S+)\s*$")
+
+
+def detect_versions(project: str, kind: str, scheme: str) -> Optional[tuple]:
+    """Return (marketing_version, build_number) from xcodebuild, or None if either is missing.
+
+    Used to match existing .xcarchive bundles against the current source tree.
+    Returns None (rather than raising) when xcodebuild fails or a value is absent,
+    so callers can simply skip archive-reuse in that case.
+    """
+    flag = "-workspace" if kind == "workspace" else "-project"
+    result = subprocess.run(
+        ["xcodebuild", "-showBuildSettings", flag, project, "-scheme", scheme],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        return None
+    marketing = None
+    build_num = None
+    for line in result.stdout.splitlines():
+        if marketing is None:
+            m = _MARKETING_VERSION_RE.match(line)
+            if m:
+                marketing = m.group(1)
+                continue
+        if build_num is None:
+            m = _CURRENT_PROJECT_VERSION_RE.match(line)
+            if m:
+                build_num = m.group(1)
+                continue
+        if marketing and build_num:
+            break
+    if not marketing or not build_num:
+        return None
+    return (marketing, build_num)
+
+
 def validate_cache_entry(field: str, value: str) -> bool:
     """Return False if cached value is no longer usable; True otherwise.
 

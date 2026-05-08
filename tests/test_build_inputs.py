@@ -621,3 +621,50 @@ def test_full_pipeline_e2e_manual_signing(tmp_path, monkeypatch):
     assert r2.certificate == "Apple Distribution: T (T)"
     assert r2.signing == "manual"
     assert r2.bundle_id == "com.example.app"
+
+
+from asc.commands.build_inputs import detect_versions
+
+
+VERSIONS_OUTPUT = """\
+Build settings for action build and target PokeVid:
+    MARKETING_VERSION = 1.2.3
+    PRODUCT_BUNDLE_IDENTIFIER = com.baiyiqi.pokevid
+    CURRENT_PROJECT_VERSION = 45
+"""
+
+
+def test_detect_versions_parses_both(monkeypatch):
+    class FakeRun:
+        returncode = 0
+        stdout = VERSIONS_OUTPUT
+        stderr = ""
+    monkeypatch.setattr(
+        "asc.commands.build_inputs.subprocess.run",
+        lambda *a, **kw: FakeRun(),
+    )
+    assert detect_versions("/x.xcodeproj", "project", "PokeVid") == ("1.2.3", "45")
+
+
+def test_detect_versions_returns_none_when_missing(monkeypatch):
+    class FakeRun:
+        returncode = 0
+        stdout = "Build settings...\n    MARKETING_VERSION = 1.0\n"  # no CURRENT_PROJECT_VERSION
+        stderr = ""
+    monkeypatch.setattr(
+        "asc.commands.build_inputs.subprocess.run",
+        lambda *a, **kw: FakeRun(),
+    )
+    assert detect_versions("/x.xcodeproj", "project", "X") is None
+
+
+def test_detect_versions_returns_none_on_xcodebuild_failure(monkeypatch):
+    class FakeRun:
+        returncode = 1
+        stdout = ""
+        stderr = "err"
+    monkeypatch.setattr(
+        "asc.commands.build_inputs.subprocess.run",
+        lambda *a, **kw: FakeRun(),
+    )
+    assert detect_versions("/x.xcodeproj", "project", "X") is None
