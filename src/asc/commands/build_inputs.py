@@ -107,3 +107,17 @@ def scan_profiles(dirs=None) -> List[ProfileInfo]:
             if info.uuid and info.uuid not in seen:
                 seen[info.uuid] = info
     return list(seen.values())
+
+
+def detect_profiles(bundle_id: str, cert_sha1: Optional[str]) -> List[ProfileInfo]:
+    """Filter discovered profiles by bundle ID, expiration, and (optionally) cert match."""
+    out: List[ProfileInfo] = []
+    for p in scan_profiles():
+        if p.bundle_id != bundle_id:
+            continue
+        if p.is_expired:
+            continue
+        if cert_sha1 is not None and cert_sha1.upper() not in {s.upper() for s in p.cert_sha1s}:
+            continue
+        out.append(p)
+    return out

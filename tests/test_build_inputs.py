@@ -147,3 +147,39 @@ def test_scan_profiles_skips_missing_dirs(tmp_path, monkeypatch):
     missing = tmp_path / "never-created"
     result = scan_profiles(dirs=[missing, existing])
     assert result == []
+
+
+from asc.commands.build_inputs import detect_profiles
+
+
+def _info(name, bundle, expired, sha1s):
+    exp = datetime.now(timezone.utc) + (timedelta(days=-1) if expired else timedelta(days=30))
+    return ProfileInfo(path=f"/p/{name}", uuid=name, name=name, team_id="T",
+                       bundle_id=bundle, expiration=exp, cert_sha1s=sha1s)
+
+
+def test_detect_profiles_filters_bundle_expiry_cert(monkeypatch):
+    pool = [
+        _info("ok",       "com.a", expired=False, sha1s=["AAA", "BBB"]),
+        _info("wrong-bid","com.b", expired=False, sha1s=["AAA"]),
+        _info("expired",  "com.a", expired=True,  sha1s=["AAA"]),
+        _info("no-cert",  "com.a", expired=False, sha1s=["ZZZ"]),
+    ]
+    monkeypatch.setattr("asc.commands.build_inputs.scan_profiles", lambda: pool)
+
+    result = detect_profiles(bundle_id="com.a", cert_sha1="AAA")
+    assert [p.name for p in result] == ["ok"]
+
+
+def test_detect_profiles_no_cert_filter_when_sha1_none(monkeypatch):
+    pool = [_info("a", "com.a", False, ["X"]), _info("b", "com.a", False, ["Y"])]
+    monkeypatch.setattr("asc.commands.build_inputs.scan_profiles", lambda: pool)
+    result = detect_profiles(bundle_id="com.a", cert_sha1=None)
+    assert {p.name for p in result} == {"a", "b"}
+
+
+def test_detect_profiles_case_insensitive_sha1(monkeypatch):
+    pool = [_info("ok", "com.a", False, ["aabbcc"])]
+    monkeypatch.setattr("asc.commands.build_inputs.scan_profiles", lambda: pool)
+    result = detect_profiles(bundle_id="com.a", cert_sha1="AABBCC")
+    assert len(result) == 1
