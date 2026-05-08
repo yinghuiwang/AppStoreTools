@@ -360,11 +360,18 @@ def test_cmd_release_non_macos():
 def test_release_calls_build_and_deploy(tmp_path, monkeypatch):
     """asc release calls build_core then deploy_core."""
     from asc.commands import build as build_mod
+    from asc.commands.build_inputs import ResolvedInputs
     monkeypatch.chdir(tmp_path)
     ws = tmp_path / "MyApp.xcworkspace"
     ws.mkdir()
 
-    with patch.object(build_mod, "build_core", return_value="/tmp/MyApp.ipa") as mock_build, \
+    fake_resolved = _resolved(
+        project_path=str(ws), project_kind="workspace",
+        scheme="MyApp", destination="testflight",
+    )
+
+    with patch.object(build_mod, "prepare_build_inputs", return_value=fake_resolved), \
+         patch.object(build_mod, "build_core", return_value="/tmp/MyApp.ipa") as mock_build, \
          patch.object(build_mod, "deploy_core") as mock_deploy, \
          patch.object(build_mod, "sys") as mock_sys:
         mock_sys.platform = "darwin"
@@ -373,6 +380,7 @@ def test_release_calls_build_and_deploy(tmp_path, monkeypatch):
             "--project", str(ws),
             "--scheme", "MyApp",
             "--destination", "testflight",
+            "--no-interactive",
         ])
 
     assert mock_build.called
@@ -385,3 +393,58 @@ def test_asc_help_shows_build_deploy_release():
     assert "build" in result.output
     assert "deploy" in result.output
     assert "release" in result.output
+
+
+def test_cmd_build_calls_prepare_build_inputs(monkeypatch, tmp_path):
+    """Verifies cmd_build goes through prepare_build_inputs and passes --no-interactive."""
+    captured = {}
+    from asc.commands.build_inputs import ResolvedInputs
+
+    def fake_prepare(cli, config, *, interactive):
+        captured["interactive"] = interactive
+        captured["cli"] = cli
+        return ResolvedInputs(
+            project_path=str(tmp_path / "x.xcodeproj"), project_kind="project",
+            scheme="X", bundle_id="com.x", signing="auto",
+            certificate=None, profile=None, destination="appstore",
+        )
+
+    monkeypatch.setattr("asc.commands.build.prepare_build_inputs", fake_prepare)
+    monkeypatch.setattr("asc.commands.build.build_core", lambda *a, **kw: None)
+    # Bypass macOS gate for test
+    monkeypatch.setattr("asc.commands.build._require_macos", lambda: None)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["build", "--no-interactive", "--dry-run"])
+    assert result.exit_code == 0, result.output
+    assert captured["interactive"] is False
+
+
+def test_cmd_build_passes_cli_signing_and_profile(monkeypatch, tmp_path):
+    """Verifies CLI flags flow into BuildInputsCLI correctly."""
+    captured = {}
+    from asc.commands.build_inputs import ResolvedInputs
+
+    def fake_prepare(cli, config, *, interactive):
+        captured["cli"] = cli
+        return ResolvedInputs(
+            project_path=str(tmp_path / "x.xcodeproj"), project_kind="project",
+            scheme="X", bundle_id="com.x", signing="manual",
+            certificate="C", profile="/p", destination="appstore",
+        )
+
+    monkeypatch.setattr("asc.commands.build.prepare_build_inputs", fake_prepare)
+    monkeypatch.setattr("asc.commands.build.build_core", lambda *a, **kw: None)
+    monkeypatch.setattr("asc.commands.build._require_macos", lambda: None)
+
+    runner = CliRunner()
+    result = runner.invoke(app, [
+        "build", "--no-interactive", "--dry-run",
+        "--signing", "manual",
+        "--profile", "/some/path.mobileprovision",
+        "--certificate", "Apple Distribution: foo",
+    ])
+    assert result.exit_code == 0, result.output
+    assert captured["cli"].signing == "manual"
+    assert captured["cli"].profile == "/some/path.mobileprovision"
+    assert captured["cli"].certificate == "Apple Distribution: foo"

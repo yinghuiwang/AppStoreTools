@@ -228,8 +228,54 @@ def _pick_one(
         typer.echo(f"❌ 无效编号，请输入 1-{len(items)}")
 
 
-# Re-export helpers from build.py so they can be monkeypatched via this module.
-from asc.commands.build import detect_project, list_schemes  # noqa: E402
+def detect_project(path: str) -> tuple[str, str]:
+    """Return (project_path, kind) where kind is 'workspace' or 'project'.
+
+    If path points directly to a .xcworkspace or .xcodeproj, return it.
+    Otherwise search the directory for one, preferring .xcworkspace.
+    """
+    p = Path(path)
+
+    if p.suffix == ".xcworkspace":
+        return str(p), "workspace"
+    if p.suffix == ".xcodeproj":
+        return str(p), "project"
+
+    # Search directory
+    workspaces = list(p.glob("*.xcworkspace"))
+    if workspaces:
+        return str(workspaces[0]), "workspace"
+
+    projects = list(p.glob("*.xcodeproj"))
+    if projects:
+        return str(projects[0]), "project"
+
+    raise ValueError(f"No Xcode project or workspace found in: {path}")
+
+
+def list_schemes(project_path: str, kind: str) -> list[str]:
+    """Return list of scheme names from xcodebuild -list."""
+    flag = "-workspace" if kind == "workspace" else "-project"
+    result = subprocess.run(
+        ["xcodebuild", flag, project_path, "-list"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"xcodebuild -list failed:\n{result.stderr}")
+
+    schemes: list[str] = []
+    in_schemes = False
+    for line in result.stdout.splitlines():
+        stripped = line.strip()
+        if stripped == "Schemes:":
+            in_schemes = True
+            continue
+        if in_schemes:
+            if stripped and not stripped.endswith(":"):
+                schemes.append(stripped)
+            elif stripped.endswith(":") and stripped != "Schemes:":
+                break
+    return schemes
 
 
 def prepare_build_inputs(

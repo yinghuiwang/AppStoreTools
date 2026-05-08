@@ -1,6 +1,6 @@
 """Build, deploy, and release commands for asc CLI."""
 from __future__ import annotations
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
 import plistlib
 import subprocess
@@ -13,8 +13,12 @@ from asc.config import Config
 from asc.guard import Guard, GuardViolationError
 from asc.i18n import t, HELP
 
-if TYPE_CHECKING:
-    from asc.commands.build_inputs import ResolvedInputs
+from asc.commands.build_inputs import (
+    BuildInputsCLI,
+    prepare_build_inputs,
+    resolve_interactive,
+    ResolvedInputs,
+)
 
 
 def _require_macos() -> None:
@@ -264,6 +268,10 @@ def cmd_build(
     destination: Optional[str] = typer.Option(None, "--destination", help=t(HELP['destination'])),
     app: Optional[str] = typer.Option(None, "--app", "-a", help=t(HELP['app_profile_name'])),
     dry_run: bool = typer.Option(False, "--dry-run", "-d", help=t(HELP['preview_command'])),
+    interactive: Optional[bool] = typer.Option(
+        None, "--interactive/--no-interactive",
+        help="强制开/关交互；不传则按 TTY 自动判断",
+    ),
 ):
     """构建 Xcode 项目并导出 .ipa 文件。
 
@@ -275,17 +283,29 @@ def cmd_build(
     """
     _require_macos()
     config = Config(app)
-    ipa = build_core(
-        project=project or config.build_project,
-        scheme=scheme or config.build_scheme,
-        configuration=configuration or "Release",
-        output=output or config.build_output,
-        signing=signing or config.build_signing,
-        profile=profile,
-        certificate=certificate,
-        destination=destination or "appstore",
-        dry_run=dry_run,
+    cli = BuildInputsCLI(
+        project=project, scheme=scheme, signing=signing,
+        profile=profile, certificate=certificate, destination=destination,
     )
+    try:
+        resolved = prepare_build_inputs(
+            cli, config, interactive=resolve_interactive(interactive),
+        )
+    except RuntimeError as e:
+        typer.echo(f"❌ {e}", err=True)
+        raise typer.Exit(1)
+
+    try:
+        ipa = build_core(
+            resolved,
+            output=output or config.build_output,
+            configuration=configuration or "Release",
+            dry_run=dry_run,
+        )
+    except RuntimeError as e:
+        typer.echo(f"❌ {e}", err=True)
+        raise typer.Exit(1)
+
     if ipa:
         typer.echo(f"\n✅ 构建完成: {ipa}")
 
@@ -410,6 +430,10 @@ def cmd_release(
     output: Optional[str] = typer.Option(None, "--output", "-o", help=t(HELP['output_dir'])),
     app: Optional[str] = typer.Option(None, "--app", "-a", help=t(HELP['app_profile_name'])),
     dry_run: bool = typer.Option(False, "--dry-run", "-d", help=t(HELP['preview_without_execute'])),
+    interactive: Optional[bool] = typer.Option(
+        None, "--interactive/--no-interactive",
+        help="强制开/关交互；不传则按 TTY 自动判断",
+    ),
 ):
     """一键构建并发布到 TestFlight 或 App Store。
 
@@ -438,26 +462,35 @@ def cmd_release(
     key_id = config.key_id
     key_file = config.key_file
 
+    # Release defaults to testflight if nothing is specified anywhere
+    effective_destination = destination or config.build_destination or "testflight"
+    cli = BuildInputsCLI(
+        project=project, scheme=scheme, signing=signing,
+        profile=profile, certificate=certificate,
+        destination=effective_destination,
+    )
+    try:
+        resolved = prepare_build_inputs(
+            cli, config, interactive=resolve_interactive(interactive),
+        )
+    except RuntimeError as e:
+        typer.echo(f"❌ {e}", err=True)
+        raise typer.Exit(1)
+
     try:
         ipa_path = build_core(
-            project=project or config.build_project,
-            scheme=scheme or config.build_scheme,
-            configuration="Release",
+            resolved,
             output=output or config.build_output,
-            signing=signing or config.build_signing,
-            profile=profile,
-            certificate=certificate,
-            destination=destination or "testflight",
+            configuration="Release",
             dry_run=dry_run,
         )
-
         if ipa_path:
             deploy_core(
                 ipa_path=ipa_path,
                 issuer_id=issuer_id or "",
                 key_id=key_id or "",
                 key_file=key_file or "",
-                destination=destination or "testflight",
+                destination=resolved.destination,
                 dry_run=dry_run,
             )
     except RuntimeError as e:
