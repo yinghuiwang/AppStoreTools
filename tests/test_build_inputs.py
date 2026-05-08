@@ -581,3 +581,43 @@ def test_resolve_interactive_defaults_to_tty(monkeypatch):
     assert resolve_interactive(None) is True
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
     assert resolve_interactive(None) is False
+
+
+def test_full_pipeline_e2e_manual_signing(tmp_path, monkeypatch):
+    """First run resolves + caches; second run uses cache (detection broken on purpose)."""
+    _patch_detection(monkeypatch)
+    cfg = _make_config(monkeypatch, tmp_path)
+
+    cli = BuildInputsCLI(signing="manual")
+    r1 = prepare_build_inputs(cli, cfg, interactive=False)
+    assert r1.profile == "/p/x.mobileprovision"
+    assert r1.certificate == "Apple Distribution: T (T)"
+    assert r1.bundle_id == "com.example.app"
+
+    # Now break detect_profiles so we know second run is using cache only
+    monkeypatch.setattr("asc.commands.build_inputs.detect_profiles",
+                        lambda *a, **kw: [])
+
+    # Cache validation calls parse_mobileprovision and Path.exists.
+    # Make the cached profile pass validation:
+    valid = ProfileInfo(
+        path="/p/x.mobileprovision", uuid="U", name="P", team_id="T",
+        bundle_id="com.example.app",
+        expiration=datetime.now(timezone.utc) + timedelta(days=30),
+        cert_sha1s=["AAA"],
+    )
+    monkeypatch.setattr("asc.commands.build_inputs.parse_mobileprovision",
+                        lambda _: valid)
+    # validate_cache_entry("profile", ...) calls Path(value).exists() — patch it.
+    real_exists = Path.exists
+    monkeypatch.setattr(
+        Path, "exists",
+        lambda self: True if str(self) == "/p/x.mobileprovision" else real_exists(self),
+    )
+
+    cfg2 = Config()
+    r2 = prepare_build_inputs(BuildInputsCLI(), cfg2, interactive=False)
+    assert r2.profile == "/p/x.mobileprovision"
+    assert r2.certificate == "Apple Distribution: T (T)"
+    assert r2.signing == "manual"
+    assert r2.bundle_id == "com.example.app"
