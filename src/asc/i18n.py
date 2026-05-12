@@ -343,6 +343,27 @@ HELP = {
         'en': 'Detected configured app profile: {app_name}',
         'zh': '检测到已配置的 App：{app_name}'
     },
+    # Local config detection
+    'no_app_select_prompt': {
+        'en': '⚠️  No --app specified, please select a config:',
+        'zh': '⚠️  未指定 --app，请选择配置：'
+    },
+    'local_config_detected': {
+        'en': 'Detected AppStore/ directory config',
+        'zh': '检测到 AppStore/ 目录配置'
+    },
+    'local_config_use_once': {
+        'en': 'Use once (do not save profile)',
+        'zh': '仅本次使用（不保存 profile）'
+    },
+    'local_config_import': {
+        'en': 'Import as new app profile',
+        'zh': '导入为新的 app profile'
+    },
+    'local_config_cancel': {
+        'en': 'Cancel',
+        'zh': '取消'
+    },
 }
 
 _COMPLETION_INSTALL = {
