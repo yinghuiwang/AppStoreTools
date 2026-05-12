@@ -10,7 +10,7 @@ import typer
 
 from asc.config import Config
 from asc.guard import Guard, GuardViolationError
-from asc.utils import make_api_from_config
+from asc.utils import make_api_from_config, resolve_app_profile
 from asc.i18n import t, HELP
 
 
@@ -202,6 +202,8 @@ def cmd_iap(
     """
     from asc.commands.subscriptions import _upload_subscriptions_core
 
+    config = Config(app)
+    app = resolve_app_profile(app, config)
     config = Config(app)
     guard = Guard()
     if guard.is_enabled():

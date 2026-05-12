@@ -3,10 +3,18 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
-from asc.utils import extract_locale, md5_of_file, parse_csv, resolve_locale
+from asc.utils import (
+    extract_locale,
+    is_interactive,
+    list_valid_profiles,
+    md5_of_file,
+    parse_csv,
+    resolve_locale,
+)
 
 
 # ── extract_locale ──
@@ -108,3 +116,28 @@ def test_md5_of_file(tmp_path):
     f.write_bytes(data)
     expected = hashlib.md5(data).hexdigest()
     assert md5_of_file(f) == expected
+
+
+# ── is_interactive ──
+
+def test_is_interactive_returns_bool():
+    """is_interactive should return a boolean"""
+    result = is_interactive()
+    assert isinstance(result, bool)
+
+
+# ── list_valid_profiles ──
+
+def test_list_valid_profiles_filters_incomplete():
+    """list_valid_profiles should only return profiles with complete credentials"""
+    mock_config = MagicMock()
+    mock_config.list_apps.return_value = ["app1", "app2", "app3"]
+    mock_config.get_app_profile.side_effect = [
+        {"issuer_id": "abc", "key_id": "def", "key_file": "/path", "app_id": "1"},
+        {"issuer_id": "abc", "key_id": "def", "app_id": "2"},  # missing key_file
+        {"issuer_id": "abc", "key_id": "def", "key_file": "/path", "app_id": "3"},
+    ]
+    result = list_valid_profiles(mock_config)
+    assert len(result) == 2
+    assert result[0][0] == "app1"
+    assert result[1][0] == "app3"

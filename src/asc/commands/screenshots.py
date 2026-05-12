@@ -13,7 +13,7 @@ from PIL import Image
 from asc.config import Config
 from asc.constants import DISPLAY_TYPE_BY_SIZE, SCREENSHOT_FOLDER_TO_LOCALE
 from asc.guard import Guard, GuardViolationError
-from asc.utils import make_api_from_config, resolve_locale, md5_of_file
+from asc.utils import make_api_from_config, resolve_app_profile, resolve_locale, md5_of_file
 from asc.i18n import t, HELP
 
 
@@ -236,6 +236,8 @@ def cmd_screenshots(
         asc --app myapp screenshots --display-type APP_IPHONE_67
         asc --app myapp screenshots --screenshots ./custom_screenshots/ --display-type APP_IPHONE_67
     """
+    config = Config(app)
+    app = resolve_app_profile(app, config)
     config = Config(app)
     guard = Guard()
     if guard.is_enabled():

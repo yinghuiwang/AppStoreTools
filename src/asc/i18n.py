@@ -304,6 +304,45 @@ HELP = {
         'en': 'Uninstall asc-appstore-tools from this system.',
         'zh': '从系统中卸载 asc-appstore-tools。',
     },
+    # App profile prompts
+    'profile_select_title': {
+        'en': 'Select an app profile to use:',
+        'zh': '请选择要使用的 App 配置：'
+    },
+    'profile_select_prompt': {
+        'en': 'Enter your choice',
+        'zh': '请输入选择'
+    },
+    'profile_invalid_choice': {
+        'en': 'Invalid choice. Please try again.',
+        'zh': '无效的选择，请重试。'
+    },
+    'profile_no_app_error': {
+        'en': 'No --app specified and no default_app configured.\n'
+              'Please use --app or set ASC_APP environment variable.',
+        'zh': '未指定 --app 且未配置 default_app。\n'
+              '请使用 --app 或设置 ASC_APP 环境变量。'
+    },
+    'profile_non_interactive_error': {
+        'en': 'Non-interactive environment detected. Please use --app or set ASC_APP environment variable.',
+        'zh': '检测到非交互式环境，请使用 --app 或设置 ASC_APP 环境变量。'
+    },
+    'profile_incomplete_error': {
+        'en': '{app_name} is missing required credentials (issuer_id, key_id, key_file).\n'
+              'Please run "asc app edit {app_name}" to fix.',
+        'zh': '{app_name} 缺少必要的凭证信息（issuer_id, key_id, key_file）。\n'
+              '请先运行 "asc app edit {app_name}" 补充配置。'
+    },
+    'profile_no_profiles_error': {
+        'en': 'No app profiles configured.\n'
+              'Please run "asc app add <name>" to add a profile, or "asc init" in your project root.',
+        'zh': '未检测到任何 App 配置。\n'
+              '请先运行 "asc app add <name>" 添加配置，或在项目根目录运行 "asc init"。'
+    },
+    'profile_detected': {
+        'en': 'Detected configured app profile: {app_name}',
+        'zh': '检测到已配置的 App：{app_name}'
+    },
 }
 
 _COMPLETION_INSTALL = {

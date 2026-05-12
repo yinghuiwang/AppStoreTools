@@ -9,7 +9,7 @@ import typer
 
 from asc.config import Config
 from asc.guard import Guard, GuardViolationError
-from asc.utils import make_api_from_config, resolve_locale
+from asc.utils import make_api_from_config, resolve_app_profile, resolve_locale
 from asc.i18n import t, HELP
 
 
@@ -103,6 +103,8 @@ def cmd_whats_new(
         typer.echo("❌ 请指定 --text 或 --file", err=True)
         raise typer.Exit(1)
 
+    config = Config(app)
+    app = resolve_app_profile(app, config)
     config = Config(app)
     guard = Guard()
     if guard.is_enabled():

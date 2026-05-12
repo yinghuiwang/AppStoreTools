@@ -13,6 +13,7 @@ from asc.config import Config
 from asc.guard import Guard, GuardViolationError
 from asc.i18n import t, HELP
 from asc.progress import Spinner
+from asc.utils import resolve_app_profile
 
 from asc.commands.build_inputs import (
     BuildInputsCLI,
@@ -285,6 +286,8 @@ def cmd_build(
     """
     _require_macos()
     config = Config(app)
+    app = resolve_app_profile(app, config)
+    config = Config(app)
     cli = BuildInputsCLI(
         project=project, scheme=scheme, signing=signing,
         profile=profile, certificate=certificate, destination=destination,
@@ -397,6 +400,8 @@ def cmd_deploy(
     """
     _require_macos()
     config = Config(app)
+    app = resolve_app_profile(app, config)
+    config = Config(app)
     guard = Guard()
     if guard.is_enabled():
         try:
@@ -465,6 +470,8 @@ def cmd_release(
         asc release --dry-run
     """
     _require_macos()
+    config = Config(app)
+    app = resolve_app_profile(app, config)
     config = Config(app)
     guard = Guard()
     if guard.is_enabled():

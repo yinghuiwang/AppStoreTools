@@ -9,7 +9,7 @@ import typer
 
 from asc.config import Config
 from asc.guard import Guard, GuardViolationError
-from asc.utils import make_api_from_config, parse_csv, resolve_locale
+from asc.utils import make_api_from_config, parse_csv, resolve_locale, resolve_app_profile
 from asc.i18n import t, HELP
 
 
@@ -314,6 +314,8 @@ def cmd_upload(
     from asc.commands.screenshots import _upload_screenshots_core
 
     config = Config(app)
+    app = resolve_app_profile(app, config)
+    config = Config(app)
     guard = Guard()
     if guard.is_enabled():
         try:
@@ -363,6 +365,8 @@ def cmd_metadata(
         asc --app myapp metadata --csv custom.csv --dry-run
     """
     config = Config(app)
+    app = resolve_app_profile(app, config)
+    config = Config(app)
     guard = Guard()
     if guard.is_enabled():
         try:
@@ -399,6 +403,8 @@ def cmd_keywords(
         asc --app myapp keywords
         asc --app myapp keywords --dry-run
     """
+    config = Config(app)
+    app = resolve_app_profile(app, config)
     config = Config(app)
     guard = Guard()
     if guard.is_enabled():
@@ -438,6 +444,8 @@ def cmd_support_url(
         asc --app myapp support-url
         asc --app myapp support-url --dry-run
     """
+    config = Config(app)
+    app = resolve_app_profile(app, config)
     config = Config(app)
     guard = Guard()
     if guard.is_enabled():
@@ -483,6 +491,8 @@ def cmd_marketing_url(
         asc --app myapp marketing-url --dry-run
     """
     config = Config(app)
+    app = resolve_app_profile(app, config)
+    config = Config(app)
     guard = Guard()
     if guard.is_enabled():
         try:
@@ -526,6 +536,8 @@ def cmd_privacy_policy_url(
         asc --app myapp privacy-policy-url
         asc --app myapp privacy-policy-url --dry-run
     """
+    config = Config(app)
+    app = resolve_app_profile(app, config)
     config = Config(app)
     guard = Guard()
     if guard.is_enabled():
@@ -575,6 +587,8 @@ def cmd_set_support_url(
         asc --app myapp set-support-url --text "https://example.com/support" --dry-run
     """
     config = Config(app)
+    app = resolve_app_profile(app, config)
+    config = Config(app)
     guard = Guard()
     if guard.is_enabled():
         try:
@@ -611,6 +625,8 @@ def cmd_set_marketing_url(
         asc --app myapp set-marketing-url --text "https://example.com"
         asc --app myapp set-marketing-url --text "https://example.com" --locales en-US,zh-CN
     """
+    config = Config(app)
+    app = resolve_app_profile(app, config)
     config = Config(app)
     guard = Guard()
     if guard.is_enabled():
@@ -649,6 +665,8 @@ def cmd_set_privacy_policy_url(
         asc --app myapp set-privacy-policy-url --text "https://example.com/privacy" --locales en-US
     """
     config = Config(app)
+    app = resolve_app_profile(app, config)
+    config = Config(app)
     guard = Guard()
     if guard.is_enabled():
         try:
@@ -686,6 +704,8 @@ def cmd_check(
     Example:
         asc --app myapp check
     """
+    config = Config(app)
+    app = resolve_app_profile(app, config)
     config = Config(app)
     api, app_id = make_api_from_config(config)
     print("\n🔐 验证 API 连接...")
