@@ -26,7 +26,11 @@ class Config:
         self._global_dir = Path.home() / ".config" / "asc"
         self._local_dir = Path.cwd() / ".asc"
         self._data: dict[str, Any] = {}
-        self._load()
+        # If __local__ sentinel with a config path, load from .env directly
+        if self.app_name == "__local__" and os.getenv("_ASC_LOCAL_CONFIG_PATH"):
+            self._load_from_local_env(Path(os.getenv("_ASC_LOCAL_CONFIG_PATH")))
+        else:
+            self._load()
 
     def _load_toml(self, path: Path) -> dict:
         if tomllib is None:
@@ -35,6 +39,19 @@ class Config:
             )
         with open(path, "rb") as f:
             return tomllib.load(f)
+
+    def _load_from_local_env(self, env_path: Path) -> None:
+        """Load credentials from a local .env file (for 'use once' local config)."""
+        if env_path.exists():
+            load_dotenv(env_path, override=True)
+        self._data = {
+            "credentials": {
+                "issuer_id": os.getenv("ISSUER_ID", ""),
+                "key_id": os.getenv("KEY_ID", ""),
+                "key_file": os.getenv("KEY_FILE", ""),
+                "app_id": os.getenv("APP_ID", ""),
+            }
+        }
 
     def _load(self):
         # Load from environment variables (lowest priority)

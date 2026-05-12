@@ -141,3 +141,23 @@ def test_list_valid_profiles_filters_incomplete():
     assert len(result) == 2
     assert result[0][0] == "app1"
     assert result[1][0] == "app3"
+
+
+# ── Config _ASC_LOCAL_CONFIG_PATH ──
+
+
+def test_config_loads_from_local_env_path(tmp_path, monkeypatch):
+    """当 _ASC_LOCAL_CONFIG_PATH 设置时，Config 从该路径加载 .env"""
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        'ISSUER_ID=env-issuer\nKEY_ID=env-key\nKEY_FILE=/tmp/key.p8\nAPP_ID=123456\n',
+        encoding="utf-8"
+    )
+    monkeypatch.setenv("_ASC_LOCAL_CONFIG_PATH", str(env_file))
+    monkeypatch.delenv("ISSUER_ID", raising=False)
+
+    from asc.config import Config
+    cfg = Config(app_name="__local__")
+    assert cfg.issuer_id == "env-issuer"
+    assert cfg.key_id == "env-key"
+    assert cfg.app_id == "123456"
