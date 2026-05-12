@@ -37,7 +37,13 @@ def cmd_app_add(
 
     issuer_id = typer.prompt("  Issuer ID")
     key_id = typer.prompt("  Key ID")
-    key_file_input = typer.prompt("  Path to .p8 private key file")
+    key_file_input = ""
+    while True:
+        key_file_input = typer.prompt("  Path to .p8 private key file")
+        key_path = Path(key_file_input.strip().strip("'\"")).expanduser()
+        if key_path.exists():
+            break
+        typer.echo(f"❌ 文件不存在，请重新输入: {key_path}", err=True)
     app_id = typer.prompt("  App ID (numeric)")
 
     typer.echo("\nEnter default data paths (press Enter to use defaults):")
@@ -47,13 +53,6 @@ def cmd_app_add(
     screenshots_path = typer.prompt(
         "  Screenshots directory", default="data/screenshots"
     )
-
-    # Strip quotes and whitespace from path input
-    key_file_clean = key_file_input.strip().strip("'\"")
-    key_path = Path(key_file_clean).expanduser()
-    if not key_path.exists():
-        typer.echo(f"❌ Key file not found: {key_path}", err=True)
-        raise typer.Exit(1)
 
     global_keys_dir = Path.home() / ".config" / "asc" / "keys"
     global_keys_dir.mkdir(parents=True, exist_ok=True)
@@ -193,7 +192,15 @@ def cmd_app_edit(
 
     issuer_id = typer.prompt("  Issuer ID", default=profile["issuer_id"])
     key_id = typer.prompt("  Key ID", default=profile["key_id"])
-    key_file_input = typer.prompt("  Path to .p8 private key file", default=profile["key_file"])
+    key_file_input = ""
+    while True:
+        key_file_input = typer.prompt("  Path to .p8 private key file", default=profile["key_file"])
+        if key_file_input == profile["key_file"]:
+            break
+        key_path = Path(key_file_input.strip().strip("'\"")).expanduser()
+        if key_path.exists():
+            break
+        typer.echo(f"❌ 文件不存在，请重新输入: {key_path}", err=True)
     app_id = typer.prompt("  App ID (numeric)", default=profile["app_id"])
     csv_path = typer.prompt("  CSV metadata file path", default=profile["csv"])
     screenshots_path = typer.prompt("  Screenshots directory", default=profile["screenshots"])
@@ -374,8 +381,10 @@ def _do_import_from_env(
     if not env_file.exists():
         raise FileNotFoundError(f"❌ 未找到配置文件：{env_file}")
 
+    # AppStore/Config/.env -> project_root = AppStore/Config/.env.parent.parent.parent
+    # i.e., AppStore/ -> project root (ios_test)
     if project_root is None:
-        project_root = env_file.parent.parent  # AppStore/Config/.env -> project root
+        project_root = env_file.parent.parent.parent
 
     # 解析 .env（仅读取不 load_dotenv 以避免污染进程环境）
     env_vars: dict[str, str] = {}
@@ -403,7 +412,8 @@ def _do_import_from_env(
     # 处理 KEY_FILE：纯文件名则在 AppStore/Config/ 下查找
     key_path = Path(key_file_val).expanduser()
     if not key_path.is_absolute():
-        key_path = project_root / "AppStore" / "Config" / key_file_val
+        # env_file is at AppStore/Config/.env, so env_file.parent is AppStore/Config
+        key_path = env_file.parent / key_file_val
     if not key_path.exists():
         raise FileNotFoundError(f"❌ 找不到 .p8 密钥文件：{key_path}")
 

@@ -44,11 +44,17 @@ class Config:
         """Load credentials from a local .env file (for 'use once' local config)."""
         if env_path.exists():
             load_dotenv(env_path, override=True)
+        # Resolve key_file relative to the .env file's directory
+        key_file = os.getenv("KEY_FILE", "")
+        if key_file:
+            key_file_path = Path(key_file)
+            if not key_file_path.is_absolute():
+                key_file = str((env_path.parent / key_file).resolve())
         self._data = {
             "credentials": {
                 "issuer_id": os.getenv("ISSUER_ID", ""),
                 "key_id": os.getenv("KEY_ID", ""),
-                "key_file": os.getenv("KEY_FILE", ""),
+                "key_file": key_file,
                 "app_id": os.getenv("APP_ID", ""),
             },
             "defaults": {

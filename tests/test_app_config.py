@@ -186,8 +186,8 @@ def test_cmd_app_edit_new_key_file_is_copied(tmp_path):
     assert expected_dest.read_text() == "fake key content"
 
 
-def test_cmd_app_edit_new_key_file_not_found_exits_1(tmp_path):
-    """When user provides a non-existent key file path, exit with code 1."""
+def test_cmd_app_edit_new_key_file_not_found_reprompts(tmp_path):
+    """When user provides a non-existent key file path, re-prompt until valid input is given."""
     profile_data = {
         "issuer_id": "ISS-1",
         "key_id": "KID-1",
@@ -196,13 +196,20 @@ def test_cmd_app_edit_new_key_file_not_found_exits_1(tmp_path):
         "csv": "data/appstore_info.csv",
         "screenshots": "data/screenshots",
     }
-    user_input = "\n\n/nonexistent/key.p8\n\n\n\n"
+    new_key = tmp_path / "NewKey.p8"
+    new_key.write_text("fake key content")
+
+    # First enter invalid path, then valid key path, then rest of defaults
+    user_input = f"\n\n/nonexistent/key.p8\n{new_key}\n\n\n\n"
 
     with patch("asc.commands.app_config.Config") as MockConfig:
         mock_cfg = MagicMock()
         mock_cfg.get_app_profile.return_value = profile_data
+        mock_cfg._global_dir = tmp_path
         MockConfig.return_value = mock_cfg
 
         result = runner.invoke(app, ["app", "edit", "myapp"], input=user_input)
 
-    assert result.exit_code == 1
+    assert result.exit_code == 0
+    # Verify re-prompt error message appeared
+    assert "文件不存在" in result.output
