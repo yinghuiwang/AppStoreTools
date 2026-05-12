@@ -161,3 +161,69 @@ def test_config_loads_from_local_env_path(tmp_path, monkeypatch):
     assert cfg.issuer_id == "env-issuer"
     assert cfg.key_id == "env-key"
     assert cfg.app_id == "123456"
+
+
+# ── detect_local_app_config ──
+
+def test_detect_local_app_config_finds_env(tmp_path):
+    """检测到 AppStore/Config/.env 时返回凭证 dict"""
+    appstore = tmp_path / "AppStore"
+    config_dir = appstore / "Config"
+    config_dir.mkdir(parents=True)
+    env_file = config_dir / ".env"
+    env_file.write_text(
+        "ISSUER_ID=abc\nKEY_ID=def\nKEY_FILE=key.p8\nAPP_ID=123\n",
+        encoding="utf-8"
+    )
+    (appstore / "data" / "screenshots").mkdir(parents=True)
+
+    from asc.utils import detect_local_app_config
+    result = detect_local_app_config(tmp_path)
+    assert result is not None
+    assert result["issuer_id"] == "abc"
+    assert result["key_id"] == "def"
+    assert result["app_id"] == "123"
+    assert result["project_name"] == tmp_path.name
+    assert result["screenshots_path"] == str(appstore / "data" / "screenshots")
+
+
+def test_detect_local_app_config_missing_env_returns_none(tmp_path):
+    """没有 AppStore/Config/.env 时返回 None"""
+    from asc.utils import detect_local_app_config
+    result = detect_local_app_config(tmp_path)
+    assert result is None
+
+
+def test_is_local_config_imported_true(tmp_path):
+    """.env 凭证与已有 profile 一致时返回 True"""
+    from asc.utils import detect_local_app_config, is_local_config_imported
+    appstore = tmp_path / "AppStore"
+    config_dir = appstore / "Config"
+    config_dir.mkdir(parents=True)
+    (config_dir / ".env").write_text(
+        "ISSUER_ID=abc\nKEY_ID=def\nKEY_FILE=key.p8\nAPP_ID=123\n",
+        encoding="utf-8"
+    )
+    local = detect_local_app_config(tmp_path)
+    existing = [
+        {"issuer_id": "abc", "key_id": "def", "app_id": "123"},
+        {"issuer_id": "xyz", "key_id": "other", "app_id": "456"},
+    ]
+    assert is_local_config_imported(local, existing) is True
+
+
+def test_is_local_config_imported_false(tmp_path):
+    """.env 凭证与任何 profile 都不一致时返回 False"""
+    from asc.utils import detect_local_app_config, is_local_config_imported
+    appstore = tmp_path / "AppStore"
+    config_dir = appstore / "Config"
+    config_dir.mkdir(parents=True)
+    (config_dir / ".env").write_text(
+        "ISSUER_ID=abc\nKEY_ID=def\nKEY_FILE=key.p8\nAPP_ID=123\n",
+        encoding="utf-8"
+    )
+    local = detect_local_app_config(tmp_path)
+    existing = [
+        {"issuer_id": "xyz", "key_id": "other", "app_id": "456"},
+    ]
+    assert is_local_config_imported(local, existing) is False

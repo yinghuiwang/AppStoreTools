@@ -206,3 +206,58 @@ def make_api_from_config(config, app_id_override: Optional[str] = None):
         raise typer.Exit(1)
 
     return AppStoreConnectAPI(issuer_id, key_id, key_file), app_id
+
+
+def detect_local_app_config(project_root: Path) -> Optional[dict]:
+    """检测项目本地 AppStore/Config/.env 配置。
+
+    Returns:
+        dict with keys: issuer_id, key_id, key_file, app_id, project_name,
+        screenshots_path, csv_path, iap_path, env_file_path
+        或 None（如果 .env 不存在或不完整）
+    """
+    env_file = project_root / "AppStore" / "Config" / ".env"
+    if not env_file.exists():
+        return None
+
+    env_vars: dict[str, str] = {}
+    for line in env_file.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        v = v.strip().strip("'\"")
+        env_vars[k.strip()] = v
+
+    required = ["ISSUER_ID", "KEY_ID", "KEY_FILE", "APP_ID"]
+    if not all(env_vars.get(k) for k in required):
+        return None
+
+    data_dir = project_root / "AppStore" / "data"
+    screenshots_path = str(data_dir / "screenshots") if (data_dir / "screenshots").exists() else ""
+    csv_path = str(data_dir / "appstore_info.csv") if (data_dir / "appstore_info.csv").exists() else ""
+    iap_path = str(data_dir / "iap_packages.json") if (data_dir / "iap_packages.json").exists() else ""
+
+    return {
+        "issuer_id": env_vars.get("ISSUER_ID", ""),
+        "key_id": env_vars.get("KEY_ID", ""),
+        "key_file": env_vars.get("KEY_FILE", ""),
+        "app_id": env_vars.get("APP_ID", ""),
+        "project_name": project_root.name,
+        "screenshots_path": screenshots_path,
+        "csv_path": csv_path,
+        "iap_path": iap_path,
+        "env_file_path": str(env_file),
+    }
+
+
+def is_local_config_imported(local_config: Optional[dict], existing_profiles: list[dict]) -> bool:
+    """检查 local_config 的凭证是否已对应某个已导入的 profile。"""
+    if not local_config:
+        return False
+    for profile in existing_profiles:
+        if (profile.get("issuer_id") == local_config.get("issuer_id")
+                and profile.get("key_id") == local_config.get("key_id")
+                and profile.get("app_id") == local_config.get("app_id")):
+            return True
+    return False
