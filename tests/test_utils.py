@@ -227,3 +227,65 @@ def test_is_local_config_imported_false(tmp_path):
         {"issuer_id": "xyz", "key_id": "other", "app_id": "456"},
     ]
     assert is_local_config_imported(local, existing) is False
+
+
+# ── prompt_local_config_usage ──
+
+
+def test_prompt_local_config_usage_choose_use_once(monkeypatch):
+    """选择 '1'（仅本次使用）返回 '__local__'"""
+    from asc.utils import prompt_local_config_usage
+
+    call_count = 0
+    def mock_input(prompt):
+        nonlocal call_count
+        call_count += 1
+        return "1"
+
+    monkeypatch.setattr("asc.utils._read_line", mock_input)
+    result = prompt_local_config_usage({})
+    assert result == "__local__"
+
+
+def test_prompt_local_config_usage_choose_import(monkeypatch):
+    """选择 '2'（导入为 profile）返回 '__import__'"""
+    from asc.utils import prompt_local_config_usage
+
+    call_count = 0
+    def mock_input(prompt):
+        nonlocal call_count
+        call_count += 1
+        return "2"
+
+    monkeypatch.setattr("asc.utils._read_line", mock_input)
+    result = prompt_local_config_usage({})
+    assert result == "__import__"
+
+
+def test_prompt_local_config_usage_cancel_raises(monkeypatch):
+    """选择 '3'（取消）抛出 Abort"""
+    from asc.utils import prompt_local_config_usage
+    import typer
+
+    call_count = 0
+    def mock_input(prompt):
+        nonlocal call_count
+        call_count += 1
+        return "3"
+
+    monkeypatch.setattr("asc.utils._read_line", mock_input)
+    with pytest.raises(typer.Abort):
+        prompt_local_config_usage({})
+
+
+def test_prompt_local_config_usage_invalid_raises(monkeypatch):
+    """无效输入抛出 Abort"""
+    from asc.utils import prompt_local_config_usage
+    import typer
+
+    def mock_input(prompt):
+        return "99"  # invalid
+
+    monkeypatch.setattr("asc.utils._read_line", mock_input)
+    with pytest.raises(typer.Abort):
+        prompt_local_config_usage({})

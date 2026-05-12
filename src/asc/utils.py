@@ -90,6 +90,60 @@ def list_valid_profiles(config: "Config") -> list[tuple[str, dict]]:
     return valid
 
 
+def _read_line(prompt: str = "") -> str:
+    """Read a line from stdin, handling KeyboardInterrupt and EOF gracefully."""
+    try:
+        return input(prompt).strip()
+    except (KeyboardInterrupt, EOFError):
+        typer.echo()
+        raise typer.Abort()
+
+
+def prompt_local_config_usage(local_config: dict) -> str:
+    """显示本地配置详情，询问使用方式：仅本次使用/导入为profile/取消。
+
+    Returns:
+        "__local__"  = use once without saving
+        "__import__" = import as new profile
+    Raises:
+        typer.Abort on cancel or invalid input
+    """
+    from asc.i18n import t
+
+    typer.echo(f"\n✅ {t({'en': 'Detected AppStore/ directory config', 'zh': '检测到 AppStore/ 目录配置'})}\n")
+    typer.echo(f"  Issuer ID:  {local_config.get('issuer_id', '')}")
+    typer.echo(f"  Key ID:     {local_config.get('key_id', '')}")
+    typer.echo(f"  App ID:     {local_config.get('app_id', '')}")
+
+    if local_config.get("screenshots_path"):
+        typer.echo(f"  Screenshots: {local_config['screenshots_path']} ✓")
+    else:
+        typer.echo(f"  Screenshots: -")
+
+    if local_config.get("csv_path"):
+        typer.echo(f"  CSV:         {local_config['csv_path']} ✓")
+    else:
+        typer.echo(f"  CSV:         -")
+
+    typer.echo("")
+    typer.echo(f"  1. {t({'en': 'Use once (do not save profile)', 'zh': '仅本次使用（不保存 profile）'})}")
+    typer.echo(f"  2. {t({'en': 'Import as new app profile', 'zh': '导入为新的 app profile'})}")
+    typer.echo(f"  3. {t({'en': 'Cancel', 'zh': '取消'})}")
+
+    typer.echo("")
+    choice = _read_line(t({'en': 'Enter your choice', 'zh': '请输入选择'}) + ": ")
+
+    if choice == "1":
+        return "__local__"
+    elif choice == "2":
+        return "__import__"
+    elif choice == "3":
+        raise typer.Abort()
+    else:
+        typer.echo(t({'en': 'Invalid choice.', 'zh': '无效的选择。'}))
+        raise typer.Abort()
+
+
 def resolve_app_profile(app_name: Optional[str], config: "Config") -> str:
     """Resolve app profile by name or interactive selection.
 
