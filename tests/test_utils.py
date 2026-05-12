@@ -289,3 +289,48 @@ def test_prompt_local_config_usage_invalid_raises(monkeypatch):
     monkeypatch.setattr("asc.utils._read_line", mock_input)
     with pytest.raises(typer.Abort):
         prompt_local_config_usage({})
+
+
+# ── resolve_app_profile with local config ──
+
+
+def test_resolve_app_profile_includes_local_config_in_choices(monkeypatch, tmp_path):
+    """当存在未导入的本地配置时，选择列表显示它"""
+    from unittest.mock import MagicMock
+    from asc.utils import resolve_app_profile
+
+    # Create AppStore/Config/.env in tmp_path
+    appstore = tmp_path / "AppStore"
+    config_dir = appstore / "Config"
+    config_dir.mkdir(parents=True)
+    (config_dir / ".env").write_text(
+        "ISSUER_ID=local-issuer\nKEY_ID=local-key\nKEY_FILE=key.p8\nAPP_ID=local-app\n",
+        encoding="utf-8"
+    )
+    (appstore / "data" / "screenshots").mkdir(parents=True)
+
+    # Mock is_interactive to return True
+    monkeypatch.setattr("asc.utils.is_interactive", lambda: True)
+
+    # Mock _read_line: return "2" to select local config, then "1" for "use once"
+    inputs = iter(["2", "1"])
+    def mock_read_line(prompt=""):
+        return next(inputs)
+    monkeypatch.setattr("asc.utils._read_line", mock_read_line)
+    monkeypatch.chdir(tmp_path)
+
+    mock_config = MagicMock()
+    mock_config.list_apps.return_value = ["profile1"]
+    mock_config.get_app_profile.return_value = {
+        "issuer_id": "other", "key_id": "other", "key_file": "/p", "app_id": "1"
+    }
+
+    import os
+    # Make sure env vars are not set before test
+    monkeypatch.delenv("_ASC_LOCAL_CONFIG_PATH", raising=False)
+
+    result = resolve_app_profile(None, mock_config)
+
+    # Should return "__local__" since we chose "use once"
+    assert result == "__local__"
+    assert os.environ.get("_ASC_LOCAL_CONFIG_PATH") is not None

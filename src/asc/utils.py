@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import os
 import re
 from pathlib import Path
 from typing import Optional
@@ -145,16 +146,22 @@ def prompt_local_config_usage(local_config: dict) -> str:
 
 
 def resolve_app_profile(app_name: Optional[str], config: "Config") -> str:
-    """Resolve app profile by name or interactive selection.
+    """解析要使用的 app profile。
 
-    Returns:
-        The selected app name (string).
+    - 若 app_name 已指定：验证存在且配置完整
+    - 若未指定且非交互式环境：报错退出
+    - 若未指定且交互式环境：显示 profile 选择菜单（含本地未导入配置）
+    - 若选择的 profile 配置不完整：报错退出
+    - 若用户选择本地配置：询问使用方式（临时/导入/取消）
+      - 返回 "__local__" 表示使用本地配置（调用方用 _ASC_LOCAL_CONFIG_PATH env var）
+      - 返回 "__import__" 表示导入后使用（调用方运行导入逻辑后重新解析）
 
     Exits with error if:
         - app_name provided but not found or has incomplete credentials
         - app_name not provided and non-interactive
-        - no valid profiles exist
+        - no valid profiles exist and no local config detected
         - user selects invalid profile
+        - user cancels at any prompt
     """
     from asc.i18n import t
 
@@ -173,7 +180,7 @@ def resolve_app_profile(app_name: Optional[str], config: "Config") -> str:
             typer.echo(t({
                 'en': f'{app_name} is missing required credentials (issuer_id, key_id, key_file).\n'
                       'Please run "asc app edit {app_name}" to fix.',
-                'zh': f'{app_name} 缺少必要的凭证信息（issuer_id, key_id, key_file）。\n'
+                'zh': f'{app_name} 缺少必要的凭证信息（issuer_id, key_id, key_file)。\n'
                       '请先运行 "asc app edit {app_name}" 补充配置。'
             }), err=True)
             raise typer.Exit(1)
@@ -187,9 +194,18 @@ def resolve_app_profile(app_name: Optional[str], config: "Config") -> str:
         }), err=True)
         raise typer.Exit(1)
 
-    # Interactive: show profile list
+    # Interactive: build selection list
     valid_profiles = list_valid_profiles(config)
-    if not valid_profiles:
+
+    # Detect local un-imported config
+    local_config = detect_local_app_config(Path.cwd())
+    existing_profiles = [p[1] for p in valid_profiles]
+    show_local = (
+        local_config is not None
+        and not is_local_config_imported(local_config, existing_profiles)
+    )
+
+    if not valid_profiles and not show_local:
         typer.echo(t({
             'en': 'No app profiles configured.\n'
                   'Please run "asc app add <name>" to add a profile, or "asc init" in your project root.',
@@ -199,33 +215,68 @@ def resolve_app_profile(app_name: Optional[str], config: "Config") -> str:
         raise typer.Exit(1)
 
     typer.echo(t({
-        'en': 'Select an app profile to use:',
-        'zh': '请选择要使用的 App 配置：'
+        'en': '⚠️  No --app specified, please select a config:',
+        'zh': '⚠️  未指定 --app，请选择配置：'
     }))
-    for i, (name, _profile) in enumerate(valid_profiles, 1):
-        typer.echo(f'  {i}) {name}')
+    typer.echo("")
 
-    typer.echo(t({
-        'en': 'Enter your choice',
-        'zh': '请输入选择'
-    }) + ': ', err=False)
+    all_choices: list[tuple[str, Optional[dict]]] = []  # (label, local_config_or_None)
+
+    for i, (name, _profile) in enumerate(valid_profiles, 1):
+        typer.echo(f"  {i}. {name}")
+        all_choices.append((name, None))
+
+    if show_local:
+        local_idx = len(all_choices) + 1
+        typer.echo(f"  {local_idx}. {local_config['project_name']} (local)")
+        # Show file status
+        env_status = "✓" if local_config.get("env_file_path") else "-"
+        ss_status = "✓" if local_config.get("screenshots_path") else "-"
+        csv_status = "✓" if local_config.get("csv_path") else "-"
+        iap_status = "✓" if local_config.get("iap_path") else "-"
+        typer.echo(f"     AppStore/Config/.env {env_status}")
+        typer.echo(f"     AppStore/data/screenshots {ss_status}")
+        typer.echo(f"     AppStore/data/appstore_info.csv {csv_status}")
+        typer.echo(f"     AppStore/data/iap_packages.json {iap_status}")
+        all_choices.append((f"{local_config['project_name']} (local)", local_config))
+
+    typer.echo("")
+    typer.echo(t({'en': 'Enter your choice', 'zh': '请输入选择'}) + ": ", err=False)
 
     try:
-        choice = input().strip()
+        choice = _read_line()
         idx = int(choice) - 1
-        if idx < 0 or idx >= len(valid_profiles):
+        if idx < 0 or idx >= len(all_choices):
             raise ValueError("out of range")
     except (ValueError, EOFError, KeyboardInterrupt):
         typer.echo()
         raise typer.Exit(1)
 
-    selected_name, selected_profile = valid_profiles[idx]
-    # Validate selected profile has complete credentials (belt and suspenders)
-    if not (selected_profile.get("issuer_id") and selected_profile.get("key_id") and selected_profile.get("key_file")):
+    selected_name, selected_local = all_choices[idx]
+
+    if selected_local is not None:
+        # User selected local config — ask how to use it
+        usage = prompt_local_config_usage(selected_local)
+        if usage == "__local__":
+            # Set env vars for Config to pick up
+            os.environ["_ASC_APP"] = "__local__"
+            os.environ["_ASC_LOCAL_CONFIG_PATH"] = selected_local["env_file_path"]
+            return "__local__"
+        elif usage == "__import__":
+            # Return special marker; caller will run import logic
+            os.environ["_ASC_IMPORT_LOCAL_CONFIG"] = selected_local["env_file_path"]
+            return "__import__"
+
+    # Regular profile selected
+    if not selected_name:
+        raise typer.Exit(1)
+
+    profile = config.get_app_profile(selected_name)
+    if not (profile and profile.get("issuer_id") and profile.get("key_id") and profile.get("key_file")):
         typer.echo(t({
             'en': f'{selected_name} is missing required credentials (issuer_id, key_id, key_file).\n'
                   'Please run "asc app edit {selected_name}" to fix.',
-            'zh': f'{selected_name} 缺少必要的凭证信息（issuer_id, key_id, key_file）。\n'
+            'zh': f'{selected_name} 缺少必要的凭证信息（issuer_id, key_id, key_file)。\n'
                   '请先运行 "asc app edit {selected_name}" 补充配置。'
         }), err=True)
         raise typer.Exit(1)
