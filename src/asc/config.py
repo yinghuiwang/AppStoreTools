@@ -50,8 +50,16 @@ class Config:
                 "key_id": os.getenv("KEY_ID", ""),
                 "key_file": os.getenv("KEY_FILE", ""),
                 "app_id": os.getenv("APP_ID", ""),
-            }
+            },
+            "defaults": {
+                "screenshots": os.getenv("_ASC_SCREENSHOTS_PATH", "data/screenshots"),
+                "csv": os.getenv("_ASC_CSV_PATH", "data/appstore_info.csv"),
+            },
         }
+        # Store IAP path separately for commands that need it
+        iap_path = os.getenv("_ASC_IAP_PATH", "")
+        if iap_path:
+            self._data["_iap_path"] = iap_path
 
     def _load(self):
         # Load from environment variables (lowest priority)
@@ -132,6 +140,11 @@ class Config:
     @property
     def screenshots_path(self) -> str:
         return self.get("screenshots", default="data/screenshots", section="defaults")
+
+    @property
+    def iap_path(self) -> Optional[str]:
+        """IAP packages JSON path, set when using local config 'use once'."""
+        return self._data.get("_iap_path") or os.getenv("_ASC_IAP_PATH")
 
     @property
     def build_project(self) -> Optional[str]:

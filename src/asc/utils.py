@@ -261,6 +261,13 @@ def resolve_app_profile(app_name: Optional[str], config: "Config") -> str:
             # Set env vars for Config to pick up
             os.environ["_ASC_APP"] = "__local__"
             os.environ["_ASC_LOCAL_CONFIG_PATH"] = selected_local["env_file_path"]
+            # Pass local paths through env vars so commands use them
+            if selected_local.get("screenshots_path"):
+                os.environ["_ASC_SCREENSHOTS_PATH"] = selected_local["screenshots_path"]
+            if selected_local.get("csv_path"):
+                os.environ["_ASC_CSV_PATH"] = selected_local["csv_path"]
+            if selected_local.get("iap_path"):
+                os.environ["_ASC_IAP_PATH"] = selected_local["iap_path"]
             return "__local__"
         elif usage == "__import__":
             # Return special marker; caller will run import logic
