@@ -488,10 +488,13 @@ def cmd_app_import(
         typer.echo("   请确保项目目录下有 AppStore/Config/.env 文件。", err=True)
         raise typer.Exit(1)
 
-    _do_import_from_env(str(env_file), project_root, name)
+    try:
+        profile_name = _do_import_from_env(str(env_file), project_root, name)
+    except (ValueError, FileNotFoundError) as e:
+        typer.echo(f"❌ {e}", err=True)
+        raise typer.Exit(1)
 
     # 询问是否设为默认
-    profile_name = name or project_root.name
     set_default = typer.confirm(f"\n将 '{profile_name}' 设为 {project_root.name} 的默认 profile？")
     if set_default:
         local_dir = project_root / ".asc"

@@ -450,7 +450,8 @@ def test_release_calls_build_and_deploy(tmp_path, monkeypatch):
     with patch.object(build_mod, "prepare_build_inputs", return_value=fake_resolved), \
          patch.object(build_mod, "build_core", return_value="/tmp/MyApp.ipa") as mock_build, \
          patch.object(build_mod, "deploy_core") as mock_deploy, \
-         patch.object(build_mod, "sys") as mock_sys:
+         patch.object(build_mod, "sys") as mock_sys, \
+         patch.object(build_mod, "resolve_app_profile", return_value="test-app"):
         mock_sys.platform = "darwin"
         result = runner.invoke(app, [
             "release",
@@ -458,6 +459,7 @@ def test_release_calls_build_and_deploy(tmp_path, monkeypatch):
             "--scheme", "MyApp",
             "--destination", "testflight",
             "--no-interactive",
+            "--app", "test-app",
         ])
 
     assert mock_build.called
@@ -490,9 +492,11 @@ def test_cmd_build_calls_prepare_build_inputs(monkeypatch, tmp_path):
     monkeypatch.setattr("asc.commands.build.build_core", lambda *a, **kw: None)
     # Bypass macOS gate for test
     monkeypatch.setattr("asc.commands.build._require_macos", lambda: None)
+    # Mock resolve_app_profile so --app test-app works without global config
+    monkeypatch.setattr("asc.commands.build.resolve_app_profile", lambda app, config: "test-app")
 
     runner = CliRunner()
-    result = runner.invoke(app, ["build", "--no-interactive", "--dry-run"])
+    result = runner.invoke(app, ["build", "--no-interactive", "--dry-run", "--app", "test-app"])
     assert result.exit_code == 0, result.output
     assert captured["interactive"] is False
 
@@ -513,10 +517,12 @@ def test_cmd_build_passes_cli_signing_and_profile(monkeypatch, tmp_path):
     monkeypatch.setattr("asc.commands.build.prepare_build_inputs", fake_prepare)
     monkeypatch.setattr("asc.commands.build.build_core", lambda *a, **kw: None)
     monkeypatch.setattr("asc.commands.build._require_macos", lambda: None)
+    # Mock resolve_app_profile so --app test-app works without global config
+    monkeypatch.setattr("asc.commands.build.resolve_app_profile", lambda app, config: "test-app")
 
     runner = CliRunner()
     result = runner.invoke(app, [
-        "build", "--no-interactive", "--dry-run",
+        "build", "--no-interactive", "--dry-run", "--app", "test-app",
         "--signing", "manual",
         "--profile", "/some/path.mobileprovision",
         "--certificate", "Apple Distribution: foo",
@@ -546,11 +552,13 @@ def test_cmd_build_passes_verbose_flag(monkeypatch, tmp_path):
     monkeypatch.setattr("asc.commands.build.prepare_build_inputs", fake_prepare)
     monkeypatch.setattr("asc.commands.build.build_core", fake_build_core)
     monkeypatch.setattr("asc.commands.build._require_macos", lambda: None)
+    # Mock resolve_app_profile so --app test-app works without global config
+    monkeypatch.setattr("asc.commands.build.resolve_app_profile", lambda app, config: "test-app")
 
     from typer.testing import CliRunner
     from asc.cli import app
     runner = CliRunner()
-    result = runner.invoke(app, ["build", "--verbose", "--no-interactive", "--dry-run"])
+    result = runner.invoke(app, ["build", "--verbose", "--no-interactive", "--dry-run", "--app", "test-app"])
     assert result.exit_code == 0, result.output
     assert captured["verbose"] is True
 
