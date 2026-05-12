@@ -1,5 +1,6 @@
 """Build, deploy, and release commands for asc CLI."""
 from __future__ import annotations
+import os
 from typing import Optional
 
 import plistlib
@@ -286,7 +287,14 @@ def cmd_build(
     """
     _require_macos()
     config = Config(app)
-    app = resolve_app_profile(app, config)
+    resolved_app = resolve_app_profile(app, config)
+    if resolved_app == "__import__":
+        from asc.commands.app_config import _do_import_from_env
+        env_path = os.environ.pop("_ASC_IMPORT_LOCAL_CONFIG", "")
+        resolved_app = _do_import_from_env(env_path)
+    elif resolved_app == "__local__":
+        os.environ.pop("_ASC_APP", None)  # Clear so Config uses __local__ sentinel
+    app = resolved_app
     config = Config(app)
     cli = BuildInputsCLI(
         project=project, scheme=scheme, signing=signing,
@@ -400,7 +408,14 @@ def cmd_deploy(
     """
     _require_macos()
     config = Config(app)
-    app = resolve_app_profile(app, config)
+    resolved_app = resolve_app_profile(app, config)
+    if resolved_app == "__import__":
+        from asc.commands.app_config import _do_import_from_env
+        env_path = os.environ.pop("_ASC_IMPORT_LOCAL_CONFIG", "")
+        resolved_app = _do_import_from_env(env_path)
+    elif resolved_app == "__local__":
+        os.environ.pop("_ASC_APP", None)  # Clear so Config uses __local__ sentinel
+    app = resolved_app
     config = Config(app)
     guard = Guard()
     if guard.is_enabled():
@@ -471,7 +486,14 @@ def cmd_release(
     """
     _require_macos()
     config = Config(app)
-    app = resolve_app_profile(app, config)
+    resolved_app = resolve_app_profile(app, config)
+    if resolved_app == "__import__":
+        from asc.commands.app_config import _do_import_from_env
+        env_path = os.environ.pop("_ASC_IMPORT_LOCAL_CONFIG", "")
+        resolved_app = _do_import_from_env(env_path)
+    elif resolved_app == "__local__":
+        os.environ.pop("_ASC_APP", None)  # Clear so Config uses __local__ sentinel
+    app = resolved_app
     config = Config(app)
     guard = Guard()
     if guard.is_enabled():

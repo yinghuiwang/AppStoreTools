@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -314,7 +315,14 @@ def cmd_upload(
     from asc.commands.screenshots import _upload_screenshots_core
 
     config = Config(app)
-    app = resolve_app_profile(app, config)
+    resolved_app = resolve_app_profile(app, config)
+    if resolved_app == "__import__":
+        from asc.commands.app_config import _do_import_from_env
+        env_path = os.environ.pop("_ASC_IMPORT_LOCAL_CONFIG", "")
+        resolved_app = _do_import_from_env(env_path)
+    elif resolved_app == "__local__":
+        os.environ.pop("_ASC_APP", None)  # Clear so Config uses __local__ sentinel
+    app = resolved_app
     config = Config(app)
     guard = Guard()
     if guard.is_enabled():
@@ -365,7 +373,14 @@ def cmd_metadata(
         asc --app myapp metadata --csv custom.csv --dry-run
     """
     config = Config(app)
-    app = resolve_app_profile(app, config)
+    resolved_app = resolve_app_profile(app, config)
+    if resolved_app == "__import__":
+        from asc.commands.app_config import _do_import_from_env
+        env_path = os.environ.pop("_ASC_IMPORT_LOCAL_CONFIG", "")
+        resolved_app = _do_import_from_env(env_path)
+    elif resolved_app == "__local__":
+        os.environ.pop("_ASC_APP", None)  # Clear so Config uses __local__ sentinel
+    app = resolved_app
     config = Config(app)
     guard = Guard()
     if guard.is_enabled():
@@ -404,7 +419,14 @@ def cmd_keywords(
         asc --app myapp keywords --dry-run
     """
     config = Config(app)
-    app = resolve_app_profile(app, config)
+    resolved_app = resolve_app_profile(app, config)
+    if resolved_app == "__import__":
+        from asc.commands.app_config import _do_import_from_env
+        env_path = os.environ.pop("_ASC_IMPORT_LOCAL_CONFIG", "")
+        resolved_app = _do_import_from_env(env_path)
+    elif resolved_app == "__local__":
+        os.environ.pop("_ASC_APP", None)  # Clear so Config uses __local__ sentinel
+    app = resolved_app
     config = Config(app)
     guard = Guard()
     if guard.is_enabled():
@@ -445,7 +467,14 @@ def cmd_support_url(
         asc --app myapp support-url --dry-run
     """
     config = Config(app)
-    app = resolve_app_profile(app, config)
+    resolved_app = resolve_app_profile(app, config)
+    if resolved_app == "__import__":
+        from asc.commands.app_config import _do_import_from_env
+        env_path = os.environ.pop("_ASC_IMPORT_LOCAL_CONFIG", "")
+        resolved_app = _do_import_from_env(env_path)
+    elif resolved_app == "__local__":
+        os.environ.pop("_ASC_APP", None)  # Clear so Config uses __local__ sentinel
+    app = resolved_app
     config = Config(app)
     guard = Guard()
     if guard.is_enabled():
@@ -491,7 +520,14 @@ def cmd_marketing_url(
         asc --app myapp marketing-url --dry-run
     """
     config = Config(app)
-    app = resolve_app_profile(app, config)
+    resolved_app = resolve_app_profile(app, config)
+    if resolved_app == "__import__":
+        from asc.commands.app_config import _do_import_from_env
+        env_path = os.environ.pop("_ASC_IMPORT_LOCAL_CONFIG", "")
+        resolved_app = _do_import_from_env(env_path)
+    elif resolved_app == "__local__":
+        os.environ.pop("_ASC_APP", None)  # Clear so Config uses __local__ sentinel
+    app = resolved_app
     config = Config(app)
     guard = Guard()
     if guard.is_enabled():
@@ -537,7 +573,14 @@ def cmd_privacy_policy_url(
         asc --app myapp privacy-policy-url --dry-run
     """
     config = Config(app)
-    app = resolve_app_profile(app, config)
+    resolved_app = resolve_app_profile(app, config)
+    if resolved_app == "__import__":
+        from asc.commands.app_config import _do_import_from_env
+        env_path = os.environ.pop("_ASC_IMPORT_LOCAL_CONFIG", "")
+        resolved_app = _do_import_from_env(env_path)
+    elif resolved_app == "__local__":
+        os.environ.pop("_ASC_APP", None)  # Clear so Config uses __local__ sentinel
+    app = resolved_app
     config = Config(app)
     guard = Guard()
     if guard.is_enabled():
@@ -587,7 +630,14 @@ def cmd_set_support_url(
         asc --app myapp set-support-url --text "https://example.com/support" --dry-run
     """
     config = Config(app)
-    app = resolve_app_profile(app, config)
+    resolved_app = resolve_app_profile(app, config)
+    if resolved_app == "__import__":
+        from asc.commands.app_config import _do_import_from_env
+        env_path = os.environ.pop("_ASC_IMPORT_LOCAL_CONFIG", "")
+        resolved_app = _do_import_from_env(env_path)
+    elif resolved_app == "__local__":
+        os.environ.pop("_ASC_APP", None)  # Clear so Config uses __local__ sentinel
+    app = resolved_app
     config = Config(app)
     guard = Guard()
     if guard.is_enabled():
@@ -626,7 +676,14 @@ def cmd_set_marketing_url(
         asc --app myapp set-marketing-url --text "https://example.com" --locales en-US,zh-CN
     """
     config = Config(app)
-    app = resolve_app_profile(app, config)
+    resolved_app = resolve_app_profile(app, config)
+    if resolved_app == "__import__":
+        from asc.commands.app_config import _do_import_from_env
+        env_path = os.environ.pop("_ASC_IMPORT_LOCAL_CONFIG", "")
+        resolved_app = _do_import_from_env(env_path)
+    elif resolved_app == "__local__":
+        os.environ.pop("_ASC_APP", None)  # Clear so Config uses __local__ sentinel
+    app = resolved_app
     config = Config(app)
     guard = Guard()
     if guard.is_enabled():
@@ -665,7 +722,14 @@ def cmd_set_privacy_policy_url(
         asc --app myapp set-privacy-policy-url --text "https://example.com/privacy" --locales en-US
     """
     config = Config(app)
-    app = resolve_app_profile(app, config)
+    resolved_app = resolve_app_profile(app, config)
+    if resolved_app == "__import__":
+        from asc.commands.app_config import _do_import_from_env
+        env_path = os.environ.pop("_ASC_IMPORT_LOCAL_CONFIG", "")
+        resolved_app = _do_import_from_env(env_path)
+    elif resolved_app == "__local__":
+        os.environ.pop("_ASC_APP", None)  # Clear so Config uses __local__ sentinel
+    app = resolved_app
     config = Config(app)
     guard = Guard()
     if guard.is_enabled():
@@ -705,7 +769,14 @@ def cmd_check(
         asc --app myapp check
     """
     config = Config(app)
-    app = resolve_app_profile(app, config)
+    resolved_app = resolve_app_profile(app, config)
+    if resolved_app == "__import__":
+        from asc.commands.app_config import _do_import_from_env
+        env_path = os.environ.pop("_ASC_IMPORT_LOCAL_CONFIG", "")
+        resolved_app = _do_import_from_env(env_path)
+    elif resolved_app == "__local__":
+        os.environ.pop("_ASC_APP", None)  # Clear so Config uses __local__ sentinel
+    app = resolved_app
     config = Config(app)
     api, app_id = make_api_from_config(config)
     print("\n🔐 验证 API 连接...")
