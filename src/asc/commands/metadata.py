@@ -9,6 +9,7 @@ from typing import Optional
 import typer
 
 from asc.config import Config
+from asc.error_handler import get_action_hint
 from asc.guard import Guard, GuardViolationError
 from asc.utils import make_api_from_config, parse_csv, resolve_locale, resolve_app_profile
 from asc.i18n import t, HELP
@@ -335,6 +336,9 @@ def cmd_upload(
             )
         except GuardViolationError as e:
             typer.echo(f"❌ {e}", err=True)
+            hint = get_action_hint(e)
+            if hint:
+                typer.echo(f"💡 {hint}", err=True)
             raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
     csv_path = Path(csv or config.csv_path)
@@ -344,6 +348,7 @@ def cmd_upload(
         _upload_metadata_core(api, app_id, metadata_list, dry_run=dry_run, app_profile=app or "")
     else:
         print(f"\n⚠️  CSV 文件不存在: {csv_path}")
+        print(f"💡 可使用 --csv 参数指定其他路径，或参考 'asc upload --help'")
     screenshots_path = Path(screenshots or config.screenshots_path)
     if screenshots_path.exists():
         _upload_screenshots_core(
@@ -393,11 +398,15 @@ def cmd_metadata(
             )
         except GuardViolationError as e:
             typer.echo(f"❌ {e}", err=True)
+            hint = get_action_hint(e)
+            if hint:
+                typer.echo(f"💡 {hint}", err=True)
             raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
     csv_path = Path(csv or config.csv_path)
     if not csv_path.exists():
         typer.echo(f"❌ CSV 文件不存在: {csv_path}", err=True)
+        typer.echo(f"💡 可使用 --csv 参数指定其他路径，或参考 'asc upload --help'", err=True)
         raise typer.Exit(1)
     metadata_list = parse_csv(str(csv_path))
     _upload_metadata_core(api, app_id, metadata_list, dry_run=dry_run, app_profile=app or "")
@@ -439,11 +448,15 @@ def cmd_keywords(
             )
         except GuardViolationError as e:
             typer.echo(f"❌ {e}", err=True)
+            hint = get_action_hint(e)
+            if hint:
+                typer.echo(f"💡 {hint}", err=True)
             raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
     csv_path = Path(csv or config.csv_path)
     if not csv_path.exists():
         typer.echo(f"❌ CSV 文件不存在: {csv_path}", err=True)
+        typer.echo(f"💡 可使用 --csv 参数指定其他路径，或参考 'asc upload --help'", err=True)
         raise typer.Exit(1)
     metadata_list = parse_csv(str(csv_path))
     _upload_metadata_core(
@@ -487,11 +500,15 @@ def cmd_support_url(
             )
         except GuardViolationError as e:
             typer.echo(f"❌ {e}", err=True)
+            hint = get_action_hint(e)
+            if hint:
+                typer.echo(f"💡 {hint}", err=True)
             raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
     csv_path = Path(csv or config.csv_path)
     if not csv_path.exists():
         typer.echo(f"❌ CSV 文件不存在: {csv_path}", err=True)
+        typer.echo(f"💡 可使用 --csv 参数指定其他路径，或参考 'asc upload --help'", err=True)
         raise typer.Exit(1)
     metadata_list = parse_csv(str(csv_path))
     _upload_metadata_core(
@@ -540,11 +557,15 @@ def cmd_marketing_url(
             )
         except GuardViolationError as e:
             typer.echo(f"❌ {e}", err=True)
+            hint = get_action_hint(e)
+            if hint:
+                typer.echo(f"💡 {hint}", err=True)
             raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
     csv_path = Path(csv or config.csv_path)
     if not csv_path.exists():
         typer.echo(f"❌ CSV 文件不存在: {csv_path}", err=True)
+        typer.echo(f"💡 可使用 --csv 参数指定其他路径，或参考 'asc upload --help'", err=True)
         raise typer.Exit(1)
     metadata_list = parse_csv(str(csv_path))
     _upload_metadata_core(
@@ -593,11 +614,15 @@ def cmd_privacy_policy_url(
             )
         except GuardViolationError as e:
             typer.echo(f"❌ {e}", err=True)
+            hint = get_action_hint(e)
+            if hint:
+                typer.echo(f"💡 {hint}", err=True)
             raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
     csv_path = Path(csv or config.csv_path)
     if not csv_path.exists():
         typer.echo(f"❌ CSV 文件不存在: {csv_path}", err=True)
+        typer.echo(f"💡 可使用 --csv 参数指定其他路径，或参考 'asc upload --help'", err=True)
         raise typer.Exit(1)
     metadata_list = parse_csv(str(csv_path))
     _upload_metadata_core(
@@ -650,6 +675,9 @@ def cmd_set_support_url(
             )
         except GuardViolationError as e:
             typer.echo(f"❌ {e}", err=True)
+            hint = get_action_hint(e)
+            if hint:
+                typer.echo(f"💡 {hint}", err=True)
             raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
     locale_list = [l.strip() for l in locales.split(",")] if locales else None
@@ -696,6 +724,9 @@ def cmd_set_marketing_url(
             )
         except GuardViolationError as e:
             typer.echo(f"❌ {e}", err=True)
+            hint = get_action_hint(e)
+            if hint:
+                typer.echo(f"💡 {hint}", err=True)
             raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
     locale_list = [l.strip() for l in locales.split(",")] if locales else None
@@ -742,6 +773,9 @@ def cmd_set_privacy_policy_url(
             )
         except GuardViolationError as e:
             typer.echo(f"❌ {e}", err=True)
+            hint = get_action_hint(e)
+            if hint:
+                typer.echo(f"💡 {hint}", err=True)
             raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
     locale_list = [l.strip() for l in locales.split(",")] if locales else None
@@ -787,4 +821,7 @@ def cmd_check(
         print(f"  ✅ 已连接: {app_name} ({bundle_id})")
     except Exception as e:
         typer.echo(f"  ❌ API 连接失败: {e}", err=True)
+        hint = get_action_hint(e)
+        if hint:
+            typer.echo(f"💡 {hint}", err=True)
         raise typer.Exit(1)
