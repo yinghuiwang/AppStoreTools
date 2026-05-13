@@ -12,7 +12,7 @@ import typer
 
 from asc.config import Config
 from asc.guard import Guard, GuardViolationError
-from asc.i18n import t, HELP
+from asc.i18n import t, HELP, ERRORS
 from asc.progress import Spinner
 from asc.utils import resolve_app_profile
 
@@ -34,7 +34,7 @@ from asc.error_handler import get_action_hint
 
 def _require_macos() -> None:
     if sys.platform != "darwin":
-        typer.echo("❌ 此命令仅支持 macOS", err=True)
+        typer.echo(f"❌ {t(ERRORS['macos_only'])}", err=True)
         raise typer.Exit(2)
 
 
@@ -383,7 +383,7 @@ def deploy_core(
     typer.echo(f"  目标: {destination}")
 
     if not Path(ipa_path).exists():
-        typer.echo(f"❌ IPA 文件不存在: {ipa_path}", err=True)
+        typer.echo(f"❌ {t(ERRORS['ipa_not_found']).format(path=ipa_path)}", err=True)
         raise typer.Exit(1)
 
     if dry_run:
@@ -443,7 +443,7 @@ def cmd_deploy(
     key_file = config.key_file
 
     if not all([issuer_id, key_id, key_file]):
-        typer.echo("❌ 缺少 API 凭证，请运行 asc app add 配置", err=True)
+        typer.echo(f"❌ {t(ERRORS['missing_api_credentials'])}", err=True)
         raise typer.Exit(1)
 
     try:
