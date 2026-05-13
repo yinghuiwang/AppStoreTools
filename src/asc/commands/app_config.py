@@ -10,6 +10,7 @@ from typing import Optional
 import typer
 
 from asc.config import Config
+from asc.i18n import t, ERRORS
 
 
 def cmd_app_add(
@@ -43,7 +44,7 @@ def cmd_app_add(
         key_path = Path(key_file_input.strip().strip("'\"")).expanduser()
         if key_path.exists():
             break
-        typer.echo(f"❌ 文件不存在，请重新输入: {key_path}", err=True)
+        typer.echo(f"❌ {t(ERRORS['file_not_found_reenter']).format(path=key_path)}", err=True)
     app_id = typer.prompt("  App ID (numeric)")
 
     typer.echo("\nEnter default data paths (press Enter to use defaults):")
@@ -200,7 +201,7 @@ def cmd_app_edit(
         key_path = Path(key_file_input.strip().strip("'\"")).expanduser()
         if key_path.exists():
             break
-        typer.echo(f"❌ 文件不存在，请重新输入: {key_path}", err=True)
+        typer.echo(f"❌ {t(ERRORS['file_not_found_reenter']).format(path=key_path)}", err=True)
     app_id = typer.prompt("  App ID (numeric)", default=profile["app_id"])
     csv_path = typer.prompt("  CSV metadata file path", default=profile["csv"])
     screenshots_path = typer.prompt("  Screenshots directory", default=profile["screenshots"])
@@ -279,7 +280,7 @@ def cmd_install():
                     typer.echo(f"  {i}. {name}")
                 chosen = typer.prompt("Profile 名称")
                 if chosen not in apps:
-                    typer.echo(f"❌ '{chosen}' 不在列表中，跳过", err=True)
+                    typer.echo(f"❌ {t(ERRORS['invalid_choice_skip']).format(choice=chosen)}", err=True)
                     typer.echo("")
                     _print_cheatsheet()
                     return
@@ -379,7 +380,7 @@ def _do_import_from_env(
     """
     env_file = Path(env_file_path)
     if not env_file.exists():
-        raise FileNotFoundError(f"❌ 未找到配置文件：{env_file}")
+        raise FileNotFoundError(f"❌ {t(ERRORS['config_file_not_found']).format(path=env_file)}")
 
     # AppStore/Config/.env -> project_root = AppStore/Config/.env.parent.parent.parent
     # i.e., AppStore/ -> project root (ios_test)
@@ -494,7 +495,7 @@ def cmd_app_import(
     env_file = project_root / "AppStore" / "Config" / ".env"
 
     if not env_file.exists():
-        typer.echo(f"❌ 未找到配置文件：{env_file}", err=True)
+        typer.echo(f"❌ {t(ERRORS['config_file_not_found']).format(path=env_file)}", err=True)
         typer.echo("   请确保项目目录下有 AppStore/Config/.env 文件。", err=True)
         raise typer.Exit(1)
 
