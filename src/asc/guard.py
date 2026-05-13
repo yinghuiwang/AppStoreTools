@@ -30,7 +30,7 @@ def _get_machine_fingerprint_macos() -> str:
             parts = line.split('"')
             if len(parts) >= 4:
                 return parts[-2]
-    raise RuntimeError("IOPlatformUUID not found")
+    raise RuntimeError("无法获取机器标识符。Guard 功能仅在 macOS 上可用。在 CI 环境请使用 'asc guard disable' 禁用。")
 
 
 def _fetch_public_ip() -> str:
@@ -41,7 +41,7 @@ def _fetch_public_ip() -> str:
                 return resp.read().decode().strip()
         except Exception:
             continue
-    raise RuntimeError("All IP endpoints failed")
+    raise RuntimeError("无法获取公网 IP 地址。请检查网络连接，或使用 'asc guard disable' 禁用 Guard。")
 
 
 class GuardError(Exception):
