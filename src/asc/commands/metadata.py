@@ -12,7 +12,7 @@ from asc.config import Config
 from asc.error_handler import get_action_hint
 from asc.guard import Guard, GuardViolationError
 from asc.utils import make_api_from_config, parse_csv, resolve_locale, resolve_app_profile
-from asc.i18n import t, HELP
+from asc.i18n import t, HELP, ERRORS
 
 
 def _upload_metadata_core(
@@ -32,7 +32,7 @@ def _upload_metadata_core(
 
     app_infos = api.get_app_infos(app_id)
     if not app_infos:
-        print("❌ 找不到 App 信息")
+        print(f"❌ {t(ERRORS['no_app_info'])}")
         return
     app_info = app_infos[0]
     app_info_id = app_info["id"]
@@ -40,7 +40,7 @@ def _upload_metadata_core(
 
     version = api.get_editable_version(app_id)
     if not version:
-        print("❌ 找不到可编辑的 App Store 版本")
+        print(f"❌ {t(ERRORS['no_editable_version'])}")
         return
     version_id = version["id"]
     version_string = version["attributes"].get("versionString", "?")
@@ -194,13 +194,13 @@ def _update_app_info_field_core(
 
     app_infos = api.get_app_infos(app_id)
     if not app_infos:
-        print("❌ 找不到 App 信息")
+        print(f"❌ {t(ERRORS['no_app_info'])}")
         return
     app_info_id = app_infos[0]["id"]
 
     info_locs = api.get_app_info_localizations(app_info_id)
     if not info_locs:
-        print("❌ 该 App 没有本地化信息")
+        print(f"❌ {t(ERRORS['app_no_localization'])}")
         return
 
     target_locs = info_locs
@@ -210,7 +210,7 @@ def _update_app_info_field_core(
         ]
         if not target_locs:
             available = [loc["attributes"]["locale"] for loc in info_locs]
-            print(f"❌ 指定的语言不存在，可用语言: {available}")
+            print(f"❌ {t(ERRORS['invalid_locale']).format(locales=available)}")
             return
 
     preview = field_value[:80] + "..." if len(field_value) > 80 else field_value
@@ -246,7 +246,7 @@ def _update_version_field_core(
 
     version = api.get_editable_version(app_id)
     if not version:
-        print("❌ 找不到可编辑的 App Store 版本")
+        print(f"❌ {t(ERRORS['no_editable_version'])}")
         return
     version_id = version["id"]
     version_string = version["attributes"].get("versionString", "?")
@@ -257,7 +257,7 @@ def _update_version_field_core(
 
     ver_locs = api.get_version_localizations(version_id)
     if not ver_locs:
-        print("❌ 该版本没有本地化信息")
+        print(f"❌ {t(ERRORS['no_localization'])}")
         return
 
     target_locs = ver_locs
@@ -267,7 +267,7 @@ def _update_version_field_core(
         ]
         if not target_locs:
             available = [loc["attributes"]["locale"] for loc in ver_locs]
-            print(f"❌ 指定的语言不存在，可用语言: {available}")
+            print(f"❌ {t(ERRORS['invalid_locale']).format(locales=available)}")
             return
 
     preview = field_value[:80] + "..." if len(field_value) > 80 else field_value
