@@ -53,7 +53,7 @@ app = typer.Typer(
     name="asc",
     help="App Store Connect CLI tool",
     no_args_is_help=True,
-    context_settings={"help_option_names": ["--help"], "max_content_width": 120},
+    context_settings={"help_option_names": ["--help", "-h"], "max_content_width": 120},
 )
 app_cmd = typer.Typer(help=t(HELP['cmd_app']), no_args_is_help=True)
 app.add_typer(app_cmd, name="app")
