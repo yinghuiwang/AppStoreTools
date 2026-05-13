@@ -8,7 +8,7 @@ from typing import Optional
 import typer
 
 from asc import __version__
-from asc.i18n import t, HELP, patch_typer_completion
+from asc.i18n import t, HELP, LANG, patch_typer_completion
 
 patch_typer_completion()
 
@@ -38,6 +38,10 @@ def main(
         None, "--app", "-a", help=t(HELP['app_profile_name']),
         is_eager=True,
     ),
+    debug: Optional[bool] = typer.Option(
+        None, "--debug", "-d", envvar="ASC_DEBUG", is_eager=True,
+        help={"en": "Enable debug mode with full traceback output", "zh": "启用调试模式，显示完整调用栈"}[LANG],
+    ),
 ):
     """App Store Connect CLI — upload metadata, screenshots, IAP, and subscriptions.
 
@@ -60,6 +64,13 @@ def main(
     \b
     First time? Run 'asc app add' to set up your credentials.
     """
+    # Register global exception handler
+    from asc.error_handler import install
+    install()
+
+    if debug is not None:
+        os.environ["_ASC_DEBUG"] = "1" if debug else "0"
+
     if app:
         os.environ["_ASC_APP"] = app
 
