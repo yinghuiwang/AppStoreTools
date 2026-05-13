@@ -102,7 +102,8 @@ def cmd_update(
         typer.echo("❌ Cannot use --version and --branch at the same time.", err=True)
         raise typer.Exit(1)
 
-    if _is_editable():
+    # Only check editable mode for latest update; version/branch install always proceeds
+    if _is_editable() and not version and not branch:
         typer.echo("Running in development mode (editable install). Skipping auto-update.")
         typer.echo(f"To update manually: git pull && pip install -e .")
         return
