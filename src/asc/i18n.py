@@ -366,6 +366,108 @@ HELP = {
     },
 }
 
+# User-facing error messages (used with t() function)
+ERRORS = {
+    # File not found errors
+    'file_not_found': {
+        'en': 'File not found: {path}',
+        'zh': '文件不存在: {path}',
+    },
+    'csv_not_found': {
+        'en': 'CSV file not found: {path}',
+        'zh': 'CSV 文件不存在: {path}',
+    },
+    'iap_config_not_found': {
+        'en': 'IAP config file not found: {path}',
+        'zh': 'IAP 配置文件不存在: {path}',
+    },
+    'screenshots_dir_not_found': {
+        'en': 'Screenshots directory not found: {path}',
+        'zh': '截图目录不存在: {path}',
+    },
+    'ipa_not_found': {
+        'en': 'IPA file not found: {path}',
+        'zh': 'IPA 文件不存在: {path}',
+    },
+    'config_file_not_found': {
+        'en': 'Config file not found: {path}',
+        'zh': '未找到配置文件：{path}',
+    },
+    'key_file_not_found': {
+        'en': 'Key file not found: {path}',
+        'zh': '找不到 .p8 密钥文件：{path}',
+    },
+    'file_not_found_reenter': {
+        'en': 'File not found, please re-enter: {path}',
+        'zh': '文件不存在，请重新输入: {path}',
+    },
+    # Version/version state errors
+    'no_editable_version': {
+        'en': 'No editable App Store version found',
+        'zh': '找不到可编辑的 App Store 版本',
+    },
+    'no_localization': {
+        'en': 'This version has no localization info',
+        'zh': '该版本没有本地化信息',
+    },
+    'no_app_info': {
+        'en': 'App info not found',
+        'zh': '找不到 App 信息',
+    },
+    'app_no_localization': {
+        'en': 'This app has no localization info',
+        'zh': '该 App 没有本地化信息',
+    },
+    'invalid_locale': {
+        'en': 'Invalid locale specified. Available: {locales}',
+        'zh': '指定的语言不存在，可用语言: {locales}',
+    },
+    'parse_whats_new_failed': {
+        'en': 'Failed to parse update description from file: {path}',
+        'zh': '未从文件中解析到更新描述: {path}',
+    },
+    # Parameter errors
+    'specify_text_or_file': {
+        'en': 'Please specify --text or --file',
+        'zh': '请指定 --text 或 --file',
+    },
+    'invalid_choice_skip': {
+        'en': "'{choice}' is not in the list, skipping",
+        'zh': "'{choice}' 不在列表中，跳过",
+    },
+    'invalid_number': {
+        'en': 'Invalid number, please enter 1-{max}',
+        'zh': '无效编号，请输入 1-{max}',
+    },
+    # Build errors
+    'macos_only': {
+        'en': 'This command is only supported on macOS',
+        'zh': '此命令仅支持 macOS',
+    },
+    'missing_api_credentials': {
+        'en': 'Missing API credentials. Please run "asc app add" to configure',
+        'zh': '缺少 API 凭证，请运行 asc app add 配置',
+    },
+    # System errors
+    'machine_id_failed': {
+        'en': 'Failed to get machine identifier. Guard requires macOS. Use "asc guard disable" in CI.',
+        'zh': '无法获取机器标识符。Guard 功能仅在 macOS 上可用。在 CI 环境请使用 "asc guard disable" 禁用。',
+    },
+    'ip_fetch_failed': {
+        'en': 'Failed to get public IP address. Check network connection or use "asc guard disable".',
+        'zh': '无法获取公网 IP 地址。请检查网络连接，或使用 "asc guard disable" 禁用 Guard。',
+    },
+    'xcode_scheme_failed': {
+        'en': 'Failed to get Xcode scheme list. Ensure --project points to a valid Xcode project.',
+        'zh': '无法获取 Xcode scheme 列表。请确认 --project 路径指向有效的 Xcode 项目。',
+    },
+    # Guard errors
+    'guard_conflict': {
+        'en': 'Guard binding conflict detected. Run "asc guard unbind" or "asc guard disable".',
+        'zh': 'Guard 绑定冲突。请运行 "asc guard unbind" 或 "asc guard disable" 禁用 Guard。',
+    },
+}
+
 _COMPLETION_INSTALL = {
     'en': 'Install completion for the current shell.',
     'zh': '为当前 Shell 安装命令补全。',
