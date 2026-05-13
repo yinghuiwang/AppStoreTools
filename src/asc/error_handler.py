@@ -74,6 +74,129 @@ ERROR_MESSAGES: dict[str, dict[str, str]] = {
     },
 }
 
+# Action hints for user-friendly error messages
+ACTION_HINTS: dict[str, dict[str, str]] = {
+    # MissingFileError patterns
+    'No Xcode project': {
+        'en': 'Use --project to specify project path, or run "asc init" in your Xcode project root.',
+        'zh': '可使用 --project 指定项目路径，或在 Xcode 项目根目录运行 asc init。',
+    },
+    'CSV 文件不存在': {
+        'en': 'Use --csv to specify another CSV file path.',
+        'zh': '可使用 --csv 参数指定其他路径，或参考 "asc upload --help"。',
+    },
+    'IAP 配置文件不存在': {
+        'en': 'Use --iap-file to specify another IAP config file path.',
+        'zh': '可使用 --iap-file 参数指定其他路径。',
+    },
+    'IPA 文件不存在': {
+        'en': 'Use --ipa to specify the .ipa file path.',
+        'zh': '可使用 --ipa 参数指定 .ipa 文件路径。',
+    },
+    # MissingConfigError patterns
+    'Missing required config': {
+        'en': 'Run "asc app edit <name>" to add missing config, or run "asc init" to set up.',
+        'zh': '请先运行 "asc app edit <name>" 补充配置，或在项目根目录运行 "asc init"。',
+    },
+    'issuer_id': {
+        'en': 'Run "asc app edit <name>" to add credentials.',
+        'zh': '请先运行 "asc app edit <name>" 补充凭证信息。',
+    },
+    # GuardError patterns
+    'IOPlatformUUID not found': {
+        'en': 'Guard requires macOS. Disable guard with "asc guard disable" if running in CI.',
+        'zh': '机器标识获取失败，Guard 功能仅支持 macOS。在 CI 环境可使用 "asc guard disable" 禁用。',
+    },
+    'machine binding': {
+        'en': 'Machine binding conflict. Run "asc guard unbind --machine" or "asc guard disable".',
+        'zh': '机器绑定冲突。请运行 "asc guard unbind --machine" 或 "asc guard disable" 禁用 Guard。',
+    },
+    'All IP endpoints failed': {
+        'en': 'Network error. Check your internet connection. Disable guard with "asc guard disable" if issue persists.',
+        'zh': '网络连接失败，请检查网络。在 CI 环境可使用 "asc guard disable" 禁用 Guard。',
+    },
+    # BuildError patterns
+    'security cms failed': {
+        'en': 'Provisioning profile may be corrupted. Try re-downloading from Apple Developer portal.',
+        'zh': '签名证书解析失败，请尝试重新从 Apple Developer 下载证书。',
+    },
+    'missing ExpirationDate': {
+        'en': 'Provisioning profile is invalid. Please re-download from Apple Developer portal.',
+        'zh': '证书已过期或损坏，请重新从 Apple Developer 下载。',
+    },
+    'xcodebuild archive failed': {
+        'en': 'Build failed. Check the log file for details. Common causes: code signing issues, missing entitlements.',
+        'zh': '构建失败，请查看日志文件。常见原因：签名配置错误、Entitlements 缺失。',
+    },
+    'xcodebuild exportArchive failed': {
+        'en': 'Export failed. Check the log file for details.',
+        'zh': '导出失败，请查看日志文件。',
+    },
+    'No .ipa found': {
+        'en': 'Build completed but .ipa not found. Check build logs for export errors.',
+        'zh': '构建完成但未找到 .ipa 文件，请查看构建日志中的导出错误。',
+    },
+    # GuardViolationError
+    '绑定冲突': {
+        'en': 'Run "asc guard unbind" to resolve the conflict, or "asc guard disable" to disable guard.',
+        'zh': '运行 "asc guard unbind" 解除绑定冲突，或使用 "asc guard disable" 禁用 Guard。',
+    },
+    'credential binding': {
+        'en': 'Run "asc guard unbind --credential" to unbind this credential.',
+        'zh': '请运行 "asc guard unbind --credential" 解除凭证绑定。',
+    },
+    # API errors
+    '401': {
+        'en': 'Authentication failed. Check your credentials in "asc app edit <name>".',
+        'zh': '认证失败，请检查 "asc app edit <name>" 中的凭证配置。',
+    },
+    '403': {
+        'en': 'Permission denied. Check your Apple Developer account permissions.',
+        'zh': '权限不足，请检查您的 Apple Developer 账户权限。',
+    },
+    '404': {
+        'en': 'Resource not found. The app or version may have been deleted in App Store Connect.',
+        'zh': '资源未找到，App 或版本可能在 App Store Connect 中已被删除。',
+    },
+    '429': {
+        'en': 'Rate limited by App Store Connect. Wait a few minutes and retry.',
+        'zh': '请求过于频繁，请稍后重试。',
+    },
+    'API 连接失败': {
+        'en': 'Network error. Check your connection to App Store Connect.',
+        'zh': '网络错误，请检查与 App Store Connect 的连接。',
+    },
+    # General
+    'No such file': {
+        'en': 'File not found. Check the path or use --help for correct usage.',
+        'zh': '文件不存在，请检查路径是否正确，或参考 --help。',
+    },
+}
+
+
+def get_action_hint(exc: BaseException) -> Optional[str]:
+    """Return user-friendly action hint based on exception type/message.
+
+    Returns None if no specific hint is available.
+    """
+    exc_str = str(exc)
+    exc_name = type(exc).__name__
+
+    # Guard specific exceptions
+    if exc_name == 'GuardViolationError':
+        if 'machine binding' in exc_str.lower():
+            return t(ACTION_HINTS['machine binding'])
+        if 'credential binding' in exc_str.lower():
+            return t(ACTION_HINTS['credential binding'])
+        return t(ACTION_HINTS['绑定冲突'])
+
+    # Check hint patterns by message content
+    for pattern, hint in ACTION_HINTS.items():
+        if pattern in exc_str:
+            return t(hint)
+
+    return None
+
 
 def is_debug() -> bool:
     """Check if debug mode is enabled.
