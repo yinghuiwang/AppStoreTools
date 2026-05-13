@@ -12,6 +12,7 @@ from typing import Optional
 import typer
 
 from asc.i18n import LANG, t
+from asc.exceptions import GuardViolationError
 
 # Flag to track if an error was already logged by the exception handler
 _error_logged = False
