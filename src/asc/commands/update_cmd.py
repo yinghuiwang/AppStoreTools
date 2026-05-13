@@ -51,13 +51,104 @@ def _parse_version(v: str):
         return tuple(int(x) for x in v.split(".") if x.isdigit())
 
 
+def _all_versions_from_github() -> Optional[list[str]]:
+    """Fetch all release versions from GitHub."""
+    try:
+        resp = requests.get(
+            "https://api.github.com/repos/yinghuiwang/AppStoreTools/releases",
+            timeout=8
+        )
+        resp.raise_for_status()
+        releases = resp.json()
+        versions = []
+        for release in releases:
+            tag = release.get("tag_name", "")
+            if tag:
+                versions.append(tag.lstrip("v"))
+        return versions
+    except Exception:
+        return None
+
+
+def _similar_versions(target: str, all_versions: list[str], limit: int = 3) -> list[str]:
+    """Return the most similar versions to target using version distance."""
+    from packaging.version import Version
+
+    def version_distance(v1: str, v2: str) -> int:
+        try:
+            p1 = Version(v1.lstrip("v"))
+            p2 = Version(v2.lstrip("v"))
+            # Distance based on major.minor.patch difference
+            d1 = abs(p1.major - p2.major) * 1000
+            d2 = abs(p1.minor - p2.minor) * 100
+            d3 = abs(p1.micro - p2.micro) * 10
+            return d1 + d2 + d3
+        except Exception:
+            # Fallback: string similarity
+            return abs(len(v1) - len(v2))
+
+    scored = [(version_distance(target, v), v) for v in all_versions]
+    scored.sort()
+    return [v for _, v in scored[:limit]]
+
+
 def cmd_update(
+    version: Optional[str] = typer.Option(None, "--version", help="Install a specific version."),
+    branch: Optional[str] = typer.Option(None, "--branch", help="Install from a specific branch."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt (for CI/scripts)."),
 ):
     """Check for updates and install the latest version from GitHub."""
-    if _is_editable():
+    if version and branch:
+        typer.echo("❌ Cannot use --version and --branch at the same time.", err=True)
+        raise typer.Exit(1)
+
+    # Only check editable mode for latest update; version/branch install always proceeds
+    if _is_editable() and not version and not branch:
         typer.echo("Running in development mode (editable install). Skipping auto-update.")
         typer.echo(f"To update manually: git pull && pip install -e .")
+        return
+
+    if branch:
+        # Branch installation
+        typer.echo(f"Installing from branch '{branch}'...")
+        try:
+            subprocess.check_call([
+                sys.executable, "-m", "pip", "install", "--quiet",
+                f"git+https://github.com/yinghuiwang/AppStoreTools.git@{branch}",
+            ])
+            typer.echo(f"Done. asc installed from branch '{branch}'.")
+        except subprocess.CalledProcessError:
+            typer.echo("Update failed. Try manually:", err=True)
+            typer.echo(f"  pip install git+https://github.com/yinghuiwang/AppStoreTools.git@{branch}", err=True)
+            raise typer.Exit(1)
+        return
+
+    if version:
+        # Specific version installation
+        target_version = version.lstrip("v")
+        typer.echo(f"Installing version {target_version}...")
+
+        # Check if version exists
+        all_versions = _all_versions_from_github()
+        if all_versions and f"v{target_version}" not in [f"v{v}" for v in all_versions]:
+            similar = _similar_versions(target_version, all_versions)
+            similar_str = ", ".join(f"v{v}" for v in similar) if similar else "N/A"
+            typer.echo(f"❌ Version v{target_version} not found.", err=True)
+            if similar:
+                typer.echo(f"Similar versions: {similar_str}", err=True)
+            raise typer.Exit(1)
+
+        install_version = f"v{target_version}"
+        try:
+            subprocess.check_call([
+                sys.executable, "-m", "pip", "install", "--quiet",
+                f"git+https://github.com/yinghuiwang/AppStoreTools.git@{install_version}",
+            ])
+            typer.echo(f"Done. asc updated to v{target_version}.")
+        except subprocess.CalledProcessError:
+            typer.echo("Update failed. Try manually:", err=True)
+            typer.echo(f"  pip install git+https://github.com/yinghuiwang/AppStoreTools.git@{install_version}", err=True)
+            raise typer.Exit(1)
         return
 
     current = _current_version()
