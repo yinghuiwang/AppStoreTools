@@ -208,7 +208,8 @@ def test_cmd_app_edit_new_key_file_not_found_reprompts(tmp_path):
         mock_cfg._global_dir = tmp_path
         MockConfig.return_value = mock_cfg
 
-        result = runner.invoke(app, ["app", "edit", "myapp"], input=user_input)
+        with patch("asc.i18n.LANG", "zh"):
+            result = runner.invoke(app, ["app", "edit", "myapp"], input=user_input)
 
     assert result.exit_code == 0
     # Verify re-prompt error message appeared
