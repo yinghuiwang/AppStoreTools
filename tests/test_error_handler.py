@@ -225,3 +225,70 @@ class TestLogError:
         # Timestamp format: YYYY-MM-DD HH:MM:SS
         import re
         assert re.search(r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}', content)
+
+
+class TestGetActionHint:
+    """Tests for get_action_hint() function."""
+
+    def test_hint_for_missing_xcode_project(self):
+        """No Xcode project error returns actionable hint."""
+        from asc.error_handler import get_action_hint
+        exc = ValueError("No Xcode project or workspace found in: .")
+        hint = get_action_hint(exc)
+        assert hint is not None
+        assert "asc init" in hint or "--project" in hint
+
+    def test_hint_for_csv_not_found(self):
+        """CSV not found returns actionable hint."""
+        from asc.error_handler import get_action_hint
+        exc = ValueError("CSV 文件不存在: data/appstore_info.csv")
+        hint = get_action_hint(exc)
+        assert hint is not None
+        assert "--csv" in hint or "asc upload" in hint
+
+    def test_hint_for_guard_violation(self):
+        """Guard violation returns actionable hint."""
+        from asc.error_handler import get_action_hint
+        exc = ValueError("GuardViolationError: credential binding conflict")
+        hint = get_action_hint(exc)
+        assert hint is not None
+        assert "asc guard" in hint
+
+    def test_hint_for_machine_binding(self):
+        """Machine binding conflict returns specific hint."""
+        from asc.error_handler import get_action_hint
+        exc = ValueError("machine binding conflict")
+        hint = get_action_hint(exc)
+        assert hint is not None
+        assert "asc guard unbind --machine" in hint or "machine" in hint.lower()
+
+    def test_hint_for_401_error(self):
+        """401 error returns hint about credentials."""
+        from asc.error_handler import get_action_hint
+        exc = ValueError("API error [401]")
+        hint = get_action_hint(exc)
+        assert hint is not None
+        assert "credentials" in hint.lower() or "凭证" in hint
+
+    def test_hint_for_ipa_not_found(self):
+        """IPA not found returns actionable hint."""
+        from asc.error_handler import get_action_hint
+        exc = ValueError("IPA 文件不存在: build/app.ipa")
+        hint = get_action_hint(exc)
+        assert hint is not None
+        assert "--ipa" in hint
+
+    def test_hint_for_api_connection_failed(self):
+        """API connection failure returns network hint."""
+        from asc.error_handler import get_action_hint
+        exc = ValueError("API 连接失败: Connection timeout")
+        hint = get_action_hint(exc)
+        assert hint is not None
+        assert "网络" in hint or "network" in hint.lower()
+
+    def test_no_hint_for_unknown_error(self):
+        """Unknown error returns None."""
+        from asc.error_handler import get_action_hint
+        exc = ValueError("Some completely unknown error message")
+        hint = get_action_hint(exc)
+        assert hint is None
