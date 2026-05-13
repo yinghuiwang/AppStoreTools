@@ -304,7 +304,7 @@ def cmd_build(
         resolved = prepare_build_inputs(
             cli, config, interactive=resolve_interactive(interactive),
         )
-    except RuntimeError as e:
+    except (RuntimeError, ValueError) as e:
         typer.echo(f"❌ {e}", err=True)
         raise typer.Exit(1)
 
@@ -523,7 +523,7 @@ def cmd_release(
         resolved = prepare_build_inputs(
             cli, config, interactive=resolve_interactive(interactive),
         )
-    except RuntimeError as e:
+    except (RuntimeError, ValueError) as e:
         typer.echo(f"❌ {e}", err=True)
         raise typer.Exit(1)
 
