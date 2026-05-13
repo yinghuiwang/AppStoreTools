@@ -64,12 +64,12 @@ def main(
     \b
     First time? Run 'asc app add' to set up your credentials.
     """
+    if debug is not None:
+        os.environ["_ASC_DEBUG"] = "1" if debug else "0"
+
     # Register global exception handler
     from asc.error_handler import install
     install()
-
-    if debug is not None:
-        os.environ["_ASC_DEBUG"] = "1" if debug else "0"
 
     if app:
         os.environ["_ASC_APP"] = app
