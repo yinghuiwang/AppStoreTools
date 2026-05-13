@@ -29,6 +29,8 @@ from asc.commands.build_inputs import (
     scan_archives,
 )
 
+from asc.error_handler import get_action_hint
+
 
 def _require_macos() -> None:
     if sys.platform != "darwin":
@@ -306,6 +308,9 @@ def cmd_build(
         )
     except (RuntimeError, ValueError) as e:
         typer.echo(f"❌ {e}", err=True)
+        hint = get_action_hint(e)
+        if hint:
+            typer.echo(f"💡 {hint}", err=True)
         raise typer.Exit(1)
 
     try:
@@ -320,6 +325,9 @@ def cmd_build(
         )
     except RuntimeError as e:
         typer.echo(f"❌ {e}", err=True)
+        hint = get_action_hint(e)
+        if hint:
+            typer.echo(f"💡 {hint}", err=True)
         raise typer.Exit(1)
 
     if ipa:
@@ -450,6 +458,9 @@ def cmd_deploy(
         )
     except RuntimeError as e:
         typer.echo(f"❌ {e}", err=True)
+        hint = get_action_hint(e)
+        if hint:
+            typer.echo(f"💡 {hint}", err=True)
         raise typer.Exit(1)
 
 
@@ -525,6 +536,9 @@ def cmd_release(
         )
     except (RuntimeError, ValueError) as e:
         typer.echo(f"❌ {e}", err=True)
+        hint = get_action_hint(e)
+        if hint:
+            typer.echo(f"💡 {hint}", err=True)
         raise typer.Exit(1)
 
     try:
@@ -549,6 +563,9 @@ def cmd_release(
             )
     except RuntimeError as e:
         typer.echo(f"❌ {e}", err=True)
+        hint = get_action_hint(e)
+        if hint:
+            typer.echo(f"💡 {hint}", err=True)
         raise typer.Exit(1)
 
     if not dry_run:
