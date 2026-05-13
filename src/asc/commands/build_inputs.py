@@ -13,6 +13,8 @@ from typing import Callable, List, Optional, Sequence, TypeVar
 
 import typer
 
+from asc.error_handler import get_action_hint
+
 
 @dataclass
 class BuildInputsCLI:
@@ -62,7 +64,7 @@ def _decode_profile_plist(path) -> dict:
         capture_output=True,
     )
     if result.returncode != 0 or not result.stdout:
-        raise RuntimeError(f"security cms failed for {path}")
+        raise RuntimeError(f"签名证书解析失败（security cms failed）。请尝试重新从 Apple Developer 下载证书：{path}")
     return plistlib.loads(result.stdout)
 
 
@@ -79,7 +81,7 @@ def parse_mobileprovision(path) -> ProfileInfo:
     cert_blobs = plist.get("DeveloperCertificates") or []
     expiration = plist.get("ExpirationDate")
     if expiration is None:
-        raise RuntimeError(f"Provisioning profile missing ExpirationDate: {path}")
+        raise RuntimeError(f"证书已过期或损坏：{path}。请重新从 Apple Developer 下载。")
     return ProfileInfo(
         path=str(path),
         uuid=plist.get("UUID", ""),
@@ -244,7 +246,7 @@ def _pick_one(
     render: Optional[Callable[[T], str]] = None,
 ) -> T:
     if not items:
-        raise RuntimeError(f"找不到可用的{label}")
+        raise RuntimeError(f"找不到可用的{label}，请在 Apple Developer 下载并安装")
     if len(items) == 1:
         return items[0]
     if not interactive:
@@ -299,7 +301,7 @@ def list_schemes(project_path: str, kind: str) -> list[str]:
         capture_output=True, text=True,
     )
     if result.returncode != 0:
-        raise RuntimeError(f"xcodebuild -list failed:\n{result.stderr}")
+        raise RuntimeError("无法获取 Xcode scheme 列表。请确认 --project 路径指向有效的 Xcode 项目。")
 
     schemes: list[str] = []
     in_schemes = False
