@@ -13,6 +13,9 @@ import typer
 
 from asc.i18n import LANG, t
 
+# Flag to track if an error was already logged by the exception handler
+_error_logged = False
+
 # Error message translations
 ERROR_MESSAGES: dict[str, dict[str, str]] = {
     # HTTP Error Codes
@@ -203,6 +206,7 @@ def handle_error(command: str, app_name: str, exc: BaseException) -> None:
 
 def _global_exception_handler(exc_type, exc_value, exc_traceback):
     """Global exception handler registered via sys.excepthook."""
+    global _error_logged
     if issubclass(exc_type, KeyboardInterrupt):
         # Allow KeyboardInterrupt to be handled normally
         sys.__excepthook__(exc_type, exc_value, exc_traceback)
@@ -211,8 +215,11 @@ def _global_exception_handler(exc_type, exc_value, exc_traceback):
     # Format and display the error
     exc = exc_value
     handle_error('unknown', 'unknown', exc)
+    _error_logged = True
 
 
 def install() -> None:
     """Register global exception handler to sys.excepthook."""
+    global _error_logged
+    _error_logged = False
     sys.excepthook = _global_exception_handler
