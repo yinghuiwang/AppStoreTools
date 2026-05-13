@@ -16,7 +16,7 @@ from asc.constants import DISPLAY_TYPE_BY_SIZE, SCREENSHOT_FOLDER_TO_LOCALE
 from asc.error_handler import get_action_hint
 from asc.guard import Guard, GuardViolationError
 from asc.utils import make_api_from_config, resolve_app_profile, resolve_locale, md5_of_file
-from asc.i18n import t, HELP
+from asc.i18n import t, ERRORS, HELP
 
 
 def _detect_display_type(image_path: Path) -> Optional[str]:
@@ -58,13 +58,13 @@ def _upload_screenshots_core(
 
     screenshots_path = Path(screenshots_dir)
     if not screenshots_path.exists():
-        print(f"❌ 截图目录不存在: {screenshots_dir}")
+        print(f"❌ {t(ERRORS['screenshots_dir_not_found']).format(path=screenshots_dir)}")
         print(f"💡 可使用 --screenshots-dir 参数指定其他路径")
         return
 
     version = api.get_editable_version(app_id)
     if not version:
-        print("❌ 找不到可编辑的 App Store 版本")
+        print(f"❌ {t(ERRORS['no_editable_version'])}")
         print(f"💡 请在 App Store Connect 中确认版本状态为可编辑状态")
         return
     version_id = version["id"]
