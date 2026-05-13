@@ -8,9 +8,7 @@ import warnings
 warnings.filterwarnings("ignore", message=".*urllib3.*OpenSSL.*")
 warnings.filterwarnings("ignore", message=".*ssl.*LibreSSL.*")
 
-from asc.cli import app
+from asc.cli import run_app
 
 if __name__ == "__main__":
-    # Use standalone_mode=False to get exceptions instead of Typer's internal handling
-    # This allows our exception handler to catch and log ALL errors
-    app(standalone_mode=False)
+    sys.exit(run_app())

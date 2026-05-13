@@ -12,6 +12,7 @@ warnings.filterwarnings("ignore", message=".*urllib3.*OpenSSL.*")
 warnings.filterwarnings("ignore", message=".*ssl.*LibreSSL.*")
 
 import typer
+import click
 
 # Monkey-patch typer.Exit to log errors before Typer handles them
 _original_exit_class = typer.Exit
@@ -48,6 +49,40 @@ from asc import __version__
 from asc.i18n import t, HELP, LANG, patch_typer_completion
 
 patch_typer_completion()
+
+
+def _handle_typer_exception(exc: Exception) -> None:
+    """Handle Typer/Click exceptions with user-friendly messages in non-debug mode."""
+    from asc.error_handler import is_debug
+    import click
+
+    # Only handle UsageError (e.g., "No such command") in non-debug mode
+    if not isinstance(exc, click.exceptions.UsageError):
+        return
+
+    if is_debug():
+        return  # In debug mode, let the exception propagate normally
+
+    # Non-debug: show clean error message
+    error_msg = str(exc).strip()
+    if not error_msg:
+        error_msg = "Unknown command error"
+
+    # Non-debug: show clean error message
+    error_msg = str(exc).strip()
+    if not error_msg:
+        error_msg = "Unknown command error"
+
+    # Extract command name from UsageError if possible
+    if hasattr(exc, 'format_message'):
+        msg = exc.format_message()
+    else:
+        msg = str(exc)
+
+    # Use stderr for errors
+    import sys as _sys
+    _sys.stderr.write(f"❌ {msg}\n")
+    _sys.exit(1)
 
 app = typer.Typer(
     name="asc",
@@ -170,7 +205,14 @@ def run_app() -> int:
     This enables our global exception handler to catch and log ALL errors,
     including those that Typer would normally handle internally (like typer.Exit).
     """
-    return app(standalone_mode=False)
+    from asc.error_handler import is_debug
+    try:
+        return app(standalone_mode=False)
+    except click.exceptions.UsageError as exc:
+        if is_debug():
+            raise
+        _handle_typer_exception(exc)
+        return 1
 
 
 # Entry point for: python -m asc
