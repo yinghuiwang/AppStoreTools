@@ -1,5 +1,6 @@
 """Build, deploy, and release commands for asc CLI."""
 from __future__ import annotations
+import os
 from typing import Optional
 
 import plistlib
@@ -11,8 +12,9 @@ import typer
 
 from asc.config import Config
 from asc.guard import Guard, GuardViolationError
-from asc.i18n import t, HELP
+from asc.i18n import t, HELP, ERRORS
 from asc.progress import Spinner
+from asc.utils import resolve_app_profile
 
 from asc.commands.build_inputs import (
     BuildInputsCLI,
@@ -27,10 +29,12 @@ from asc.commands.build_inputs import (
     scan_archives,
 )
 
+from asc.error_handler import get_action_hint
+
 
 def _require_macos() -> None:
     if sys.platform != "darwin":
-        typer.echo("❌ 此命令仅支持 macOS", err=True)
+        typer.echo(f"❌ {t(ERRORS['macos_only'])}", err=True)
         raise typer.Exit(2)
 
 
@@ -285,6 +289,15 @@ def cmd_build(
     """
     _require_macos()
     config = Config(app)
+    resolved_app = resolve_app_profile(app, config)
+    if resolved_app == "__import__":
+        from asc.commands.app_config import _do_import_from_env
+        env_path = os.environ.pop("_ASC_IMPORT_LOCAL_CONFIG", "")
+        resolved_app = _do_import_from_env(env_path)
+    elif resolved_app == "__local__":
+        os.environ.pop("_ASC_APP", None)  # Clear so Config uses __local__ sentinel
+    app = resolved_app
+    config = Config(app)
     cli = BuildInputsCLI(
         project=project, scheme=scheme, signing=signing,
         profile=profile, certificate=certificate, destination=destination,
@@ -293,8 +306,11 @@ def cmd_build(
         resolved = prepare_build_inputs(
             cli, config, interactive=resolve_interactive(interactive),
         )
-    except RuntimeError as e:
+    except (RuntimeError, ValueError) as e:
         typer.echo(f"❌ {e}", err=True)
+        hint = get_action_hint(e)
+        if hint:
+            typer.echo(f"💡 {hint}", err=True)
         raise typer.Exit(1)
 
     try:
@@ -309,6 +325,9 @@ def cmd_build(
         )
     except RuntimeError as e:
         typer.echo(f"❌ {e}", err=True)
+        hint = get_action_hint(e)
+        if hint:
+            typer.echo(f"💡 {hint}", err=True)
         raise typer.Exit(1)
 
     if ipa:
@@ -364,7 +383,7 @@ def deploy_core(
     typer.echo(f"  目标: {destination}")
 
     if not Path(ipa_path).exists():
-        typer.echo(f"❌ IPA 文件不存在: {ipa_path}", err=True)
+        typer.echo(f"❌ {t(ERRORS['ipa_not_found']).format(path=ipa_path)}", err=True)
         raise typer.Exit(1)
 
     if dry_run:
@@ -397,6 +416,15 @@ def cmd_deploy(
     """
     _require_macos()
     config = Config(app)
+    resolved_app = resolve_app_profile(app, config)
+    if resolved_app == "__import__":
+        from asc.commands.app_config import _do_import_from_env
+        env_path = os.environ.pop("_ASC_IMPORT_LOCAL_CONFIG", "")
+        resolved_app = _do_import_from_env(env_path)
+    elif resolved_app == "__local__":
+        os.environ.pop("_ASC_APP", None)  # Clear so Config uses __local__ sentinel
+    app = resolved_app
+    config = Config(app)
     guard = Guard()
     if guard.is_enabled():
         try:
@@ -415,7 +443,7 @@ def cmd_deploy(
     key_file = config.key_file
 
     if not all([issuer_id, key_id, key_file]):
-        typer.echo("❌ 缺少 API 凭证，请运行 asc app add 配置", err=True)
+        typer.echo(f"❌ {t(ERRORS['missing_api_credentials'])}", err=True)
         raise typer.Exit(1)
 
     try:
@@ -430,6 +458,9 @@ def cmd_deploy(
         )
     except RuntimeError as e:
         typer.echo(f"❌ {e}", err=True)
+        hint = get_action_hint(e)
+        if hint:
+            typer.echo(f"💡 {hint}", err=True)
         raise typer.Exit(1)
 
 
@@ -466,6 +497,15 @@ def cmd_release(
     """
     _require_macos()
     config = Config(app)
+    resolved_app = resolve_app_profile(app, config)
+    if resolved_app == "__import__":
+        from asc.commands.app_config import _do_import_from_env
+        env_path = os.environ.pop("_ASC_IMPORT_LOCAL_CONFIG", "")
+        resolved_app = _do_import_from_env(env_path)
+    elif resolved_app == "__local__":
+        os.environ.pop("_ASC_APP", None)  # Clear so Config uses __local__ sentinel
+    app = resolved_app
+    config = Config(app)
     guard = Guard()
     if guard.is_enabled():
         try:
@@ -494,8 +534,11 @@ def cmd_release(
         resolved = prepare_build_inputs(
             cli, config, interactive=resolve_interactive(interactive),
         )
-    except RuntimeError as e:
+    except (RuntimeError, ValueError) as e:
         typer.echo(f"❌ {e}", err=True)
+        hint = get_action_hint(e)
+        if hint:
+            typer.echo(f"💡 {hint}", err=True)
         raise typer.Exit(1)
 
     try:
@@ -520,6 +563,9 @@ def cmd_release(
             )
     except RuntimeError as e:
         typer.echo(f"❌ {e}", err=True)
+        hint = get_action_hint(e)
+        if hint:
+            typer.echo(f"💡 {hint}", err=True)
         raise typer.Exit(1)
 
     if not dry_run:

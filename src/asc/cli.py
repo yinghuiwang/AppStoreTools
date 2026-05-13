@@ -3,20 +3,92 @@
 from __future__ import annotations
 
 import os
+import sys
+import warnings
 from typing import Optional
 
+# Suppress SSL warnings from urllib3 (not relevant to end users)
+warnings.filterwarnings("ignore", message=".*urllib3.*OpenSSL.*")
+warnings.filterwarnings("ignore", message=".*ssl.*LibreSSL.*")
+
 import typer
+import click
+
+# Monkey-patch typer.Exit to log errors before Typer handles them
+_original_exit_class = typer.Exit
+
+class LoggedExit(_original_exit_class):
+    """Extended Exit that logs errors before raising."""
+
+    def __init__(self, code: int = 1, message: str = ""):
+        # Log the error to .asc/error.log before Typer handles it
+        try:
+            from asc.error_handler import is_debug, ensure_error_log_dir, get_error_log_path
+            if is_debug():
+                # In debug mode, use handle_error to show full traceback
+                from asc.error_handler import handle_error
+                exc = _original_exit_class(code)
+                handle_error('cli', 'unknown', exc)
+            else:
+                # In non-debug mode, log simple message
+                ensure_error_log_dir()
+                log_path = get_error_log_path()
+                from datetime import datetime
+                timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                error_msg = message or f"Exit with code {code}"
+                with open(log_path, "a", encoding="utf-8") as f:
+                    f.write(f"{timestamp} | ERROR | cli | unknown | {error_msg}\n")
+        except Exception:
+            pass  # Don't fail if logging fails
+        super().__init__(code)
+
+# Replace typer.Exit with our logging version
+typer.Exit = LoggedExit  # type: ignore
 
 from asc import __version__
-from asc.i18n import t, HELP, patch_typer_completion
+from asc.i18n import t, HELP, LANG, patch_typer_completion
 
 patch_typer_completion()
+
+
+def _handle_typer_exception(exc: Exception) -> None:
+    """Handle Typer/Click exceptions with user-friendly messages in non-debug mode."""
+    from asc.error_handler import is_debug
+    import click
+
+    # Only handle UsageError (e.g., "No such command") in non-debug mode
+    if not isinstance(exc, click.exceptions.UsageError):
+        return
+
+    if is_debug():
+        return  # In debug mode, let the exception propagate normally
+
+    # Non-debug: show clean error message
+    error_msg = str(exc).strip()
+    if not error_msg:
+        error_msg = "Unknown command error"
+
+    # Non-debug: show clean error message
+    error_msg = str(exc).strip()
+    if not error_msg:
+        error_msg = "Unknown command error"
+
+    # Extract command name from UsageError if possible
+    if hasattr(exc, 'format_message'):
+        msg = exc.format_message()
+    else:
+        msg = str(exc)
+
+    # Use stderr for errors
+    import sys as _sys
+    _sys.stderr.write(f"❌ {msg}\n")
+    _sys.exit(1)
 
 app = typer.Typer(
     name="asc",
     help="App Store Connect CLI tool",
     no_args_is_help=True,
-    context_settings={"help_option_names": ["--help"], "max_content_width": 120},
+    context_settings={"help_option_names": ["--help", "-h"], "max_content_width": 120},
 )
 app_cmd = typer.Typer(help=t(HELP['cmd_app']), no_args_is_help=True)
 app.add_typer(app_cmd, name="app")
@@ -37,6 +109,10 @@ def main(
     app: Optional[str] = typer.Option(
         None, "--app", "-a", help=t(HELP['app_profile_name']),
         is_eager=True,
+    ),
+    debug: Optional[bool] = typer.Option(
+        None, "--debug", "-d", envvar="ASC_DEBUG", is_eager=True,
+        help={"en": "Enable debug mode with full traceback output", "zh": "启用调试模式，显示完整调用栈"}[LANG],
     ),
 ):
     """App Store Connect CLI — upload metadata, screenshots, IAP, and subscriptions.
@@ -60,6 +136,9 @@ def main(
     \b
     First time? Run 'asc app add' to set up your credentials.
     """
+    if debug is not None:
+        os.environ["_ASC_DEBUG"] = "1" if debug else "0"
+
     if app:
         os.environ["_ASC_APP"] = app
 
@@ -114,3 +193,29 @@ app.command("uninstall",           help=t(HELP['cmd_uninstall']))(cmd_uninstall)
 
 from asc.commands.guard_cmd import guard_app
 app.add_typer(guard_app, name="guard")
+
+# Install global exception handler (runs at module import time)
+from asc.error_handler import install
+install()
+
+
+def run_app() -> int:
+    """Run the Typer app with standalone_mode=False to allow exception propagation.
+
+    This enables our global exception handler to catch and log ALL errors,
+    including those that Typer would normally handle internally (like typer.Exit).
+    """
+    from asc.error_handler import is_debug
+    try:
+        return app(standalone_mode=False)
+    except click.exceptions.UsageError as exc:
+        if is_debug():
+            raise
+        _handle_typer_exception(exc)
+        return 1
+
+
+# Entry point for: python -m asc
+if __name__ == "__main__":
+    import sys
+    sys.exit(run_app())

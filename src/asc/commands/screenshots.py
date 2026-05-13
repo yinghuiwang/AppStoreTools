@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import time
 from pathlib import Path
@@ -12,9 +13,10 @@ from PIL import Image
 
 from asc.config import Config
 from asc.constants import DISPLAY_TYPE_BY_SIZE, SCREENSHOT_FOLDER_TO_LOCALE
+from asc.error_handler import get_action_hint
 from asc.guard import Guard, GuardViolationError
-from asc.utils import make_api_from_config, resolve_locale, md5_of_file
-from asc.i18n import t, HELP
+from asc.utils import make_api_from_config, resolve_app_profile, resolve_locale, md5_of_file
+from asc.i18n import t, ERRORS, HELP
 
 
 def _detect_display_type(image_path: Path) -> Optional[str]:
@@ -56,12 +58,14 @@ def _upload_screenshots_core(
 
     screenshots_path = Path(screenshots_dir)
     if not screenshots_path.exists():
-        print(f"❌ 截图目录不存在: {screenshots_dir}")
+        print(f"❌ {t(ERRORS['screenshots_dir_not_found']).format(path=screenshots_dir)}")
+        print(f"💡 可使用 --screenshots-dir 参数指定其他路径")
         return
 
     version = api.get_editable_version(app_id)
     if not version:
-        print("❌ 找不到可编辑的 App Store 版本")
+        print(f"❌ {t(ERRORS['no_editable_version'])}")
+        print(f"💡 请在 App Store Connect 中确认版本状态为可编辑状态")
         return
     version_id = version["id"]
 
@@ -113,7 +117,7 @@ def _upload_screenshots_core(
         if not display_type:
             display_type = _detect_display_type(files[0])
         if not display_type:
-            print("    ❌ 无法确定设备类型，请使用 --display-type 手动指定")
+            print("💡 无法确定设备类型，请使用 --display-type 手动指定")
             continue
         print(f"    设备类型: {display_type}")
 
@@ -190,6 +194,7 @@ def _upload_screenshots_core(
                         "errors", []
                     )
                     print(f"         ❌ 上传失败: {errors}")
+                    print(f"💡 请检查网络连接后重试")
                     break
                 else:
                     if retry % 5 == 4:
@@ -237,6 +242,15 @@ def cmd_screenshots(
         asc --app myapp screenshots --screenshots ./custom_screenshots/ --display-type APP_IPHONE_67
     """
     config = Config(app)
+    resolved_app = resolve_app_profile(app, config)
+    if resolved_app == "__import__":
+        from asc.commands.app_config import _do_import_from_env
+        env_path = os.environ.pop("_ASC_IMPORT_LOCAL_CONFIG", "")
+        resolved_app = _do_import_from_env(env_path)
+    elif resolved_app == "__local__":
+        os.environ.pop("_ASC_APP", None)  # Clear so Config uses __local__ sentinel
+    app = resolved_app
+    config = Config(app)
     guard = Guard()
     if guard.is_enabled():
         try:
@@ -248,6 +262,9 @@ def cmd_screenshots(
             )
         except GuardViolationError as e:
             typer.echo(f"❌ {e}", err=True)
+            hint = get_action_hint(e)
+            if hint:
+                typer.echo(f"💡 {hint}", err=True)
             raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
     screenshots_dir = screenshots or config.screenshots_path

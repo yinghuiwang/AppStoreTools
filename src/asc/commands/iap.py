@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Optional
 
 import typer
 
 from asc.config import Config
+from asc.error_handler import get_action_hint
 from asc.guard import Guard, GuardViolationError
-from asc.utils import make_api_from_config
-from asc.i18n import t, HELP
+from asc.utils import make_api_from_config, resolve_app_profile
+from asc.i18n import t, ERRORS, HELP
 
 
 def _load_iap_config(file_path: str) -> tuple[list[dict], list[dict]]:
@@ -203,6 +205,15 @@ def cmd_iap(
     from asc.commands.subscriptions import _upload_subscriptions_core
 
     config = Config(app)
+    resolved_app = resolve_app_profile(app, config)
+    if resolved_app == "__import__":
+        from asc.commands.app_config import _do_import_from_env
+        env_path = os.environ.pop("_ASC_IMPORT_LOCAL_CONFIG", "")
+        resolved_app = _do_import_from_env(env_path)
+    elif resolved_app == "__local__":
+        os.environ.pop("_ASC_APP", None)  # Clear so Config uses __local__ sentinel
+    app = resolved_app
+    config = Config(app)
     guard = Guard()
     if guard.is_enabled():
         try:
@@ -214,17 +225,24 @@ def cmd_iap(
             )
         except GuardViolationError as e:
             typer.echo(f"❌ {e}", err=True)
+            hint = get_action_hint(e)
+            if hint:
+                typer.echo(f"💡 {hint}", err=True)
             raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
     iap_path = Path(iap_file)
     if not iap_path.exists():
-        typer.echo(f"❌ IAP 配置文件不存在: {iap_path}", err=True)
+        typer.echo(f"❌ {t(ERRORS['iap_config_not_found']).format(path=iap_path)}", err=True)
+        typer.echo(f"💡 可使用 --iap-file 参数指定其他路径。", err=True)
         raise typer.Exit(1)
 
     try:
         items, groups = _load_iap_config(str(iap_path))
     except ValueError as e:
         typer.echo(f"❌ {e}", err=True)
+        hint = get_action_hint(e)
+        if hint:
+            typer.echo(f"💡 {hint}", err=True)
         raise typer.Exit(1)
 
     exit_code = 0

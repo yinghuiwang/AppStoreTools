@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Optional
 
 import typer
 
 from asc.config import Config
+from asc.error_handler import get_action_hint
 from asc.guard import Guard, GuardViolationError
-from asc.utils import make_api_from_config, parse_csv, resolve_locale
-from asc.i18n import t, HELP
+from asc.utils import make_api_from_config, parse_csv, resolve_locale, resolve_app_profile
+from asc.i18n import t, HELP, ERRORS
 
 
 def _upload_metadata_core(
@@ -30,7 +32,7 @@ def _upload_metadata_core(
 
     app_infos = api.get_app_infos(app_id)
     if not app_infos:
-        print("❌ 找不到 App 信息")
+        print(f"❌ {t(ERRORS['no_app_info'])}")
         return
     app_info = app_infos[0]
     app_info_id = app_info["id"]
@@ -38,7 +40,7 @@ def _upload_metadata_core(
 
     version = api.get_editable_version(app_id)
     if not version:
-        print("❌ 找不到可编辑的 App Store 版本")
+        print(f"❌ {t(ERRORS['no_editable_version'])}")
         return
     version_id = version["id"]
     version_string = version["attributes"].get("versionString", "?")
@@ -192,13 +194,13 @@ def _update_app_info_field_core(
 
     app_infos = api.get_app_infos(app_id)
     if not app_infos:
-        print("❌ 找不到 App 信息")
+        print(f"❌ {t(ERRORS['no_app_info'])}")
         return
     app_info_id = app_infos[0]["id"]
 
     info_locs = api.get_app_info_localizations(app_info_id)
     if not info_locs:
-        print("❌ 该 App 没有本地化信息")
+        print(f"❌ {t(ERRORS['app_no_localization'])}")
         return
 
     target_locs = info_locs
@@ -208,7 +210,7 @@ def _update_app_info_field_core(
         ]
         if not target_locs:
             available = [loc["attributes"]["locale"] for loc in info_locs]
-            print(f"❌ 指定的语言不存在，可用语言: {available}")
+            print(f"❌ {t(ERRORS['invalid_locale']).format(locales=available)}")
             return
 
     preview = field_value[:80] + "..." if len(field_value) > 80 else field_value
@@ -244,7 +246,7 @@ def _update_version_field_core(
 
     version = api.get_editable_version(app_id)
     if not version:
-        print("❌ 找不到可编辑的 App Store 版本")
+        print(f"❌ {t(ERRORS['no_editable_version'])}")
         return
     version_id = version["id"]
     version_string = version["attributes"].get("versionString", "?")
@@ -255,7 +257,7 @@ def _update_version_field_core(
 
     ver_locs = api.get_version_localizations(version_id)
     if not ver_locs:
-        print("❌ 该版本没有本地化信息")
+        print(f"❌ {t(ERRORS['no_localization'])}")
         return
 
     target_locs = ver_locs
@@ -265,7 +267,7 @@ def _update_version_field_core(
         ]
         if not target_locs:
             available = [loc["attributes"]["locale"] for loc in ver_locs]
-            print(f"❌ 指定的语言不存在，可用语言: {available}")
+            print(f"❌ {t(ERRORS['invalid_locale']).format(locales=available)}")
             return
 
     preview = field_value[:80] + "..." if len(field_value) > 80 else field_value
@@ -314,6 +316,15 @@ def cmd_upload(
     from asc.commands.screenshots import _upload_screenshots_core
 
     config = Config(app)
+    resolved_app = resolve_app_profile(app, config)
+    if resolved_app == "__import__":
+        from asc.commands.app_config import _do_import_from_env
+        env_path = os.environ.pop("_ASC_IMPORT_LOCAL_CONFIG", "")
+        resolved_app = _do_import_from_env(env_path)
+    elif resolved_app == "__local__":
+        os.environ.pop("_ASC_APP", None)  # Clear so Config uses __local__ sentinel
+    app = resolved_app
+    config = Config(app)
     guard = Guard()
     if guard.is_enabled():
         try:
@@ -325,6 +336,9 @@ def cmd_upload(
             )
         except GuardViolationError as e:
             typer.echo(f"❌ {e}", err=True)
+            hint = get_action_hint(e)
+            if hint:
+                typer.echo(f"💡 {hint}", err=True)
             raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
     csv_path = Path(csv or config.csv_path)
@@ -334,6 +348,7 @@ def cmd_upload(
         _upload_metadata_core(api, app_id, metadata_list, dry_run=dry_run, app_profile=app or "")
     else:
         print(f"\n⚠️  CSV 文件不存在: {csv_path}")
+        print(f"💡 可使用 --csv 参数指定其他路径，或参考 'asc upload --help'")
     screenshots_path = Path(screenshots or config.screenshots_path)
     if screenshots_path.exists():
         _upload_screenshots_core(
@@ -363,6 +378,15 @@ def cmd_metadata(
         asc --app myapp metadata --csv custom.csv --dry-run
     """
     config = Config(app)
+    resolved_app = resolve_app_profile(app, config)
+    if resolved_app == "__import__":
+        from asc.commands.app_config import _do_import_from_env
+        env_path = os.environ.pop("_ASC_IMPORT_LOCAL_CONFIG", "")
+        resolved_app = _do_import_from_env(env_path)
+    elif resolved_app == "__local__":
+        os.environ.pop("_ASC_APP", None)  # Clear so Config uses __local__ sentinel
+    app = resolved_app
+    config = Config(app)
     guard = Guard()
     if guard.is_enabled():
         try:
@@ -374,11 +398,15 @@ def cmd_metadata(
             )
         except GuardViolationError as e:
             typer.echo(f"❌ {e}", err=True)
+            hint = get_action_hint(e)
+            if hint:
+                typer.echo(f"💡 {hint}", err=True)
             raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
     csv_path = Path(csv or config.csv_path)
     if not csv_path.exists():
         typer.echo(f"❌ CSV 文件不存在: {csv_path}", err=True)
+        typer.echo(f"💡 可使用 --csv 参数指定其他路径，或参考 'asc upload --help'", err=True)
         raise typer.Exit(1)
     metadata_list = parse_csv(str(csv_path))
     _upload_metadata_core(api, app_id, metadata_list, dry_run=dry_run, app_profile=app or "")
@@ -400,6 +428,15 @@ def cmd_keywords(
         asc --app myapp keywords --dry-run
     """
     config = Config(app)
+    resolved_app = resolve_app_profile(app, config)
+    if resolved_app == "__import__":
+        from asc.commands.app_config import _do_import_from_env
+        env_path = os.environ.pop("_ASC_IMPORT_LOCAL_CONFIG", "")
+        resolved_app = _do_import_from_env(env_path)
+    elif resolved_app == "__local__":
+        os.environ.pop("_ASC_APP", None)  # Clear so Config uses __local__ sentinel
+    app = resolved_app
+    config = Config(app)
     guard = Guard()
     if guard.is_enabled():
         try:
@@ -411,11 +448,15 @@ def cmd_keywords(
             )
         except GuardViolationError as e:
             typer.echo(f"❌ {e}", err=True)
+            hint = get_action_hint(e)
+            if hint:
+                typer.echo(f"💡 {hint}", err=True)
             raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
     csv_path = Path(csv or config.csv_path)
     if not csv_path.exists():
         typer.echo(f"❌ CSV 文件不存在: {csv_path}", err=True)
+        typer.echo(f"💡 可使用 --csv 参数指定其他路径，或参考 'asc upload --help'", err=True)
         raise typer.Exit(1)
     metadata_list = parse_csv(str(csv_path))
     _upload_metadata_core(
@@ -439,6 +480,15 @@ def cmd_support_url(
         asc --app myapp support-url --dry-run
     """
     config = Config(app)
+    resolved_app = resolve_app_profile(app, config)
+    if resolved_app == "__import__":
+        from asc.commands.app_config import _do_import_from_env
+        env_path = os.environ.pop("_ASC_IMPORT_LOCAL_CONFIG", "")
+        resolved_app = _do_import_from_env(env_path)
+    elif resolved_app == "__local__":
+        os.environ.pop("_ASC_APP", None)  # Clear so Config uses __local__ sentinel
+    app = resolved_app
+    config = Config(app)
     guard = Guard()
     if guard.is_enabled():
         try:
@@ -450,11 +500,15 @@ def cmd_support_url(
             )
         except GuardViolationError as e:
             typer.echo(f"❌ {e}", err=True)
+            hint = get_action_hint(e)
+            if hint:
+                typer.echo(f"💡 {hint}", err=True)
             raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
     csv_path = Path(csv or config.csv_path)
     if not csv_path.exists():
         typer.echo(f"❌ CSV 文件不存在: {csv_path}", err=True)
+        typer.echo(f"💡 可使用 --csv 参数指定其他路径，或参考 'asc upload --help'", err=True)
         raise typer.Exit(1)
     metadata_list = parse_csv(str(csv_path))
     _upload_metadata_core(
@@ -483,6 +537,15 @@ def cmd_marketing_url(
         asc --app myapp marketing-url --dry-run
     """
     config = Config(app)
+    resolved_app = resolve_app_profile(app, config)
+    if resolved_app == "__import__":
+        from asc.commands.app_config import _do_import_from_env
+        env_path = os.environ.pop("_ASC_IMPORT_LOCAL_CONFIG", "")
+        resolved_app = _do_import_from_env(env_path)
+    elif resolved_app == "__local__":
+        os.environ.pop("_ASC_APP", None)  # Clear so Config uses __local__ sentinel
+    app = resolved_app
+    config = Config(app)
     guard = Guard()
     if guard.is_enabled():
         try:
@@ -494,11 +557,15 @@ def cmd_marketing_url(
             )
         except GuardViolationError as e:
             typer.echo(f"❌ {e}", err=True)
+            hint = get_action_hint(e)
+            if hint:
+                typer.echo(f"💡 {hint}", err=True)
             raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
     csv_path = Path(csv or config.csv_path)
     if not csv_path.exists():
         typer.echo(f"❌ CSV 文件不存在: {csv_path}", err=True)
+        typer.echo(f"💡 可使用 --csv 参数指定其他路径，或参考 'asc upload --help'", err=True)
         raise typer.Exit(1)
     metadata_list = parse_csv(str(csv_path))
     _upload_metadata_core(
@@ -527,6 +594,15 @@ def cmd_privacy_policy_url(
         asc --app myapp privacy-policy-url --dry-run
     """
     config = Config(app)
+    resolved_app = resolve_app_profile(app, config)
+    if resolved_app == "__import__":
+        from asc.commands.app_config import _do_import_from_env
+        env_path = os.environ.pop("_ASC_IMPORT_LOCAL_CONFIG", "")
+        resolved_app = _do_import_from_env(env_path)
+    elif resolved_app == "__local__":
+        os.environ.pop("_ASC_APP", None)  # Clear so Config uses __local__ sentinel
+    app = resolved_app
+    config = Config(app)
     guard = Guard()
     if guard.is_enabled():
         try:
@@ -538,11 +614,15 @@ def cmd_privacy_policy_url(
             )
         except GuardViolationError as e:
             typer.echo(f"❌ {e}", err=True)
+            hint = get_action_hint(e)
+            if hint:
+                typer.echo(f"💡 {hint}", err=True)
             raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
     csv_path = Path(csv or config.csv_path)
     if not csv_path.exists():
         typer.echo(f"❌ CSV 文件不存在: {csv_path}", err=True)
+        typer.echo(f"💡 可使用 --csv 参数指定其他路径，或参考 'asc upload --help'", err=True)
         raise typer.Exit(1)
     metadata_list = parse_csv(str(csv_path))
     _upload_metadata_core(
@@ -575,6 +655,15 @@ def cmd_set_support_url(
         asc --app myapp set-support-url --text "https://example.com/support" --dry-run
     """
     config = Config(app)
+    resolved_app = resolve_app_profile(app, config)
+    if resolved_app == "__import__":
+        from asc.commands.app_config import _do_import_from_env
+        env_path = os.environ.pop("_ASC_IMPORT_LOCAL_CONFIG", "")
+        resolved_app = _do_import_from_env(env_path)
+    elif resolved_app == "__local__":
+        os.environ.pop("_ASC_APP", None)  # Clear so Config uses __local__ sentinel
+    app = resolved_app
+    config = Config(app)
     guard = Guard()
     if guard.is_enabled():
         try:
@@ -586,6 +675,9 @@ def cmd_set_support_url(
             )
         except GuardViolationError as e:
             typer.echo(f"❌ {e}", err=True)
+            hint = get_action_hint(e)
+            if hint:
+                typer.echo(f"💡 {hint}", err=True)
             raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
     locale_list = [l.strip() for l in locales.split(",")] if locales else None
@@ -612,6 +704,15 @@ def cmd_set_marketing_url(
         asc --app myapp set-marketing-url --text "https://example.com" --locales en-US,zh-CN
     """
     config = Config(app)
+    resolved_app = resolve_app_profile(app, config)
+    if resolved_app == "__import__":
+        from asc.commands.app_config import _do_import_from_env
+        env_path = os.environ.pop("_ASC_IMPORT_LOCAL_CONFIG", "")
+        resolved_app = _do_import_from_env(env_path)
+    elif resolved_app == "__local__":
+        os.environ.pop("_ASC_APP", None)  # Clear so Config uses __local__ sentinel
+    app = resolved_app
+    config = Config(app)
     guard = Guard()
     if guard.is_enabled():
         try:
@@ -623,6 +724,9 @@ def cmd_set_marketing_url(
             )
         except GuardViolationError as e:
             typer.echo(f"❌ {e}", err=True)
+            hint = get_action_hint(e)
+            if hint:
+                typer.echo(f"💡 {hint}", err=True)
             raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
     locale_list = [l.strip() for l in locales.split(",")] if locales else None
@@ -649,6 +753,15 @@ def cmd_set_privacy_policy_url(
         asc --app myapp set-privacy-policy-url --text "https://example.com/privacy" --locales en-US
     """
     config = Config(app)
+    resolved_app = resolve_app_profile(app, config)
+    if resolved_app == "__import__":
+        from asc.commands.app_config import _do_import_from_env
+        env_path = os.environ.pop("_ASC_IMPORT_LOCAL_CONFIG", "")
+        resolved_app = _do_import_from_env(env_path)
+    elif resolved_app == "__local__":
+        os.environ.pop("_ASC_APP", None)  # Clear so Config uses __local__ sentinel
+    app = resolved_app
+    config = Config(app)
     guard = Guard()
     if guard.is_enabled():
         try:
@@ -660,6 +773,9 @@ def cmd_set_privacy_policy_url(
             )
         except GuardViolationError as e:
             typer.echo(f"❌ {e}", err=True)
+            hint = get_action_hint(e)
+            if hint:
+                typer.echo(f"💡 {hint}", err=True)
             raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
     locale_list = [l.strip() for l in locales.split(",")] if locales else None
@@ -687,6 +803,15 @@ def cmd_check(
         asc --app myapp check
     """
     config = Config(app)
+    resolved_app = resolve_app_profile(app, config)
+    if resolved_app == "__import__":
+        from asc.commands.app_config import _do_import_from_env
+        env_path = os.environ.pop("_ASC_IMPORT_LOCAL_CONFIG", "")
+        resolved_app = _do_import_from_env(env_path)
+    elif resolved_app == "__local__":
+        os.environ.pop("_ASC_APP", None)  # Clear so Config uses __local__ sentinel
+    app = resolved_app
+    config = Config(app)
     api, app_id = make_api_from_config(config)
     print("\n🔐 验证 API 连接...")
     try:
@@ -696,4 +821,7 @@ def cmd_check(
         print(f"  ✅ 已连接: {app_name} ({bundle_id})")
     except Exception as e:
         typer.echo(f"  ❌ API 连接失败: {e}", err=True)
+        hint = get_action_hint(e)
+        if hint:
+            typer.echo(f"💡 {hint}", err=True)
         raise typer.Exit(1)
