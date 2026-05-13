@@ -12,6 +12,7 @@ from typing import Optional
 import typer
 
 from asc.constants import CSV_LOCALE_TO_ASC, normalize_locale_code
+from asc.error_handler import get_action_hint
 
 
 def extract_locale(raw_lang: str) -> str:
@@ -311,8 +312,11 @@ def make_api_from_config(config, app_id_override: Optional[str] = None):
         missing.append("APP_ID / app_id")
     if missing:
         typer.echo(
-            f"❌ Missing required config: {', '.join(missing)}\n"
-            "Run 'asc app add <name>' to configure an app profile, or set environment variables.",
+            f"❌ Missing required config: {', '.join(missing)}",
+            err=True,
+        )
+        typer.echo(
+            f"💡 请先运行 'asc app edit <name>' 补充配置，或在项目根目录运行 'asc init'。",
             err=True,
         )
         raise typer.Exit(1)
