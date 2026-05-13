@@ -134,8 +134,9 @@ def test_list_schemes_raises_on_failure():
     from asc.commands.build import list_schemes
     with patch("asc.commands.build.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(stdout="", stderr="error: invalid project", returncode=1)
-        with pytest.raises(RuntimeError, match="无法获取 Xcode scheme 列表"):
-            list_schemes("/invalid/path", "workspace")
+        with patch("asc.i18n.LANG", "zh"):
+            with pytest.raises(RuntimeError, match="无法获取 Xcode scheme 列表"):
+                list_schemes("/invalid/path", "workspace")
 
 
 # ── generate_export_options tests ──
