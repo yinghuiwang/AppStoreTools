@@ -35,7 +35,7 @@ dev = [
 ]
 
 [project.scripts]
-asc = "asc.cli:app"
+asc = "asc.cli:run_app"
 
 [build-system]
 requires = ["hatchling"]

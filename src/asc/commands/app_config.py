@@ -10,6 +10,7 @@ from typing import Optional
 import typer
 
 from asc.config import Config
+from asc.i18n import t, ERRORS
 
 
 def cmd_app_add(
@@ -37,7 +38,13 @@ def cmd_app_add(
 
     issuer_id = typer.prompt("  Issuer ID")
     key_id = typer.prompt("  Key ID")
-    key_file_input = typer.prompt("  Path to .p8 private key file")
+    key_file_input = ""
+    while True:
+        key_file_input = typer.prompt("  Path to .p8 private key file")
+        key_path = Path(key_file_input.strip().strip("'\"")).expanduser()
+        if key_path.exists():
+            break
+        typer.echo(f"❌ {t(ERRORS['file_not_found_reenter']).format(path=key_path)}", err=True)
     app_id = typer.prompt("  App ID (numeric)")
 
     typer.echo("\nEnter default data paths (press Enter to use defaults):")
@@ -47,13 +54,6 @@ def cmd_app_add(
     screenshots_path = typer.prompt(
         "  Screenshots directory", default="data/screenshots"
     )
-
-    # Strip quotes and whitespace from path input
-    key_file_clean = key_file_input.strip().strip("'\"")
-    key_path = Path(key_file_clean).expanduser()
-    if not key_path.exists():
-        typer.echo(f"❌ Key file not found: {key_path}", err=True)
-        raise typer.Exit(1)
 
     global_keys_dir = Path.home() / ".config" / "asc" / "keys"
     global_keys_dir.mkdir(parents=True, exist_ok=True)
@@ -193,7 +193,15 @@ def cmd_app_edit(
 
     issuer_id = typer.prompt("  Issuer ID", default=profile["issuer_id"])
     key_id = typer.prompt("  Key ID", default=profile["key_id"])
-    key_file_input = typer.prompt("  Path to .p8 private key file", default=profile["key_file"])
+    key_file_input = ""
+    while True:
+        key_file_input = typer.prompt("  Path to .p8 private key file", default=profile["key_file"])
+        if key_file_input == profile["key_file"]:
+            break
+        key_path = Path(key_file_input.strip().strip("'\"")).expanduser()
+        if key_path.exists():
+            break
+        typer.echo(f"❌ {t(ERRORS['file_not_found_reenter']).format(path=key_path)}", err=True)
     app_id = typer.prompt("  App ID (numeric)", default=profile["app_id"])
     csv_path = typer.prompt("  CSV metadata file path", default=profile["csv"])
     screenshots_path = typer.prompt("  Screenshots directory", default=profile["screenshots"])
@@ -272,7 +280,7 @@ def cmd_install():
                     typer.echo(f"  {i}. {name}")
                 chosen = typer.prompt("Profile 名称")
                 if chosen not in apps:
-                    typer.echo(f"❌ '{chosen}' 不在列表中，跳过", err=True)
+                    typer.echo(f"❌ {t(ERRORS['invalid_choice_skip']).format(choice=chosen)}", err=True)
                     typer.echo("")
                     _print_cheatsheet()
                     return
@@ -351,39 +359,33 @@ def _write_local_default(local_dir: Path, profile_name: str) -> None:
         config_file.write_text(prefix + f'[defaults]\ndefault_app = "{profile_name}"\n')
 
 
-def cmd_app_import(
-    path: Optional[str] = typer.Option(
-        None, "--path", "-p",
-        help="项目根路径（默认：当前目录）",
-    ),
-    name: Optional[str] = typer.Option(
-        None, "--name", "-n",
-        help="Profile 名称（默认：项目目录名）",
-    ),
-):
-    """从项目 AppStore/Config/.env 读取凭证，自动创建 app profile。
+def _do_import_from_env(
+    env_file_path: str,
+    project_root: Optional[Path] = None,
+    name: Optional[str] = None,
+) -> str:
+    """Import app profile from .env file.
 
-    在项目根目录的 AppStore/Config/.env 中读取以下字段：
-    ISSUER_ID, KEY_ID, KEY_FILE, APP_ID。
+    Parses the .env file at env_file_path, validates required fields,
+    copies the key file to ~/.config/asc/keys/, auto-detects csv and
+    screenshots paths, and saves the profile.
 
-    KEY_FILE 若为纯文件名，会在 AppStore/Config/ 下查找并拷贝到全局
-    ~/.config/asc/keys/（已存在则跳过）。
+    Args:
+        env_file_path: Path to the .env file to import
+        project_root: Root path of the project (used for relative path resolution)
+        name: Optional profile name (defaults to project_root.name)
 
-    csv 和 screenshots 路径根据 AppStore/data/ 目录内容自动推断。
-
-    \b
-    Example:
-        asc app import
-        asc app import --path /path/to/MyProject
-        asc app import --path /path/to/MyProject --name myapp
+    Returns:
+        The profile name that was created/updated
     """
-    project_root = Path(path).expanduser().resolve() if path else Path.cwd()
-    env_file = project_root / "AppStore" / "Config" / ".env"
-
+    env_file = Path(env_file_path)
     if not env_file.exists():
-        typer.echo(f"❌ 未找到配置文件：{env_file}", err=True)
-        typer.echo("   请确保项目目录下有 AppStore/Config/.env 文件。", err=True)
-        raise typer.Exit(1)
+        raise FileNotFoundError(f"❌ {t(ERRORS['config_file_not_found']).format(path=env_file)}")
+
+    # AppStore/Config/.env -> project_root = AppStore/Config/.env.parent.parent.parent
+    # i.e., AppStore/ -> project root (ios_test)
+    if project_root is None:
+        project_root = env_file.parent.parent.parent
 
     # 解析 .env（仅读取不 load_dotenv 以避免污染进程环境）
     env_vars: dict[str, str] = {}
@@ -401,8 +403,7 @@ def cmd_app_import(
     required = ["ISSUER_ID", "KEY_ID", "KEY_FILE", "APP_ID"]
     missing = [f for f in required if not env_vars.get(f)]
     if missing:
-        typer.echo(f"❌ .env 缺少必填字段：{', '.join(missing)}", err=True)
-        raise typer.Exit(1)
+        raise ValueError(f"❌ .env 缺少必填字段：{', '.join(missing)}")
 
     issuer_id = env_vars["ISSUER_ID"]
     key_id = env_vars["KEY_ID"]
@@ -412,10 +413,10 @@ def cmd_app_import(
     # 处理 KEY_FILE：纯文件名则在 AppStore/Config/ 下查找
     key_path = Path(key_file_val).expanduser()
     if not key_path.is_absolute():
-        key_path = project_root / "AppStore" / "Config" / key_file_val
+        # env_file is at AppStore/Config/.env, so env_file.parent is AppStore/Config
+        key_path = env_file.parent / key_file_val
     if not key_path.exists():
-        typer.echo(f"❌ 找不到 .p8 密钥文件：{key_path}", err=True)
-        raise typer.Exit(1)
+        raise FileNotFoundError(f"❌ 找不到 .p8 密钥文件：{key_path}")
 
     global_keys_dir = Path.home() / ".config" / "asc" / "keys"
     global_keys_dir.mkdir(parents=True, exist_ok=True)
@@ -460,6 +461,49 @@ def cmd_app_import(
     typer.echo(f"   App ID:     {app_id}")
     typer.echo(f"   CSV:        {csv_path}")
     typer.echo(f"   截图路径:   {screenshots_path}")
+
+    return profile_name
+
+
+def cmd_app_import(
+    path: Optional[str] = typer.Option(
+        None, "--path", "-p",
+        help="项目根路径（默认：当前目录）",
+    ),
+    name: Optional[str] = typer.Option(
+        None, "--name", "-n",
+        help="Profile 名称（默认：项目目录名）",
+    ),
+):
+    """从项目 AppStore/Config/.env 读取凭证，自动创建 app profile。
+
+    在项目根目录的 AppStore/Config/.env 中读取以下字段：
+    ISSUER_ID, KEY_ID, KEY_FILE, APP_ID。
+
+    KEY_FILE 若为纯文件名，会在 AppStore/Config/ 下查找并拷贝到全局
+    ~/.config/asc/keys/（已存在则跳过）。
+
+    csv 和 screenshots 路径根据 AppStore/data/ 目录内容自动推断。
+
+    \b
+    Example:
+        asc app import
+        asc app import --path /path/to/MyProject
+        asc app import --path /path/to/MyProject --name myapp
+    """
+    project_root = Path(path).expanduser().resolve() if path else Path.cwd()
+    env_file = project_root / "AppStore" / "Config" / ".env"
+
+    if not env_file.exists():
+        typer.echo(f"❌ {t(ERRORS['config_file_not_found']).format(path=env_file)}", err=True)
+        typer.echo("   请确保项目目录下有 AppStore/Config/.env 文件。", err=True)
+        raise typer.Exit(1)
+
+    try:
+        profile_name = _do_import_from_env(str(env_file), project_root, name)
+    except (ValueError, FileNotFoundError) as e:
+        typer.echo(f"❌ {e}", err=True)
+        raise typer.Exit(1)
 
     # 询问是否设为默认
     set_default = typer.confirm(f"\n将 '{profile_name}' 设为 {project_root.name} 的默认 profile？")

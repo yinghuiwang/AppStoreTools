@@ -90,7 +90,8 @@ def test_install_has_profiles_invalid_name_shows_cheatsheet(tmp_path, monkeypatc
         MockConfig.return_value = mock_cfg
 
         # User says yes to set default, but enters invalid name
-        result = runner.invoke(app, ["install"], input="y\nbadname\n")
+        with patch("asc.i18n.LANG", "zh"):
+            result = runner.invoke(app, ["install"], input="y\nbadname\n")
 
     assert result.exit_code == 0
     assert "不在列表中" in result.output

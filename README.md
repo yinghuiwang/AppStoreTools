@@ -213,6 +213,14 @@ asc guard unbind --credential <KEY_ID>
 asc guard reset
 ```
 
+### Updating
+
+```bash
+asc update                    # Update to the latest version
+asc update --version 0.1.5    # Install a specific version
+asc update --branch main      # Install from a specific branch
+```
+
 ## Build Defaults (`.asc/config.toml`)
 
 ```toml

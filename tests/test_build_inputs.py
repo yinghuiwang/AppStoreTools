@@ -88,7 +88,7 @@ def test_parse_mobileprovision_raises_when_expiration_missing(tmp_path, monkeypa
                    "Entitlements": {"application-identifier": "T.com.x"},
                    "DeveloperCertificates": []},
     )
-    with pytest.raises(RuntimeError, match="ExpirationDate"):
+    with pytest.raises(RuntimeError, match="证书已过期或损坏"):
         parse_mobileprovision(p)
 
 
