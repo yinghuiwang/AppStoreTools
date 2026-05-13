@@ -13,7 +13,7 @@ from asc.config import Config
 from asc.error_handler import get_action_hint
 from asc.guard import Guard, GuardViolationError
 from asc.utils import make_api_from_config, resolve_app_profile
-from asc.i18n import t, HELP
+from asc.i18n import t, ERRORS, HELP
 
 
 def _load_iap_config(file_path: str) -> tuple[list[dict], list[dict]]:
@@ -232,7 +232,7 @@ def cmd_iap(
     api, app_id = make_api_from_config(config)
     iap_path = Path(iap_file)
     if not iap_path.exists():
-        typer.echo(f"❌ IAP 配置文件不存在: {iap_path}", err=True)
+        typer.echo(f"❌ {t(ERRORS['iap_config_not_found']).format(path=iap_path)}", err=True)
         typer.echo(f"💡 可使用 --iap-file 参数指定其他路径。", err=True)
         raise typer.Exit(1)
 
