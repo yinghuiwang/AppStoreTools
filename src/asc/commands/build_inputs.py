@@ -14,6 +14,7 @@ from typing import Callable, List, Optional, Sequence, TypeVar
 import typer
 
 from asc.error_handler import get_action_hint
+from asc.i18n import t, ERRORS
 
 
 @dataclass
@@ -301,7 +302,7 @@ def list_schemes(project_path: str, kind: str) -> list[str]:
         capture_output=True, text=True,
     )
     if result.returncode != 0:
-        raise RuntimeError("无法获取 Xcode scheme 列表。请确认 --project 路径指向有效的 Xcode 项目。")
+        raise RuntimeError(t(ERRORS['xcode_scheme_failed']))
 
     schemes: list[str] = []
     in_schemes = False
