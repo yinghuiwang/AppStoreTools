@@ -15,6 +15,8 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from asc.i18n import t, ERRORS
+
 GUARD_FILE = Path.home() / ".config" / "asc" / "guard.json"
 
 _EMPTY = {"enabled": True, "bindings": {"machine": {}, "ip": {}, "credential": {}}}
@@ -30,7 +32,7 @@ def _get_machine_fingerprint_macos() -> str:
             parts = line.split('"')
             if len(parts) >= 4:
                 return parts[-2]
-    raise RuntimeError("无法获取机器标识符。Guard 功能仅在 macOS 上可用。在 CI 环境请使用 'asc guard disable' 禁用。")
+    raise RuntimeError(t(ERRORS['machine_id_failed']))
 
 
 def _fetch_public_ip() -> str:
@@ -41,7 +43,7 @@ def _fetch_public_ip() -> str:
                 return resp.read().decode().strip()
         except Exception:
             continue
-    raise RuntimeError("无法获取公网 IP 地址。请检查网络连接，或使用 'asc guard disable' 禁用 Guard。")
+    raise RuntimeError(t(ERRORS['ip_fetch_failed']))
 
 
 class GuardError(Exception):
