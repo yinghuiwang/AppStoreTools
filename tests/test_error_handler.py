@@ -131,7 +131,7 @@ class TestGetUserMessage:
 
         exc = Exception("API Error [401] Invalid token")
         result = get_user_message(exc)
-        assert "401" in result or "Authentication failed" in result
+        assert result == "Authentication failed. Please check your credentials (issuer_id, key_id, key_file)."
 
     def test_fallback_generic_message(self, monkeypatch):
         """Falls back to generic message for unknown exceptions."""
@@ -140,7 +140,7 @@ class TestGetUserMessage:
 
         exc = RuntimeError("Something went wrong")
         result = get_user_message(exc)
-        assert "RuntimeError" in result or "Something went wrong" in result
+        assert result == "Error: Something went wrong"
 
     def test_chinese_message(self, monkeypatch):
         """Returns Chinese message when LANG is zh."""
@@ -149,7 +149,7 @@ class TestGetUserMessage:
 
         exc = FileNotFoundError("key.p8 not found")
         result = get_user_message(exc)
-        assert "文件未找到" in result or "文件" in result
+        assert result == "文件未找到，请检查文件路径。"
 
 
 class TestLogError:
