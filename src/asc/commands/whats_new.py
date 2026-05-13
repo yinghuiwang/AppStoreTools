@@ -9,6 +9,7 @@ from typing import Optional
 import typer
 
 from asc.config import Config
+from asc.error_handler import get_action_hint
 from asc.guard import Guard, GuardViolationError
 from asc.utils import make_api_from_config, resolve_app_profile, resolve_locale
 from asc.i18n import t, HELP
@@ -125,12 +126,16 @@ def cmd_whats_new(
             )
         except GuardViolationError as e:
             typer.echo(f"❌ {e}", err=True)
+            hint = get_action_hint(e)
+            if hint:
+                typer.echo(f"💡 {hint}", err=True)
             raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
 
     version = api.get_editable_version(app_id)
     if not version:
         typer.echo("❌ 找不到可编辑的 App Store 版本", err=True)
+        typer.echo("💡 请在 App Store Connect 中确认版本状态为可编辑状态（如 PREPARE_FOR_SUBMISSION）", err=True)
         raise typer.Exit(1)
     version_id = version["id"]
     version_string = version["attributes"].get("versionString", "?")
@@ -140,6 +145,7 @@ def cmd_whats_new(
     ver_locs = api.get_version_localizations(version_id)
     if not ver_locs:
         typer.echo("❌ 该版本没有本地化信息", err=True)
+        typer.echo("💡 请先通过 asc metadata 命令上传至少一个本地化描述文件", err=True)
         raise typer.Exit(1)
     ver_loc_map = {loc["attributes"]["locale"]: loc for loc in ver_locs}
     existing_locales = list(ver_loc_map.keys())
@@ -148,10 +154,12 @@ def cmd_whats_new(
         file_path = Path(file)
         if not file_path.exists():
             typer.echo(f"❌ 文件不存在: {file_path}", err=True)
+            typer.echo("💡 请检查文件路径是否正确，或使用 --text 直接指定内容", err=True)
             raise typer.Exit(1)
         entries = _parse_whats_new_file(str(file_path))
         if not entries:
             typer.echo(f"❌ 未从文件中解析到更新描述: {file_path}", err=True)
+            typer.echo("💡 请确保文件格式正确，包含有效的更新描述文本", err=True)
             raise typer.Exit(1)
 
         for locale, content in entries.items():
