@@ -25,10 +25,12 @@ class _FakeSpinner:
         self.label = label
         self.log_path = log_path
 
-    def run(self, cmd):
+    def run(self, cmd, output_callback=None):
         # Write a minimal log file so helpers that read it don't error
         Path(self.log_path).parent.mkdir(parents=True, exist_ok=True)
         Path(self.log_path).write_text(self.__class__.stderr or "")
+        if output_callback and self.__class__.stderr:
+            output_callback(self.__class__.stderr)
         return subprocess.CompletedProcess(
             args=cmd,
             returncode=self.__class__.returncode,
@@ -234,9 +236,9 @@ def test_run_xcodebuild_archive_calls_correct_command(tmp_path, monkeypatch):
     captured_cmd = {}
 
     class _TrackingSpinner(_FakeSpinner):
-        def run(self, cmd):
+        def run(self, cmd, output_callback=None):
             captured_cmd["cmd"] = cmd
-            return super().run(cmd)
+            return super().run(cmd, output_callback=output_callback)
 
     _TrackingSpinner.returncode = 0
     _TrackingSpinner.stderr = ""
@@ -290,9 +292,9 @@ def test_run_xcodebuild_export_calls_correct_command(tmp_path, monkeypatch):
     captured_cmd = {}
 
     class _TrackingSpinner(_FakeSpinner):
-        def run(self, cmd):
+        def run(self, cmd, output_callback=None):
             captured_cmd["cmd"] = cmd
-            return super().run(cmd)
+            return super().run(cmd, output_callback=output_callback)
 
     _TrackingSpinner.returncode = 0
     _TrackingSpinner.stderr = ""
@@ -353,9 +355,9 @@ def test_upload_ipa_uses_altool(tmp_path, monkeypatch):
     captured_cmd = {}
 
     class _TrackingSpinner(_FakeSpinner):
-        def run(self, cmd):
+        def run(self, cmd, output_callback=None):
             captured_cmd["cmd"] = cmd
-            return super().run(cmd)
+            return super().run(cmd, output_callback=output_callback)
 
     _TrackingSpinner.returncode = 0
     _TrackingSpinner.stderr = ""
@@ -396,6 +398,59 @@ def test_upload_ipa_raises_on_failure(tmp_path, monkeypatch):
 
     _FakeSpinner.returncode = 0
     _FakeSpinner.stderr = ""
+
+
+def test_upload_progress_reporter_prints_total_and_percent(capsys):
+    """Upload progress reporter converts percent output into uploaded bytes."""
+    from asc.commands.build import UploadProgressReporter
+
+    reporter = UploadProgressReporter(total_bytes=10 * 1024 * 1024)
+
+    reporter.print_start()
+    reporter.handle_output_line("Uploading package: 25%")
+
+    captured = capsys.readouterr()
+    output = captured.out + captured.err
+    assert "IPA 总大小: 10.0 MB" in output
+    assert "已上传: 2.5 MB / 10.0 MB (25%)" in output
+
+
+def test_upload_progress_reporter_prints_transporter_byte_progress(capsys):
+    """Upload progress reporter uses uploaded byte counters when present."""
+    from asc.commands.build import UploadProgressReporter
+
+    reporter = UploadProgressReporter(total_bytes=8 * 1024 * 1024)
+
+    reporter.handle_output_line("Uploaded 4194304 of 8388608 bytes")
+
+    captured = capsys.readouterr()
+    output = captured.out + captured.err
+    assert "已上传: 4.0 MB / 8.0 MB (50%)" in output
+
+
+def test_deploy_core_prints_upload_steps_and_total(tmp_path, monkeypatch, capsys):
+    """deploy_core shows the current upload step and IPA size."""
+    from asc.commands.build import deploy_core
+
+    ipa = tmp_path / "MyApp.ipa"
+    ipa.write_bytes(b"x" * (3 * 1024 * 1024))
+
+    monkeypatch.setattr("asc.commands.build.upload_ipa", lambda *a, **kw: None)
+
+    deploy_core(
+        ipa_path=str(ipa),
+        issuer_id="issuer-123",
+        key_id="key-456",
+        key_file="/path/to/key.p8",
+        destination="testflight",
+        dry_run=False,
+    )
+
+    captured = capsys.readouterr()
+    assert "步骤 1/3：检查 IPA 文件" in captured.out
+    assert "IPA 总大小: 3.0 MB" in captured.out
+    assert "步骤 2/3：上传 IPA 到 App Store Connect" in captured.out
+    assert "步骤 3/3：等待 altool 返回上传结果" in captured.out
 
 
 def test_cmd_deploy_non_macos():

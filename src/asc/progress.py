@@ -3,7 +3,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 SPINNER_INTERVAL = 0.08
@@ -94,7 +94,11 @@ class Spinner:
                 sys.stderr.write(f"   {line}\n")
             sys.stderr.flush()
 
-    def run(self, cmd: list) -> subprocess.CompletedProcess:
+    def run(
+        self,
+        cmd: list,
+        output_callback: Optional[Callable[[str], None]] = None,
+    ) -> subprocess.CompletedProcess:
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         log_file = open(self.log_path, "w", buffering=1)  # line-buffered
 
@@ -122,6 +126,8 @@ class Spinner:
             assert proc.stdout is not None
             for line in proc.stdout:
                 log_file.write(line)
+                if output_callback is not None:
+                    output_callback(line)
                 if self.verbose:
                     sys.stdout.write(line)
                     sys.stdout.flush()

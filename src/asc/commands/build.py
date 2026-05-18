@@ -1,6 +1,7 @@
 """Build, deploy, and release commands for asc CLI."""
 from __future__ import annotations
 import os
+import re
 from typing import Optional
 
 import plistlib
@@ -30,6 +31,72 @@ from asc.commands.build_inputs import (
 )
 
 from asc.error_handler import get_action_hint
+
+
+_BYTE_PROGRESS_RE = re.compile(
+    r"(?P<uploaded>\d[\d,]*)\s+(?:of|/)\s+(?P<total>\d[\d,]*)\s+bytes",
+    re.IGNORECASE,
+)
+_PERCENT_PROGRESS_RE = re.compile(r"(?P<percent>\d{1,3})(?:\.\d+)?\s*%")
+
+
+def _format_bytes(num_bytes: int) -> str:
+    """Format bytes for user-facing CLI progress."""
+    size = float(num_bytes)
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024 or unit == "GB":
+            if unit == "B":
+                return f"{int(size)} {unit}"
+            return f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} GB"
+
+
+class UploadProgressReporter:
+    """Print user-facing IPA upload progress from altool/Transporter output."""
+
+    def __init__(self, total_bytes: int):
+        self.total_bytes = total_bytes
+        self._last_percent: Optional[int] = None
+
+    def print_start(self) -> None:
+        typer.echo(f"  IPA 总大小: {_format_bytes(self.total_bytes)}")
+        typer.echo("  上传进度: 等待 App Store Connect 接收数据...")
+
+    def handle_output_line(self, line: str) -> None:
+        progress = self._parse_progress(line)
+        if progress is None:
+            return
+
+        uploaded, percent = progress
+        if self._last_percent == percent:
+            return
+        self._last_percent = percent
+
+        typer.echo(
+            "  已上传: "
+            f"{_format_bytes(uploaded)} / {_format_bytes(self.total_bytes)} "
+            f"({percent}%)"
+        )
+
+    def _parse_progress(self, line: str) -> Optional[tuple[int, int]]:
+        byte_match = _BYTE_PROGRESS_RE.search(line)
+        if byte_match:
+            uploaded = int(byte_match.group("uploaded").replace(",", ""))
+            total = int(byte_match.group("total").replace(",", ""))
+            if total > 0:
+                self.total_bytes = total
+            uploaded = min(uploaded, self.total_bytes)
+            percent = int(uploaded * 100 / self.total_bytes) if self.total_bytes else 0
+            return uploaded, min(percent, 100)
+
+        percent_match = _PERCENT_PROGRESS_RE.search(line)
+        if percent_match:
+            percent = min(int(percent_match.group("percent")), 100)
+            uploaded = int(self.total_bytes * percent / 100)
+            return uploaded, percent
+
+        return None
 
 
 def _require_macos() -> None:
@@ -342,6 +409,7 @@ def upload_ipa(
     destination: str,
     *,
     verbose: bool = False,
+    progress_reporter: Optional[UploadProgressReporter] = None,
 ) -> None:
     """Upload .ipa using xcrun altool.
 
@@ -359,8 +427,11 @@ def upload_ipa(
         "-t", "ios",
     ]
     log_path = Path(ipa_path).parent / "upload.log"
+    if progress_reporter is None:
+        progress_reporter = UploadProgressReporter(Path(ipa_path).stat().st_size)
+        progress_reporter.print_start()
     sp = Spinner("上传到 App Store Connect", log_path=str(log_path), verbose=verbose)
-    result = sp.run(cmd)
+    result = sp.run(cmd, output_callback=progress_reporter.handle_output_line)
     if result.returncode != 0:
         raise RuntimeError(f"Upload failed (see {log_path})")
 
@@ -382,17 +453,30 @@ def deploy_core(
     typer.echo(f"  IPA: {ipa_path}")
     typer.echo(f"  目标: {destination}")
 
+    typer.echo("\n  ── 步骤 1/3：检查 IPA 文件 ──")
     if not Path(ipa_path).exists():
         typer.echo(f"❌ {t(ERRORS['ipa_not_found']).format(path=ipa_path)}", err=True)
         raise typer.Exit(1)
+    ipa_size = Path(ipa_path).stat().st_size
+    progress_reporter = UploadProgressReporter(ipa_size)
+    progress_reporter.print_start()
 
     if dry_run:
         typer.echo("\n[预览] 将上传：")
         typer.echo(f"  xcrun altool --upload-app -f {ipa_path}")
         return
 
-    typer.echo("\n  正在上传...")
-    upload_ipa(ipa_path, issuer_id, key_id, key_file, destination, verbose=verbose)
+    typer.echo("  ── 步骤 2/3：上传 IPA 到 App Store Connect ──")
+    upload_ipa(
+        ipa_path,
+        issuer_id,
+        key_id,
+        key_file,
+        destination,
+        verbose=verbose,
+        progress_reporter=progress_reporter,
+    )
+    typer.echo("  ── 步骤 3/3：等待 altool 返回上传结果 ──")
     typer.echo("  ✅ 上传成功")
 
 
