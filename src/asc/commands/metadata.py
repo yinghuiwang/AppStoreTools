@@ -60,7 +60,8 @@ def _upload_metadata_core(
     existing_ver_locales = list(ver_loc_map.keys())
     print(f"  已有版本语言: {existing_ver_locales}")
 
-    for meta in metadata_list:
+    total_locales = len(metadata_list)
+    for idx, meta in enumerate(metadata_list):
         csv_locale = meta["语言"]
         info_locale = resolve_locale(csv_locale, existing_info_locales)
         ver_locale = resolve_locale(csv_locale, existing_ver_locales)
@@ -174,6 +175,11 @@ def _upload_metadata_core(
                                 print(f"    ❌ 无法处理版本本地化: {e}")
                         else:
                             raise
+
+        # Progress output for Web UI
+        current_idx = idx + 1
+        pct = int(current_idx / total_locales * 100)
+        print(f"[PROGRESS:{pct}:元数据 {current_idx}/{total_locales} 语言]")
 
     print("\n✅ 元数据上传完成")
 

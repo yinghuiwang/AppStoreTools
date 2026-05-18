@@ -267,3 +267,25 @@ def test_metadata_check_error_level(client):
         data = resp.json()
         assert data["level"] == "error"
         assert data["ok"] is False
+
+
+def test_metadata_core_outputs_progress(capsys):
+    from asc.commands.metadata import _upload_metadata_core
+    from unittest.mock import MagicMock
+    mock_api = MagicMock()
+    mock_api.get_app_infos.return_value = [{"id": "info1"}]
+    mock_api.get_editable_version.return_value = {
+        "id": "v1", "attributes": {"versionString": "1.0", "appStoreState": "PREPARE_FOR_SUBMISSION"}
+    }
+    mock_api.get_app_info_localizations.return_value = []
+    mock_api.get_version_localizations.return_value = []
+    mock_api.create_app_info_localization.return_value = {"id": "loc1"}
+    mock_api.create_version_localization.return_value = {"id": "vloc1"}
+    metadata_list = [
+        {"语言": "en-US", "应用名称": "Test", "长描述": "desc"},
+        {"语言": "zh-CN", "应用名称": "测试", "长描述": "描述"},
+    ]
+    _upload_metadata_core(mock_api, "app1", metadata_list, dry_run=True)
+    captured = capsys.readouterr()
+    assert "[PROGRESS:50:元数据 1/2 语言]" in captured.out
+    assert "[PROGRESS:100:元数据 2/2 语言]" in captured.out
