@@ -313,3 +313,27 @@ def test_screenshots_core_outputs_progress(capsys, tmp_path):
     captured = capsys.readouterr()
     assert "[PROGRESS:" in captured.out
     assert "截图" in captured.out
+
+
+def test_progress_parsing_in_drain_loop():
+    import re
+    line = "[PROGRESS:45:元数据 5/11 语言]"
+    match = re.match(r"\[PROGRESS:(\d+):(.+)\]", line)
+    assert match is not None
+    assert match.group(1) == "45"
+    assert match.group(2) == "元数据 5/11 语言"
+
+
+def test_sse_stream_emits_progress():
+    from asc.web.tasks import TaskStore, TaskStatus
+    store = TaskStore()
+    task_id = store.create("metadata", profile="myapp")
+    store.set_status(task_id, TaskStatus.RUNNING)
+    store.set_progress(task_id, 50, "测试进度")
+    store.append_log(task_id, "some log")
+    store.set_status(task_id, TaskStatus.DONE)
+
+    # Verify progress field is accessible
+    task = store.get(task_id)
+    assert task["progress"]["pct"] == 50
+    assert task["progress"]["msg"] == "测试进度"

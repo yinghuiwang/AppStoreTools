@@ -1,6 +1,7 @@
 """API routes for asc Web UI (/api/*)."""
 from __future__ import annotations
 
+import re
 import tempfile
 from pathlib import Path
 
@@ -143,13 +144,25 @@ def _start_metadata_task(
         q: queue.Queue = queue.Queue()
         done_flag = _threading.Event()
 
+        _PROGRESS_RE = re.compile(r"\[PROGRESS:(\d+):(.+)\]")
+
         def _drain_loop():
             while not done_flag.is_set():
                 while not q.empty():
-                    _task_store.append_log(task_id, q.get_nowait())
+                    line = q.get_nowait()
+                    m = _PROGRESS_RE.match(line)
+                    if m:
+                        _task_store.set_progress(task_id, int(m.group(1)), m.group(2))
+                    else:
+                        _task_store.append_log(task_id, line)
                 done_flag.wait(timeout=0.05)
             while not q.empty():
-                _task_store.append_log(task_id, q.get_nowait())
+                line = q.get_nowait()
+                m = _PROGRESS_RE.match(line)
+                if m:
+                    _task_store.set_progress(task_id, int(m.group(1)), m.group(2))
+                else:
+                    _task_store.append_log(task_id, line)
 
         _threading.Thread(target=_drain_loop, daemon=True).start()
 
@@ -227,13 +240,25 @@ def _start_build_task(
         q: queue.Queue = queue.Queue()
         done_flag = _threading.Event()
 
+        _PROGRESS_RE = re.compile(r"\[PROGRESS:(\d+):(.+)\]")
+
         def _drain_loop():
             while not done_flag.is_set():
                 while not q.empty():
-                    _task_store.append_log(task_id, q.get_nowait())
+                    line = q.get_nowait()
+                    m = _PROGRESS_RE.match(line)
+                    if m:
+                        _task_store.set_progress(task_id, int(m.group(1)), m.group(2))
+                    else:
+                        _task_store.append_log(task_id, line)
                 done_flag.wait(timeout=0.05)
             while not q.empty():
-                _task_store.append_log(task_id, q.get_nowait())
+                line = q.get_nowait()
+                m = _PROGRESS_RE.match(line)
+                if m:
+                    _task_store.set_progress(task_id, int(m.group(1)), m.group(2))
+                else:
+                    _task_store.append_log(task_id, line)
 
         _threading.Thread(target=_drain_loop, daemon=True).start()
 
@@ -339,6 +364,7 @@ async def task_stream(task_id: str):
 
     async def _generate():
         sent = 0
+        last_progress = None
         max_polls = 1500  # 300 seconds at 0.2s intervals
         polls = 0
         while polls < max_polls:
@@ -350,6 +376,12 @@ async def task_stream(task_id: str):
             while sent < len(logs):
                 yield _fmt_sse("log", logs[sent])
                 sent += 1
+            # Emit progress event if changed
+            progress = current.get("progress")
+            if progress and progress != last_progress:
+                import json
+                yield _fmt_sse("progress", json.dumps(progress))
+                last_progress = progress
             status = current["status"]
             if status == _TaskStatus.DONE:
                 yield _fmt_sse("done", "")
