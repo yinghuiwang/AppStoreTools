@@ -289,3 +289,27 @@ def test_metadata_core_outputs_progress(capsys):
     captured = capsys.readouterr()
     assert "[PROGRESS:50:元数据 1/2 语言]" in captured.out
     assert "[PROGRESS:100:元数据 2/2 语言]" in captured.out
+
+
+def test_screenshots_core_outputs_progress(capsys, tmp_path):
+    from asc.commands.screenshots import _upload_screenshots_core
+    from unittest.mock import MagicMock, patch
+    mock_api = MagicMock()
+    mock_api.get_editable_version.return_value = {"id": "v1"}
+    mock_api.get_version_localizations.return_value = [
+        {"id": "loc1", "attributes": {"locale": "en-US"}},
+        {"id": "loc2", "attributes": {"locale": "zh-CN"}},
+    ]
+    # Create screenshot folders
+    en_dir = tmp_path / "en-US"
+    en_dir.mkdir()
+    (en_dir / "screen1.png").write_bytes(b'\x89PNG\r\n\x1a\n' + b'\x00' * 100)
+    zh_dir = tmp_path / "zh-CN"
+    zh_dir.mkdir()
+    (zh_dir / "screen1.png").write_bytes(b'\x89PNG\r\n\x1a\n' + b'\x00' * 100)
+    with patch("asc.commands.screenshots._detect_display_type", return_value="APP_IPHONE_67"), \
+         patch("asc.commands.screenshots._get_sorted_screenshots", return_value=[en_dir / "screen1.png"]):
+        _upload_screenshots_core(mock_api, "app1", str(tmp_path), dry_run=True)
+    captured = capsys.readouterr()
+    assert "[PROGRESS:" in captured.out
+    assert "截图" in captured.out
