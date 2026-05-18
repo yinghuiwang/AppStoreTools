@@ -31,7 +31,7 @@
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">CSV 文件路径</label>
           <div class="flex gap-2">
-            <input type="text" name="csv_path" value="data/appstore_info.csv"
+            <input type="text" name="csv_path" value="{{ profile_csv }}"
                    id="csv-path-input"
                    class="flex-1 border border-gray-300 rounded px-3 py-2 text-sm font-mono">
             <button type="button"
@@ -43,7 +43,7 @@
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">截图目录</label>
           <div class="flex gap-2">
-            <input type="text" name="screenshots_dir" value="data/screenshots"
+            <input type="text" name="screenshots_dir" value="{{ profile_screenshots }}"
                    id="screenshots-dir-input"
                    class="flex-1 border border-gray-300 rounded px-3 py-2 text-sm font-mono">
             <button type="button"
@@ -103,11 +103,11 @@
       </div>
       <p class="text-xs text-gray-500 mb-4" x-text="progressMsg"></p>
 
-      <div x-data="{ open: false }">
+      <div x-data="{ open: true }">
         <button type="button" class="text-sm text-gray-600 hover:underline" @click="open = !open">
           <span x-text="open ? '▼ 收起日志' : '▶ 展开日志'"></span>
         </button>
-        <div x-show="open" class="mt-2 bg-gray-900 text-green-400 text-xs font-mono rounded p-3 max-h-64 overflow-y-auto">
+        <div x-show="open" class="mt-2 bg-gray-900 text-green-400 text-xs font-mono rounded p-3 max-h-64 overflow-y-auto" id="log-panel">
           <template x-for="(line, idx) in logs" :key="idx">
             <div x-text="line"></div>
           </template>
@@ -134,6 +134,46 @@
 </div>
 
 <script>
+const _METADATA_STORE_KEY = 'asc_metadata_form_{{ current_profile }}';
+
+function _saveMetadataForm() {
+  const f = document.getElementById('metadata-form');
+  if (!f) return;
+  const data = {
+    csv_path: f.querySelector('[name=csv_path]').value,
+    screenshots_dir: f.querySelector('[name=screenshots_dir]').value,
+    include_metadata: f.querySelector('[name=include_metadata]').checked,
+    include_screenshots: f.querySelector('[name=include_screenshots]').checked,
+    dry_run: f.querySelector('[name=dry_run]').checked,
+  };
+  localStorage.setItem(_METADATA_STORE_KEY, JSON.stringify(data));
+}
+
+function _restoreMetadataForm() {
+  const raw = localStorage.getItem(_METADATA_STORE_KEY);
+  if (!raw) return;
+  try {
+    const data = JSON.parse(raw);
+    const f = document.getElementById('metadata-form');
+    if (!f) return;
+    if (data.csv_path) f.querySelector('[name=csv_path]').value = data.csv_path;
+    if (data.screenshots_dir) f.querySelector('[name=screenshots_dir]').value = data.screenshots_dir;
+    f.querySelector('[name=include_metadata]').checked = data.include_metadata !== false;
+    f.querySelector('[name=include_screenshots]').checked = data.include_screenshots !== false;
+    f.querySelector('[name=dry_run]').checked = !!data.dry_run;
+  } catch(e) {}
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  _restoreMetadataForm();
+  const f = document.getElementById('metadata-form');
+  if (f) {
+    f.addEventListener('change', _saveMetadataForm);
+    f.addEventListener('input', _saveMetadataForm);
+    f.addEventListener('submit', _saveMetadataForm);
+  }
+});
+
 let _fbTargetInput = null;
 let _fbMode = 'dir';
 let _fbExt = '';
@@ -153,7 +193,9 @@ function closeFileBrowser() {
 
 function selectFile(path) {
   if (_fbTargetInput) {
-    document.getElementById(_fbTargetInput).value = path;
+    const el = document.getElementById(_fbTargetInput);
+    el.value = path;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
   }
   closeFileBrowser();
 }
@@ -162,7 +204,11 @@ function startSSE(taskId) {
   const root = document.querySelector('[x-data]');
   const d = Alpine.$data(root);
   const es = new EventSource(`/api/task/${taskId}/stream`);
-  es.addEventListener('log', e => { d.logs.push(e.data); });
+  es.addEventListener('log', e => {
+    d.logs.push(e.data);
+    const panel = document.getElementById('log-panel');
+    if (panel) requestAnimationFrame(() => { panel.scrollTop = panel.scrollHeight; });
+  });
   es.addEventListener('progress', e => {
     const p = JSON.parse(e.data);
     d.progress = p.pct || 0;

@@ -123,11 +123,11 @@
       </div>
       <p class="text-xs text-gray-500 mb-4" x-text="progressMsg"></p>
 
-      <div x-data="{ open: false }">
+      <div x-data="{ open: true }">
         <button type="button" class="text-sm text-gray-600 hover:underline" @click="open = !open">
           <span x-text="open ? '▼ 收起日志' : '▶ 展开日志'"></span>
         </button>
-        <div x-show="open" class="mt-2 bg-gray-900 text-green-400 text-xs font-mono rounded p-3 max-h-64 overflow-y-auto">
+        <div x-show="open" class="mt-2 bg-gray-900 text-green-400 text-xs font-mono rounded p-3 max-h-64 overflow-y-auto" id="build-log-panel">
           <template x-for="(line, idx) in logs" :key="idx">
             <div x-text="line"></div>
           </template>
@@ -154,6 +154,52 @@
 </div>
 
 <script>
+const _BUILD_STORE_KEY = 'asc_build_form_{{ current_profile }}';
+
+function _saveBuildForm() {
+  const f = document.getElementById('build-form');
+  if (!f) return;
+  const data = {
+    mode: f.querySelector('[name=mode]:checked')?.value || 'full',
+    project: f.querySelector('[name=project]').value,
+    destination: f.querySelector('[name=destination]:checked')?.value || 'testflight',
+    ipa_path: f.querySelector('[name=ipa_path]').value,
+    verbose: f.querySelector('[name=verbose]').checked,
+  };
+  localStorage.setItem(_BUILD_STORE_KEY, JSON.stringify(data));
+}
+
+function _restoreBuildForm() {
+  const raw = localStorage.getItem(_BUILD_STORE_KEY);
+  if (!raw) return;
+  try {
+    const data = JSON.parse(raw);
+    const f = document.getElementById('build-form');
+    if (!f) return;
+    if (data.mode) {
+      const r = f.querySelector(`[name=mode][value="${data.mode}"]`);
+      if (r) { r.checked = true; r.dispatchEvent(new Event('change')); }
+    }
+    if (data.project) f.querySelector('[name=project]').value = data.project;
+    if (data.destination) {
+      const r = f.querySelector(`[name=destination][value="${data.destination}"]`);
+      if (r) r.checked = true;
+    }
+    if (data.ipa_path) f.querySelector('[name=ipa_path]').value = data.ipa_path;
+    f.querySelector('[name=verbose]').checked = !!data.verbose;
+  } catch(e) {}
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  _restoreBuildForm();
+  const f = document.getElementById('build-form');
+  if (f) {
+    f.addEventListener('change', _saveBuildForm);
+    f.addEventListener('input', _saveBuildForm);
+    f.addEventListener('submit', _saveBuildForm);
+  }
+});
+
 let _fbTargetInput = null, _fbMode = 'dir', _fbExt = '';
 function openFileBrowser(inputId, mode, ext) {
   _fbTargetInput = inputId; _fbMode = mode; _fbExt = ext;
@@ -162,7 +208,14 @@ function openFileBrowser(inputId, mode, ext) {
   htmx.ajax('GET', `/api/browse?path=${encodeURIComponent(val)}&mode=${mode}&ext=${ext}`, {target: '#filebrowser-content', swap: 'innerHTML'});
 }
 function closeFileBrowser() { document.getElementById('filebrowser-modal').classList.add('hidden'); }
-function selectFile(path) { if (_fbTargetInput) document.getElementById(_fbTargetInput).value = path; closeFileBrowser(); }
+function selectFile(path) {
+  if (_fbTargetInput) {
+    const el = document.getElementById(_fbTargetInput);
+    el.value = path;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  closeFileBrowser();
+}
 
 function startBuildSSE(taskId) {
   const root = document.querySelector('[x-data]');
@@ -173,6 +226,8 @@ function startBuildSSE(taskId) {
     if (e.data.includes('archive') || e.data.includes('归档')) d.phase = Math.max(d.phase, 1);
     if (e.data.includes('export') || e.data.includes('导出')) d.phase = Math.max(d.phase, 2);
     if (e.data.includes('upload') || e.data.includes('上传')) d.phase = Math.max(d.phase, 3);
+    const panel = document.getElementById('build-log-panel');
+    if (panel) requestAnimationFrame(() => { panel.scrollTop = panel.scrollHeight; });
   });
   es.addEventListener('progress', e => { const p = JSON.parse(e.data); d.progress = p.pct || 0; d.progressMsg = p.msg || ''; });
   es.addEventListener('done', () => { d.status = 'done'; d.progress = 100; d.phase = 3; es.close(); });

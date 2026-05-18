@@ -21,9 +21,10 @@
       <label class="text-xs text-gray-500 mb-1 block">当前 App</label>
       <select id="app-switcher"
               class="w-full text-sm border border-gray-300 rounded px-2 py-1"
-              hx-get="/api/switch-profile"
-              hx-trigger="change"
-              hx-include="this"
+              onchange="
+                fetch('/api/switch-profile?profile=' + encodeURIComponent(this.value))
+                  .then(() => location.reload());
+              "
               name="profile">
         {% for p in profiles %}
         <option value="{{ p }}" {% if p == current_profile %}selected{% endif %}>{{ p }}</option>

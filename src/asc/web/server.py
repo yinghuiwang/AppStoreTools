@@ -17,13 +17,18 @@ def create_app() -> FastAPI:
     templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
     def _get_profile_context(request: Request) -> dict:
-        """Extract current profile from cookie or config."""
+        """Extract current profile from cookie or config, including profile defaults."""
         from asc.config import Config
         profile_from_cookie = request.cookies.get("asc_profile")
         config = Config(app_name=profile_from_cookie)
         profiles = config.list_apps()
         current = profile_from_cookie or config.app_name or (profiles[0] if profiles else "")
-        return {"profiles": profiles, "current_profile": current}
+        return {
+            "profiles": profiles,
+            "current_profile": current,
+            "profile_csv": config.csv_path,
+            "profile_screenshots": config.screenshots_path,
+        }
 
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request):

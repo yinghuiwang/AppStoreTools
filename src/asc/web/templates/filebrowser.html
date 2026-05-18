@@ -1,4 +1,11 @@
-<div class="text-xs text-gray-500 mb-2 font-mono truncate">{{ current_path }}</div>
+<div class="flex items-center justify-between mb-2">
+  <span class="text-xs text-gray-500 font-mono truncate">{{ current_path }}</span>
+  {% if mode == "dir" %}
+  <button type="button"
+          class="ml-2 shrink-0 px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
+          onclick="selectFile('{{ current_path }}')">选择此目录</button>
+  {% endif %}
+</div>
 <ul class="divide-y divide-gray-100 max-h-64 overflow-y-auto">
   {% for entry in entries %}
   <li>

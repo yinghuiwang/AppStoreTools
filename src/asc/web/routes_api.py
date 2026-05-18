@@ -81,10 +81,7 @@ def _run_metadata_check(profile: str) -> dict:
     from asc.utils import make_api_from_config
     try:
         config = Config(app_name=profile)
-        api = make_api_from_config(config)
-        app_id = config.app_id
-        if not app_id:
-            return {"ok": False, "message": "未配置 App ID"}
+        api, app_id = make_api_from_config(config)
         version = api.get_editable_version(app_id)
         if not version:
             return {"ok": False, "message": "无可编辑版本，请在 App Store Connect 创建版本"}
@@ -112,11 +109,21 @@ def _start_metadata_task(
 
         _task_store.set_status(task_id, _TaskStatus.RUNNING)
         q: queue.Queue = queue.Queue()
+        done_flag = _threading.Event()
+
+        def _drain_loop():
+            while not done_flag.is_set():
+                while not q.empty():
+                    _task_store.append_log(task_id, q.get_nowait())
+                done_flag.wait(timeout=0.05)
+            while not q.empty():
+                _task_store.append_log(task_id, q.get_nowait())
+
+        _threading.Thread(target=_drain_loop, daemon=True).start()
 
         try:
             config = Config(app_name=profile)
-            api = make_api_from_config(config)
-            app_id = config.app_id
+            api, app_id = make_api_from_config(config)
 
             with capture_stdout_to_queue(q):
                 if include_metadata:
@@ -127,14 +134,11 @@ def _start_metadata_task(
                     from asc.commands.screenshots import _upload_screenshots_core
                     _upload_screenshots_core(api, app_id, screenshots_dir, dry_run=dry_run)
 
-            while not q.empty():
-                _task_store.append_log(task_id, q.get_nowait())
-
+            done_flag.set()
             _task_store.set_status(task_id, _TaskStatus.DONE)
             _task_store.set_result(task_id, {"success": True})
         except Exception as e:
-            while not q.empty():
-                _task_store.append_log(task_id, q.get_nowait())
+            done_flag.set()
             _task_store.append_log(task_id, f"❌ 错误：{e}")
             _task_store.set_status(task_id, _TaskStatus.ERROR)
             _task_store.set_result(task_id, {"success": False, "error": str(e)})
@@ -187,10 +191,17 @@ def _start_build_task(
 
         _task_store.set_status(task_id, _TaskStatus.RUNNING)
         q: queue.Queue = queue.Queue()
+        done_flag = _threading.Event()
 
-        def _drain_q():
+        def _drain_loop():
+            while not done_flag.is_set():
+                while not q.empty():
+                    _task_store.append_log(task_id, q.get_nowait())
+                done_flag.wait(timeout=0.05)
             while not q.empty():
                 _task_store.append_log(task_id, q.get_nowait())
+
+        _threading.Thread(target=_drain_loop, daemon=True).start()
 
         try:
             config = Config(app_name=profile)
@@ -208,7 +219,6 @@ def _start_build_task(
                     )
                     resolved = prepare_build_inputs(cli, config, interactive=False)
                     ipa = build_core(resolved, config.build_output, verbose=verbose)
-                    _drain_q()
                     if mode == "full" and ipa:
                         from asc.commands.build import deploy_core
                         deploy_core(
@@ -232,13 +242,11 @@ def _start_build_task(
                         verbose=verbose,
                     )
 
-            while not q.empty():
-                _task_store.append_log(task_id, q.get_nowait())
+            done_flag.set()
             _task_store.set_status(task_id, _TaskStatus.DONE)
             _task_store.set_result(task_id, {"success": True})
         except Exception as e:
-            while not q.empty():
-                _task_store.append_log(task_id, q.get_nowait())
+            done_flag.set()
             _task_store.append_log(task_id, f"❌ 错误：{e}")
             _task_store.set_status(task_id, _TaskStatus.ERROR)
             _task_store.set_result(task_id, {"success": False, "error": str(e)})
