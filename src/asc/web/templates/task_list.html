@@ -1,0 +1,28 @@
+{% for t in tasks %}
+<div class="px-5 py-3 border-b border-gray-50 last:border-0">
+  <div class="flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <span class="text-sm">
+        {% if t.status == 'done' %}✅{% elif t.status == 'error' %}❌{% elif t.status == 'running' %}⏳{% else %}⏸️{% endif %}
+      </span>
+      <span class="text-sm">{{ '元数据上传' if t.kind == 'metadata' else '构建上传' }}</span>
+      <span class="text-xs text-gray-500">{{ t.profile or '' }}</span>
+    </div>
+    <div class="flex items-center gap-3">
+      <span class="text-xs text-gray-400">{{ t.created_at[:16] }}</span>
+      <button type="button" class="text-xs text-blue-600 hover:underline"
+              onclick="this.parentElement.parentElement.nextElementSibling.classList.toggle('hidden')">
+        查看日志
+      </button>
+      {% if t.status == 'error' %}
+      <a href="/{{ t.kind }}" class="text-xs text-orange-600 hover:underline">重试</a>
+      {% endif %}
+    </div>
+  </div>
+  <div class="hidden mt-2 bg-gray-900 text-green-400 text-xs font-mono rounded p-3 max-h-48 overflow-y-auto">
+    {% for line in t.logs %}
+    <div>{{ line }}</div>
+    {% endfor %}
+  </div>
+</div>
+{% endfor %}

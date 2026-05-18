@@ -33,7 +33,7 @@ def create_app() -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request):
         ctx = _get_profile_context(request)
-        ctx["recent_tasks"] = task_store.list_recent(limit=5)
+        ctx["recent_tasks"] = task_store.list_recent(limit=20)
         return templates.TemplateResponse(request, "index.html", ctx)
 
     @app.get("/metadata", response_class=HTMLResponse)

@@ -213,6 +213,21 @@ def test_task_store_create_with_profile_and_progress():
     assert task["progress"] == {"pct": 0, "msg": ""}
 
 
+def test_task_store_list_recent_includes_profile():
+    from asc.web.tasks import TaskStore
+    store = TaskStore()
+    store.create("metadata", profile="myapp")
+    store.create("build", profile="staging")
+    recent = store.list_recent(limit=20)
+    assert recent[0]["profile"] == "staging"
+    assert recent[1]["profile"] == "myapp"
+
+
+def test_tasks_recent_endpoint(client):
+    resp = client.get("/api/tasks/recent")
+    assert resp.status_code == 200
+
+
 def test_task_store_set_progress():
     from asc.web.tasks import TaskStore
     store = TaskStore()

@@ -132,7 +132,7 @@ def _start_metadata_task(
     include_screenshots: bool,
     dry_run: bool,
 ) -> str:
-    task_id = _task_store.create("metadata")
+    task_id = _task_store.create("metadata", profile=profile)
 
     def _run():
         import queue
@@ -229,7 +229,7 @@ def _start_build_task(
     ipa_path: str,
     verbose: bool,
 ) -> str:
-    task_id = _task_store.create("build")
+    task_id = _task_store.create("build", profile=profile)
 
     def _run():
         import queue
@@ -585,6 +585,13 @@ async def guard_status(request: Request):
         return data
     except Exception as e:
         return {"enabled": False, "bindings": {"machine": {}, "ip": {}, "credential": {}}, "current_profile": "", "error": str(e)}
+
+
+@router.get("/tasks/recent", response_class=HTMLResponse)
+async def tasks_recent_html(request: Request):
+    """Return HTML fragment of recent tasks for HTMX polling."""
+    tasks = _task_store.list_recent(limit=20)
+    return _templates.TemplateResponse(request, "task_list.html", {"tasks": tasks})
 
 
 @router.post("/settings/lang")
