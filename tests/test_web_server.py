@@ -160,7 +160,6 @@ def test_profile_delete_api(client):
 def test_guard_status_returns_json(client):
     from unittest.mock import patch, MagicMock
     mock_guard = MagicMock()
-    mock_guard.is_enabled.return_value = True
     mock_guard.get_status.return_value = {
         "enabled": True,
         "bindings": {"machine": {}, "ip": {}, "credential": {}},
@@ -172,6 +171,37 @@ def test_guard_status_returns_json(client):
     assert data["enabled"] is True
     assert "bindings" in data
     assert "current_profile" in data
+
+
+def test_guard_status_truncates_fingerprint(client):
+    from unittest.mock import patch, MagicMock
+    long_fp = "a1b2c3d4e5f6g7h8i9j0"
+    mock_guard = MagicMock()
+    mock_guard.get_status.return_value = {
+        "enabled": True,
+        "bindings": {
+            "machine": {long_fp: {"app_id": "123", "app_name": "myapp", "bound_at": "2026-05-18T10:00:00"}},
+            "ip": {},
+            "credential": {},
+        },
+    }
+    with patch("asc.guard.Guard", return_value=mock_guard):
+        resp = client.get("/api/guard/status")
+    data = resp.json()
+    machine_keys = list(data["bindings"]["machine"].keys())
+    assert len(machine_keys) == 1
+    assert machine_keys[0] == "a1b2c3d4..."
+
+
+def test_guard_status_error_returns_json(client):
+    from unittest.mock import patch
+    with patch("asc.guard.Guard", side_effect=Exception("read error")):
+        resp = client.get("/api/guard/status")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["enabled"] is False
+    assert data["bindings"] == {"machine": {}, "ip": {}, "credential": {}}
+    assert "error" in data
 
 
 def test_task_store_create_with_profile_and_progress():
