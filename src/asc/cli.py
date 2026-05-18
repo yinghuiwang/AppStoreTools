@@ -191,7 +191,7 @@ app.command("deploy",              help=t(HELP['cmd_deploy']))(cmd_deploy)
 app.command("release",             help=t(HELP['cmd_release']))(cmd_release)
 app.command("update",              help=t(HELP['cmd_update']))(cmd_update)
 app.command("uninstall",           help=t(HELP['cmd_uninstall']))(cmd_uninstall)
-app.command("web",                 help="启动本地 Web UI 服务器")(cmd_web)
+app.command("web")(cmd_web)
 
 from asc.commands.guard_cmd import guard_app
 app.add_typer(guard_app, name="guard")

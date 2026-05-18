@@ -1,6 +1,7 @@
 """asc web command — start local Web UI server."""
 from __future__ import annotations
-from typing import Optional
+import threading
+import webbrowser
 import typer
 
 
@@ -17,19 +18,15 @@ def cmd_web(
         asc web --port 9090
         asc web --no-open
     """
-    try:
-        import uvicorn
-        from asc.web.server import create_app
-    except ImportError:
-        typer.echo("❌ 缺少 Web UI 依赖，请运行：pip install 'asc-appstore-tools[web]'", err=True)
-        raise typer.Exit(1)
+    import uvicorn
+    from asc.web.server import create_app
 
-    url = f"http://{host}:{port}"
+    open_host = "127.0.0.1" if host == "0.0.0.0" else host
+    url = f"http://{open_host}:{port}"
     typer.echo(f"🌐 启动 Web UI：{url}")
 
     if not no_open:
-        import webbrowser, threading
-        threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+        threading.Timer(1.5, lambda: webbrowser.open(url)).start()
 
     app = create_app()
-    uvicorn.run(app, host=host, port=port, log_level="warning")
+    uvicorn.run(app, host=host, port=port, log_level="info")
