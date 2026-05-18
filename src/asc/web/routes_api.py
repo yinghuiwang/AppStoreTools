@@ -76,7 +76,7 @@ from asc.web.tasks import task_store as _task_store, TaskStatus as _TaskStatus
 
 
 def _run_metadata_check(profile: str) -> dict:
-    """Run connectivity check for the given profile and return result dict."""
+    """Run connectivity check for the given profile and return structured result."""
     from asc.config import Config
     from asc.utils import make_api_from_config
     try:
@@ -84,11 +84,43 @@ def _run_metadata_check(profile: str) -> dict:
         api, app_id = make_api_from_config(config)
         version = api.get_editable_version(app_id)
         if not version:
-            return {"ok": False, "message": "无可编辑版本，请在 App Store Connect 创建版本"}
+            return {
+                "ok": False,
+                "level": "warning",
+                "message": "无可编辑版本，请在 App Store Connect 创建版本",
+                "detail": {},
+            }
         vs = version["attributes"].get("versionString", "?")
-        return {"ok": True, "message": f"环境正常，版本 {vs} 可编辑"}
+        state = version["attributes"].get("appStoreState") or version["attributes"].get("appVersionState", "?")
+        # Determine level based on state
+        editable_states = {
+            "PREPARE_FOR_SUBMISSION",
+            "DEVELOPER_REJECTED",
+            "REJECTED",
+        }
+        if state in editable_states:
+            level = "success"
+            message = f"环境正常，版本 {vs} 可编辑"
+        else:
+            level = "warning"
+            message = f"版本 {vs} 存在但状态为 {state}，不可编辑"
+        return {
+            "ok": level == "success",
+            "level": level,
+            "message": message,
+            "detail": {
+                "version": vs,
+                "state": state,
+                "app_name": profile,
+            },
+        }
     except Exception as e:
-        return {"ok": False, "message": str(e)}
+        return {
+            "ok": False,
+            "level": "error",
+            "message": str(e),
+            "detail": {},
+        }
 
 
 def _start_metadata_task(

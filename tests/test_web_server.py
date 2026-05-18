@@ -56,10 +56,11 @@ def test_metadata_check_api(client):
     """POST /api/metadata/check 返回 JSON 验证结果"""
     from unittest.mock import patch
     with patch("asc.web.routes_api._run_metadata_check") as mock_check:
-        mock_check.return_value = {"ok": True, "message": "环境正常"}
+        mock_check.return_value = {"ok": True, "level": "success", "message": "环境正常", "detail": {}}
         resp = client.post("/api/metadata/check", cookies={"asc_profile": "myapp"})
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
+        assert resp.json()["level"] == "success"
 
 def test_metadata_run_api_starts_task(client):
     """POST /api/metadata/run 创建任务并返回 task_id"""
@@ -219,3 +220,50 @@ def test_task_store_set_progress():
     store.set_progress(task_id, 45, "元数据 5/11 语言")
     task = store.get(task_id)
     assert task["progress"] == {"pct": 45, "msg": "元数据 5/11 语言"}
+
+
+def test_metadata_check_returns_level(client):
+    from unittest.mock import patch, MagicMock
+    mock_api = MagicMock()
+    mock_api.get_editable_version.return_value = {
+        "id": "v1",
+        "attributes": {"versionString": "1.2.3", "appStoreState": "PREPARE_FOR_SUBMISSION"},
+    }
+    mock_config = MagicMock()
+    mock_config.app_name = "testapp"
+    with patch("asc.config.Config", return_value=mock_config), \
+         patch("asc.utils.make_api_from_config", return_value=(mock_api, "app1")):
+        resp = client.post("/api/metadata/check", cookies={"asc_profile": "testapp"})
+        data = resp.json()
+        assert data["level"] == "success"
+        assert data["ok"] is True
+        assert "detail" in data
+        assert data["detail"]["version"] == "1.2.3"
+
+
+def test_metadata_check_warning_level(client):
+    from unittest.mock import patch, MagicMock
+    mock_api = MagicMock()
+    mock_api.get_editable_version.return_value = {
+        "id": "v1",
+        "attributes": {"versionString": "1.2.3", "appStoreState": "WAITING_FOR_REVIEW"},
+    }
+    mock_config = MagicMock()
+    mock_config.app_name = "testapp"
+    with patch("asc.config.Config", return_value=mock_config), \
+         patch("asc.utils.make_api_from_config", return_value=(mock_api, "app1")):
+        resp = client.post("/api/metadata/check", cookies={"asc_profile": "testapp"})
+        data = resp.json()
+        assert data["level"] == "warning"
+
+
+def test_metadata_check_error_level(client):
+    from unittest.mock import patch, MagicMock
+    mock_config = MagicMock()
+    mock_config.app_name = "testapp"
+    with patch("asc.config.Config", return_value=mock_config), \
+         patch("asc.utils.make_api_from_config", side_effect=Exception("conn fail")):
+        resp = client.post("/api/metadata/check", cookies={"asc_profile": "testapp"})
+        data = resp.json()
+        assert data["level"] == "error"
+        assert data["ok"] is False
