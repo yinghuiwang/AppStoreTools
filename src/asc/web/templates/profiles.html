@@ -1,188 +1,200 @@
 {% extends "base.html" %}
 {% block content %}
-<div x-data="profilesApp()" x-init="loadProfiles()">
-  <div class="flex items-center justify-between mb-6">
-    <h1 class="text-xl font-semibold flex items-center gap-2">
-      <svg class="w-5 h-5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z"/></svg>
+<div class="" x-data="profilesApp()" x-init="loadProfiles()">
+  <!-- Header -->
+  <div class="flex items-center justify-between mb-8">
+    <h1 class="text-2xl font-bold tracking-tight text-obsidian-50 flex items-center gap-3">
+      <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: var(--accent-glow);">
+        <svg class="w-4.5 h-4.5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z"/></svg>
+      </div>
       App 管理
     </h1>
     <button @click="openDrawer(null)"
-            class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 cursor-pointer transition-colors duration-150 focus-ring flex items-center gap-1">
-      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+            class="btn-primary flex items-center gap-1.5">
+      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
       新增
     </button>
   </div>
 
   <!-- Profile list -->
-  <div class="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100 max-w-xl">
+  <div class="card">
     <template x-for="p in profiles" :key="p">
-      <div class="flex items-center justify-between px-4 py-3">
-        <div class="flex items-center gap-2">
-          <button @click="setDefault(p)" class="text-lg cursor-pointer" :title="p === defaultProfile ? '默认' : '设为默认'">
-            <span x-text="p === defaultProfile ? '★' : '○'" :class="p === defaultProfile ? 'text-yellow-500' : 'text-gray-300'"></span>
+      <div class="flex items-center justify-between px-5 py-4 border-b border-obsidian-700 last:border-0 hover:bg-obsidian-800/50 transition-colors duration-150 group">
+        <div class="flex items-center gap-3">
+          <button @click="setDefault(p)" class="cursor-pointer transition-colors duration-150" :title="p === defaultProfile ? '默认' : '设为默认'">
+            <span x-text="p === defaultProfile ? '★' : '○'"
+                  :class="p === defaultProfile ? 'text-amber-500 text-lg' : 'text-obsidian-600 text-sm group-hover:text-obsidian-400'"></span>
           </button>
-          <span class="text-sm font-medium" x-text="p"></span>
+          <span class="text-sm font-medium text-obsidian-100 font-mono" x-text="p"></span>
+          <span x-show="p === defaultProfile" class="badge badge-info text-[10px]">DEFAULT</span>
         </div>
-        <div class="flex gap-2">
-          <button @click="openDrawer(p)" class="text-xs text-blue-600 hover:text-blue-800 cursor-pointer transition-colors duration-150">编辑</button>
-          <button @click="deleteProfile(p)" class="text-xs text-red-500 hover:text-red-700 cursor-pointer transition-colors duration-150">删除</button>
+        <div class="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+          <button @click="openDrawer(p)" class="text-xs text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium">编辑</button>
+          <button @click="deleteProfile(p)" class="text-xs text-red-500 hover:text-red-400 cursor-pointer transition-colors duration-150 font-medium">删除</button>
         </div>
       </div>
     </template>
-    <div x-show="profiles.length === 0" class="px-4 py-6 text-sm text-gray-400 text-center">
-      暂无 App Profile，点击「新增」添加
+    <div x-show="profiles.length === 0" class="card-body py-12 text-center">
+      <svg class="w-10 h-10 text-obsidian-600 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke-width="1" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z"/></svg>
+      <p class="text-sm text-obsidian-400">暂无 App Profile</p>
+      <p class="text-xs text-obsidian-600 mt-1">点击「新增」添加第一个 App</p>
     </div>
   </div>
 
   <!-- Drawer backdrop -->
-  <div x-show="drawerOpen" class="fixed inset-0 bg-black/30 z-40" @click="drawerOpen = false"></div>
+  <div x-show="drawerOpen" class="fixed inset-0 z-40" style="background: rgba(0,0,0,0.5); backdrop-filter: blur(2px);" @click="drawerOpen = false"></div>
 
   <!-- Drawer -->
   <div x-show="drawerOpen"
-       class="fixed right-0 top-0 h-full w-96 bg-white shadow-xl z-50 overflow-y-auto p-6"
-       x-transition:enter="transition ease-out duration-200"
+       class="fixed right-0 top-0 h-full w-[440px] z-50 overflow-y-auto"
+       style="background: var(--bg-surface); border-left: 1px solid var(--border-subtle);"
+       x-transition:enter="transition ease-out duration-300"
        x-transition:enter-start="translate-x-full"
        x-transition:enter-end="translate-x-0"
-       x-transition:leave="transition ease-in duration-150"
+       x-transition:leave="transition ease-in duration-200"
        x-transition:leave-start="translate-x-0"
        x-transition:leave-end="translate-x-full">
-    <div class="flex items-center justify-between mb-4">
-      <h2 class="font-semibold" x-text="editingProfile ? '编辑 ' + editingProfile : '新增 App Profile'"></h2>
-      <button @click="drawerOpen = false" class="text-gray-400 hover:text-gray-600 cursor-pointer transition-colors duration-150 p-1 rounded focus-ring">
-        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
-      </button>
-    </div>
+    <div class="p-6">
+      <div class="flex items-center justify-between mb-6">
+        <h2 class="font-semibold text-obsidian-50" x-text="editingProfile ? '编辑 ' + editingProfile : '新增 App Profile'"></h2>
+        <button @click="drawerOpen = false" class="text-obsidian-500 hover:text-obsidian-300 cursor-pointer transition-colors duration-150 p-1 rounded focus-ring">
+          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
 
-    <form @submit.prevent="saveProfile" class="space-y-4">
-      <div x-show="!editingProfile">
-        <label class="block text-sm font-medium text-gray-700 mb-1">Profile 名称</label>
-        <input type="text" x-model="form.name"
-               :required="!editingProfile"
-               class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus-ring transition-colors duration-150 focus:border-blue-500"
-               placeholder="myapp">
-      </div>
-      <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1">Issuer ID</label>
-        <div class="relative">
-          <input :type="showIssuer ? 'text' : 'password'" x-model="form.issuer_id" required
-                 class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm pr-16 focus-ring transition-colors duration-150 focus:border-blue-500">
-          <button type="button" @click="showIssuer = !showIssuer"
-                  class="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">
-            <span x-text="showIssuer ? '隐藏' : '显示'"></span>
-          </button>
+      <form @submit.prevent="saveProfile" class="space-y-5">
+        <!-- Profile name -->
+        <div x-show="!editingProfile">
+          <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">Profile 名称</label>
+          <input type="text" x-model="form.name"
+                 :required="!editingProfile"
+                 class="field-input w-full"
+                 placeholder="myapp">
         </div>
-      </div>
-      <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1">Key ID</label>
-        <div class="relative">
-          <input :type="showKeyId ? 'text' : 'password'" x-model="form.key_id" required
-                 class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm pr-16 focus-ring transition-colors duration-150 focus:border-blue-500">
-          <button type="button" @click="showKeyId = !showKeyId"
-                  class="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">
-            <span x-text="showKeyId ? '隐藏' : '显示'"></span>
-          </button>
+
+        <!-- Issuer ID -->
+        <div>
+          <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">Issuer ID</label>
+          <div class="relative">
+            <input :type="showIssuer ? 'text' : 'password'" x-model="form.issuer_id" required
+                   class="field-input w-full pr-16">
+            <button type="button" @click="showIssuer = !showIssuer"
+                    class="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-obsidian-500 hover:text-obsidian-300 uppercase tracking-wider font-medium cursor-pointer transition-colors duration-150">
+              <span x-text="showIssuer ? '隐藏' : '显示'"></span>
+            </button>
+          </div>
         </div>
-      </div>
-      <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1">.p8 私钥文件</label>
-        <input type="file" accept=".p8" x-ref="keyFileInput"
-               class="w-full text-sm text-gray-500 file:mr-3 file:py-1 file:px-3 file:rounded file:border file:border-gray-300 file:text-sm file:bg-white">
-        <p x-show="editingProfile" class="text-xs text-gray-400 mt-1">留空则保留原有密钥文件</p>
-      </div>
-      <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1">App ID（数字）</label>
-        <input type="text" x-model="form.app_id" required
-               class="w-full border border-gray-300 rounded px-3 py-2 text-sm"
-               placeholder="1234567890">
-      </div>
-      <div>
-        <div class="flex items-center gap-1 mb-1">
-          <label class="block text-sm font-medium text-gray-700">默认 CSV 路径（可选）</label>
-          <button type="button" @click="showCsvHelp = !showCsvHelp"
-                  class="w-4 h-4 inline-flex items-center justify-center rounded-full border border-gray-300 text-gray-400 hover:text-blue-600 hover:border-blue-400 cursor-pointer transition-colors duration-150 focus-ring"
-                  title="CSV 格式说明">?</button>
+
+        <!-- Key ID -->
+        <div>
+          <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">Key ID</label>
+          <div class="relative">
+            <input :type="showKeyId ? 'text' : 'password'" x-model="form.key_id" required
+                   class="field-input w-full pr-16">
+            <button type="button" @click="showKeyId = !showKeyId"
+                    class="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-obsidian-500 hover:text-obsidian-300 uppercase tracking-wider font-medium cursor-pointer transition-colors duration-150">
+              <span x-text="showKeyId ? '隐藏' : '显示'"></span>
+            </button>
+          </div>
         </div>
-        <div x-show="showCsvHelp" x-transition class="mb-2 p-3 bg-blue-50 border border-blue-200 rounded-md text-xs text-gray-600 space-y-1.5">
-          <p class="font-medium text-gray-700">CSV 格式要求</p>
-          <p><span class="font-mono text-blue-700">UTF-8</span> 编码，首行为表头，支持 BOM。</p>
-          <p><span class="font-medium">必填列：</span><code class="bg-white px-1 rounded">语言</code> <code class="bg-white px-1 rounded">应用名称</code> <code class="bg-white px-1 rounded">副标题</code> <code class="bg-white px-1 rounded">长描述</code> <code class="bg-white px-1 rounded">关键子</code></p>
-          <p><span class="font-medium">可选列：</span><code class="bg-white px-1 rounded">技术支持链接</code> <code class="bg-white px-1 rounded">营销网站</code> <code class="bg-white px-1 rounded">隐私政策网址</code></p>
-          <p><span class="font-medium">语言列格式：</span><code class="bg-white px-1 rounded">简体中文(zh-Hans)</code> 或 <code class="bg-white px-1 rounded">en-US</code></p>
-          <p class="text-gray-400">空值字段不会覆盖线上已有内容。</p>
-          <a href="/api/examples/csv" download
-             class="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 cursor-pointer transition-colors duration-150">
-            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
-            下载示例 CSV
-          </a>
+
+        <!-- .p8 key file -->
+        <div>
+          <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">.p8 私钥文件</label>
+          <input type="file" accept=".p8" x-ref="keyFileInput"
+                 class="w-full text-sm text-obsidian-400 file:mr-3 file:py-1.5 file:px-4 file:rounded-md file:border-0 file:text-xs file:font-medium file:uppercase file:tracking-wider file:cursor-pointer" style="color: var(--text-muted); --tw-file-bg: var(--bg-overlay); --tw-file-text: var(--text-secondary);">
+          <p x-show="editingProfile" class="text-[11px] text-obsidian-500 mt-1.5">留空则保留原有密钥文件</p>
         </div>
-        <div class="flex gap-2">
-          <input type="text" x-model="form.csv" id="profile-csv-input"
-                 class="flex-1 border border-gray-300 rounded-md px-3 py-2 text-sm font-mono focus-ring transition-colors duration-150 focus:border-blue-500">
-          <button type="button"
-                  class="px-3 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50 cursor-pointer transition-colors duration-150 focus-ring"
-                  onclick="openFileBrowser('profile-csv-input', 'file', '.csv')">浏览</button>
+
+        <!-- App ID -->
+        <div>
+          <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">App ID（数字）</label>
+          <input type="text" x-model="form.app_id" required
+                 class="field-input w-full"
+                 placeholder="1234567890">
         </div>
-      </div>
-      <div>
-        <div class="flex items-center gap-1 mb-1">
-          <label class="block text-sm font-medium text-gray-700">默认截图目录（可选）</label>
-          <button type="button" @click="showScreenshotsHelp = !showScreenshotsHelp"
-                  class="w-4 h-4 inline-flex items-center justify-center rounded-full border border-gray-300 text-gray-400 hover:text-blue-600 hover:border-blue-400 cursor-pointer transition-colors duration-150 focus-ring"
-                  title="截图目录说明">?</button>
+
+        <!-- CSV path -->
+        <div>
+          <div class="flex items-center gap-1.5 mb-2">
+            <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">默认 CSV 路径（可选）</label>
+            <button type="button" @click="showCsvHelp = !showCsvHelp"
+                    class="w-4 h-4 inline-flex items-center justify-center rounded-full border border-obsidian-600 text-obsidian-500 hover:text-amber-500 hover:border-amber-550 cursor-pointer transition-colors duration-150 focus-ring text-[9px]"
+                    title="CSV 格式说明">?</button>
+          </div>
+          <div x-show="showCsvHelp" x-transition class="mb-2 p-4 rounded-lg text-xs space-y-2" style="background: var(--accent-glow); border: 1px solid rgba(232,161,37,0.2);">
+            <p class="font-medium text-amber-500">CSV 格式要求</p>
+            <p class="text-obsidian-200"><span class="font-mono text-amber-550">UTF-8</span> 编码，首行为表头，支持 BOM。</p>
+            <p class="text-obsidian-200"><span class="font-medium text-obsidian-100">必填列：</span><code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">语言</code> <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">应用名称</code> <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">副标题</code></p>
+            <a href="/api/examples/csv" download
+               class="inline-flex items-center gap-1.5 text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium">
+              下载示例 CSV
+            </a>
+          </div>
+          <div class="flex gap-2">
+            <input type="text" x-model="form.csv" id="profile-csv-input"
+                   class="field-input flex-1">
+            <button type="button"
+                    class="btn-ghost whitespace-nowrap"
+                    onclick="openFileBrowser('profile-csv-input', 'file', '.csv')">浏览</button>
+          </div>
         </div>
-        <div x-show="showScreenshotsHelp" x-transition class="mb-2 p-3 bg-blue-50 border border-blue-200 rounded-md text-xs text-gray-600 space-y-1.5">
-          <p class="font-medium text-gray-700">截图目录结构</p>
-          <pre class="bg-white rounded px-2 py-1.5 text-[11px] leading-relaxed font-mono">screenshots/
-├── zh-Hans/     ← 语言目录
+
+        <!-- Screenshots dir -->
+        <div>
+          <div class="flex items-center gap-1.5 mb-2">
+            <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">默认截图目录（可选）</label>
+            <button type="button" @click="showScreenshotsHelp = !showScreenshotsHelp"
+                    class="w-4 h-4 inline-flex items-center justify-center rounded-full border border-obsidian-600 text-obsidian-500 hover:text-amber-500 hover:border-amber-550 cursor-pointer transition-colors duration-150 focus-ring text-[9px]"
+                    title="截图目录说明">?</button>
+          </div>
+          <div x-show="showScreenshotsHelp" x-transition class="mb-2 p-4 rounded-lg text-xs space-y-2" style="background: var(--accent-glow); border: 1px solid rgba(232,161,37,0.2);">
+            <p class="font-medium text-amber-500">截图目录结构</p>
+            <pre class="bg-obsidian-800 rounded px-3 py-2 text-[11px] leading-relaxed font-mono text-obsidian-200">screenshots/
+├── zh-Hans/
 │   ├── 01_home.png
 │   └── 02_detail.png
 └── en-US/
     └── 01_home.png</pre>
-          <p><span class="font-medium">语言目录名：</span><code class="bg-white px-1 rounded">zh-Hans</code>、<code class="bg-white px-1 rounded">en-US</code>、<code class="bg-white px-1 rounded">ja</code>、<code class="bg-white px-1 rounded">ko</code> 等，也支持简写 <code class="bg-white px-1 rounded">cn</code> → <code class="bg-white px-1 rounded">zh-Hans</code></p>
-          <p><span class="font-medium">图片格式：</span>PNG / JPG，按文件名中的数字排序</p>
-          <p><span class="font-medium">设备类型：</span>根据首张图片分辨率自动识别（iPhone/iPad 各尺寸）</p>
-          <p class="text-gray-400">上传前会清空同设备类型的旧截图再重新上传。</p>
-          <a href="/api/examples/screenshots" download
-             class="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 cursor-pointer transition-colors duration-150">
-            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
-            下载示例截图目录
-          </a>
+            <a href="/api/examples/screenshots" download
+               class="inline-flex items-center gap-1.5 text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium">
+              下载示例截图目录
+            </a>
+          </div>
+          <div class="flex gap-2">
+            <input type="text" x-model="form.screenshots" id="profile-screenshots-input"
+                   class="field-input flex-1">
+            <button type="button"
+                    class="btn-ghost whitespace-nowrap"
+                    onclick="openFileBrowser('profile-screenshots-input', 'dir', '')">浏览</button>
+          </div>
         </div>
-        <div class="flex gap-2">
-          <input type="text" x-model="form.screenshots" id="profile-screenshots-input"
-                 class="flex-1 border border-gray-300 rounded-md px-3 py-2 text-sm font-mono focus-ring transition-colors duration-150 focus:border-blue-500">
-          <button type="button"
-                  class="px-3 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50 cursor-pointer transition-colors duration-150 focus-ring"
-                  onclick="openFileBrowser('profile-screenshots-input', 'dir', '')">浏览</button>
+
+        <!-- Error -->
+        <div x-show="formError" class="rounded-lg p-3 bg-red-500/10 text-red-400 border border-red-500/20 text-sm" x-text="formError"></div>
+
+        <!-- Actions -->
+        <div class="flex gap-3 pt-4 border-t border-obsidian-700">
+          <button type="submit" class="btn-primary" x-text="editingProfile ? '保存' : '创建'"></button>
+          <button type="button" @click="drawerOpen = false" class="btn-ghost">取消</button>
         </div>
-      </div>
-      <div x-show="formError" class="text-sm text-red-500" x-text="formError"></div>
-      <div class="flex gap-3 pt-2">
-        <button type="submit"
-                class="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 cursor-pointer transition-colors duration-150 focus-ring"
-                x-text="editingProfile ? '保存' : '创建'">
-        </button>
-        <button type="button" @click="drawerOpen = false"
-                class="px-4 py-2 border border-gray-300 text-sm rounded-md hover:bg-gray-50 cursor-pointer transition-colors duration-150 focus-ring">
-          取消
-        </button>
-      </div>
-    </form>
+      </form>
+    </div>
   </div>
 </div>
 
 <!-- File browser modal -->
-<div id="filebrowser-modal" class="hidden fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-  <div class="bg-white rounded-lg shadow-xl w-96 p-4">
-    <div class="flex items-center justify-between mb-3">
-      <h3 class="font-medium text-sm">选择路径</h3>
-      <button onclick="closeFileBrowser()" class="text-gray-400 hover:text-gray-600 cursor-pointer transition-colors duration-150 p-1 rounded focus-ring">
+<div id="filebrowser-modal" class="hidden fixed inset-0 flex items-center justify-center z-50" style="background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);">
+  <div class="card w-[420px]">
+    <div class="card-header flex items-center justify-between">
+      <h3 class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">选择路径</h3>
+      <button onclick="closeFileBrowser()" class="text-obsidian-500 hover:text-obsidian-300 cursor-pointer transition-colors duration-150 p-1 rounded focus-ring">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
       </button>
     </div>
-    <div id="filebrowser-content"></div>
-    <div class="mt-3 flex justify-end">
-      <button onclick="closeFileBrowser()" class="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 cursor-pointer transition-colors duration-150 focus-ring">取消</button>
+    <div id="filebrowser-content" class="card-body"></div>
+    <div class="px-5 py-3 border-t border-obsidian-700 flex justify-end">
+      <button onclick="closeFileBrowser()" class="btn-ghost">取消</button>
     </div>
   </div>
 </div>
