@@ -155,3 +155,22 @@ def test_profile_delete_api(client):
         resp = client.delete("/api/profiles/myapp")
         assert resp.status_code == 200
         mock_remove.assert_called_once_with("myapp")
+
+
+def test_task_store_create_with_profile_and_progress():
+    from asc.web.tasks import TaskStore
+    store = TaskStore()
+    task_id = store.create("metadata", profile="myapp")
+    task = store.get(task_id)
+    assert task["kind"] == "metadata"
+    assert task["profile"] == "myapp"
+    assert task["progress"] == {"pct": 0, "msg": ""}
+
+
+def test_task_store_set_progress():
+    from asc.web.tasks import TaskStore
+    store = TaskStore()
+    task_id = store.create("build", profile="staging")
+    store.set_progress(task_id, 45, "元数据 5/11 语言")
+    task = store.get(task_id)
+    assert task["progress"] == {"pct": 45, "msg": "元数据 5/11 语言"}

@@ -23,15 +23,17 @@ class TaskStore:
         self._order: list[str] = []
         self._lock = Lock()
 
-    def create(self, kind: str) -> str:
+    def create(self, kind: str, *, profile: str = "") -> str:
         task_id = str(uuid.uuid4())
         task = {
             "id": task_id,
             "kind": kind,
+            "profile": profile,
             "status": TaskStatus.PENDING,
             "logs": [],
             "result": None,
             "created_at": datetime.now().isoformat(),
+            "progress": {"pct": 0, "msg": ""},
         }
         with self._lock:
             self._tasks[task_id] = task
@@ -62,6 +64,11 @@ class TaskStore:
         with self._lock:
             if task_id in self._tasks:
                 self._tasks[task_id]["result"] = result
+
+    def set_progress(self, task_id: str, pct: int, msg: str) -> None:
+        with self._lock:
+            if task_id in self._tasks:
+                self._tasks[task_id]["progress"] = {"pct": pct, "msg": msg}
 
     def list_recent(self, limit: int = 20) -> list[dict]:
         with self._lock:
