@@ -364,12 +364,27 @@ async def create_profile(
     screenshots: str = _Form("data/screenshots"),
     key_file: _UploadFile = _File(...),
 ):
+    import os
+    import re
+    from fastapi import HTTPException
+
+    # Fix 2: Validate profile name
+    if not re.match(r'^[a-zA-Z0-9_-]+$', name):
+        raise HTTPException(status_code=400, detail="Invalid profile name")
+
+    # Fix 1: Sanitize key filename (path traversal protection)
+    safe_filename = os.path.basename(key_file.filename)
+    if not safe_filename or safe_filename.startswith("."):
+        raise HTTPException(status_code=400, detail="Invalid key filename")
+
     global_keys_dir = Path.home() / ".config" / "asc" / "keys"
     global_keys_dir.mkdir(parents=True, exist_ok=True)
-    dest_key = global_keys_dir / key_file.filename
+    dest_key = global_keys_dir / safe_filename
 
     content = await key_file.read()
     dest_key.write_bytes(content)
+    # Fix 3: Set key file permissions
+    dest_key.chmod(0o600)
 
     from asc.config import Config
     config = Config()
@@ -387,20 +402,34 @@ async def update_profile(
     screenshots: str = _Form("data/screenshots"),
     key_file: _UploadFile = _File(None),
 ):
+    import os
+    import re
+    from fastapi import HTTPException
+
+    # Fix 2: Validate profile name
+    if not re.match(r'^[a-zA-Z0-9_-]+$', name):
+        raise HTTPException(status_code=400, detail="Invalid profile name")
+
     from asc.config import Config
     config = Config()
     existing = config.get_app_profile(name)
     if existing is None:
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Profile not found")
 
     key_file_path = existing["key_file"]
     if key_file and key_file.filename:
+        # Fix 1: Sanitize key filename
+        safe_filename = os.path.basename(key_file.filename)
+        if not safe_filename or safe_filename.startswith("."):
+            raise HTTPException(status_code=400, detail="Invalid key filename")
+
         global_keys_dir = Path.home() / ".config" / "asc" / "keys"
         global_keys_dir.mkdir(parents=True, exist_ok=True)
-        dest_key = global_keys_dir / key_file.filename
+        dest_key = global_keys_dir / safe_filename
         content = await key_file.read()
         dest_key.write_bytes(content)
+        # Fix 3: Set key file permissions
+        dest_key.chmod(0o600)
         key_file_path = str(dest_key)
 
     config.save_app_profile(name, issuer_id, key_id, key_file_path, app_id, csv, screenshots)
@@ -409,6 +438,13 @@ async def update_profile(
 
 @router.delete("/profiles/{name}")
 async def delete_profile(name: str):
+    import re
+    from fastapi import HTTPException
+
+    # Fix 2: Validate profile name
+    if not re.match(r'^[a-zA-Z0-9_-]+$', name):
+        raise HTTPException(status_code=400, detail="Invalid profile name")
+
     from asc.config import Config
     config = Config()
     config.remove_app_profile(name)
@@ -418,6 +454,12 @@ async def delete_profile(name: str):
 @router.post("/profiles/{name}/set-default")
 async def set_default_profile(name: str):
     import re
+    from fastapi import HTTPException
+
+    # Fix 2: Validate profile name
+    if not re.match(r'^[a-zA-Z0-9_-]+$', name):
+        raise HTTPException(status_code=400, detail="Invalid profile name")
+
     local_dir = Path.cwd() / ".asc"
     local_dir.mkdir(parents=True, exist_ok=True)
     cfg_path = local_dir / "config.toml"
@@ -425,18 +467,26 @@ async def set_default_profile(name: str):
     if "default_app" in content:
         content = re.sub(r'default_app\s*=\s*"[^"]*"', f'default_app = "{name}"', content)
     else:
-        content = f'default_app = "{name}"\n' + content
+        # Fix 4: TOML injection protection (double-quote escaping)
+        safe_name = name.replace('"', '\\"')
+        content = f'default_app = "{safe_name}"\n' + content
     cfg_path.write_text(content)
     return {"ok": True}
 
 
 @router.get("/profiles/{name}")
 async def get_profile(name: str):
+    import re
+    from fastapi import HTTPException
+
+    # Fix 2: Validate profile name
+    if not re.match(r'^[a-zA-Z0-9_-]+$', name):
+        raise HTTPException(status_code=400, detail="Invalid profile name")
+
     from asc.config import Config
     config = Config()
     data = config.get_app_profile(name)
     if data is None:
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Profile not found")
     data["key_file_name"] = Path(data["key_file"]).name if data.get("key_file") else ""
     data.pop("key_file", None)
