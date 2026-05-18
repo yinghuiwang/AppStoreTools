@@ -1,3 +1,22 @@
+{% set has_running = tasks | selectattr('status', 'equalto', 'running') | list | length > 0 %}
+{% if has_running %}
+<script>
+  // Re-enable polling while tasks are running
+  var el = document.getElementById('task-list');
+  if (el) {
+    el.setAttribute('hx-trigger', 'every 3s');
+    htmx.process(el);
+  }
+</script>
+{% else %}
+<script>
+  // Stop polling when no tasks are running
+  var el = document.getElementById('task-list');
+  if (el) {
+    el.removeAttribute('hx-trigger');
+  }
+</script>
+{% endif %}
 {% for t in tasks %}
 <div class="px-5 py-3 border-b border-gray-50 last:border-0">
   <div class="flex items-center justify-between">

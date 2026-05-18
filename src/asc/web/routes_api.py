@@ -1,6 +1,8 @@
 """API routes for asc Web UI (/api/*)."""
 from __future__ import annotations
 
+import copy
+import json
 import re
 import tempfile
 from pathlib import Path
@@ -379,7 +381,6 @@ async def task_stream(task_id: str):
             # Emit progress event if changed
             progress = current.get("progress")
             if progress and progress != last_progress:
-                import json
                 yield _fmt_sse("progress", json.dumps(progress))
                 last_progress = progress
             status = current["status"]
@@ -573,7 +574,7 @@ async def guard_status(request: Request):
     from asc.guard import Guard
     try:
         guard = Guard()
-        data = guard.get_status()
+        data = copy.deepcopy(guard.get_status())
         # Truncate machine fingerprints to first 8 chars
         for fp, info in list(data.get("bindings", {}).get("machine", {}).items()):
             if len(fp) > 8:

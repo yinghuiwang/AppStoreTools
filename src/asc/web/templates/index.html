@@ -9,10 +9,10 @@
     <h2 class="text-sm font-medium text-gray-700">任务历史</h2>
   </div>
 
-  <!-- HTMX auto-refresh -->
+  <!-- HTMX auto-refresh when tasks are running -->
   <div id="task-list"
        hx-get="/api/tasks/recent"
-       hx-trigger="load, every 3s"
+       hx-trigger="load"
        hx-swap="innerHTML">
     {% for t in recent_tasks %}
     <div class="px-5 py-3 border-b border-gray-50 last:border-0">
