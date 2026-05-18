@@ -57,7 +57,7 @@ def test_metadata_check_api(client):
     from unittest.mock import patch
     with patch("asc.web.routes_api._run_metadata_check") as mock_check:
         mock_check.return_value = {"ok": True, "message": "环境正常"}
-        resp = client.post("/api/metadata/check", data={"profile": "myapp"})
+        resp = client.post("/api/metadata/check", cookies={"asc_profile": "myapp"})
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
 
@@ -66,8 +66,7 @@ def test_metadata_run_api_starts_task(client):
     from unittest.mock import patch
     with patch("asc.web.routes_api._start_metadata_task") as mock_start:
         mock_start.return_value = "fake-task-id"
-        resp = client.post("/api/metadata/run", data={
-            "profile": "myapp",
+        resp = client.post("/api/metadata/run", cookies={"asc_profile": "myapp"}, data={
             "csv_path": "data/appstore_info.csv",
             "screenshots_dir": "data/screenshots",
             "include_metadata": "on",
@@ -81,8 +80,7 @@ def test_build_run_api_starts_task(client):
     from unittest.mock import patch
     with patch("asc.web.routes_api._start_build_task") as mock_start:
         mock_start.return_value = "fake-build-task-id"
-        resp = client.post("/api/build/run", data={
-            "profile": "myapp",
+        resp = client.post("/api/build/run", cookies={"asc_profile": "myapp"}, data={
             "mode": "full",
             "destination": "testflight",
             "verbose": "",

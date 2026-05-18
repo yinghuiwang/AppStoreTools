@@ -148,20 +148,22 @@ def _start_metadata_task(
 
 
 @router.post("/metadata/check")
-async def metadata_check(profile: str = _Form(...)):
+async def metadata_check(request: Request):
+    profile = request.cookies.get("asc_profile", "")
     result = _run_metadata_check(profile)
     return result
 
 
 @router.post("/metadata/run")
 async def metadata_run(
-    profile: str = _Form(...),
+    request: Request,
     csv_path: str = _Form("data/appstore_info.csv"),
     screenshots_dir: str = _Form("data/screenshots"),
     include_metadata: str = _Form(""),
     include_screenshots: str = _Form(""),
     dry_run: str = _Form(""),
 ):
+    profile = request.cookies.get("asc_profile", "")
     task_id = _start_metadata_task(
         profile=profile,
         csv_path=csv_path,
@@ -257,7 +259,7 @@ def _start_build_task(
 
 @router.post("/build/run")
 async def build_run(
-    profile: str = _Form(...),
+    request: Request,
     mode: str = _Form("full"),
     project: str = _Form(""),
     scheme: str = _Form(""),
@@ -265,6 +267,7 @@ async def build_run(
     ipa_path: str = _Form(""),
     verbose: str = _Form(""),
 ):
+    profile = request.cookies.get("asc_profile", "")
     task_id = _start_build_task(
         profile=profile,
         mode=mode,

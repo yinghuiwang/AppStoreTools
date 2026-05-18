@@ -20,15 +20,6 @@
       <div class="bg-white rounded-lg border border-gray-200 p-5 space-y-4 max-w-xl">
 
         <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">App Profile</label>
-          <select name="profile" class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
-            {% for p in profiles %}
-            <option value="{{ p }}" {% if p == current_profile %}selected{% endif %}>{{ p }}</option>
-            {% endfor %}
-          </select>
-        </div>
-
-        <div>
           <label class="block text-sm font-medium text-gray-700 mb-2">操作模式</label>
           <div class="space-y-1">
             <label class="flex items-center gap-2 text-sm">
