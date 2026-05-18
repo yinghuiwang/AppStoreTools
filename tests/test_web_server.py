@@ -75,3 +75,17 @@ def test_metadata_run_api_starts_task(client):
         })
         assert resp.status_code == 200
         assert "task_id" in resp.json()
+
+
+def test_build_run_api_starts_task(client):
+    from unittest.mock import patch
+    with patch("asc.web.routes_api._start_build_task") as mock_start:
+        mock_start.return_value = "fake-build-task-id"
+        resp = client.post("/api/build/run", data={
+            "profile": "myapp",
+            "mode": "full",
+            "destination": "testflight",
+            "verbose": "",
+        })
+        assert resp.status_code == 200
+        assert "task_id" in resp.json()

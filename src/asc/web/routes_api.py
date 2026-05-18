@@ -167,3 +167,115 @@ async def metadata_run(
         dry_run=bool(dry_run),
     )
     return {"task_id": task_id}
+
+
+def _start_build_task(
+    profile: str,
+    mode: str,
+    project: str,
+    scheme: str,
+    destination: str,
+    ipa_path: str,
+    verbose: bool,
+) -> str:
+    task_id = _task_store.create("build")
+
+    def _run():
+        import queue
+        from asc.web.sse import capture_stdout_to_queue
+        from asc.config import Config
+
+        _task_store.set_status(task_id, _TaskStatus.RUNNING)
+        q: queue.Queue = queue.Queue()
+
+        try:
+            config = Config(app_name=profile)
+
+            with capture_stdout_to_queue(q):
+                def _drain_q():
+                    while not q.empty():
+                        _task_store.append_log(task_id, q.get_nowait())
+
+                if mode in ("full", "build"):
+                    from asc.commands.build_inputs import (
+                        BuildInputsCLI, prepare_build_inputs
+                    )
+                    from asc.commands.build import build_core
+                    cli = BuildInputsCLI(
+                        project=project or None,
+                        scheme=scheme or None,
+                        destination=destination or None,
+                    )
+                    resolved = prepare_build_inputs(cli, config, interactive=False)
+                    ipa = build_core(resolved, config.build_output, verbose=verbose)
+                    _drain_q()
+                    if mode == "full" and ipa:
+                        from asc.commands.build import deploy_core
+                        deploy_core(
+                            ipa_path=ipa,
+                            issuer_id=config.issuer_id,
+                            key_id=config.key_id,
+                            key_file=config.key_file,
+                            destination=destination or "appstore",
+                            dry_run=False,
+                            verbose=verbose,
+                        )
+                elif mode == "deploy":
+                    from asc.commands.build import deploy_core
+                    deploy_core(
+                        ipa_path=ipa_path,
+                        issuer_id=config.issuer_id,
+                        key_id=config.key_id,
+                        key_file=config.key_file,
+                        destination=destination or "appstore",
+                        dry_run=False,
+                        verbose=verbose,
+                    )
+
+            while not q.empty():
+                _task_store.append_log(task_id, q.get_nowait())
+            _task_store.set_status(task_id, _TaskStatus.DONE)
+            _task_store.set_result(task_id, {"success": True})
+        except Exception as e:
+            while not q.empty():
+                _task_store.append_log(task_id, q.get_nowait())
+            _task_store.append_log(task_id, f"❌ 错误：{e}")
+            _task_store.set_status(task_id, _TaskStatus.ERROR)
+            _task_store.set_result(task_id, {"success": False, "error": str(e)})
+
+    _threading.Thread(target=_run, daemon=True).start()
+    return task_id
+
+
+@router.post("/build/run")
+async def build_run(
+    profile: str = _Form(...),
+    mode: str = _Form("full"),
+    project: str = _Form(""),
+    scheme: str = _Form(""),
+    destination: str = _Form("testflight"),
+    ipa_path: str = _Form(""),
+    verbose: str = _Form(""),
+):
+    task_id = _start_build_task(
+        profile=profile,
+        mode=mode,
+        project=project,
+        scheme=scheme,
+        destination=destination,
+        ipa_path=ipa_path,
+        verbose=bool(verbose),
+    )
+    return {"task_id": task_id}
+
+
+@router.get("/build/schemes")
+async def build_schemes(project: str = "."):
+    """Return list of schemes for a given project path."""
+    try:
+        from asc.commands.build_inputs import detect_project, list_schemes
+        project_path, kind = detect_project(project)
+        schemes = list_schemes(project_path, kind)
+        return {"schemes": schemes}
+    except Exception as e:
+        return {"schemes": [], "error": str(e)}
