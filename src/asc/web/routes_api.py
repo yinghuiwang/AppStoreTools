@@ -491,3 +491,31 @@ async def get_profile(name: str):
     data["key_file_name"] = Path(data["key_file"]).name if data.get("key_file") else ""
     data.pop("key_file", None)
     return data
+
+
+@router.get("/guard/status", response_class=HTMLResponse)
+async def guard_status(request: Request):
+    from asc.guard import Guard
+    try:
+        guard = Guard()
+        enabled = guard.is_enabled()
+        status_text = "已启用" if enabled else "已禁用"
+        color = "text-green-600" if enabled else "text-gray-400"
+        return HTMLResponse(f"""
+        <h2 class="font-medium text-sm mb-2">🛡️ Guard 安全守卫</h2>
+        <p class="text-sm {color}">状态：{status_text}</p>
+        <p class="text-xs text-gray-400 mt-1">Guard 将凭证绑定到当前机器和 IP，防止凭证滥用。</p>
+        <p class="text-xs text-gray-400">如需修改，请使用 CLI：<code class="font-mono">asc guard enable/disable</code></p>
+        """)
+    except Exception as e:
+        return HTMLResponse(f'<p class="text-sm text-red-500">Guard 状态读取失败：{e}</p>')
+
+
+@router.post("/settings/lang")
+async def set_lang(lang: str = _Form("zh")):
+    import os
+    if lang not in ("zh", "en"):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Invalid language")
+    os.environ["ASC_LANG"] = lang
+    return {"ok": True, "lang": lang}

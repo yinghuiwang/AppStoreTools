@@ -1,5 +1,27 @@
 {% extends "base.html" %}
 {% block content %}
-<h1 class="text-xl font-semibold mb-4">⚙️ 设置</h1>
-<p class="text-gray-400 text-sm">（设置将在 Task 10 实现）</p>
+<h1 class="text-xl font-semibold mb-6">⚙️ 设置</h1>
+
+<div class="max-w-xl space-y-6">
+  <!-- Guard status -->
+  <div class="bg-white rounded-lg border border-gray-200 p-5"
+       hx-get="/api/guard/status"
+       hx-trigger="load"
+       hx-swap="innerHTML">
+    <p class="text-sm text-gray-400">加载 Guard 状态...</p>
+  </div>
+
+  <!-- Language -->
+  <div class="bg-white rounded-lg border border-gray-200 p-5">
+    <h2 class="font-medium text-sm mb-3">语言</h2>
+    <select class="border border-gray-300 rounded px-3 py-2 text-sm"
+            hx-post="/api/settings/lang"
+            hx-trigger="change"
+            hx-include="this"
+            name="lang">
+      <option value="zh">中文</option>
+      <option value="en">English</option>
+    </select>
+  </div>
+</div>
 {% endblock %}
