@@ -89,3 +89,37 @@ def test_build_run_api_starts_task(client):
         })
         assert resp.status_code == 200
         assert "task_id" in resp.json()
+
+
+def test_task_stream_done_task(client):
+    """已完成任务的 SSE 流应立即发送所有日志并关闭。"""
+    from asc.web.tasks import task_store, TaskStatus
+    task_id = task_store.create("metadata")
+    task_store.append_log(task_id, "line 1")
+    task_store.append_log(task_id, "line 2")
+    task_store.set_status(task_id, TaskStatus.DONE)
+
+    resp = client.get(f"/api/task/{task_id}/stream")
+    assert resp.status_code == 200
+    assert "text/event-stream" in resp.headers["content-type"]
+    body = resp.text
+    assert "line 1" in body
+    assert "line 2" in body
+    assert "event: done" in body
+
+
+def test_task_stream_not_found(client):
+    resp = client.get("/api/task/nonexistent/stream")
+    assert resp.status_code == 404
+
+
+def test_task_status_endpoint(client):
+    """GET /api/task/{task_id}/status 返回任务状态 JSON。"""
+    from asc.web.tasks import task_store, TaskStatus
+    task_id = task_store.create("build")
+    task_store.set_status(task_id, TaskStatus.RUNNING)
+    resp = client.get(f"/api/task/{task_id}/status")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "running"
+    assert data["task_id"] == task_id

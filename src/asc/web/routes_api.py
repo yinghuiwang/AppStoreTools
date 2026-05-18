@@ -279,3 +279,57 @@ async def build_schemes(project: str = "."):
         return {"schemes": schemes}
     except Exception as e:
         return {"schemes": [], "error": str(e)}
+
+
+import asyncio as _asyncio
+from fastapi.responses import StreamingResponse as _StreamingResponse
+from asc.web.sse import format_sse_event as _fmt_sse
+
+
+@router.get("/task/{task_id}/stream")
+async def task_stream(task_id: str):
+    """SSE stream: replay existing logs then push new ones until task completes."""
+    task = _task_store.get(task_id)
+    if task is None:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    async def _generate():
+        sent = 0
+        while True:
+            current = _task_store.get(task_id)
+            if current is None:
+                break
+            logs = current["logs"]
+            while sent < len(logs):
+                yield _fmt_sse("log", logs[sent])
+                sent += 1
+            status = current["status"]
+            if status == _TaskStatus.DONE:
+                yield _fmt_sse("done", "")
+                break
+            elif status == _TaskStatus.ERROR:
+                yield _fmt_sse("error_event", "")
+                break
+            await _asyncio.sleep(0.2)
+
+    return _StreamingResponse(
+        _generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.get("/task/{task_id}/status")
+async def task_status(task_id: str):
+    """Return current task status and result as JSON."""
+    task = _task_store.get(task_id)
+    if task is None:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Task not found")
+    return {
+        "task_id": task_id,
+        "status": task["status"],
+        "result": task["result"],
+        "log_count": len(task["logs"]),
+    }
