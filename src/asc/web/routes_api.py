@@ -296,9 +296,12 @@ async def task_stream(task_id: str):
 
     async def _generate():
         sent = 0
-        while True:
+        max_polls = 1500  # 300 seconds at 0.2s intervals
+        polls = 0
+        while polls < max_polls:
             current = _task_store.get(task_id)
             if current is None:
+                yield _fmt_sse("error_event", "task not found")
                 break
             logs = current["logs"]
             while sent < len(logs):
@@ -311,7 +314,10 @@ async def task_stream(task_id: str):
             elif status == _TaskStatus.ERROR:
                 yield _fmt_sse("error_event", "")
                 break
+            polls += 1
             await _asyncio.sleep(0.2)
+        else:
+            yield _fmt_sse("error_event", "timeout")
 
     return _StreamingResponse(
         _generate(),
