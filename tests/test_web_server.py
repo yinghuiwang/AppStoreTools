@@ -157,6 +157,23 @@ def test_profile_delete_api(client):
         mock_remove.assert_called_once_with("myapp")
 
 
+def test_guard_status_returns_json(client):
+    from unittest.mock import patch, MagicMock
+    mock_guard = MagicMock()
+    mock_guard.is_enabled.return_value = True
+    mock_guard.get_status.return_value = {
+        "enabled": True,
+        "bindings": {"machine": {}, "ip": {}, "credential": {}},
+    }
+    with patch("asc.guard.Guard", return_value=mock_guard):
+        resp = client.get("/api/guard/status")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["enabled"] is True
+    assert "bindings" in data
+    assert "current_profile" in data
+
+
 def test_task_store_create_with_profile_and_progress():
     from asc.web.tasks import TaskStore
     store = TaskStore()

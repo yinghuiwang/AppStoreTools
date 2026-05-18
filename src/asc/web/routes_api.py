@@ -501,22 +501,23 @@ async def get_profile(name: str):
     return data
 
 
-@router.get("/guard/status", response_class=HTMLResponse)
+@router.get("/guard/status")
 async def guard_status(request: Request):
     from asc.guard import Guard
     try:
         guard = Guard()
-        enabled = guard.is_enabled()
-        status_text = "已启用" if enabled else "已禁用"
-        color = "text-green-600" if enabled else "text-gray-400"
-        return HTMLResponse(f"""
-        <h2 class="font-medium text-sm mb-2">🛡️ Guard 安全守卫</h2>
-        <p class="text-sm {color}">状态：{status_text}</p>
-        <p class="text-xs text-gray-400 mt-1">Guard 将凭证绑定到当前机器和 IP，防止凭证滥用。</p>
-        <p class="text-xs text-gray-400">如需修改，请使用 CLI：<code class="font-mono">asc guard enable/disable</code></p>
-        """)
+        data = guard.get_status()
+        # Truncate machine fingerprints to first 8 chars
+        for fp, info in list(data.get("bindings", {}).get("machine", {}).items()):
+            if len(fp) > 8:
+                truncated = fp[:8] + "..."
+                data["bindings"]["machine"][truncated] = data["bindings"]["machine"].pop(fp)
+        # Add current_profile from cookie
+        profile = request.cookies.get("asc_profile", "")
+        data["current_profile"] = profile
+        return data
     except Exception as e:
-        return HTMLResponse(f'<p class="text-sm text-red-500">Guard 状态读取失败：{e}</p>')
+        return {"enabled": False, "bindings": {"machine": {}, "ip": {}, "credential": {}}, "current_profile": "", "error": str(e)}
 
 
 @router.post("/settings/lang")
