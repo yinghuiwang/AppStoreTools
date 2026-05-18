@@ -104,10 +104,13 @@
         <button type="button" class="text-sm text-blue-600 hover:underline" @click="step=1; logs=[]; status='idle'">重新运行</button>
       </div>
 
-      <div class="w-full bg-gray-100 rounded-full h-2 mb-2">
+      <div class="w-full bg-gray-100 rounded-full h-2 mb-2 relative">
         <div class="bg-blue-500 h-2 rounded-full transition-all" :style="`width: ${progress}%`"></div>
       </div>
-      <p class="text-xs text-gray-500 mb-4" x-text="progressMsg"></p>
+      <div class="flex items-center justify-between mb-4">
+        <p class="text-xs text-gray-500" x-text="progressMsg"></p>
+        <span class="text-xs font-mono text-gray-400" x-text="progress > 0 ? progress + '%' : ''"></span>
+      </div>
 
       <div x-data="{ open: true }">
         <button type="button" class="text-sm text-gray-600 hover:underline" @click="open = !open">
