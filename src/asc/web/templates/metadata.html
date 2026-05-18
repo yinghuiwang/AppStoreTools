@@ -1,0 +1,320 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="">
+  <!-- Header -->
+  <div class="mb-8">
+    <h1 class="text-2xl font-bold tracking-tight text-obsidian-50 flex items-center gap-3">
+      <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: var(--accent-glow);">
+        <svg class="w-4.5 h-4.5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"/></svg>
+      </div>
+      元数据上传
+    </h1>
+  </div>
+
+  <div x-data="{ step: 1, taskId: null, logs: [], status: 'idle', progress: 0, progressMsg: '', checkResult: null, submitting: false, showCsvHelp: false, showScreenshotsHelp: false }">
+
+    <!-- Step 1: 配置表单 -->
+    <div x-show="step === 1">
+      <form id="metadata-form"
+            hx-post="/api/metadata/run"
+            hx-target="#run-result"
+            hx-swap="innerHTML"
+            @htmx:after-request.camel="
+              const data = JSON.parse(event.detail.xhr.responseText);
+              taskId = data.task_id;
+              step = 2;
+              submitting = false;
+              startSSE(taskId);
+            "
+            @htmx:before-request.camel="submitting = true">
+
+        <div class="card">
+          <div class="card-body space-y-5">
+
+            <!-- CSV path -->
+            <div>
+              <div class="flex items-center gap-1.5 mb-2">
+                <label for="csv-path-input" class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">CSV 文件路径</label>
+                <button type="button" @click="showCsvHelp = !showCsvHelp"
+                        class="w-4 h-4 inline-flex items-center justify-center rounded-full border border-obsidian-600 text-obsidian-500 hover:text-amber-500 hover:border-amber-550 cursor-pointer transition-colors duration-150 focus-ring text-[9px]"
+                        title="CSV 格式说明">?</button>
+              </div>
+              <div x-show="showCsvHelp" x-transition class="mb-3 p-4 rounded-lg text-xs space-y-2" style="background: var(--accent-glow); border: 1px solid rgba(232,161,37,0.2);">
+                <p class="font-medium text-amber-500">CSV 格式要求</p>
+                <p class="text-obsidian-200"><span class="font-mono text-amber-550">UTF-8</span> 编码，首行为表头，支持 BOM。</p>
+                <p class="text-obsidian-200"><span class="font-medium text-obsidian-100">必填列：</span><code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">语言</code> <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">应用名称</code> <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">副标题</code> <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">长描述</code> <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">关键子</code></p>
+                <p class="text-obsidian-200"><span class="font-medium text-obsidian-100">可选列：</span><code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">技术支持链接</code> <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">营销网站</code> <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">隐私政策网址</code></p>
+                <p class="text-obsidian-200"><span class="font-medium text-obsidian-100">语言列格式：</span><code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">简体中文(zh-Hans)</code> 或 <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">en-US</code></p>
+                <p class="text-obsidian-500">空值字段不会覆盖线上已有内容。</p>
+                <a href="/api/examples/csv" download
+                   class="inline-flex items-center gap-1.5 text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium">
+                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
+                  下载示例 CSV
+                </a>
+              </div>
+              <div class="flex gap-2">
+                <input type="text" name="csv_path" value="{{ profile_csv }}"
+                       id="csv-path-input"
+                       class="field-input flex-1">
+                <button type="button"
+                        class="btn-ghost whitespace-nowrap"
+                        onclick="openFileBrowser('csv-path-input', 'file', '.csv')">浏览</button>
+              </div>
+            </div>
+
+            <!-- Screenshots dir -->
+            <div>
+              <div class="flex items-center gap-1.5 mb-2">
+                <label for="screenshots-dir-input" class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">截图目录</label>
+                <button type="button" @click="showScreenshotsHelp = !showScreenshotsHelp"
+                        class="w-4 h-4 inline-flex items-center justify-center rounded-full border border-obsidian-600 text-obsidian-500 hover:text-amber-500 hover:border-amber-550 cursor-pointer transition-colors duration-150 focus-ring text-[9px]"
+                        title="截图目录说明">?</button>
+              </div>
+              <div x-show="showScreenshotsHelp" x-transition class="mb-3 p-4 rounded-lg text-xs space-y-2" style="background: var(--accent-glow); border: 1px solid rgba(232,161,37,0.2);">
+                <p class="font-medium text-amber-500">截图目录结构</p>
+                <pre class="bg-obsidian-800 rounded px-3 py-2 text-[11px] leading-relaxed font-mono text-obsidian-200">screenshots/
+├── zh-Hans/     ← 语言目录
+│   ├── 01_home.png
+│   └── 02_detail.png
+└── en-US/
+    └── 01_home.png</pre>
+                <p class="text-obsidian-200"><span class="font-medium text-obsidian-100">语言目录名：</span><code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">zh-Hans</code>、<code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">en-US</code>、<code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">ja</code> 等</p>
+                <p class="text-obsidian-200"><span class="font-medium text-obsidian-100">图片格式：</span>PNG / JPG，按文件名中的数字排序</p>
+                <p class="text-obsidian-200"><span class="font-medium text-obsidian-100">设备类型：</span>根据首张图片分辨率自动识别</p>
+                <a href="/api/examples/screenshots" download
+                   class="inline-flex items-center gap-1.5 text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium">
+                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
+                  下载示例截图目录
+                </a>
+              </div>
+              <div class="flex gap-2">
+                <input type="text" name="screenshots_dir" value="{{ profile_screenshots }}"
+                       id="screenshots-dir-input"
+                       class="field-input flex-1">
+                <button type="button"
+                        class="btn-ghost whitespace-nowrap"
+                        onclick="openFileBrowser('screenshots-dir-input', 'dir', '')">浏览</button>
+              </div>
+            </div>
+
+            <!-- Upload scope -->
+            <div>
+              <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">上传范围</label>
+              <div class="flex gap-6">
+                <label class="flex items-center gap-2.5 text-sm text-obsidian-200 cursor-pointer">
+                  <input type="checkbox" name="include_metadata" value="on" checked class="w-4 h-4"> 元数据
+                </label>
+                <label class="flex items-center gap-2.5 text-sm text-obsidian-200 cursor-pointer">
+                  <input type="checkbox" name="include_screenshots" value="on" checked class="w-4 h-4"> 截图
+                </label>
+              </div>
+            </div>
+
+            <!-- Dry run -->
+            <div>
+              <label class="flex items-center gap-2.5 text-sm text-obsidian-300 cursor-pointer">
+                <input type="checkbox" name="dry_run" value="on" class="w-4 h-4"> Dry Run（预览，不实际上传）
+              </label>
+            </div>
+
+            <!-- Actions -->
+            <div class="flex gap-3 pt-3 border-t border-obsidian-700">
+              <button type="submit"
+                      class="btn-primary"
+                      :disabled="submitting">
+                <span x-show="!submitting">开始上传</span>
+                <span x-show="submitting" class="flex items-center gap-1.5">
+                  <svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                  提交中...
+                </span>
+              </button>
+              <button type="button"
+                      class="btn-ghost"
+                      @click="
+                        fetch('/api/metadata/check', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}})
+                          .then(r => r.json())
+                          .then(data => { checkResult = data; })
+                          .catch(() => { checkResult = {ok: false, level: 'error', message: '请求失败'}; })
+                      ">
+                验证环境
+              </button>
+            </div>
+
+            <!-- Check result -->
+            <template x-if="checkResult">
+              <div class="rounded-lg p-4 text-sm"
+                   :class="{
+                     'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20': checkResult.level === 'success',
+                     'bg-amber-500/10 text-amber-400 border border-amber-500/20': checkResult.level === 'warning',
+                     'bg-red-500/10 text-red-400 border border-red-500/20': checkResult.level === 'error',
+                   }">
+                <p class="font-medium" x-text="checkResult.message"></p>
+                <template x-if="checkResult.detail && checkResult.detail.version">
+                  <p class="text-xs mt-1 opacity-80"
+                     x-text="'版本 ' + checkResult.detail.version + ' · 状态 ' + checkResult.detail.state"></p>
+                </template>
+              </div>
+            </template>
+          </div>
+        </div>
+      </form>
+    </div>
+
+    <!-- Step 2: 执行面板 -->
+    <div x-show="step === 2" class="">
+      <div class="card">
+        <div class="card-body">
+          <div class="flex items-center justify-between mb-5">
+            <h2 class="font-semibold text-obsidian-100 flex items-center gap-2.5" x-text="status === 'done' ? '上传完成' : status === 'error' ? '上传失败' : '上传中...'">
+            </h2>
+            <div class="flex items-center gap-3">
+              <template x-if="status === 'done'">
+                <div class="w-7 h-7 rounded-full flex items-center justify-center bg-emerald-500/15">
+                  <svg class="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>
+                </div>
+              </template>
+              <template x-if="status === 'error'">
+                <div class="w-7 h-7 rounded-full flex items-center justify-center bg-red-500/15">
+                  <svg class="w-4 h-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"/></svg>
+                </div>
+              </template>
+              <template x-if="status === 'running'">
+                <div class="w-7 h-7 rounded-full flex items-center justify-center" style="background: var(--accent-glow);">
+                  <svg class="w-4 h-4 text-amber-500 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                </div>
+              </template>
+              <button type="button" class="text-xs text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium" @click="step=1; logs=[]; status='idle'">重新运行</button>
+            </div>
+          </div>
+
+          <!-- Progress -->
+          <div class="progress-track mb-2">
+            <div class="progress-fill" :style="`width: ${progress}%`"></div>
+          </div>
+          <div class="flex items-center justify-between mb-5">
+            <p class="text-xs text-obsidian-400" x-text="progressMsg"></p>
+            <span class="text-xs font-mono text-obsidian-500 tabular-nums" x-text="progress > 0 ? progress + '%' : ''"></span>
+          </div>
+
+          <!-- Log toggle -->
+          <div x-data="{ open: true }">
+            <button type="button" class="text-xs text-obsidian-400 hover:text-obsidian-200 cursor-pointer transition-colors duration-150 flex items-center gap-1.5 uppercase tracking-wider font-medium" @click="open = !open">
+              <svg class="w-3 h-3 transition-transform duration-150" :class="open ? 'rotate-0' : '-rotate-90'" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg>
+              <span x-text="open ? '收起日志' : '展开日志'"></span>
+            </button>
+            <div x-show="open" x-transition.duration.150ms class="mt-2 log-panel max-h-64" id="log-panel">
+              <template x-for="(line, idx) in logs" :key="idx">
+                <div x-text="line"></div>
+              </template>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="run-result"></div>
+  </div>
+</div>
+
+<!-- File browser modal -->
+<div id="filebrowser-modal" class="hidden fixed inset-0 flex items-center justify-center z-50" style="background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);">
+  <div class="card w-[420px]">
+    <div class="card-header flex items-center justify-between">
+      <h3 class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">选择路径</h3>
+      <button onclick="closeFileBrowser()" class="text-obsidian-500 hover:text-obsidian-300 cursor-pointer transition-colors duration-150 p-1 rounded focus-ring">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div id="filebrowser-content" class="card-body"></div>
+    <div class="px-5 py-3 border-t border-obsidian-700 flex justify-end">
+      <button onclick="closeFileBrowser()" class="btn-ghost">取消</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const _METADATA_STORE_KEY = 'asc_metadata_form_{{ current_profile }}';
+
+function _saveMetadataForm() {
+  const f = document.getElementById('metadata-form');
+  if (!f) return;
+  const data = {
+    csv_path: f.querySelector('[name=csv_path]').value,
+    screenshots_dir: f.querySelector('[name=screenshots_dir]').value,
+    include_metadata: f.querySelector('[name=include_metadata]').checked,
+    include_screenshots: f.querySelector('[name=include_screenshots]').checked,
+    dry_run: f.querySelector('[name=dry_run]').checked,
+  };
+  localStorage.setItem(_METADATA_STORE_KEY, JSON.stringify(data));
+}
+
+function _restoreMetadataForm() {
+  const raw = localStorage.getItem(_METADATA_STORE_KEY);
+  if (!raw) return;
+  try {
+    const data = JSON.parse(raw);
+    const f = document.getElementById('metadata-form');
+    if (!f) return;
+    if (data.csv_path) f.querySelector('[name=csv_path]').value = data.csv_path;
+    if (data.screenshots_dir) f.querySelector('[name=screenshots_dir]').value = data.screenshots_dir;
+    f.querySelector('[name=include_metadata]').checked = data.include_metadata !== false;
+    f.querySelector('[name=include_screenshots]').checked = data.include_screenshots !== false;
+    f.querySelector('[name=dry_run]').checked = !!data.dry_run;
+  } catch(e) {}
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  _restoreMetadataForm();
+  const f = document.getElementById('metadata-form');
+  if (f) {
+    f.addEventListener('change', _saveMetadataForm);
+    f.addEventListener('input', _saveMetadataForm);
+    f.addEventListener('submit', _saveMetadataForm);
+  }
+});
+
+let _fbTargetInput = null;
+let _fbMode = 'dir';
+let _fbExt = '';
+
+function openFileBrowser(inputId, mode, ext) {
+  _fbTargetInput = inputId;
+  _fbMode = mode;
+  _fbExt = ext;
+  document.getElementById('filebrowser-modal').classList.remove('hidden');
+  const currentVal = document.getElementById(inputId).value || '.';
+  htmx.ajax('GET', `/api/browse?path=${encodeURIComponent(currentVal)}&mode=${mode}&ext=${ext}`, {target: '#filebrowser-content', swap: 'innerHTML'});
+}
+
+function closeFileBrowser() {
+  document.getElementById('filebrowser-modal').classList.add('hidden');
+}
+
+function selectFile(path) {
+  if (_fbTargetInput) {
+    const el = document.getElementById(_fbTargetInput);
+    el.value = path;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  closeFileBrowser();
+}
+
+function startSSE(taskId) {
+  const root = document.querySelector('[x-data]');
+  const d = Alpine.$data(root);
+  const es = new EventSource(`/api/task/${taskId}/stream`);
+  es.addEventListener('log', e => {
+    d.logs.push(e.data);
+    const panel = document.getElementById('log-panel');
+    if (panel) requestAnimationFrame(() => { panel.scrollTop = panel.scrollHeight; });
+  });
+  es.addEventListener('progress', e => {
+    const p = JSON.parse(e.data);
+    d.progress = p.pct || 0;
+    d.progressMsg = p.msg || '';
+  });
+  es.addEventListener('done', () => { d.status = 'done'; d.progress = 100; es.close(); });
+  es.addEventListener('error_event', () => { d.status = 'error'; es.close(); });
+}
+</script>
+{% endblock %}

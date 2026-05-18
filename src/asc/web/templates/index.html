@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="max-w-3xl">
+  <!-- Header -->
+  <div class="mb-8">
+    <h1 class="text-2xl font-bold tracking-tight text-obsidian-50">仪表盘</h1>
+    <p class="text-sm text-obsidian-400 mt-1.5">
+      当前 App：<span class="text-amber-500 font-medium font-mono">{{ current_profile or "未配置" }}</span>
+    </p>
+  </div>
+
+  {% if recent_tasks %}
+  <div class="card">
+    <div class="card-header flex items-center justify-between">
+      <h2 class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">任务历史</h2>
+      <span class="text-[10px] text-obsidian-500 font-mono">TASK LOG</span>
+    </div>
+
+    <!-- HTMX auto-refresh when tasks are running -->
+    <div id="task-list"
+         hx-get="/api/tasks/recent"
+         hx-trigger="load"
+         hx-swap="innerHTML">
+      {% for t in recent_tasks %}
+      <div class="px-5 py-3.5 border-b border-obsidian-700 last:border-0 hover:bg-obsidian-800/50 transition-colors duration-150">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            {% if t.status == 'done' %}
+            <div class="w-6 h-6 rounded-full flex items-center justify-center" style="background: rgba(52,211,153,0.12);">
+              <svg class="w-3.5 h-3.5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>
+            </div>
+            {% elif t.status == 'error' %}
+            <div class="w-6 h-6 rounded-full flex items-center justify-center" style="background: rgba(248,113,113,0.12);">
+              <svg class="w-3.5 h-3.5 text-red-400" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"/></svg>
+            </div>
+            {% elif t.status == 'running' %}
+            <div class="w-6 h-6 rounded-full flex items-center justify-center" style="background: rgba(232,161,37,0.15);">
+              <svg class="w-3.5 h-3.5 text-amber-500 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+            </div>
+            {% else %}
+            <div class="w-6 h-6 rounded-full flex items-center justify-center bg-obsidian-800">
+              <svg class="w-3.5 h-3.5 text-obsidian-500" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>
+            </div>
+            {% endif %}
+            <div>
+              <span class="text-sm text-obsidian-100">{{ '元数据上传' if t.kind == 'metadata' else '构建上传' }}</span>
+              <span class="text-xs text-obsidian-500 font-mono ml-2">{{ t.profile or '' }}</span>
+            </div>
+          </div>
+          <div class="flex items-center gap-3">
+            <span class="text-[11px] text-obsidian-500 font-mono tabular-nums">{{ t.created_at[:16] }}</span>
+            <button type="button" class="text-[11px] text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium"
+                    onclick="this.parentElement.parentElement.nextElementSibling.classList.toggle('hidden')">
+              LOGS
+            </button>
+            {% if t.status == 'error' %}
+            <a href="/{{ t.kind }}" class="badge badge-error text-[10px] cursor-pointer hover:bg-red-500/20 transition-colors duration-150">重试</a>
+            {% endif %}
+          </div>
+        </div>
+        <div class="hidden mt-3 log-panel max-h-48">
+          {% for line in t.logs %}
+          <div class="leading-relaxed">{{ line }}</div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% else %}
+  <div class="card">
+    <div class="card-body py-16 text-center">
+      <svg class="w-10 h-10 text-obsidian-600 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke-width="1" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25a2.25 2.25 0 0 1-2.25-2.25v-2.25Z"/></svg>
+      <p class="text-sm text-obsidian-400">暂无任务记录</p>
+      <p class="text-xs text-obsidian-600 mt-1">执行上传操作后，任务将显示在此处</p>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block right_panel %}
+<!-- Right: illustration panel (dashboard only) -->
+<div class="hidden xl:flex flex-col items-center justify-center w-[35%] max-w-[480px] min-w-[320px] shrink-0 relative overflow-hidden" style="background: linear-gradient(160deg, var(--bg-surface) 0%, var(--bg-overlay) 100%); border-left: 1px solid var(--border-subtle);">
+  <!-- Decorative gradient orbs -->
+  <div class="absolute top-[15%] left-[20%] w-40 h-40 rounded-full opacity-20 blur-3xl" style="background: var(--accent);"></div>
+  <div class="absolute bottom-[20%] right-[15%] w-32 h-32 rounded-full opacity-10 blur-2xl" style="background: var(--info);"></div>
+
+  <!-- Illustration SVG -->
+  <svg viewBox="0 0 320 400" class="w-full max-w-[340px] px-6 relative z-10 illustration-float" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <!-- Phone body -->
+    <rect x="95" y="40" width="130" height="260" rx="20" stroke="#35353f" stroke-width="2" fill="#16161b"/>
+    <rect x="103" y="68" width="114" height="200" rx="4" fill="#111115" stroke="#27272f" stroke-width="1"/>
+    <!-- Notch -->
+    <rect x="135" y="48" width="50" height="10" rx="5" fill="#1c1c23" stroke="#27272f" stroke-width="1"/>
+    <!-- Home indicator -->
+    <rect x="140" y="278" width="40" height="4" rx="2" fill="#27272f"/>
+
+    <!-- Screen content: App icon grid -->
+    <rect x="112" y="82" width="24" height="24" rx="6" fill="#1c1c23" stroke="#e8a125" stroke-width="1" opacity="0.6"/>
+    <rect x="142" y="82" width="24" height="24" rx="6" fill="#1c1c23" stroke="#35353f" stroke-width="1"/>
+    <rect x="172" y="82" width="24" height="24" rx="6" fill="#1c1c23" stroke="#35353f" stroke-width="1"/>
+
+    <rect x="112" y="114" width="24" height="24" rx="6" fill="#1c1c23" stroke="#35353f" stroke-width="1"/>
+    <rect x="142" y="114" width="24" height="24" rx="6" fill="#1c1c23" stroke="#e8a125" stroke-width="1" opacity="0.4"/>
+    <rect x="172" y="114" width="24" height="24" rx="6" fill="#1c1c23" stroke="#35353f" stroke-width="1"/>
+
+    <!-- Upload arrow on screen -->
+    <path d="M160 165 L160 140" stroke="#e8a125" stroke-width="2.5" stroke-linecap="round" opacity="0.8"/>
+    <path d="M152 148 L160 140 L168 148" stroke="#e8a125" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.8"/>
+    <!-- Progress dots -->
+    <circle cx="148" cy="180" r="2" fill="#e8a125" opacity="0.8"/>
+    <circle cx="160" cy="180" r="2" fill="#e8a125" opacity="0.5"/>
+    <circle cx="172" cy="180" r="2" fill="#e8a125" opacity="0.2"/>
+
+    <!-- Screen bottom bar -->
+    <rect x="112" y="220" width="96" height="6" rx="3" fill="#27272f"/>
+    <rect x="112" y="220" width="60" height="6" rx="3" fill="#e8a125" opacity="0.4"/>
+    <rect x="112" y="234" width="72" height="4" rx="2" fill="#27272f"/>
+    <rect x="112" y="244" width="48" height="4" rx="2" fill="#1c1c23"/>
+
+    <!-- Rocket -->
+    <g transform="translate(60, 100) rotate(-15)">
+      <!-- Body -->
+      <path d="M0 -40 C8 -38 12 -20 12 0 C12 12 6 20 0 22 C-6 20 -12 12 -12 0 C-12 -20 -8 -38 0 -40Z" fill="#1c1c23" stroke="#e8a125" stroke-width="1.5"/>
+      <!-- Window -->
+      <circle cx="0" cy="-14" r="4" fill="#111115" stroke="#e8a125" stroke-width="1"/>
+      <!-- Fins -->
+      <path d="M-12 10 L-20 22 L-10 16Z" fill="#27272f" stroke="#e8a125" stroke-width="1"/>
+      <path d="M12 10 L20 22 L10 16Z" fill="#27272f" stroke="#e8a125" stroke-width="1"/>
+      <!-- Flame -->
+      <path d="M-5 22 Q0 36 5 22" fill="#e8a125" opacity="0.6"/>
+      <path d="M-3 22 Q0 30 3 22" fill="#f0b03a" opacity="0.8"/>
+    </g>
+
+    <!-- Stars / particles -->
+    <circle cx="50" cy="70" r="1.5" fill="#e8a125" opacity="0.6"/>
+    <circle cx="270" cy="90" r="1" fill="#e8a125" opacity="0.4"/>
+    <circle cx="40" cy="200" r="1" fill="#91919e" opacity="0.3"/>
+    <circle cx="280" cy="180" r="1.5" fill="#91919e" opacity="0.3"/>
+    <circle cx="260" cy="280" r="1" fill="#e8a125" opacity="0.3"/>
+    <circle cx="70" cy="300" r="1" fill="#91919e" opacity="0.2"/>
+
+    <!-- Cloud 1 -->
+    <g opacity="0.15">
+      <ellipse cx="60" cy="250" rx="30" ry="12" fill="#91919e"/>
+      <ellipse cx="50" cy="245" rx="18" ry="10" fill="#91919e"/>
+      <ellipse cx="75" cy="246" rx="15" ry="8" fill="#91919e"/>
+    </g>
+    <!-- Cloud 2 -->
+    <g opacity="0.1">
+      <ellipse cx="240" cy="140" rx="25" ry="10" fill="#91919e"/>
+      <ellipse cx="230" cy="136" rx="15" ry="8" fill="#91919e"/>
+      <ellipse cx="255" cy="137" rx="12" ry="6" fill="#91919e"/>
+    </g>
+
+    <!-- Ground / city silhouette -->
+    <rect x="20" y="340" width="280" height="60" fill="#111115" rx="0"/>
+    <rect x="40" y="310" width="20" height="30" fill="#16161b" stroke="#27272f" stroke-width="1"/>
+    <rect x="65" y="320" width="15" height="20" fill="#16161b" stroke="#27272f" stroke-width="1"/>
+    <rect x="90" y="300" width="25" height="40" fill="#16161b" stroke="#27272f" stroke-width="1"/>
+    <rect x="125" y="315" width="18" height="25" fill="#16161b" stroke="#27272f" stroke-width="1"/>
+    <rect x="150" y="305" width="22" height="35" fill="#16161b" stroke="#1c1c23" stroke-width="1"/>
+    <!-- Tower accent -->
+    <rect x="155" y="305" width="2" height="35" fill="#e8a125" opacity="0.3"/>
+    <rect x="180" y="320" width="16" height="20" fill="#16161b" stroke="#27272f" stroke-width="1"/>
+    <rect x="205" y="310" width="22" height="30" fill="#16161b" stroke="#27272f" stroke-width="1"/>
+    <rect x="235" y="325" width="14" height="15" fill="#16161b" stroke="#27272f" stroke-width="1"/>
+    <rect x="258" y="312" width="20" height="28" fill="#16161b" stroke="#27272f" stroke-width="1"/>
+    <!-- Windows on buildings -->
+    <rect x="95" y="308" width="3" height="3" fill="#e8a125" opacity="0.4"/>
+    <rect x="103" y="308" width="3" height="3" fill="#e8a125" opacity="0.2"/>
+    <rect x="95" y="316" width="3" height="3" fill="#e8a125" opacity="0.15"/>
+    <rect x="210" y="318" width="3" height="3" fill="#e8a125" opacity="0.3"/>
+    <rect x="218" y="318" width="3" height="3" fill="#e8a125" opacity="0.15"/>
+    <rect x="263" y="320" width="3" height="3" fill="#e8a125" opacity="0.2"/>
+
+    <!-- Floating text label -->
+    <text x="160" y="395" text-anchor="middle" font-family="DM Sans, sans-serif" font-size="11" fill="#4a4a56" letter-spacing="0.15em" font-weight="500">SHIP WITH CONFIDENCE</text>
+  </svg>
+
+  <!-- Subtitle under illustration -->
+  <div class="mt-6 text-center px-8 relative z-10">
+    <p class="text-xs text-obsidian-500 leading-relaxed">App Store Connect 自动化工具<br>元数据 · 截图 · 构建 · 上传</p>
+  </div>
+</div>
+{% endblock %}

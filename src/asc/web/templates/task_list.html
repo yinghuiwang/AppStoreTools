@@ -1,0 +1,61 @@
+{% set has_running = tasks | selectattr('status', 'equalto', 'running') | list | length > 0 %}
+{% if has_running %}
+<script>
+  var el = document.getElementById('task-list');
+  if (el) {
+    el.setAttribute('hx-trigger', 'every 3s');
+    htmx.process(el);
+  }
+</script>
+{% else %}
+<script>
+  var el = document.getElementById('task-list');
+  if (el) {
+    el.removeAttribute('hx-trigger');
+  }
+</script>
+{% endif %}
+{% for t in tasks %}
+<div class="px-5 py-3.5 border-b border-obsidian-700 last:border-0 hover:bg-obsidian-800/50 transition-colors duration-150">
+  <div class="flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      {% if t.status == 'done' %}
+      <div class="w-6 h-6 rounded-full flex items-center justify-center" style="background: rgba(52,211,153,0.12);">
+        <svg class="w-3.5 h-3.5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>
+      </div>
+      {% elif t.status == 'error' %}
+      <div class="w-6 h-6 rounded-full flex items-center justify-center" style="background: rgba(248,113,113,0.12);">
+        <svg class="w-3.5 h-3.5 text-red-400" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"/></svg>
+      </div>
+      {% elif t.status == 'running' %}
+      <div class="w-6 h-6 rounded-full flex items-center justify-center" style="background: rgba(232,161,37,0.15);">
+        <svg class="w-3.5 h-3.5 text-amber-500 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+      </div>
+      {% else %}
+      <div class="w-6 h-6 rounded-full flex items-center justify-center bg-obsidian-800">
+        <svg class="w-3.5 h-3.5 text-obsidian-500" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>
+      </div>
+      {% endif %}
+      <div>
+        <span class="text-sm text-obsidian-100">{{ '元数据上传' if t.kind == 'metadata' else '构建上传' }}</span>
+        <span class="text-xs text-obsidian-500 font-mono ml-2">{{ t.profile or '' }}</span>
+      </div>
+    </div>
+    <div class="flex items-center gap-3">
+      <span class="text-[11px] text-obsidian-500 font-mono tabular-nums">{{ t.created_at[:16] }}</span>
+      <button type="button" class="text-[11px] text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium uppercase tracking-wider"
+              onclick="this.parentElement.parentElement.nextElementSibling.classList.toggle('hidden')">
+        LOGS
+      </button>
+      {% if t.status == 'error' %}
+      <a href="/{{ t.kind }}" class="badge badge-error text-[10px] cursor-pointer hover:bg-red-500/20 transition-colors duration-150">重试</a>
+      {% endif %}
+    </div>
+  </div>
+  <div class="hidden mt-3 log-panel max-h-48">
+    {% for line in t.logs %}
+    <div>{{ line }}</div>
+    {% endfor %}
+  </div>
+</div>
+{% endfor %}

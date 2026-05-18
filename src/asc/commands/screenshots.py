@@ -92,13 +92,20 @@ def _upload_screenshots_core(
                 en_us_folder = folder
                 break
 
+    total_locales = len(ver_loc_map)
+    locale_keys = list(ver_loc_map.keys())
+
     for resolved, loc_data in sorted(ver_loc_map.items()):
+        current_idx = locale_keys.index(resolved) + 1
+        pct = int(current_idx / total_locales * 100)
+
         folder = locale_to_folder.get(resolved)
         if folder is None:
             if en_us_folder is None:
                 print(
                     f"\n  ── locale: {resolved} → 无截图文件夹且无 en-US 可回退，跳过 ──"
                 )
+                print(f"[PROGRESS:{pct}:截图 {current_idx}/{total_locales} 语言]")
                 continue
             print(f"\n  ── locale: {resolved} → 无截图文件夹，使用 en-US 截图回退 ──")
             folder = en_us_folder
@@ -109,6 +116,7 @@ def _upload_screenshots_core(
         files = _get_sorted_screenshots(folder)
         if not files:
             print("    没有找到截图文件，跳过")
+            print(f"[PROGRESS:{pct}:截图 {current_idx}/{total_locales} 语言]")
             continue
 
         print(f"    找到 {len(files)} 张截图: {[f.name for f in files]}")
@@ -118,6 +126,7 @@ def _upload_screenshots_core(
             display_type = _detect_display_type(files[0])
         if not display_type:
             print("💡 无法确定设备类型，请使用 --display-type 手动指定")
+            print(f"[PROGRESS:{pct}:截图 {current_idx}/{total_locales} 语言]")
             continue
         print(f"    设备类型: {display_type}")
 
@@ -126,6 +135,7 @@ def _upload_screenshots_core(
                 print(
                     f"    [预览] 将上传: {f.name} ({f.stat().st_size / 1024:.0f} KB)"
                 )
+            print(f"[PROGRESS:{pct}:截图 {current_idx}/{total_locales} 语言]")
             continue
 
         sets_resp = api.get_screenshot_sets(localization_id)
@@ -201,6 +211,11 @@ def _upload_screenshots_core(
                         print(f"         ⏳ 处理中 ({state})...")
             else:
                 print("         ⚠️  处理超时，请在 App Store Connect 中检查状态")
+
+        # Progress output for Web UI
+        current_idx = locale_keys.index(resolved) + 1
+        pct = int(current_idx / total_locales * 100)
+        print(f"[PROGRESS:{pct}:截图 {current_idx}/{total_locales} 语言]")
 
     print("\n✅ 截图上传完成")
 
