@@ -40,7 +40,13 @@ class TaskStore:
 
     def get(self, task_id: str) -> Optional[dict]:
         with self._lock:
-            return self._tasks.get(task_id)
+            task = self._tasks.get(task_id)
+            if task is None:
+                return None
+            # Return a shallow copy with a copied logs list to prevent external mutation
+            result = dict(task)
+            result["logs"] = list(task["logs"])
+            return result
 
     def append_log(self, task_id: str, line: str) -> None:
         with self._lock:
@@ -59,7 +65,13 @@ class TaskStore:
 
     def list_recent(self, limit: int = 20) -> list[dict]:
         with self._lock:
-            ordered = [self._tasks[tid] for tid in reversed(self._order) if tid in self._tasks]
+            ordered = []
+            for tid in reversed(self._order):
+                if tid in self._tasks:
+                    task = self._tasks[tid]
+                    copy = dict(task)
+                    copy["logs"] = list(task["logs"])
+                    ordered.append(copy)
         return ordered[:limit]
 
 
