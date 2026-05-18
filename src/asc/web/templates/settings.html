@@ -28,35 +28,36 @@
                 const apps = {};
                 const bindings = guard.bindings;
                 for (const [fp, info] of Object.entries(bindings.machine || {})) {
-                  const name = info.app_name || info.app_id;
-                  if (!apps[name]) apps[name] = {app_name: name, app_id: info.app_id, credential: '', machine: fp, ip: '', bound_at: info.bound_at};
-                  else apps[name].machine = fp;
-                  if (info.bound_at) apps[name].bound_at = info.bound_at;
+                  const key = info.profile_name || info.app_name || info.app_id;
+                  if (!apps[key]) apps[key] = {profile_name: info.profile_name || '', app_name: info.app_name || '', app_id: info.app_id, credential: '', machine: fp, ip: '', bound_at: info.bound_at};
+                  else apps[key].machine = fp;
+                  if (info.bound_at) apps[key].bound_at = info.bound_at;
                 }
                 for (const [ip, info] of Object.entries(bindings.ip || {})) {
-                  const name = info.app_name || info.app_id;
-                  if (!apps[name]) apps[name] = {app_name: name, app_id: info.app_id, credential: '', machine: '', ip: ip, bound_at: info.bound_at};
-                  else apps[name].ip = ip;
-                  if (info.bound_at) apps[name].bound_at = info.bound_at;
+                  const key = info.profile_name || info.app_name || info.app_id;
+                  if (!apps[key]) apps[key] = {profile_name: info.profile_name || '', app_name: info.app_name || '', app_id: info.app_id, credential: '', machine: '', ip: ip, bound_at: info.bound_at};
+                  else apps[key].ip = ip;
+                  if (info.bound_at) apps[key].bound_at = info.bound_at;
                 }
                 for (const [key_id, info] of Object.entries(bindings.credential || {})) {
-                  const name = info.app_name || info.app_id;
-                  if (!apps[name]) apps[name] = {app_name: name, app_id: info.app_id, credential: key_id, machine: '', ip: '', bound_at: info.bound_at};
-                  else apps[name].credential = key_id;
-                  if (info.bound_at) apps[name].bound_at = info.bound_at;
+                  const key = info.profile_name || info.app_name || info.app_id;
+                  if (!apps[key]) apps[key] = {profile_name: info.profile_name || '', app_name: info.app_name || '', app_id: info.app_id, credential: key_id, machine: '', ip: '', bound_at: info.bound_at};
+                  else apps[key].credential = key_id;
+                  if (info.bound_at) apps[key].bound_at = info.bound_at;
                 }
                 const sorted = Object.values(apps);
                 sorted.sort((a, b) => {
-                  if (a.app_name === guard.current_profile) return -1;
-                  if (b.app_name === guard.current_profile) return 1;
+                  if (a.profile_name === guard.current_profile) return -1;
+                  if (b.profile_name === guard.current_profile) return 1;
                   return 0;
                 });
                 return sorted;
               })()" :key="idx">
                 <div class="flex items-center gap-3 text-sm py-1.5 border-b border-gray-100 last:border-0">
-                  <span x-text="row.app_name === guard.current_profile ? '★' : ''"
-                        :class="row.app_name === guard.current_profile ? 'text-yellow-500 font-bold' : 'text-gray-300'"></span>
-                  <span class="font-mono min-w-[80px]" x-text="row.app_name"></span>
+                  <span x-text="row.profile_name === guard.current_profile ? '★' : ''"
+                        :class="row.profile_name === guard.current_profile ? 'text-yellow-500 font-bold' : 'text-gray-300'"></span>
+                  <span class="font-mono min-w-[80px]" x-text="row.profile_name || row.app_id"></span>
+                  <span class="text-xs text-gray-500 min-w-[120px]" x-text="row.app_name && row.app_name !== row.profile_name ? row.app_name : ''"></span>
                   <span class="text-xs text-gray-500 min-w-[100px]" x-text="row.credential ? '凭证 ' + row.credential : ''"></span>
                   <span class="text-xs text-gray-500 min-w-[100px]" x-text="row.machine ? '机器 ' + row.machine : ''"></span>
                   <span class="text-xs text-gray-500 min-w-[80px]" x-text="row.ip ? 'IP ' + row.ip : ''"></span>

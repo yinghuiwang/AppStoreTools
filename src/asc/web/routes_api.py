@@ -583,6 +583,19 @@ async def guard_status(request: Request):
         # Add current_profile from cookie
         profile = request.cookies.get("asc_profile", "")
         data["current_profile"] = profile
+        # Build app_id → profile_name mapping for display
+        from asc.config import Config
+        config = Config()
+        profiles = config.list_apps()
+        app_id_to_profile = {}
+        for p in profiles:
+            pdata = config.get_app_profile(p)
+            if pdata and pdata.get("app_id"):
+                app_id_to_profile[pdata["app_id"]] = p
+        # Inject profile_name into each binding entry
+        for category in ("machine", "ip", "credential"):
+            for key, info in data.get("bindings", {}).get(category, {}).items():
+                info["profile_name"] = app_id_to_profile.get(info.get("app_id", ""), "")
         return data
     except Exception as e:
         return {"enabled": False, "bindings": {"machine": {}, "ip": {}, "credential": {}}, "current_profile": "", "error": str(e)}
