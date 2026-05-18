@@ -339,3 +339,105 @@ async def task_status(task_id: str):
         "result": task["result"],
         "log_count": len(task["logs"]),
     }
+
+
+import shutil as _shutil
+from fastapi import UploadFile as _UploadFile, File as _File
+
+
+@router.get("/profiles")
+async def list_profiles_api():
+    from asc.config import Config
+    config = Config()
+    apps = config.list_apps()
+    default = config.app_name or (apps[0] if apps else "")
+    return {"profiles": apps, "default": default}
+
+
+@router.post("/profiles")
+async def create_profile(
+    name: str = _Form(...),
+    issuer_id: str = _Form(...),
+    key_id: str = _Form(...),
+    app_id: str = _Form(...),
+    csv: str = _Form("data/appstore_info.csv"),
+    screenshots: str = _Form("data/screenshots"),
+    key_file: _UploadFile = _File(...),
+):
+    global_keys_dir = Path.home() / ".config" / "asc" / "keys"
+    global_keys_dir.mkdir(parents=True, exist_ok=True)
+    dest_key = global_keys_dir / key_file.filename
+
+    content = await key_file.read()
+    dest_key.write_bytes(content)
+
+    from asc.config import Config
+    config = Config()
+    config.save_app_profile(name, issuer_id, key_id, str(dest_key), app_id, csv, screenshots)
+    return {"ok": True, "name": name}
+
+
+@router.put("/profiles/{name}")
+async def update_profile(
+    name: str,
+    issuer_id: str = _Form(...),
+    key_id: str = _Form(...),
+    app_id: str = _Form(...),
+    csv: str = _Form("data/appstore_info.csv"),
+    screenshots: str = _Form("data/screenshots"),
+    key_file: _UploadFile = _File(None),
+):
+    from asc.config import Config
+    config = Config()
+    existing = config.get_app_profile(name)
+    if existing is None:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    key_file_path = existing["key_file"]
+    if key_file and key_file.filename:
+        global_keys_dir = Path.home() / ".config" / "asc" / "keys"
+        global_keys_dir.mkdir(parents=True, exist_ok=True)
+        dest_key = global_keys_dir / key_file.filename
+        content = await key_file.read()
+        dest_key.write_bytes(content)
+        key_file_path = str(dest_key)
+
+    config.save_app_profile(name, issuer_id, key_id, key_file_path, app_id, csv, screenshots)
+    return {"ok": True, "name": name}
+
+
+@router.delete("/profiles/{name}")
+async def delete_profile(name: str):
+    from asc.config import Config
+    config = Config()
+    config.remove_app_profile(name)
+    return {"ok": True}
+
+
+@router.post("/profiles/{name}/set-default")
+async def set_default_profile(name: str):
+    import re
+    local_dir = Path.cwd() / ".asc"
+    local_dir.mkdir(parents=True, exist_ok=True)
+    cfg_path = local_dir / "config.toml"
+    content = cfg_path.read_text() if cfg_path.exists() else ""
+    if "default_app" in content:
+        content = re.sub(r'default_app\s*=\s*"[^"]*"', f'default_app = "{name}"', content)
+    else:
+        content = f'default_app = "{name}"\n' + content
+    cfg_path.write_text(content)
+    return {"ok": True}
+
+
+@router.get("/profiles/{name}")
+async def get_profile(name: str):
+    from asc.config import Config
+    config = Config()
+    data = config.get_app_profile(name)
+    if data is None:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Profile not found")
+    data["key_file_name"] = Path(data["key_file"]).name if data.get("key_file") else ""
+    data.pop("key_file", None)
+    return data

@@ -123,3 +123,35 @@ def test_task_status_endpoint(client):
     data = resp.json()
     assert data["status"] == "running"
     assert data["task_id"] == task_id
+
+
+def test_profiles_list_api(client):
+    from unittest.mock import patch
+    with patch("asc.config.Config.list_apps", return_value=["myapp", "staging"]):
+        resp = client.get("/api/profiles")
+        assert resp.status_code == 200
+        assert "myapp" in resp.json()["profiles"]
+
+def test_profile_create_api(client, tmp_path):
+    """POST /api/profiles 创建新 profile"""
+    p8_content = b"-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----\n"
+    from unittest.mock import patch
+    with patch("asc.config.Config.save_app_profile") as mock_save:
+        resp = client.post("/api/profiles", data={
+            "name": "newapp",
+            "issuer_id": "abc-123",
+            "key_id": "KEYID123",
+            "app_id": "1234567890",
+            "csv": "data/appstore_info.csv",
+            "screenshots": "data/screenshots",
+        }, files={"key_file": ("AuthKey_KEYID123.p8", p8_content, "application/octet-stream")})
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+        mock_save.assert_called_once()
+
+def test_profile_delete_api(client):
+    from unittest.mock import patch
+    with patch("asc.config.Config.remove_app_profile") as mock_remove:
+        resp = client.delete("/api/profiles/myapp")
+        assert resp.status_code == 200
+        mock_remove.assert_called_once_with("myapp")
