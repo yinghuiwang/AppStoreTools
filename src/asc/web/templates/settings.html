@@ -2,13 +2,82 @@
 {% block content %}
 <h1 class="text-xl font-semibold mb-6">⚙️ 设置</h1>
 
-<div class="max-w-xl space-y-6">
+<div class="max-w-2xl space-y-6">
   <!-- Guard status -->
   <div class="bg-white rounded-lg border border-gray-200 p-5"
-       hx-get="/api/guard/status"
-       hx-trigger="load"
-       hx-swap="innerHTML">
-    <p class="text-sm text-gray-400">加载 Guard 状态...</p>
+       x-data="{ guard: null }"
+       x-init="
+         fetch('/api/guard/status')
+           .then(r => r.json())
+           .then(data => { guard = data; })
+           .catch(() => { guard = null; })
+       ">
+    <h2 class="font-medium text-sm mb-2">🛡️ Guard 安全守卫</h2>
+    <template x-if="guard">
+      <div>
+        <p class="text-sm mb-3"
+           :class="guard.enabled ? 'text-green-600' : 'text-gray-400'"
+           x-text="guard.enabled ? '状态：已启用' : '状态：已禁用'"></p>
+
+        <!-- Bindings table -->
+        <template x-if="guard.enabled && Object.keys(guard.bindings.machine).length + Object.keys(guard.bindings.ip).length + Object.keys(guard.bindings.credential).length > 0">
+          <div>
+            <h3 class="text-xs font-medium text-gray-500 mb-2">绑定详情</h3>
+            <div class="space-y-2">
+              <template x-for="(row, idx) in (() => {
+                const apps = {};
+                const bindings = guard.bindings;
+                for (const [fp, info] of Object.entries(bindings.machine || {})) {
+                  const name = info.app_name || info.app_id;
+                  if (!apps[name]) apps[name] = {app_name: name, app_id: info.app_id, credential: '', machine: fp, ip: '', bound_at: info.bound_at};
+                  else apps[name].machine = fp;
+                  if (info.bound_at) apps[name].bound_at = info.bound_at;
+                }
+                for (const [ip, info] of Object.entries(bindings.ip || {})) {
+                  const name = info.app_name || info.app_id;
+                  if (!apps[name]) apps[name] = {app_name: name, app_id: info.app_id, credential: '', machine: '', ip: ip, bound_at: info.bound_at};
+                  else apps[name].ip = ip;
+                  if (info.bound_at) apps[name].bound_at = info.bound_at;
+                }
+                for (const [key_id, info] of Object.entries(bindings.credential || {})) {
+                  const name = info.app_name || info.app_id;
+                  if (!apps[name]) apps[name] = {app_name: name, app_id: info.app_id, credential: key_id, machine: '', ip: '', bound_at: info.bound_at};
+                  else apps[name].credential = key_id;
+                  if (info.bound_at) apps[name].bound_at = info.bound_at;
+                }
+                const sorted = Object.values(apps);
+                sorted.sort((a, b) => {
+                  if (a.app_name === guard.current_profile) return -1;
+                  if (b.app_name === guard.current_profile) return 1;
+                  return 0;
+                });
+                return sorted;
+              })()" :key="idx">
+                <div class="flex items-center gap-3 text-sm py-1.5 border-b border-gray-100 last:border-0">
+                  <span x-text="row.app_name === guard.current_profile ? '★' : ''"
+                        :class="row.app_name === guard.current_profile ? 'text-yellow-500 font-bold' : 'text-gray-300'"></span>
+                  <span class="font-mono min-w-[80px]" x-text="row.app_name"></span>
+                  <span class="text-xs text-gray-500 min-w-[100px]" x-text="row.credential ? '凭证 ' + row.credential : ''"></span>
+                  <span class="text-xs text-gray-500 min-w-[100px]" x-text="row.machine ? '机器 ' + row.machine : ''"></span>
+                  <span class="text-xs text-gray-500 min-w-[80px]" x-text="row.ip ? 'IP ' + row.ip : ''"></span>
+                  <span class="text-xs text-gray-400" x-text="row.bound_at ? '绑定于 ' + row.bound_at.slice(0, 16) : ''"></span>
+                </div>
+              </template>
+            </div>
+          </div>
+        </template>
+
+        <template x-if="guard.enabled && Object.keys(guard.bindings.machine).length === 0 && Object.keys(guard.bindings.ip).length === 0 && Object.keys(guard.bindings.credential).length === 0">
+          <p class="text-xs text-gray-400">暂无绑定记录</p>
+        </template>
+
+        <p class="text-xs text-gray-400 mt-2">Guard 将凭证绑定到当前机器和 IP，防止凭证滥用。</p>
+        <p class="text-xs text-gray-400">如需修改，请使用 CLI：<code class="font-mono">asc guard enable/disable</code></p>
+      </div>
+    </template>
+    <template x-if="!guard">
+      <p class="text-sm text-red-500">Guard 状态读取失败</p>
+    </template>
   </div>
 
   <!-- Language -->
