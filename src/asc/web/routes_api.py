@@ -17,6 +17,7 @@ _templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 _HOME = Path.home().resolve()
 _TMPDIR = Path(tempfile.gettempdir()).resolve()
 _ALLOWED_ROOTS = (_HOME, _TMPDIR)
+_DATA_DIR = Path(__file__).resolve().parents[3] / "data"
 
 
 def _is_under_allowed_root(target: Path) -> bool:
@@ -616,3 +617,41 @@ async def set_lang(lang: str = _Form("zh")):
         raise HTTPException(status_code=400, detail="Invalid language")
     os.environ["ASC_LANG"] = lang
     return {"ok": True, "lang": lang}
+
+
+@router.get("/examples/csv")
+async def download_example_csv():
+    """Download the example CSV file."""
+    csv_path = _DATA_DIR / "appstore_info.csv"
+    if not csv_path.exists():
+        return Response("Example CSV not found", status_code=404)
+    content = csv_path.read_bytes()
+    return Response(
+        content,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=appstore_info_example.csv"},
+    )
+
+
+@router.get("/examples/screenshots")
+async def download_example_screenshots():
+    """Download the example screenshots directory as a zip."""
+    import io
+    import zipfile
+
+    screenshots_dir = _DATA_DIR / "screenshots"
+    if not screenshots_dir.exists():
+        return Response("Example screenshots not found", status_code=404)
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for fp in sorted(screenshots_dir.rglob("*")):
+            if fp.is_file():
+                arcname = str(fp.relative_to(screenshots_dir))
+                zf.write(fp, arcname)
+    buf.seek(0)
+    return Response(
+        buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": "attachment; filename=screenshots_example.zip"},
+    )

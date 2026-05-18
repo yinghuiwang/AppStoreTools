@@ -352,3 +352,19 @@ def test_sse_stream_emits_progress():
     task = store.get(task_id)
     assert task["progress"]["pct"] == 50
     assert task["progress"]["msg"] == "测试进度"
+
+
+def test_examples_csv_download(client):
+    resp = client.get("/api/examples/csv")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/csv")
+    assert "appstore_info_example.csv" in resp.headers.get("content-disposition", "")
+    assert "语言" in resp.text
+
+
+def test_examples_screenshots_download(client):
+    resp = client.get("/api/examples/screenshots")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/zip"
+    assert "screenshots_example.zip" in resp.headers.get("content-disposition", "")
+    assert len(resp.content) > 0

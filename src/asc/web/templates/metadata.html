@@ -5,7 +5,7 @@
   元数据上传
 </h1>
 
-<div x-data="{ step: 1, taskId: null, logs: [], status: 'idle', progress: 0, progressMsg: '', checkResult: null, submitting: false }">
+<div x-data="{ step: 1, taskId: null, logs: [], status: 'idle', progress: 0, progressMsg: '', checkResult: null, submitting: false, showCsvHelp: false, showScreenshotsHelp: false }">
 
   <!-- Step 1: 配置表单 -->
   <div x-show="step === 1">
@@ -25,7 +25,25 @@
       <div class="bg-white rounded-lg border border-gray-200 p-5 space-y-4 max-w-xl">
 
         <div>
-          <label for="csv-path-input" class="block text-sm font-medium text-gray-700 mb-1">CSV 文件路径</label>
+          <div class="flex items-center gap-1 mb-1">
+            <label for="csv-path-input" class="block text-sm font-medium text-gray-700">CSV 文件路径</label>
+            <button type="button" @click="showCsvHelp = !showCsvHelp"
+                    class="w-4 h-4 inline-flex items-center justify-center rounded-full border border-gray-300 text-gray-400 hover:text-blue-600 hover:border-blue-400 cursor-pointer transition-colors duration-150 focus-ring"
+                    title="CSV 格式说明">?</button>
+          </div>
+          <div x-show="showCsvHelp" x-transition class="mb-2 p-3 bg-blue-50 border border-blue-200 rounded-md text-xs text-gray-600 space-y-1.5">
+            <p class="font-medium text-gray-700">CSV 格式要求</p>
+            <p><span class="font-mono text-blue-700">UTF-8</span> 编码，首行为表头，支持 BOM。</p>
+            <p><span class="font-medium">必填列：</span><code class="bg-white px-1 rounded">语言</code> <code class="bg-white px-1 rounded">应用名称</code> <code class="bg-white px-1 rounded">副标题</code> <code class="bg-white px-1 rounded">长描述</code> <code class="bg-white px-1 rounded">关键子</code></p>
+            <p><span class="font-medium">可选列：</span><code class="bg-white px-1 rounded">技术支持链接</code> <code class="bg-white px-1 rounded">营销网站</code> <code class="bg-white px-1 rounded">隐私政策网址</code></p>
+            <p><span class="font-medium">语言列格式：</span><code class="bg-white px-1 rounded">简体中文(zh-Hans)</code> 或 <code class="bg-white px-1 rounded">en-US</code></p>
+            <p class="text-gray-400">空值字段不会覆盖线上已有内容。</p>
+            <a href="/api/examples/csv" download
+               class="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 cursor-pointer transition-colors duration-150">
+              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
+              下载示例 CSV
+            </a>
+          </div>
           <div class="flex gap-2">
             <input type="text" name="csv_path" value="{{ profile_csv }}"
                    id="csv-path-input"
@@ -37,7 +55,30 @@
         </div>
 
         <div>
-          <label for="screenshots-dir-input" class="block text-sm font-medium text-gray-700 mb-1">截图目录</label>
+          <div class="flex items-center gap-1 mb-1">
+            <label for="screenshots-dir-input" class="block text-sm font-medium text-gray-700">截图目录</label>
+            <button type="button" @click="showScreenshotsHelp = !showScreenshotsHelp"
+                    class="w-4 h-4 inline-flex items-center justify-center rounded-full border border-gray-300 text-gray-400 hover:text-blue-600 hover:border-blue-400 cursor-pointer transition-colors duration-150 focus-ring"
+                    title="截图目录说明">?</button>
+          </div>
+          <div x-show="showScreenshotsHelp" x-transition class="mb-2 p-3 bg-blue-50 border border-blue-200 rounded-md text-xs text-gray-600 space-y-1.5">
+            <p class="font-medium text-gray-700">截图目录结构</p>
+            <pre class="bg-white rounded px-2 py-1.5 text-[11px] leading-relaxed font-mono">screenshots/
+├── zh-Hans/     ← 语言目录
+│   ├── 01_home.png
+│   └── 02_detail.png
+└── en-US/
+    └── 01_home.png</pre>
+            <p><span class="font-medium">语言目录名：</span><code class="bg-white px-1 rounded">zh-Hans</code>、<code class="bg-white px-1 rounded">en-US</code>、<code class="bg-white px-1 rounded">ja</code>、<code class="bg-white px-1 rounded">ko</code> 等，也支持简写 <code class="bg-white px-1 rounded">cn</code> → <code class="bg-white px-1 rounded">zh-Hans</code></p>
+            <p><span class="font-medium">图片格式：</span>PNG / JPG，按文件名中的数字排序</p>
+            <p><span class="font-medium">设备类型：</span>根据首张图片分辨率自动识别（iPhone/iPad 各尺寸）</p>
+            <p class="text-gray-400">上传前会清空同设备类型的旧截图再重新上传。</p>
+            <a href="/api/examples/screenshots" download
+               class="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 cursor-pointer transition-colors duration-150">
+              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
+              下载示例截图目录
+            </a>
+          </div>
           <div class="flex gap-2">
             <input type="text" name="screenshots_dir" value="{{ profile_screenshots }}"
                    id="screenshots-dir-input"
