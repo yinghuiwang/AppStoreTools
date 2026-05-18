@@ -77,6 +77,7 @@
           <label class="block text-sm font-medium text-gray-700 mb-1">IPA 路径</label>
           <div class="flex gap-2">
             <input type="text" name="ipa_path" id="ipa-path-input"
+                   :required="mode === 'deploy'"
                    class="flex-1 border border-gray-300 rounded px-3 py-2 text-sm font-mono">
             <button type="button"
                     class="px-3 py-2 text-sm border border-gray-300 rounded hover:bg-gray-50"

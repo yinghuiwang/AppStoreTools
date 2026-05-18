@@ -188,14 +188,14 @@ def _start_build_task(
         _task_store.set_status(task_id, _TaskStatus.RUNNING)
         q: queue.Queue = queue.Queue()
 
+        def _drain_q():
+            while not q.empty():
+                _task_store.append_log(task_id, q.get_nowait())
+
         try:
             config = Config(app_name=profile)
 
             with capture_stdout_to_queue(q):
-                def _drain_q():
-                    while not q.empty():
-                        _task_store.append_log(task_id, q.get_nowait())
-
                 if mode in ("full", "build"):
                     from asc.commands.build_inputs import (
                         BuildInputsCLI, prepare_build_inputs
