@@ -5,7 +5,7 @@
   <div class="mb-8">
     <h1 class="text-2xl font-bold tracking-tight text-obsidian-50 flex items-center gap-3">
       <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: var(--accent-glow);">
-        <svg class="w-4.5 h-4.5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M20.25 7.5v-.085a2.25 2.25 0 0 0-.329-.985l-7.877-3.51a2.25 2.25 0 0 0-1.278 0l7.877 3.51c.128.058.245.132.329.21ZM16.5 19.125a2.25 2.25 0 0 0-2.475 2.25H5.475a2.25 2.25 0 0 0-2.475-2.25V6.375a2.25 2.25 0 0 0 2.475-2.25H10.5m3.75 0h3.75m-9 8.25h.008v.008H12v-.008Zm.375 0a.75.75 0 1 1-1.5 0 .75.75 0 0 1-1.5 0Zm-.375 3.75h.008v.008H12v-.008Zm.375 0a.75.75 0 1 1-1.5 0 .75.75 0 0 1-1.5 0Zm1.125-3.75h.008v.008h-.008v-.008Z"/></svg>
+        <svg class="w-4.5 h-4.5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M20.25 7.5v-.085a2.25 2.25 0 0 0-.329-.985l-7.877-3.51a2.25 2.25 0 0 0-1.278 0l-7.877 3.51c-.128.058-.245.132-.329.21ZM16.5 19.125a2.25 2.25 0 0 0-2.475 2.25H5.475a2.25 2.25 0 0 0-2.475-2.25V6.375a2.25 2.25 0 0 0 2.475-2.25H10.5m3.75 0h3.75m-9 8.25h.008v.008H12v-.008Zm.375 0a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm-.375 3.75h.008v.008h-.008v-.008Zm.375 0a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm1.125-3.75h.008v.008h-.008v-.008Z"/></svg>
       </div>
       IAP 管理
     </h1>
@@ -44,7 +44,7 @@
             <div>
               <label for="iap-file-input" class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">IAP 配置文件</label>
               <div class="flex gap-2">
-                <input type="text" name="iap_file" value="{{ profile_csv or 'data/iap_packages.json' }}" id="iap-file-input" class="field-input flex-1">
+                <input type="text" name="iap_file" value="{{ profile_iap_file }}" id="iap-file-input" class="field-input flex-1">
                 <button type="button" class="btn-ghost whitespace-nowrap" onclick="openFileBrowser('iap-file-input', 'file', '.json')">浏览</button>
               </div>
             </div>
@@ -176,6 +176,46 @@
 </div>
 
 <script>
+const _IAP_STORE_KEY = 'asc_iap_form_{{ current_profile }}';
+
+function _saveIapForm() {
+  const f = document.getElementById('iap-form');
+  if (!f) return;
+  const data = {
+    iap_file: f.querySelector('[name=iap_file]').value,
+    include_items: f.querySelector('[name=include_items]').checked,
+    include_groups: f.querySelector('[name=include_groups]').checked,
+    dry_run: f.querySelector('[name=dry_run]').checked,
+    update_existing: f.querySelector('[name=update_existing]').checked,
+  };
+  localStorage.setItem(_IAP_STORE_KEY, JSON.stringify(data));
+}
+
+function _restoreIapForm() {
+  const raw = localStorage.getItem(_IAP_STORE_KEY);
+  if (!raw) return;
+  try {
+    const data = JSON.parse(raw);
+    const f = document.getElementById('iap-form');
+    if (!f) return;
+    if (data.iap_file) f.querySelector('[name=iap_file]').value = data.iap_file;
+    if (data.include_items !== undefined) f.querySelector('[name=include_items]').checked = data.include_items;
+    if (data.include_groups !== undefined) f.querySelector('[name=include_groups]').checked = data.include_groups;
+    f.querySelector('[name=dry_run]').checked = !!data.dry_run;
+    f.querySelector('[name=update_existing]').checked = !!data.update_existing;
+  } catch(e) {}
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  _restoreIapForm();
+  const f = document.getElementById('iap-form');
+  if (f) {
+    f.addEventListener('change', _saveIapForm);
+    f.addEventListener('input', _saveIapForm);
+    f.addEventListener('submit', _saveIapForm);
+  }
+});
+
 let _fbTargetInput = null;
 let _fbMode = 'dir';
 let _fbExt = '';

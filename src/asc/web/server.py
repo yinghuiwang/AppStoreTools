@@ -28,6 +28,7 @@ def create_app() -> FastAPI:
             "current_profile": current,
             "profile_csv": config.csv_path,
             "profile_screenshots": config.screenshots_path,
+            "profile_iap_file": config.iap_path or "data/iap_packages.json",
         }
 
     @app.get("/", response_class=HTMLResponse)
