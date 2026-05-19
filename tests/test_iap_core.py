@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pytest
+from pathlib import Path
 
 from asc.commands.iap import _upload_iap_core
 
@@ -128,3 +129,71 @@ def test_iap_skips_item_without_product_id():
     _upload_iap_core(api, "app1", items)
     create_calls = [c for c in api.calls if c[0] == "create_in_app_purchase"]
     assert create_calls == []
+
+
+from asc.commands.iap import _load_iap_config
+
+def test_load_iap_config_resolves_relative_screenshot_path(tmp_path):
+    """Relative screenshot paths are resolved against the config file's directory."""
+    import json
+    sub_dir = tmp_path / "configs"
+    sub_dir.mkdir()
+    shot_file = sub_dir / "shots" / "review.png"
+    shot_file.parent.mkdir()
+    shot_file.write_bytes(b"fake")
+
+    cfg = {
+        "subscriptionGroups": [{
+            "referenceName": "TestGroup",
+            "subscriptions": [{
+                "productId": "com.test.sub",
+                "name": "Sub",
+                "subscriptionPeriod": "ONE_MONTH",
+                "groupLevel": 1,
+                "localizations": {"en-US": {"name": "Sub", "description": "desc"}},
+                "price": {"baseTerritory": "USA", "baseAmount": "0.99"},
+                "review": {
+                    "note": "test note",
+                    "screenshot": "./shots/review.png",
+                },
+            }],
+        }],
+    }
+    cfg_path = sub_dir / "subs.json"
+    cfg_path.write_text(json.dumps(cfg), encoding="utf-8")
+
+    items, subs = _load_iap_config(str(cfg_path))
+    shot_path = subs[0]["subscriptions"][0]["review"]["screenshot"]
+    assert Path(shot_path).is_absolute(), f"Expected absolute path, got: {shot_path}"
+    assert Path(shot_path).exists(), f"Screenshot not found at resolved path: {shot_path}"
+
+
+def test_load_iap_config_absolute_screenshot_path_untouched(tmp_path):
+    """Absolute screenshot paths are kept as-is."""
+    import json
+    shot_file = tmp_path / "review.png"
+    shot_file.write_bytes(b"fake")
+
+    cfg = {
+        "subscriptionGroups": [{
+            "referenceName": "TestGroup",
+            "subscriptions": [{
+                "productId": "com.test.sub",
+                "name": "Sub",
+                "subscriptionPeriod": "ONE_MONTH",
+                "groupLevel": 1,
+                "localizations": {"en-US": {"name": "Sub", "description": "desc"}},
+                "price": {"baseTerritory": "USA", "baseAmount": "0.99"},
+                "review": {
+                    "note": "test note",
+                    "screenshot": str(shot_file),
+                },
+            }],
+        }],
+    }
+    cfg_path = tmp_path / "subs.json"
+    cfg_path.write_text(json.dumps(cfg), encoding="utf-8")
+
+    items, subs = _load_iap_config(str(cfg_path))
+    shot_path = subs[0]["subscriptions"][0]["review"]["screenshot"]
+    assert shot_path == str(shot_file)
