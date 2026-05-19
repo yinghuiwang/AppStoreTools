@@ -19,18 +19,48 @@
   <!-- Profile list -->
   <div class="card">
     <template x-for="p in profiles" :key="p">
-      <div class="flex items-center justify-between px-5 py-4 border-b border-obsidian-700 last:border-0 hover:bg-obsidian-800/50 transition-colors duration-150 group">
-        <div class="flex items-center gap-3">
-          <button @click="setDefault(p)" class="cursor-pointer transition-colors duration-150" :title="p === defaultProfile ? '默认' : '设为默认'">
-            <span x-text="p === defaultProfile ? '★' : '○'"
-                  :class="p === defaultProfile ? 'text-amber-500 text-lg' : 'text-obsidian-600 text-sm group-hover:text-obsidian-400'"></span>
-          </button>
-          <span class="text-sm font-medium text-obsidian-100 font-mono" x-text="p"></span>
-          <span x-show="p === defaultProfile" class="badge badge-info text-[10px]">DEFAULT</span>
-        </div>
-        <div class="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
-          <button @click="openDrawer(p)" class="text-xs text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium">编辑</button>
-          <button @click="deleteProfile(p)" class="text-xs text-red-500 hover:text-red-400 cursor-pointer transition-colors duration-150 font-medium">删除</button>
+      <div class="px-5 py-4 border-b border-obsidian-700 last:border-0 hover:bg-obsidian-800/50 transition-colors duration-150 group">
+        <div class="flex items-start justify-between gap-4">
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-3">
+              <button @click="setDefault(p)" class="cursor-pointer transition-colors duration-150 shrink-0" :title="p === defaultProfile ? '默认' : '设为默认'">
+                <span x-text="p === defaultProfile ? '★' : '○'"
+                      :class="p === defaultProfile ? 'text-amber-500 text-lg' : 'text-obsidian-600 text-sm group-hover:text-obsidian-400'"></span>
+              </button>
+              <span class="text-sm font-medium text-obsidian-100 font-mono truncate" x-text="p"></span>
+              <span x-show="p === defaultProfile" class="badge badge-info text-[10px]">DEFAULT</span>
+            </div>
+            <div class="mt-3 ml-7 grid grid-cols-2 xl:grid-cols-3 gap-x-6 gap-y-2">
+              <div>
+                <span class="text-[10px] uppercase tracking-widest text-obsidian-500 block mb-0.5">App ID</span>
+                <span class="text-xs text-obsidian-200 font-mono break-all" x-text="detailFor(p).app_id || '-'"></span>
+              </div>
+              <div>
+                <span class="text-[10px] uppercase tracking-widest text-obsidian-500 block mb-0.5">Issuer ID</span>
+                <span class="text-xs text-obsidian-200 font-mono break-all" x-text="detailFor(p).issuer_id || '-'"></span>
+              </div>
+              <div>
+                <span class="text-[10px] uppercase tracking-widest text-obsidian-500 block mb-0.5">Key ID</span>
+                <span class="text-xs text-obsidian-200 font-mono break-all" x-text="detailFor(p).key_id || '-'"></span>
+              </div>
+              <div>
+                <span class="text-[10px] uppercase tracking-widest text-obsidian-500 block mb-0.5">私钥文件</span>
+                <span class="text-xs text-obsidian-300 font-mono break-all" x-text="detailFor(p).key_file_name || '-'"></span>
+              </div>
+              <div>
+                <span class="text-[10px] uppercase tracking-widest text-obsidian-500 block mb-0.5">CSV</span>
+                <span class="text-xs text-obsidian-300 font-mono break-all" x-text="detailFor(p).csv || '-'"></span>
+              </div>
+              <div>
+                <span class="text-[10px] uppercase tracking-widest text-obsidian-500 block mb-0.5">截图目录</span>
+                <span class="text-xs text-obsidian-300 font-mono break-all" x-text="detailFor(p).screenshots || '-'"></span>
+              </div>
+            </div>
+          </div>
+          <div class="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-150 shrink-0 pt-0.5">
+            <button @click="openDrawer(p)" class="text-xs text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium">编辑</button>
+            <button @click="deleteProfile(p)" class="text-xs text-red-500 hover:text-red-400 cursor-pointer transition-colors duration-150 font-medium">删除</button>
+          </div>
         </div>
       </div>
     </template>
@@ -240,6 +270,7 @@ function selectFile(path) {
 function profilesApp() {
   return {
     profiles: [],
+    profileDetails: {},
     defaultProfile: '',
     drawerOpen: false,
     editingProfile: null,
@@ -254,7 +285,12 @@ function profilesApp() {
       const r = await fetch('/api/profiles');
       const d = await r.json();
       this.profiles = d.profiles;
+      this.profileDetails = d.profile_details || {};
       this.defaultProfile = d.default;
+    },
+
+    detailFor(name) {
+      return this.profileDetails[name] || {};
     },
 
     openDrawer(name) {

@@ -14,13 +14,48 @@
   <div class="space-y-6">
     <!-- Guard status -->
     <div class="card"
-         x-data="{ guard: null }"
-         x-init="
-           fetch('/api/guard/status')
-             .then(r => r.json())
-             .then(data => { guard = data; })
-             .catch(() => { guard = null; })
-         ">
+         x-data="{
+           guard: null,
+           savingNote: '',
+           loadGuard() {
+             return fetch('/api/guard/status')
+               .then(r => r.json())
+               .then(data => { this.guard = data; })
+               .catch(() => { this.guard = null; });
+           },
+           noteRows() {
+             if (!this.guard || !this.guard.bindings) return [];
+             const apps = {};
+             const notes = this.guard.app_notes || {};
+             for (const bindings of Object.values(this.guard.bindings)) {
+               for (const info of Object.values(bindings || {})) {
+                 const appId = String(info.app_id || '');
+                 if (!appId || apps[appId]) continue;
+                 apps[appId] = {
+                   app_id: appId,
+                   app: info.profile_name || info.app_name || info.app_id,
+                   note: notes[appId] || ''
+                 };
+               }
+             }
+             return Object.values(apps);
+           },
+           saveNote(row) {
+             const token = row.app_id;
+             this.savingNote = token;
+             return fetch('/api/guard/note', {
+               method: 'POST',
+               headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+               body: new URLSearchParams({app_id: row.app_id, note: row.note || ''})
+             })
+               .then(r => {
+                 if (!r.ok) throw new Error('save failed');
+                 return this.loadGuard();
+               })
+               .finally(() => { this.savingNote = ''; });
+           }
+         }"
+         x-init="loadGuard()">
       <div class="card-header flex items-center gap-2">
         <svg class="w-4 h-4 text-amber-500" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z"/></svg>
         <h2 class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">Guard 安全守卫</h2>
@@ -44,22 +79,30 @@
                   <template x-for="(row, idx) in (() => {
                     const apps = {};
                     const bindings = guard.bindings;
+                    const appNotes = guard.app_notes || {};
+                    const append = (row, field, value) => {
+                      if (!value) return;
+                      if (row[field] && row[field].split(', ').includes(value)) return;
+                      row[field] = row[field] ? `${row[field]}, ${value}` : value;
+                    };
                     for (const [fp, info] of Object.entries(bindings.machine || {})) {
-                      const key = info.profile_name || info.app_name || info.app_id;
-                      if (!apps[key]) apps[key] = {profile_name: info.profile_name || '', app_name: info.app_name || '', app_id: info.app_id, credential: '', machine: fp, ip: '', bound_at: info.bound_at};
-                      else apps[key].machine = fp;
+                      const appId = String(info.app_id || '');
+                      const key = info.profile_name || info.app_name || appId;
+                      if (!apps[key]) apps[key] = {profile_name: info.profile_name || '', app_name: info.app_name || '', app_id: appId, machine: '', ip: '', bound_at: info.bound_at, note: appNotes[appId] || ''};
+                      append(apps[key], 'machine', fp);
                       if (info.bound_at) apps[key].bound_at = info.bound_at;
                     }
                     for (const [ip, info] of Object.entries(bindings.ip || {})) {
-                      const key = info.profile_name || info.app_name || info.app_id;
-                      if (!apps[key]) apps[key] = {profile_name: info.profile_name || '', app_name: info.app_name || '', app_id: info.app_id, credential: '', machine: '', ip: ip, bound_at: info.bound_at};
-                      else apps[key].ip = ip;
+                      const appId = String(info.app_id || '');
+                      const key = info.profile_name || info.app_name || appId;
+                      if (!apps[key]) apps[key] = {profile_name: info.profile_name || '', app_name: info.app_name || '', app_id: appId, machine: '', ip: '', bound_at: info.bound_at, note: appNotes[appId] || ''};
+                      append(apps[key], 'ip', ip);
                       if (info.bound_at) apps[key].bound_at = info.bound_at;
                     }
                     for (const [key_id, info] of Object.entries(bindings.credential || {})) {
-                      const key = info.profile_name || info.app_name || info.app_id;
-                      if (!apps[key]) apps[key] = {profile_name: info.profile_name || '', app_name: info.app_name || '', app_id: info.app_id, credential: key_id, machine: '', ip: '', bound_at: info.bound_at};
-                      else apps[key].credential = key_id;
+                      const appId = String(info.app_id || '');
+                      const key = info.profile_name || info.app_name || appId;
+                      if (!apps[key]) apps[key] = {profile_name: info.profile_name || '', app_name: info.app_name || '', app_id: appId, machine: '', ip: '', bound_at: info.bound_at, note: appNotes[appId] || ''};
                       if (info.bound_at) apps[key].bound_at = info.bound_at;
                     }
                     const sorted = Object.values(apps);
@@ -83,10 +126,10 @@
                       </div>
                       <!-- Detail grid -->
                       <div class="grid grid-cols-2 gap-x-6 gap-y-2">
-                        <template x-if="row.credential">
+                        <template x-if="row.app_id">
                           <div>
-                            <span class="text-[10px] uppercase tracking-widest text-obsidian-500 block mb-0.5">凭证 Key ID</span>
-                            <span class="text-xs text-obsidian-200 font-mono break-all" x-text="row.credential"></span>
+                            <span class="text-[10px] uppercase tracking-widest text-obsidian-500 block mb-0.5">App ID</span>
+                            <span class="text-xs text-obsidian-200 font-mono break-all" x-text="row.app_id"></span>
                           </div>
                         </template>
                         <template x-if="row.machine">
@@ -107,9 +150,36 @@
                             <span class="text-xs text-obsidian-400 font-mono" x-text="row.bound_at.slice(0,19).replace('T',' ')"></span>
                           </div>
                         </template>
+                        <template x-if="row.note">
+                          <div class="col-span-2">
+                            <span class="text-[10px] uppercase tracking-widest text-obsidian-500 block mb-0.5">备注</span>
+                            <span class="text-xs text-obsidian-300 break-all" x-text="row.note"></span>
+                          </div>
+                        </template>
                       </div>
                     </div>
                   </template>
+                </div>
+                <div class="mt-5 pt-4 border-t border-obsidian-800">
+                  <h4 class="text-[10px] uppercase tracking-widest text-obsidian-500 font-medium mb-3">编辑备注</h4>
+                  <div class="space-y-2">
+                    <template x-for="row in noteRows()" :key="row.app_id">
+                      <div class="grid grid-cols-[84px_minmax(0,1fr)_minmax(180px,260px)_auto] items-center gap-2">
+                        <span class="text-[11px] text-obsidian-400">App</span>
+                        <span class="text-xs text-obsidian-200 font-mono truncate" :title="row.app_id" x-text="row.app_id"></span>
+                        <input class="field-input text-xs h-9"
+                               type="text"
+                               placeholder="备注"
+                               x-model="row.note">
+                        <button type="button"
+                                class="btn-secondary text-xs h-9 px-3"
+                                @click="saveNote(row)"
+                                :disabled="savingNote === row.app_id">
+                          <span x-text="savingNote === row.app_id ? '保存中' : '保存备注'"></span>
+                        </button>
+                      </div>
+                    </template>
+                  </div>
                 </div>
               </div>
             </template>
@@ -120,7 +190,7 @@
 
             <div class="mt-4 pt-4 border-t border-obsidian-700 space-y-1.5">
               <p class="text-[11px] text-obsidian-500">Guard 将凭证绑定到当前机器和 IP，防止凭证滥用。</p>
-              <p class="text-[11px] text-obsidian-500">如需修改，请使用 CLI：<code class="font-mono text-amber-550 bg-obsidian-800 px-1.5 py-0.5 rounded">asc guard enable/disable</code></p>
+              <p class="text-[11px] text-obsidian-500">可在此编辑绑定备注；启用、禁用和解绑仍使用 CLI：<code class="font-mono text-amber-550 bg-obsidian-800 px-1.5 py-0.5 rounded">asc guard enable/disable/unbind</code></p>
             </div>
           </div>
         </template>

@@ -8,7 +8,6 @@ import shutil
 import copy
 import typer
 import click
-import hashlib
 import platform
 import subprocess
 import uuid
@@ -19,7 +18,7 @@ from asc.i18n import t, ERRORS
 
 GUARD_FILE = Path.home() / ".config" / "asc" / "guard.json"
 
-_EMPTY = {"enabled": True, "bindings": {"machine": {}, "ip": {}, "credential": {}}}
+_EMPTY = {"enabled": True, "bindings": {"machine": {}, "ip": {}, "credential": {}}, "app_notes": {}}
 
 
 def _get_machine_fingerprint_macos() -> str:
@@ -28,7 +27,7 @@ def _get_machine_fingerprint_macos() -> str:
         capture_output=True, text=True, timeout=5,
     )
     for line in result.stdout.splitlines():
-        if "IOPlatformUUID" in line:
+        if "IOPlatformSerialNumber" in line:
             parts = line.split('"')
             if len(parts) >= 4:
                 return parts[-2]
@@ -65,7 +64,7 @@ class Guard:
 
     def _load(self) -> dict:
         if os.getenv("ASC_GUARD_DISABLE", "").strip() == "1":
-            return {"enabled": False, "bindings": {"machine": {}, "ip": {}, "credential": {}}}
+            return {"enabled": False, "bindings": {"machine": {}, "ip": {}, "credential": {}}, "app_notes": {}}
         if not self._file.exists():
             return copy.deepcopy(_EMPTY)
         try:
@@ -73,6 +72,11 @@ class Guard:
             data.setdefault("bindings", {})
             for k in ("machine", "ip", "credential"):
                 data["bindings"].setdefault(k, {})
+            for bindings in data["bindings"].values():
+                for entry in bindings.values():
+                    if "app_id" in entry:
+                        entry["app_id"] = str(entry["app_id"])
+            data.setdefault("app_notes", {})
             return data
         except Exception:
             backup = self._file.with_suffix(".json.backup")
@@ -96,10 +100,9 @@ class Guard:
 
     def _get_machine_fingerprint(self) -> str:
         try:
-            raw = _get_machine_fingerprint_macos()
+            return _get_machine_fingerprint_macos()
         except Exception:
-            raw = f"{platform.node()}-{uuid.getnode()}"
-        return hashlib.sha256(raw.encode()).hexdigest()
+            return f"{platform.node()}-{uuid.getnode()}"
 
     def _get_public_ip(self) -> str:
         try:
@@ -114,20 +117,61 @@ class Guard:
     def _now(self) -> str:
         return datetime.now(timezone.utc).isoformat()
 
-    def bind(self, app_id: str, app_name: str, key_id: str, issuer_id: str) -> None:
-        fp = self._get_machine_fingerprint()
-        ip = self._get_public_ip()
+    def _entry(self, existing: dict | None, app_id: str, app_name: str, issuer_id: str, now: str) -> dict:
+        existing = existing or {}
+        app_id = str(app_id)
+        return {
+            "app_id": app_id,
+            "app_name": app_name,
+            "issuer_id": issuer_id,
+            "bound_at": existing.get("bound_at", now),
+            "last_checked": now,
+        }
+
+    def _upsert_bindings(
+        self,
+        app_id: str,
+        app_name: str,
+        key_id: str,
+        issuer_id: str,
+        fp: str,
+        ip: str,
+        note: str = "",
+    ) -> None:
         now = self._now()
         b = self._data["bindings"]
-        b["machine"][fp] = {"app_id": app_id, "app_name": app_name, "bound_at": now, "last_checked": now}
+        b["machine"][fp] = self._entry(b["machine"].get(fp), app_id, app_name, issuer_id, now)
         if ip != "unknown":
-            b["ip"][ip] = {"app_id": app_id, "app_name": app_name, "bound_at": now, "last_checked": now}
-        b["credential"][key_id] = {"app_id": app_id, "app_name": app_name, "issuer_id": issuer_id, "bound_at": now, "last_checked": now}
+            b["ip"][ip] = self._entry(b["ip"].get(ip), app_id, app_name, issuer_id, now)
+        credential = self._entry(b["credential"].get(key_id), app_id, app_name, issuer_id, now)
+        credential["issuer_id"] = issuer_id
+        b["credential"][key_id] = credential
+        self._data.setdefault("app_notes", {})
+        if note:
+            self._data["app_notes"][app_id] = note
         self._save()
+
+    def bind(self, app_id: str, app_name: str, key_id: str, issuer_id: str, note: str = "") -> None:
+        fp = self._get_machine_fingerprint()
+        ip = self._get_public_ip()
+        self._upsert_bindings(app_id, app_name, key_id, issuer_id, fp, ip, note)
 
     def unbind(self, target: str, value: str) -> None:
         self._data["bindings"].get(target, {}).pop(value, None)
         self._save()
+
+    def set_app_note(self, app_id: str, note: str) -> bool:
+        app_id = str(app_id)
+        app_exists = any(
+            str(entry.get("app_id")) == app_id
+            for bindings in self._data.get("bindings", {}).values()
+            for entry in bindings.values()
+        )
+        if not app_exists:
+            return False
+        self._data.setdefault("app_notes", {})[app_id] = note
+        self._save()
+        return True
 
     def enable(self) -> None:
         self._data["enabled"] = True
@@ -137,12 +181,18 @@ class Guard:
         self._data["enabled"] = False
         self._save()
 
-    def _collect_conflicts(self, app_id: str, key_id: str, fp: str, ip: str) -> list[dict]:
-        """返回所有绑定到不同 App 的冲突条目列表。"""
+    def _same_account(self, entry: dict, app_id: str, issuer_id: str) -> bool:
+        entry_issuer_id = entry.get("issuer_id")
+        if entry_issuer_id:
+            return entry_issuer_id == issuer_id
+        return entry.get("app_id") == app_id
+
+    def _collect_conflicts(self, app_id: str, key_id: str, issuer_id: str, fp: str, ip: str) -> list[dict]:
+        """返回所有绑定到不同 Issuer ID 的冲突条目列表。"""
         b = self._data["bindings"]
         conflicts = []
         checks = [
-            ("machine", fp, f"机器指纹 ({fp[:8]}...)"),
+            ("machine", fp, f"机器指纹 ({fp})"),
             ("ip", ip, f"IP 地址 ({ip})"),
             ("credential", key_id, f"API 凭证 ({key_id})"),
         ]
@@ -150,7 +200,7 @@ class Guard:
             if bkey == "unknown":
                 continue
             entry = b.get(btype, {}).get(bkey)
-            if entry and entry.get("app_id") != app_id:
+            if entry and not self._same_account(entry, app_id, issuer_id):
                 conflicts.append({
                     "type": btype,
                     "key": bkey,
@@ -176,16 +226,18 @@ class Guard:
         fp = self._get_machine_fingerprint()
         ip = self._get_public_ip()
 
-        conflicts = self._collect_conflicts(app_id, key_id, fp, ip)
+        conflicts = self._collect_conflicts(app_id, key_id, issuer_id, fp, ip)
 
         if not conflicts:
             b = self._data["bindings"]
-            first_bind = fp not in b.get("machine", {})
-            if first_bind:
-                self.bind(app_id, app_name, key_id, issuer_id)
+            has_new_binding = (
+                fp not in b.get("machine", {})
+                or (ip != "unknown" and ip not in b.get("ip", {}))
+                or key_id not in b.get("credential", {})
+            )
+            self._upsert_bindings(app_id, app_name, key_id, issuer_id, fp, ip)
+            if has_new_binding:
                 typer.echo(f"ℹ️  已绑定当前环境到 App: {app_name}", err=True)
-            else:
-                self._update_last_checked(app_id, key_id, fp, ip)
             return
 
         typer.echo("\n⚠️  检测到 App 绑定冲突：\n", err=True)

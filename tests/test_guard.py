@@ -17,7 +17,7 @@ def test_guard_loads_empty_config(tmp_path):
     with patch("asc.guard.GUARD_FILE", tmp_path / "guard.json"):
         g = Guard()
         assert g.is_enabled() is True
-        assert g._data == {"enabled": True, "bindings": {"machine": {}, "ip": {}, "credential": {}}}
+        assert g._data == {"enabled": True, "bindings": {"machine": {}, "ip": {}, "credential": {}}, "app_notes": {}}
 
 
 def test_guard_loads_existing_config(tmp_path):
@@ -50,20 +50,39 @@ def test_guard_disable_via_env(tmp_path, monkeypatch):
 def test_get_machine_fingerprint_macos(tmp_path):
     from asc.guard import Guard
     with patch("asc.guard.GUARD_FILE", tmp_path / "guard.json"):
-        with patch("asc.guard._get_machine_fingerprint_macos", return_value="FAKE-UUID-1234"):
+        with patch("asc.guard._get_machine_fingerprint_macos", return_value="SERIAL-C02ABC123456"):
             g = Guard()
             fp = g._get_machine_fingerprint()
-            assert len(fp) == 64  # sha256 hex digest
-            assert isinstance(fp, str)
+            assert fp == "SERIAL-C02ABC123456"
+
+
+def test_get_machine_fingerprint_macos_uses_serial_number(tmp_path):
+    from asc.guard import Guard
+
+    ioreg_output = '''
+    | |   "IOPlatformUUID" = "FAKE-UUID-1234"
+    | |   "IOPlatformSerialNumber" = "SERIAL-C02ABC123456"
+    '''
+    completed = MagicMock(stdout=ioreg_output)
+    with patch("asc.guard.GUARD_FILE", tmp_path / "guard.json"), \
+         patch("asc.guard.subprocess.run", return_value=completed):
+        g = Guard()
+
+        fp = g._get_machine_fingerprint()
+
+    assert fp == "SERIAL-C02ABC123456"
+    assert fp != "FAKE-UUID-1234"
 
 
 def test_get_machine_fingerprint_fallback(tmp_path):
     from asc.guard import Guard
     with patch("asc.guard.GUARD_FILE", tmp_path / "guard.json"):
-        with patch("asc.guard._get_machine_fingerprint_macos", side_effect=Exception("fail")):
+        with patch("asc.guard._get_machine_fingerprint_macos", side_effect=Exception("fail")), \
+             patch("asc.guard.platform.node", return_value="host1"), \
+             patch("asc.guard.uuid.getnode", return_value=12345):
             g = Guard()
             fp = g._get_machine_fingerprint()
-            assert len(fp) == 64
+            assert fp == "host1-12345"
 
 
 def test_get_public_ip_success(tmp_path):
@@ -97,6 +116,24 @@ def test_bind_creates_entries(tmp_path):
         assert "1.2.3.4" in data["bindings"]["ip"]
         assert "KEY1" in data["bindings"]["credential"]
         assert data["bindings"]["machine"]["fp123"]["app_id"] == "com.ex.app"
+        assert data["bindings"]["machine"]["fp123"]["issuer_id"] == "ISS1"
+        assert data["bindings"]["ip"]["1.2.3.4"]["issuer_id"] == "ISS1"
+        assert data["app_notes"] == {}
+
+
+def test_bind_creates_app_note(tmp_path):
+    from asc.guard import Guard
+    guard_file = tmp_path / "guard.json"
+    with patch("asc.guard.GUARD_FILE", guard_file), \
+         patch.object(Guard, "_get_machine_fingerprint", return_value="fp123"), \
+         patch.object(Guard, "_get_public_ip", return_value="1.2.3.4"):
+        g = Guard()
+        g.bind(app_id="com.ex.app", app_name="myapp", key_id="KEY1", issuer_id="ISS1", note="office mac")
+        data = json.loads(guard_file.read_text())
+        assert data["app_notes"]["com.ex.app"] == "office mac"
+        assert "note" not in data["bindings"]["machine"]["fp123"]
+        assert "note" not in data["bindings"]["ip"]["1.2.3.4"]
+        assert "note" not in data["bindings"]["credential"]["KEY1"]
 
 
 def test_unbind_removes_entry(tmp_path):
@@ -148,6 +185,74 @@ def test_no_conflict_same_app(tmp_path):
         g.check_and_enforce(app_id="com.ex.app", app_name="myapp", key_id="K1", issuer_id="I1")
 
 
+def test_same_issuer_allows_machine_and_ip_overlap_for_different_apps(tmp_path):
+    from asc.guard import Guard
+    guard_file = tmp_path / "guard.json"
+    with patch("asc.guard.GUARD_FILE", guard_file), \
+         patch.object(Guard, "_get_machine_fingerprint", return_value="fp1"), \
+         patch.object(Guard, "_get_public_ip", return_value="1.1.1.1"):
+        g = Guard()
+        g.bind("com.ex.first", "first", "K1", "ISS-SAME")
+        g.check_and_enforce(app_id="com.ex.second", app_name="second", key_id="K2", issuer_id="ISS-SAME")
+        data = json.loads(guard_file.read_text())
+        assert data["bindings"]["machine"]["fp1"]["app_id"] == "com.ex.second"
+        assert data["bindings"]["ip"]["1.1.1.1"]["app_id"] == "com.ex.second"
+        assert data["bindings"]["credential"]["K2"]["issuer_id"] == "ISS-SAME"
+
+
+def test_same_issuer_adds_new_ip_for_existing_machine(tmp_path):
+    from asc.guard import Guard
+    guard_file = tmp_path / "guard.json"
+    ips = iter(["1.1.1.1", "2.2.2.2"])
+    with patch("asc.guard.GUARD_FILE", guard_file), \
+         patch.object(Guard, "_get_machine_fingerprint", return_value="fp1"), \
+         patch.object(Guard, "_get_public_ip", side_effect=lambda: next(ips)):
+        g = Guard()
+        g.bind("com.ex.first", "first", "K1", "ISS-SAME")
+        g.check_and_enforce(app_id="com.ex.second", app_name="second", key_id="K2", issuer_id="ISS-SAME")
+        data = json.loads(guard_file.read_text())
+        assert set(data["bindings"]["ip"]) == {"1.1.1.1", "2.2.2.2"}
+        assert data["bindings"]["ip"]["2.2.2.2"]["issuer_id"] == "ISS-SAME"
+
+
+def test_different_issuer_conflicts_on_ip_overlap(tmp_path):
+    from asc.guard import Guard
+    guard_file = tmp_path / "guard.json"
+    with patch("asc.guard.GUARD_FILE", guard_file), \
+         patch.object(Guard, "_get_machine_fingerprint", return_value="fp1"), \
+         patch.object(Guard, "_get_public_ip", return_value="1.1.1.1"):
+        g = Guard()
+        g.bind("com.ex.first", "first", "K1", "ISS-ONE")
+        conflicts = g._collect_conflicts(app_id="com.ex.second", key_id="K2", issuer_id="ISS-TWO", fp="fp2", ip="1.1.1.1")
+        assert [c["type"] for c in conflicts] == ["ip"]
+
+
+def test_different_issuer_conflicts_on_machine_overlap(tmp_path):
+    from asc.guard import Guard
+    guard_file = tmp_path / "guard.json"
+    with patch("asc.guard.GUARD_FILE", guard_file), \
+         patch.object(Guard, "_get_machine_fingerprint", return_value="fp1"), \
+         patch.object(Guard, "_get_public_ip", return_value="1.1.1.1"):
+        g = Guard()
+        g.bind("com.ex.first", "first", "K1", "ISS-ONE")
+        conflicts = g._collect_conflicts(app_id="com.ex.second", key_id="K2", issuer_id="ISS-TWO", fp="fp1", ip="2.2.2.2")
+        assert [c["type"] for c in conflicts] == ["machine"]
+
+
+def test_set_app_note_updates_existing_app(tmp_path):
+    from asc.guard import Guard
+    guard_file = tmp_path / "guard.json"
+    with patch("asc.guard.GUARD_FILE", guard_file), \
+         patch.object(Guard, "_get_machine_fingerprint", return_value="fp1"), \
+         patch.object(Guard, "_get_public_ip", return_value="1.1.1.1"):
+        g = Guard()
+        g.bind("com.ex.app", "myapp", "K1", "ISS1")
+        assert g.set_app_note("com.ex.app", "办公室 Mac") is True
+        data = json.loads(guard_file.read_text())
+        assert data["app_notes"]["com.ex.app"] == "办公室 Mac"
+        assert g.set_app_note("missing.app", "x") is False
+
+
 def test_conflict_user_confirms(tmp_path):
     """冲突时用户输入 yes，更新绑定后继续"""
     from asc.guard import Guard
@@ -159,7 +264,7 @@ def test_conflict_user_confirms(tmp_path):
          patch("typer.prompt", return_value="yes"):
         g = Guard()
         g.bind("com.ex.other", "otherapp", "K1", "I1")
-        g.check_and_enforce(app_id="com.ex.app", app_name="myapp", key_id="K1", issuer_id="I1")
+        g.check_and_enforce(app_id="com.ex.app", app_name="myapp", key_id="K1", issuer_id="I2")
         data = json.loads(guard_file.read_text())
         assert data["bindings"]["credential"]["K1"]["app_id"] == "com.ex.app"
 
@@ -176,7 +281,7 @@ def test_conflict_user_denies(tmp_path):
         g = Guard()
         g.bind("com.ex.other", "otherapp", "K1", "I1")
         with pytest.raises(GuardViolationError):
-            g.check_and_enforce(app_id="com.ex.app", app_name="myapp", key_id="K1", issuer_id="I1")
+            g.check_and_enforce(app_id="com.ex.app", app_name="myapp", key_id="K1", issuer_id="I2")
 
 
 def test_conflict_non_interactive(tmp_path):
@@ -190,7 +295,7 @@ def test_conflict_non_interactive(tmp_path):
         g = Guard()
         g.bind("com.ex.other", "otherapp", "K1", "I1")
         with pytest.raises(GuardViolationError):
-            g.check_and_enforce(app_id="com.ex.app", app_name="myapp", key_id="K1", issuer_id="I1")
+            g.check_and_enforce(app_id="com.ex.app", app_name="myapp", key_id="K1", issuer_id="I2")
 
 
 def test_conflict_keyboard_interrupt(tmp_path):
@@ -205,4 +310,4 @@ def test_conflict_keyboard_interrupt(tmp_path):
         g = Guard()
         g.bind("com.ex.other", "otherapp", "K1", "I1")
         with pytest.raises(GuardViolationError):
-            g.check_and_enforce(app_id="com.ex.app", app_name="myapp", key_id="K1", issuer_id="I1")
+            g.check_and_enforce(app_id="com.ex.app", app_name="myapp", key_id="K1", issuer_id="I2")

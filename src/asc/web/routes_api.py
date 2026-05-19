@@ -439,7 +439,19 @@ async def list_profiles_api():
     config = Config()
     apps = config.list_apps()
     default = config.app_name or (apps[0] if apps else "")
-    return {"profiles": apps, "default": default}
+    profile_details = {}
+    for app in apps:
+        data = config.get_app_profile(app) or {}
+        key_file = data.get("key_file", "")
+        profile_details[app] = {
+            "issuer_id": data.get("issuer_id", ""),
+            "key_id": data.get("key_id", ""),
+            "key_file_name": Path(key_file).name if key_file else "",
+            "app_id": str(data.get("app_id", "")),
+            "csv": data.get("csv", ""),
+            "screenshots": data.get("screenshots", ""),
+        }
+    return {"profiles": apps, "default": default, "profile_details": profile_details}
 
 
 @router.post("/profiles")
@@ -587,11 +599,6 @@ async def guard_status(request: Request):
     try:
         guard = Guard()
         data = copy.deepcopy(guard.get_status())
-        # Truncate machine fingerprints to first 8 chars
-        for fp, info in list(data.get("bindings", {}).get("machine", {}).items()):
-            if len(fp) > 8:
-                truncated = fp[:8] + "..."
-                data["bindings"]["machine"][truncated] = data["bindings"]["machine"].pop(fp)
         # Add current_profile from cookie
         profile = request.cookies.get("asc_profile", "")
         data["current_profile"] = profile
@@ -610,7 +617,21 @@ async def guard_status(request: Request):
                 info["profile_name"] = app_id_to_profile.get(info.get("app_id", ""), "")
         return data
     except Exception as e:
-        return {"enabled": False, "bindings": {"machine": {}, "ip": {}, "credential": {}}, "current_profile": "", "error": str(e)}
+        return {"enabled": False, "bindings": {"machine": {}, "ip": {}, "credential": {}}, "app_notes": {}, "current_profile": "", "error": str(e)}
+
+
+@router.post("/guard/note")
+async def guard_note(
+    app_id: str = _Form(...),
+    note: str = _Form(""),
+):
+    from fastapi import HTTPException
+    from asc.guard import Guard
+
+    guard = Guard()
+    if not guard.set_app_note(app_id, note):
+        raise HTTPException(status_code=404, detail="App binding not found")
+    return {"ok": True}
 
 
 @router.get("/tasks/recent", response_class=HTMLResponse)
