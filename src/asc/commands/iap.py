@@ -57,7 +57,8 @@ def _upload_iap_core(api, app_id: str, iap_items: list[dict], dry_run: bool = Fa
         if product_id:
             existing_by_product_id[product_id] = iap
 
-    for item in iap_items:
+    total_items = len(iap_items)
+    for idx, item in enumerate(iap_items):
         product_id = str(item.get("productId", "")).strip()
         if not product_id:
             print("  ❌ 跳过：缺少 productId")
@@ -138,6 +139,10 @@ def _upload_iap_core(api, app_id: str, iap_items: list[dict], dry_run: bool = Fa
             else:
                 api.create_in_app_purchase_localization(iap_id, locale, loc_attrs)
                 print(f"    ✅ {locale}: 已创建本地化")
+
+        # Progress output for Web UI
+        pct = int((idx + 1) / total_items * 100)
+        print(f"[PROGRESS:{pct}:IAP {idx + 1}/{total_items}]")
 
     print("\n✅ IAP 上传完成")
 

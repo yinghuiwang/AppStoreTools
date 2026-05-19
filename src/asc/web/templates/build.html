@@ -11,7 +11,7 @@
     </h1>
   </div>
 
-  <div x-data="{ step: 1, taskId: null, logs: [], status: 'idle', progress: 0, progressMsg: '', phase: 0, mode: 'full', submitting: false }">
+  <div x-data="{ step: 1, taskId: null, logs: [], status: 'idle', progress: 0, progressMsg: '', phase: 0, mode: 'full', signing: 'auto', submitting: false }">
 
     <!-- Step 1: 配置表单 -->
     <div x-show="step === 1">
@@ -80,6 +80,25 @@
                 <label class="flex items-center gap-2.5 text-sm text-obsidian-200 cursor-pointer">
                   <input type="radio" name="destination" value="appstore" class="w-4 h-4"> App Store
                 </label>
+              </div>
+            </div>
+
+            <!-- Signing -->
+            <div x-show="mode !== 'deploy'">
+              <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2.5 block">签名方式</label>
+              <div class="space-y-2">
+                <label class="flex items-center gap-2.5 text-sm text-obsidian-200 cursor-pointer group">
+                  <input type="radio" name="signing" value="auto" x-model="signing" checked class="w-4 h-4">
+                  <span class="group-hover:text-obsidian-50 transition-colors duration-150">自动签名</span>
+                </label>
+                <label class="flex items-center gap-2.5 text-sm text-obsidian-200 cursor-pointer group">
+                  <input type="radio" name="signing" value="manual" x-model="signing" class="w-4 h-4">
+                  <span class="group-hover:text-obsidian-50 transition-colors duration-150">手动签名</span>
+                </label>
+                <div x-show="signing === 'manual'" x-transition class="ml-6 mt-1 p-3 rounded-lg text-xs" style="background: var(--accent-glow); border: 1px solid rgba(232,161,37,0.2);">
+                  <p class="text-obsidian-300">手动签名将使用配置文件中的证书和描述文件。</p>
+                  <p class="text-obsidian-500 mt-1">可通过 <code class="font-mono text-amber-550 bg-obsidian-800 px-1.5 py-0.5 rounded">asc config</code> 或编辑 <code class="font-mono text-amber-550 bg-obsidian-800 px-1.5 py-0.5 rounded">.asc/config.toml</code> 配置。</p>
+                </div>
               </div>
             </div>
 
@@ -217,6 +236,7 @@ function _saveBuildForm() {
     mode: f.querySelector('[name=mode]:checked')?.value || 'full',
     project: f.querySelector('[name=project]').value,
     destination: f.querySelector('[name=destination]:checked')?.value || 'testflight',
+    signing: f.querySelector('[name=signing]:checked')?.value || 'auto',
     ipa_path: f.querySelector('[name=ipa_path]').value,
     verbose: f.querySelector('[name=verbose]').checked,
   };
@@ -238,6 +258,10 @@ function _restoreBuildForm() {
     if (data.destination) {
       const r = f.querySelector(`[name=destination][value="${data.destination}"]`);
       if (r) r.checked = true;
+    }
+    if (data.signing) {
+      const r = f.querySelector(`[name=signing][value="${data.signing}"]`);
+      if (r) { r.checked = true; r.dispatchEvent(new Event('change')); }
     }
     if (data.ipa_path) f.querySelector('[name=ipa_path]').value = data.ipa_path;
     f.querySelector('[name=verbose]').checked = !!data.verbose;

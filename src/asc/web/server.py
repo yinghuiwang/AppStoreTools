@@ -51,6 +51,11 @@ def create_app() -> FastAPI:
         ctx = _get_profile_context(request)
         return templates.TemplateResponse(request, "profiles.html", ctx)
 
+    @app.get("/iap", response_class=HTMLResponse)
+    async def iap_page(request: Request):
+        ctx = _get_profile_context(request)
+        return templates.TemplateResponse(request, "iap.html", ctx)
+
     @app.get("/settings", response_class=HTMLResponse)
     async def settings_page(request: Request):
         ctx = _get_profile_context(request)

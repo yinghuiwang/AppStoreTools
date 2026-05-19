@@ -368,3 +368,47 @@ def test_examples_screenshots_download(client):
     assert resp.headers["content-type"] == "application/zip"
     assert "screenshots_example.zip" in resp.headers.get("content-disposition", "")
     assert len(resp.content) > 0
+
+# IAP endpoint tests
+def test_iap_check_api(client):
+    from unittest.mock import patch, MagicMock
+    from pathlib import Path
+    mock_config = MagicMock()
+    mock_config.iap_file = str(Path('data/iap_packages.json'))
+    with patch('asc.web.routes_api.Config', return_value=mock_config),          patch('pathlib.Path.exists', return_value=True),          patch('asc.web.routes_api._load_iap_config', return_value=([{'productId': 'com.test.item1'}], [])):
+        resp = client.post('/api/iap/check', cookies={'asc_profile': 'testapp'})
+        assert resp.status_code == 200, f'Got {resp.status_code}'
+        data = resp.json()
+        assert data['ok'] is True
+        assert data['level'] == 'success'
+        print('test_iap_check_api: PASS')
+
+def test_iap_run_api_starts_task(client):
+    from unittest.mock import patch, MagicMock
+    mock_config = MagicMock()
+    mock_config.iap_file = 'data/iap_packages.json'
+    with patch('asc.web.routes_api.Config', return_value=mock_config),          patch('asc.web.routes_api._task_store') as mock_store:
+        mock_store.create.return_value = 'fake-task-id'
+        resp = client.post(
+            '/api/iap/run',
+            data={'iap_file': 'data/iap_packages.json'},
+            cookies={'asc_profile': 'testapp'},
+        )
+        assert resp.status_code == 200, f'Got {resp.status_code}: {resp.text}'
+        data = resp.json()
+        assert 'task_id' in data
+        mock_store.create.assert_called_once()
+        print('test_iap_run_api_starts_task: PASS')
+
+def test_iap_check_missing_file(client):
+    from unittest.mock import patch, MagicMock
+    from pathlib import Path
+    mock_config = MagicMock()
+    mock_config.iap_file = 'nonexistent.json'
+    with patch('asc.web.routes_api.Config', return_value=mock_config),          patch('pathlib.Path.exists', return_value=False):
+        resp = client.post('/api/iap/check', cookies={'asc_profile': 'testapp'})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data['ok'] is False
+        assert data['level'] == 'error'
+        print('test_iap_check_missing_file: PASS')

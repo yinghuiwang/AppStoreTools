@@ -10,6 +10,9 @@ from pathlib import Path
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
+from asc.commands.iap import _upload_iap_core, _load_iap_config
+from asc.commands.subscriptions import _upload_subscriptions_core
+from asc.config import Config
 
 router = APIRouter()
 
@@ -18,7 +21,6 @@ _HOME = Path.home().resolve()
 _TMPDIR = Path(tempfile.gettempdir()).resolve()
 _ALLOWED_ROOTS = (_HOME, _TMPDIR)
 _DATA_DIR = Path(__file__).resolve().parents[3] / "data"
-
 
 def _is_under_allowed_root(target: Path) -> bool:
     """Return True if target is at or under any allowed root."""
@@ -231,6 +233,7 @@ def _start_build_task(
     destination: str,
     ipa_path: str,
     verbose: bool,
+    signing: str = "auto",
 ) -> str:
     task_id = _task_store.create("build", profile=profile)
 
@@ -278,6 +281,7 @@ def _start_build_task(
                         project=project or None,
                         scheme=scheme or None,
                         destination=destination or None,
+                        signing=signing or None,
                     )
                     resolved = prepare_build_inputs(cli, config, interactive=False)
                     ipa = build_core(resolved, config.build_output, verbose=verbose)
@@ -326,6 +330,7 @@ async def build_run(
     destination: str = _Form("testflight"),
     ipa_path: str = _Form(""),
     verbose: str = _Form(""),
+    signing: str = _Form("auto"),
 ):
     profile = request.cookies.get("asc_profile", "")
     task_id = _start_build_task(
@@ -336,6 +341,7 @@ async def build_run(
         destination=destination,
         ipa_path=ipa_path,
         verbose=bool(verbose),
+        signing=signing,
     )
     return {"task_id": task_id}
 
@@ -655,3 +661,115 @@ async def download_example_screenshots():
         media_type="application/zip",
         headers={"Content-Disposition": "attachment; filename=screenshots_example.zip"},
     )
+
+
+# ---------- IAP helpers & endpoints ----------
+
+def _start_iap_task(
+        profile: str,
+        iap_file: str,
+        dry_run: bool,
+        update_existing: bool,
+    ) -> str:
+    task_id = _task_store.create("iap", profile=profile)
+
+    def _run():
+        import queue
+        from asc.web.sse import capture_stdout_to_queue
+        from asc.config import Config
+        from asc.utils import make_api_from_config
+
+        _task_store.set_status(task_id, _TaskStatus.RUNNING)
+        q: "queue.Queue" = queue.Queue()
+        done_flag = _threading.Event()
+
+        _PROGRESS_RE = re.compile(r"\[PROGRESS:(\d+)\:(.+)\]")
+
+        def _drain_loop():
+            while not done_flag.is_set():
+                while not q.empty():
+                    line = q.get_nowait()
+                    m = _PROGRESS_RE.match(line)
+                    if m:
+                        _task_store.set_progress(task_id, int(m.group(1)), m.group(2))
+                    else:
+                        _task_store.append_log(task_id, line)
+                done_flag.wait(timeout=0.05)
+            while not q.empty():
+                line = q.get_nowait()
+                m = _PROGRESS_RE.match(line)
+                if m:
+                    _task_store.set_progress(task_id, int(m.group(1)), m.group(2))
+                else:
+                    _task_store.append_log(task_id, line)
+
+        _threading.Thread(target=_drain_loop, daemon=True).start()
+
+        try:
+            config = Config(app_name=profile)
+            api, app_id = make_api_from_config(config)
+
+            items, groups = _load_iap_config(iap_file)
+            if items:
+                _upload_iap_core(api, app_id, items,
+                                 dry_run=dry_run,
+                                 update_existing=update_existing)
+            if groups:
+                _upload_subscriptions_core(
+                    api, app_id, groups,
+                    update_existing=update_existing, dry_run=dry_run
+                )
+
+            done_flag.set()
+            _task_store.set_status(task_id, _TaskStatus.DONE)
+            _task_store.set_result(task_id, {"success": True})
+        except Exception as e:
+            done_flag.set()
+            _task_store.append_log(task_id, f"❌ 错误：{e}")
+            _task_store.set_status(task_id, _TaskStatus.ERROR)
+            _task_store.set_result(task_id, {"success": False, "error": str(e)})
+
+    _threading.Thread(target=_run, daemon=True).start()
+    return task_id
+
+@router.post("/iap/run")
+async def iap_run(
+        request: Request,
+        iap_file: str = _Form("data/iap_packages.json"),
+        dry_run: str = _Form(""),
+        update_existing: str = _Form(""),
+):
+    profile = request.cookies.get("asc_profile", "")
+    task_id = _start_iap_task(
+        profile=profile,
+        iap_file=iap_file,
+        dry_run=bool(dry_run),
+        update_existing=bool(update_existing),
+    )
+    return {"task_id": task_id}
+
+
+@router.post("/iap/check")
+async def iap_check(request: Request):
+    profile = request.cookies.get("asc_profile", "")
+    try:
+        from pathlib import Path
+        config = Config(app_name=profile)
+        iap_path = Path(config.iap_file) if hasattr(config, "iap_file") and config.iap_file else Path("data/iap_packages.json")
+        if not iap_path.exists():
+            return {
+                "ok": False,
+                "level": "error",
+                "message": f"IAP 配置文件未找到: {iap_path}",
+                "detail": {},
+            }
+        items, groups = _load_iap_config(str(iap_path))
+        total = len(items) + len(groups)
+        return {
+            "ok": True,
+            "level": "success",
+            "message": f"配置有效：{len(items)} 个 IAP 项，{len(groups)} 个订阅组",
+            "detail": {"items": len(items), "groups": len(groups), "total": total},
+        }
+    except Exception as e:
+        return {"ok": False, "level": "error", "message": str(e), "detail": {}}
