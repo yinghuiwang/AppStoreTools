@@ -13,6 +13,7 @@ from fastapi.templating import Jinja2Templates
 from asc.commands.iap import _upload_iap_core, _load_iap_config
 from asc.commands.subscriptions import _upload_subscriptions_core
 from asc.config import Config
+from asc.utils import make_api_from_config
 
 router = APIRouter()
 
@@ -51,13 +52,17 @@ async def browse(request: Request, path: str = ".", mode: str = "dir", ext: str 
     if not target.exists():
         target = _HOME
 
+    # If target is a file, use its parent directory for browsing
+    if target.is_file():
+        target = target.parent
+
     entries = []
     if target != _HOME and target.parent != target:
         entries.append({"name": "..", "path": str(target.parent), "is_dir": True})
 
     try:
         items = sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
-    except PermissionError:
+    except (PermissionError, NotADirectoryError, OSError):
         items = []
 
     for item in items:
@@ -774,3 +779,295 @@ async def iap_check(request: Request):
         }
     except Exception as e:
         return {"ok": False, "level": "error", "message": str(e), "detail": {}}
+
+
+# ---------- URL Settings API ----------
+
+def _get_available_locales(api, app_id: str) -> list[dict]:
+    """Get all available locales from app version."""
+    version = api.get_editable_version(app_id)
+    if not version:
+        return []
+    version_id = version["id"]
+    ver_locs = api.get_version_localizations(version_id)
+    return [{"locale": loc["attributes"]["locale"], "id": loc["id"]} for loc in ver_locs]
+
+
+@router.get("/urls/check")
+async def urls_check(request: Request):
+    """Check environment for URL settings."""
+    profile = request.cookies.get("asc_profile", "")
+    try:
+        config = Config(app_name=profile)
+        api, app_id = make_api_from_config(config)
+        version = api.get_editable_version(app_id)
+        if not version:
+            return {
+                "ok": False,
+                "level": "warning",
+                "message": "无可编辑版本",
+                "detail": {},
+            }
+        locales = _get_available_locales(api, app_id)
+        return {
+            "ok": True,
+            "level": "success",
+            "message": f"环境正常，找到 {len(locales)} 个语言版本",
+            "detail": {"locales": [l["locale"] for l in locales]},
+        }
+    except Exception as e:
+        return {"ok": False, "level": "error", "message": str(e), "detail": {}}
+
+
+@router.post("/urls/set")
+async def urls_set(
+    request: Request,
+    field: str = _Form(...),  # supportUrl, marketingUrl, privacyPolicyUrl
+    url: str = _Form(...),
+    locales: str = _Form(""),  # comma-separated or empty for all
+    dry_run: str = _Form(""),
+):
+    """Set a URL field directly."""
+    profile = request.cookies.get("asc_profile", "")
+    task_id = _task_store.create("urls", profile=profile)
+
+    def _run():
+        import queue
+        from asc.web.sse import capture_stdout_to_queue
+
+        _task_store.set_status(task_id, _TaskStatus.RUNNING)
+        q: "queue.Queue" = queue.Queue()
+        done_flag = _threading.Event()
+
+        def _drain_loop():
+            while not done_flag.is_set():
+                while not q.empty():
+                    _task_store.append_log(task_id, q.get_nowait())
+                done_flag.wait(timeout=0.05)
+            while not q.empty():
+                _task_store.append_log(task_id, q.get_nowait())
+
+        _threading.Thread(target=_drain_loop, daemon=True).start()
+
+        try:
+            config = Config(app_name=profile)
+            api, app_id = make_api_from_config(config)
+            locale_list = [l.strip() for l in locales.split(",")] if locales else None
+
+            with capture_stdout_to_queue(q):
+                if field == "privacyPolicyUrl":
+                    from asc.commands.metadata import _update_app_info_field_core
+                    _update_app_info_field_core(
+                        api, app_id, field, field, url, locale_list, bool(dry_run)
+                    )
+                else:
+                    from asc.commands.metadata import _update_version_field_core
+                    _update_version_field_core(
+                        api, app_id, field, field, url, locale_list, bool(dry_run)
+                    )
+
+            done_flag.set()
+            _task_store.set_status(task_id, _TaskStatus.DONE)
+            _task_store.set_result(task_id, {"success": True})
+        except Exception as e:
+            done_flag.set()
+            _task_store.append_log(task_id, f"❌ 错误：{e}")
+            _task_store.set_status(task_id, _TaskStatus.ERROR)
+            _task_store.set_result(task_id, {"success": False, "error": str(e)})
+
+    _threading.Thread(target=_run, daemon=True).start()
+    return {"task_id": task_id}
+
+
+# ---------- What's New API ----------
+
+@router.get("/whatsnew/check")
+async def whatsnew_check(request: Request):
+    """Check environment for What's New."""
+    profile = request.cookies.get("asc_profile", "")
+    try:
+        config = Config(app_name=profile)
+        api, app_id = make_api_from_config(config)
+        version = api.get_editable_version(app_id)
+        if not version:
+            return {
+                "ok": False,
+                "level": "warning",
+                "message": "无可编辑版本",
+                "detail": {},
+            }
+        version_string = version["attributes"].get("versionString", "?")
+        locales = _get_available_locales(api, app_id)
+        return {
+            "ok": True,
+            "level": "success",
+            "message": f"版本 {version_string}，找到 {len(locales)} 个语言",
+            "detail": {"version": version_string, "locales": [l["locale"] for l in locales]},
+        }
+    except Exception as e:
+        return {"ok": False, "level": "error", "message": str(e), "detail": {}}
+
+
+@router.post("/whatsnew/set")
+async def whatsnew_set(
+    request: Request,
+    text: str = _Form(...),
+    locales: str = _Form(""),  # comma-separated or empty for all
+    dry_run: str = _Form(""),
+):
+    """Set What's New (release notes) for the current version."""
+    profile = request.cookies.get("asc_profile", "")
+    task_id = _task_store.create("whatsnew", profile=profile)
+
+    def _run():
+        import queue
+        from asc.web.sse import capture_stdout_to_queue
+        from asc.commands.whats_new import cmd_whats_new
+        import argparse
+
+        _task_store.set_status(task_id, _TaskStatus.RUNNING)
+        q: "queue.Queue" = queue.Queue()
+        done_flag = _threading.Event()
+
+        def _drain_loop():
+            while not done_flag.is_set():
+                while not q.empty():
+                    _task_store.append_log(task_id, q.get_nowait())
+                done_flag.wait(timeout=0.05)
+            while not q.empty():
+                _task_store.append_log(task_id, q.get_nowait())
+
+        _threading.Thread(target=_drain_loop, daemon=True).start()
+
+        try:
+            config = Config(app_name=profile)
+            api, app_id = make_api_from_config(config)
+            locale_list = [l.strip() for l in locales.split(",")] if locales else None
+
+            version = api.get_editable_version(app_id)
+            if not version:
+                raise Exception("无可编辑版本")
+
+            # Check if whatsNew can be edited in current state
+            app_store_state = version["attributes"].get("appStoreState", "")
+            # States where whatsNew CAN be edited
+            editable_states_for_whatsnew = {
+                "PREPARE_FOR_SUBMISSION",
+                "DEVELOPER_REJECTED",
+                "REJECTED",
+            }
+            if app_store_state not in editable_states_for_whatsnew:
+                state_hint = {
+                    "READY_FOR_SALE": "版本已上架，无法编辑更新说明。如需修改，请创建新版本。",
+                    "WAITING_FOR_REVIEW": "版本正在等待审核，请先拒绝版本后再修改。",
+                    "IN_REVIEW": "版本正在审核中，无法修改更新说明。",
+                    "PENDING_APPLE_RELEASE": "版本待 Apple 发布，无法修改更新说明。",
+                    "ACCEPTED": "版本已通过审核，无法修改更新说明。",
+                }.get(app_store_state, f"当前版本状态「{app_store_state}」不允许编辑更新说明。")
+                raise Exception(
+                    f"无法编辑 What's New：{state_hint}\n"
+                    f"💡 可编辑状态：{', '.join(editable_states_for_whatsnew)}"
+                )
+
+            version_id = version["id"]
+            ver_locs = api.get_version_localizations(version_id)
+            ver_loc_map = {loc["attributes"]["locale"]: loc for loc in ver_locs}
+
+            target_locs = ver_locs
+            if locale_list:
+                target_locs = [
+                    loc for loc in ver_locs if loc["attributes"]["locale"] in locale_list
+                ]
+                if not target_locs:
+                    raise Exception(f"指定的语言不存在，可用语言: {list(ver_loc_map.keys())}")
+
+            with capture_stdout_to_queue(q):
+                print(f"📋 更新版本描述 (What's New)")
+                print(f"  版本状态: {app_store_state}")
+                print(f"  更新内容: {text[:80]}..." if len(text) > 80 else f"  更新内容: {text}")
+                print(f"  目标语言: {[loc['attributes']['locale'] for loc in target_locs]}")
+
+                if dry_run:
+                    print("  ⚠️  预览模式，不实际更新")
+                else:
+                    for loc in target_locs:
+                        locale = loc["attributes"]["locale"]
+                        loc_id = loc["id"]
+                        api.update_version_localization(loc_id, {"whatsNew": text})
+                        print(f"  ✅ {locale}: 已更新")
+
+            done_flag.set()
+            _task_store.set_status(task_id, _TaskStatus.DONE)
+            _task_store.set_result(task_id, {"success": True})
+        except Exception as e:
+            done_flag.set()
+            _task_store.append_log(task_id, f"❌ 错误：{e}")
+            _task_store.set_status(task_id, _TaskStatus.ERROR)
+            _task_store.set_result(task_id, {"success": False, "error": str(e)})
+
+    _threading.Thread(target=_run, daemon=True).start()
+    return {"task_id": task_id}
+
+
+# ---------- Update API ----------
+
+@router.get("/update/check")
+async def update_check():
+    """Check for updates."""
+    from asc.commands.update_cmd import _current_version, _latest_version_from_github, _parse_version
+
+    current = _current_version()
+    latest = _latest_version_from_github()
+    if not latest:
+        return {
+            "ok": False,
+            "level": "warning",
+            "message": "无法连接到 GitHub",
+            "detail": {"current": current},
+        }
+    is_latest = _parse_version(latest) <= _parse_version(current)
+    return {
+        "ok": True,
+        "level": "success" if is_latest else "info",
+        "message": f"当前版本: {current}" + (" (已是最新)" if is_latest else f" → 最新版本: {latest}"),
+        "detail": {
+            "current": current,
+            "latest": latest,
+            "is_latest": is_latest,
+        },
+    }
+
+
+@router.post("/update/run")
+async def update_run(version: str = _Form(""), branch: str = _Form(""), dry_run: str = _Form("")):
+    """Run update."""
+    task_id = _task_store.create("update", profile="system")
+
+    def _run():
+        _task_store.set_status(task_id, _TaskStatus.RUNNING)
+        try:
+            from asc.commands.update_cmd import cmd_update
+            import io
+            import sys
+
+            old_stdout = sys.stdout
+            sys.stdout = captured = io.StringIO()
+
+            try:
+                cmd_update(version=version or None, branch=branch or None, yes=True)
+            finally:
+                sys.stdout = old_stdout
+
+            output = captured.getvalue()
+            for line in output.splitlines():
+                _task_store.append_log(task_id, line)
+
+            _task_store.set_status(task_id, _TaskStatus.DONE)
+            _task_store.set_result(task_id, {"success": True})
+        except Exception as e:
+            _task_store.append_log(task_id, f"❌ 错误：{e}")
+            _task_store.set_status(task_id, _TaskStatus.ERROR)
+            _task_store.set_result(task_id, {"success": False, "error": str(e)})
+
+    _threading.Thread(target=_run, daemon=True).start()
+    return {"task_id": task_id}

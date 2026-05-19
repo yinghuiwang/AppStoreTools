@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+{% block content %}
+<div>
+  <!-- Header -->
+  <div class="mb-8">
+    <h1 class="text-2xl font-bold tracking-tight text-obsidian-50 flex items-center gap-3">
+      <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: var(--accent-glow);">
+        <svg class="w-4.5 h-4.5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"/></svg>
+      </div>
+      URL 设置
+    </h1>
+    <p class="text-sm text-obsidian-400 mt-1">直接设置技术支持、营销和隐私政策链接，无需 CSV 文件</p>
+  </div>
+
+  <div x-data="{
+    step: 1,
+    taskId: null,
+    logs: [],
+    status: 'idle',
+    checkResult: null,
+    selectedField: 'supportUrl',
+    availableLocales: [],
+    localesText: '',
+    submitting: false,
+
+    submitForm(e) {
+      this.submitting = true;
+      const form = e.target;
+      // 设置隐藏字段
+      form.elements.namedItem('field').value = this.selectedField;
+      form.elements.namedItem('locales').value = this.localesText;
+      fetch('/api/urls/set', {
+        method: 'POST',
+        body: new FormData(form)
+      })
+      .then(r => r.json())
+      .then(data => {
+        this.taskId = data.task_id;
+        this.step = 2;
+        this.submitting = false;
+        startSSE(data.task_id);
+      })
+      .catch(e => { 
+        this.submitting = false;
+        alert('提交失败: ' + e); 
+      });
+    },
+
+    checkEnv() {
+      fetch('/api/urls/check')
+        .then(r => r.json())
+        .then(data => {
+          this.checkResult = data;
+          if (data.ok && data.detail && data.detail.locales) {
+            this.availableLocales = data.detail.locales;
+            this.localesText = data.detail.locales.join(', ');
+          }
+        })
+        .catch(() => { this.checkResult = {ok: false, level: 'error', message: '请求失败'}; });
+    }
+  }">
+
+    <!-- Step 1: 配置表单 -->
+    <div x-show="step === 1">
+      <form id="urls-form" @submit.prevent="submitForm($event)">
+        <!-- 隐藏字段 -->
+        <input type="hidden" name="field" :value="selectedField">
+        <input type="hidden" name="locales" :value="localesText">
+
+        <div class="card">
+          <div class="card-body space-y-5">
+
+            <!-- Field selector -->
+            <div>
+              <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">选择 URL 类型</label>
+              <div class="grid grid-cols-1 gap-2">
+                <label class="flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all duration-150"
+                       :class="selectedField === 'supportUrl' ? 'border-amber-500/40 bg-amber-500/10' : 'border-obsidian-700 bg-obsidian-800/30 hover:border-obsidian-600'">
+                  <input type="radio" name="field_radio" value="supportUrl" x-model="selectedField" class="hidden">
+                  <div class="w-4 h-4 rounded-full border-2 flex items-center justify-center"
+                       :class="selectedField === 'supportUrl' ? 'border-amber-500' : 'border-obsidian-500'">
+                    <div class="w-2 h-2 rounded-full bg-amber-500" x-show="selectedField === 'supportUrl'"></div>
+                  </div>
+                  <div>
+                    <p class="text-sm font-medium text-obsidian-100">技术支持链接</p>
+                    <p class="text-xs text-obsidian-400">Support URL</p>
+                  </div>
+                </label>
+                <label class="flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all duration-150"
+                       :class="selectedField === 'marketingUrl' ? 'border-amber-500/40 bg-amber-500/10' : 'border-obsidian-700 bg-obsidian-800/30 hover:border-obsidian-600'">
+                  <input type="radio" name="field_radio" value="marketingUrl" x-model="selectedField" class="hidden">
+                  <div class="w-4 h-4 rounded-full border-2 flex items-center justify-center"
+                       :class="selectedField === 'marketingUrl' ? 'border-amber-500' : 'border-obsidian-500'">
+                    <div class="w-2 h-2 rounded-full bg-amber-500" x-show="selectedField === 'marketingUrl'"></div>
+                  </div>
+                  <div>
+                    <p class="text-sm font-medium text-obsidian-100">营销网站链接</p>
+                    <p class="text-xs text-obsidian-400">Marketing URL</p>
+                  </div>
+                </label>
+                <label class="flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all duration-150"
+                       :class="selectedField === 'privacyPolicyUrl' ? 'border-amber-500/40 bg-amber-500/10' : 'border-obsidian-700 bg-obsidian-800/30 hover:border-obsidian-600'">
+                  <input type="radio" name="field_radio" value="privacyPolicyUrl" x-model="selectedField" class="hidden">
+                  <div class="w-4 h-4 rounded-full border-2 flex items-center justify-center"
+                       :class="selectedField === 'privacyPolicyUrl' ? 'border-amber-500' : 'border-obsidian-500'">
+                    <div class="w-2 h-2 rounded-full bg-amber-500" x-show="selectedField === 'privacyPolicyUrl'"></div>
+                  </div>
+                  <div>
+                    <p class="text-sm font-medium text-obsidian-100">隐私政策链接</p>
+                    <p class="text-xs text-obsidian-400">Privacy Policy URL</p>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <!-- URL input -->
+            <div>
+              <label for="url-input" class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">URL 地址</label>
+              <input type="url" name="url" id="url-input" required
+                     class="field-input w-full"
+                     placeholder="https://example.com/support">
+            </div>
+
+            <!-- Locales -->
+            <div>
+              <label for="locales-input" class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">目标语言</label>
+              <input type="text" id="locales-input"
+                     x-model="localesText"
+                     class="field-input w-full"
+                     placeholder="留空表示所有语言，如：zh-Hans, en-US">
+              <p class="text-xs text-obsidian-500 mt-1">多个语言用逗号分隔。点击"验证环境"后自动填充可用语言。</p>
+            </div>
+
+            <!-- Dry run -->
+            <div>
+              <label class="flex items-center gap-2.5 text-sm text-obsidian-300 cursor-pointer">
+                <input type="checkbox" name="dry_run" value="on" class="w-4 h-4"> Dry Run（预览，不实际上传）
+              </label>
+            </div>
+
+            <!-- Actions -->
+            <div class="flex gap-3 pt-3 border-t border-obsidian-700">
+              <button type="submit" class="btn-primary" :disabled="submitting">
+                <span x-show="!submitting">设置 URL</span>
+                <span x-show="submitting" class="flex items-center gap-1.5">
+                  <svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                  提交中...
+                </span>
+              </button>
+              <button type="button" class="btn-ghost" @click="checkEnv()">
+                验证环境
+              </button>
+            </div>
+
+            <!-- Check result -->
+            <template x-if="checkResult">
+              <div class="rounded-lg p-4 text-sm"
+                   :class="{
+                     'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20': checkResult.level === 'success',
+                     'bg-amber-500/10 text-amber-400 border border-amber-500/20': checkResult.level === 'warning',
+                     'bg-red-500/10 text-red-400 border border-red-500/20': checkResult.level === 'error',
+                   }">
+                <p class="font-medium" x-text="checkResult.message"></p>
+                <template x-if="checkResult.detail && checkResult.detail.locales">
+                  <p class="text-xs mt-1 opacity-80" x-text="'可用语言: ' + checkResult.detail.locales.join(', ')"></p>
+                </template>
+              </div>
+            </template>
+
+          </div>
+        </div>
+      </form>
+    </div>
+
+    <!-- Step 2: 执行面板 -->
+    <div x-show="step === 2">
+      <div class="card">
+        <div class="card-body">
+          <div class="flex items-center justify-between mb-5">
+            <h2 class="font-semibold text-obsidian-100" x-text="status === 'done' ? '设置完成' : status === 'error' ? '设置失败' : '设置中...'"></h2>
+            <button type="button" class="text-xs text-amber-500 hover:text-amber-400 cursor-pointer transition-colors duration-150 font-medium" @click="step=1; logs=[]; status='idle'; checkResult=null;">重新运行</button>
+          </div>
+          <div class="log-panel max-h-64" id="log-panel">
+            <template x-for="(line, idx) in logs" :key="idx">
+              <div x-text="line"></div>
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function startSSE(taskId) {
+  const root = document.querySelector('[x-data]');
+  const d = Alpine.$data(root);
+  const es = new EventSource(`/api/task/${taskId}/stream`);
+  es.addEventListener('log', e => {
+    d.logs.push(e.data);
+    const panel = document.getElementById('log-panel');
+    if (panel) requestAnimationFrame(() => { panel.scrollTop = panel.scrollHeight; });
+  });
+  es.addEventListener('done', () => { d.status = 'done'; es.close(); });
+  es.addEventListener('error_event', () => { d.status = 'error'; es.close(); });
+}
+</script>
+{% endblock %}

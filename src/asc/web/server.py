@@ -62,6 +62,21 @@ def create_app() -> FastAPI:
         ctx = _get_profile_context(request)
         return templates.TemplateResponse(request, "settings.html", ctx)
 
+    @app.get("/urls", response_class=HTMLResponse)
+    async def urls_page(request: Request):
+        ctx = _get_profile_context(request)
+        return templates.TemplateResponse(request, "urls.html", ctx)
+
+    @app.get("/whatsnew", response_class=HTMLResponse)
+    async def whatsnew_page(request: Request):
+        ctx = _get_profile_context(request)
+        return templates.TemplateResponse(request, "whatsnew.html", ctx)
+
+    @app.get("/update", response_class=HTMLResponse)
+    async def update_page(request: Request):
+        ctx = _get_profile_context(request)
+        return templates.TemplateResponse(request, "update.html", ctx)
+
     from asc.web import routes_api
     app.include_router(routes_api.router, prefix="/api")
 

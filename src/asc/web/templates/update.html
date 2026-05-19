@@ -1,0 +1,244 @@
+{% extends "base.html" %}
+{% block content %}
+<div>
+  <!-- Header -->
+  <div class="mb-8">
+    <h1 class="text-2xl font-bold tracking-tight text-obsidian-50 flex items-center gap-3">
+      <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: var(--accent-glow);">
+        <svg class="w-4.5 h-4.5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"/></svg>
+      </div>
+      检查更新
+    </h1>
+    <p class="text-sm text-obsidian-400 mt-1">检查并安装 AppStoreTools 最新版本</p>
+  </div>
+
+  <div x-data="{ checkResult: null, checking: false, step: 1, taskId: null, logs: [], status: 'idle', selectedTab: 'latest' }">
+
+    <!-- Check status card -->
+    <div class="card mb-6">
+      <div class="card-body">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-4">
+            <button @click="checkUpdate()" :disabled="checking" class="btn-ghost flex items-center gap-2">
+              <svg class="w-4 h-4" :class="checking ? 'animate-spin' : ''" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"/></svg>
+              <span x-text="checking ? '检查中...' : '检查更新'"></span>
+            </button>
+            <template x-if="checkResult">
+              <div class="flex items-center gap-2">
+                <div class="w-6 h-6 rounded-full flex items-center justify-center"
+                     :class="{
+                       'bg-emerald-500/15': checkResult.level === 'success',
+                       'bg-amber-500/15': checkResult.level === 'info',
+                       'bg-red-500/15': checkResult.level === 'error',
+                       'bg-obsidian-700': checkResult.level === 'warning',
+                     }">
+                  <svg class="w-3.5 h-3.5"
+                       :class="{
+                         'text-emerald-400': checkResult.level === 'success',
+                         'text-amber-400': checkResult.level === 'info' || checkResult.level === 'warning',
+                         'text-red-400': checkResult.level === 'error',
+                       }"
+                       fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor">
+                    <template x-if="checkResult.level === 'success'">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/>
+                    </template>
+                    <template x-if="checkResult.level === 'info'">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/>
+                    </template>
+                    <template x-if="checkResult.level === 'error' || checkResult.level === 'warning'">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"/>
+                    </template>
+                  </svg>
+                </div>
+                <span class="text-sm" x-text="checkResult.message"></span>
+              </div>
+            </template>
+          </div>
+
+          <template x-if="checkResult && checkResult.detail">
+            <div class="text-xs text-obsidian-500">
+              当前版本: <span class="font-mono text-obsidian-400" x-text="checkResult.detail.current"></span>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- Install options -->
+    <template x-if="checkResult && checkResult.detail && !checkResult.detail.is_latest">
+      <div class="card">
+        <div class="card-body space-y-4">
+          <div class="flex items-center gap-2 text-amber-400">
+            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/></svg>
+            <span class="font-medium">发现新版本: <span x-text="checkResult.detail.latest"></span></span>
+          </div>
+
+          <!-- Tabs -->
+          <div class="flex gap-1 p-1 rounded-lg" style="background: var(--accent-glow);">
+            <button @click="selectedTab = 'latest'" type="button"
+                    class="flex-1 py-2 px-3 rounded-md text-sm font-medium transition-all duration-150"
+                    :class="selectedTab === 'latest' ? 'bg-amber-500 text-obsidian-900' : 'text-obsidian-300 hover:text-obsidian-100'">
+              最新版本
+            </button>
+            <button @click="selectedTab = 'specific'" type="button"
+                    class="flex-1 py-2 px-3 rounded-md text-sm font-medium transition-all duration-150"
+                    :class="selectedTab === 'specific' ? 'bg-amber-500 text-obsidian-900' : 'text-obsidian-300 hover:text-obsidian-100'">
+              指定版本
+            </button>
+            <button @click="selectedTab = 'branch'" type="button"
+                    class="flex-1 py-2 px-3 rounded-md text-sm font-medium transition-all duration-150"
+                    :class="selectedTab === 'branch' ? 'bg-amber-500 text-obsidian-900' : 'text-obsidian-300 hover:text-obsidian-100'">
+              指定分支
+            </button>
+          </div>
+
+          <!-- Latest version form -->
+          <form x-show="selectedTab === 'latest'" @submit.prevent="runUpdate('')">
+            <p class="text-sm text-obsidian-400 mb-3">安装最新稳定版本 <span class="text-amber-400 font-medium" x-text="checkResult.detail.latest"></span></p>
+            <button type="submit" class="btn-primary">
+              立即更新
+            </button>
+          </form>
+
+          <!-- Specific version form -->
+          <form x-show="selectedTab === 'specific'" @submit.prevent="runUpdate($el.querySelector('[name=version]').value)">
+            <div class="flex gap-3 items-end">
+              <div class="flex-1">
+                <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">版本号</label>
+                <input type="text" name="version" class="field-input w-full" placeholder="例如: 1.2.3">
+              </div>
+              <button type="submit" class="btn-primary">安装指定版本</button>
+            </div>
+          </form>
+
+          <!-- Branch form -->
+          <form x-show="selectedTab === 'branch'" @submit.prevent="runUpdateBranch($el.querySelector('[name=branch]').value)">
+            <div class="flex gap-3 items-end">
+              <div class="flex-1">
+                <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">分支名</label>
+                <input type="text" name="branch" class="field-input w-full" placeholder="例如: main, develop">
+              </div>
+              <button type="submit" class="btn-primary">从分支安装</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </template>
+
+    <!-- Already up to date -->
+    <template x-if="checkResult && checkResult.detail && checkResult.detail.is_latest">
+      <div class="card">
+        <div class="card-body text-center py-8">
+          <div class="w-12 h-12 rounded-full bg-emerald-500/15 flex items-center justify-center mx-auto mb-4">
+            <svg class="w-6 h-6 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>
+          </div>
+          <h3 class="text-lg font-medium text-obsidian-100 mb-1">已是最新版本</h3>
+          <p class="text-sm text-obsidian-400">当前版本 <span class="font-mono text-amber-400" x-text="checkResult.detail.current"></span> 已是最新</p>
+        </div>
+      </div>
+    </template>
+
+    <!-- Progress card -->
+    <div x-show="step === 2" class="card mt-6">
+      <div class="card-body">
+        <div class="flex items-center justify-between mb-5">
+          <h2 class="font-semibold text-obsidian-100" x-text="status === 'done' ? '更新完成' : status === 'error' ? '更新失败' : '更新中...'"></h2>
+          <template x-if="status === 'done'">
+            <div class="w-7 h-7 rounded-full flex items-center justify-center bg-emerald-500/15">
+              <svg class="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>
+            </div>
+          </template>
+          <template x-if="status === 'error'">
+            <div class="w-7 h-7 rounded-full flex items-center justify-center bg-red-500/15">
+              <svg class="w-4 h-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"/></svg>
+            </div>
+          </template>
+        </div>
+
+        <div class="log-panel max-h-64" id="log-panel">
+          <template x-for="(line, idx) in logs" :key="idx">
+            <div x-text="line"></div>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- Note -->
+    <div class="mt-6 text-xs text-obsidian-500">
+      <p>注：如果通过 pip 安装或 editable 模式运行，自动更新将被跳过。</p>
+    </div>
+  </div>
+</div>
+
+<script>
+function startSSE(taskId) {
+  const root = document.querySelector('[x-data]');
+  const d = Alpine.$data(root);
+  const es = new EventSource(`/api/task/${taskId}/stream`);
+  es.addEventListener('log', e => {
+    d.logs.push(e.data);
+    const panel = document.getElementById('log-panel');
+    if (panel) requestAnimationFrame(() => { panel.scrollTop = panel.scrollHeight; });
+  });
+  es.addEventListener('done', () => { d.status = 'done'; es.close(); checkUpdate(); });
+  es.addEventListener('error_event', () => { d.status = 'error'; es.close(); });
+}
+
+function checkUpdate() {
+  const root = document.querySelector('[x-data]');
+  const d = Alpine.$data(root);
+  d.checking = true;
+  fetch('/api/update/check')
+    .then(r => r.json())
+    .then(data => {
+      d.checkResult = data;
+      d.checking = false;
+    })
+    .catch(() => {
+      d.checkResult = {ok: false, level: 'error', message: '检查更新失败'};
+      d.checking = false;
+    });
+}
+
+function runUpdate(version) {
+  const root = document.querySelector('[x-data]');
+  const d = Alpine.$data(root);
+  fetch('/api/update/run', {
+    method: 'POST',
+    body: new URLSearchParams({version: version || ''}),
+    headers: {'Content-Type': 'application/x-www-form-urlencoded'}
+  })
+  .then(r => r.json())
+  .then(data => {
+    d.taskId = data.task_id;
+    d.step = 2;
+    d.logs = [];
+    d.status = 'running';
+    startSSE(data.task_id);
+  });
+}
+
+function runUpdateBranch(branch) {
+  const root = document.querySelector('[x-data]');
+  const d = Alpine.$data(root);
+  fetch('/api/update/run', {
+    method: 'POST',
+    body: new URLSearchParams({branch: branch || ''}),
+    headers: {'Content-Type': 'application/x-www-form-urlencoded'}
+  })
+  .then(r => r.json())
+  .then(data => {
+    d.taskId = data.task_id;
+    d.step = 2;
+    d.logs = [];
+    d.status = 'running';
+    startSSE(data.task_id);
+  });
+}
+
+// Auto check on load
+document.addEventListener('DOMContentLoaded', () => {
+  setTimeout(checkUpdate, 500);
+});
+</script>
+{% endblock %}
