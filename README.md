@@ -2,7 +2,18 @@
 
 [中文文档](README.zh-CN.md) | [Tutorials](docs/tutorials/README.md)
 
-`asc` is an App Store Connect CLI for end-to-end release operations: upload metadata/screenshots/IAP subscriptions, manage localized "What's New" and store URLs, and build/deploy `.ipa` to TestFlight or App Store.
+`asc` is a Python CLI for App Store Connect release work. It can upload localized metadata and screenshots, create or update IAP and subscriptions, manage "What's New" text and store URLs, build Xcode projects, upload `.ipa` files, and run a local Web UI for common workflows.
+
+## Features
+
+- Metadata upload from `data/appstore_info.csv`
+- Screenshot upload by locale and device size, with automatic display type detection
+- IAP and auto-renewable subscription sync from JSON
+- Release notes and support / marketing / privacy policy URL updates
+- Xcode archive, IPA export, and App Store Connect upload
+- Multi-app profiles with local defaults
+- Guard checks for machine / IP / credential binding before risky operations
+- Local Web UI via `asc web`
 
 ## Tutorials
 
@@ -19,21 +30,14 @@ Step-by-step guides for every major workflow:
 | 07 | [Guard Security](docs/tutorials/07-guard-security.md) | Machine / IP / credential binding, conflict resolution, CI bypass |
 | 08 | [CI/CD Automation](docs/tutorials/08-ci-cd.md) | GitHub Actions example, inject credentials via env vars |
 
-→ [Full tutorials index](docs/tutorials/README.md)
-
 ## Quick Start
 
-### Option 1: One-line install via curl (fastest)
+### Option 1: One-line install via curl
 
 ```bash
-# Download and run installer (using source makes `asc` available immediately)
 source <(curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh)
-
-# Initialize current project
 asc install
-
-# Upload metadata + screenshots
-asc upload
+asc upload --dry-run
 ```
 
 ### Option 2: Install from repository
@@ -41,18 +45,12 @@ asc upload
 ```bash
 git clone https://github.com/yinghuiwang/AppStoreTools.git
 cd AppStoreTools
-
-# Install environment + CLI
 bash install.sh
-
-# Interactive project initialization
 asc install
-
-# Start uploading
-asc upload
+asc upload --dry-run
 ```
 
-### Option 3: Install from PyPI
+### Option 3: Install from PyPI or GitHub
 
 ```bash
 pip install asc-appstore-tools
@@ -60,8 +58,48 @@ pip install asc-appstore-tools
 pip install git+https://github.com/yinghuiwang/AppStoreTools.git
 
 asc install
-asc upload
+asc upload --dry-run
 ```
+
+For local development:
+
+```bash
+pip install -e ".[dev]"
+pytest
+```
+
+## Prerequisites
+
+1. Create an App Store Connect API key in [Users and Access > Integrations](https://appstoreconnect.apple.com/access/integrations/api).
+2. Use the **App Manager** role or higher.
+3. Save the **Issuer ID** and **Key ID**.
+4. Download the `.p8` private key. Apple only allows downloading it once.
+5. Copy the numeric Apple ID for your app from App Store Connect.
+
+## Project Setup
+
+### Scaffold a new project
+
+```bash
+cd /path/to/MyXcodeProject
+asc init
+# Fill AppStore/Config/.env, then:
+asc app import
+```
+
+### Import an existing AppStore/Config/.env
+
+```bash
+asc app import --path /path/to/MyProject --name myapp
+```
+
+### Configure interactively
+
+```bash
+asc app add myapp
+```
+
+The private key is copied to `~/.config/asc/keys/`. Profiles are saved under `~/.config/asc/profiles/`.
 
 ## Project Structure
 
@@ -69,74 +107,34 @@ asc upload
 AppStoreTools/
 ├── src/asc/                        # Python package source
 │   ├── commands/                   # CLI subcommands
+│   ├── web/                        # Local Web UI
 │   ├── api.py                      # App Store Connect REST client
 │   ├── config.py                   # Config management
-│   ├── constants.py                # Device/locale mapping
-│   └── utils.py                    # Utilities
-├── data/                           # Upload input data
+│   └── i18n.py                     # Chinese / English CLI text
+├── data/                           # Example upload data
 │   ├── appstore_info.csv           # Metadata CSV
 │   ├── iap_packages.example.json   # IAP/subscription example
 │   └── screenshots/                # Screenshots by locale
-│       ├── cn/
-│       └── en-US/
-├── pyproject.toml
-└── README.md
+├── docs/tutorials/                 # Workflow tutorials
+├── tests/                          # pytest suite
+└── pyproject.toml
 ```
-
-## Prerequisites
-
-### 1) Create App Store Connect API key
-
-1. Open [App Store Connect - API Keys](https://appstoreconnect.apple.com/access/integrations/api)
-2. Create a key with **App Manager** role (or higher)
-3. Save **Issuer ID** and **Key ID**
-4. Download `.p8` private key (download is one-time only)
-
-### 2) Get App ID
-
-In App Store Connect, open your app and copy the numeric Apple ID from the app URL/info page.
-
-### 3) Add an app profile
-
-**Option A — Scaffold a new project first (recommended for Xcode projects):**
-
-```bash
-cd /path/to/MyXcodeProject
-asc init                  # creates AppStore/ template structure
-# fill in AppStore/Config/.env, then:
-asc app import            # reads .env and creates the profile automatically
-```
-
-**Option B — Import from an existing project with AppStore/Config/.env:**
-
-```bash
-asc app import --path /path/to/MyProject --name myapp
-```
-
-**Option C — Interactive setup:**
-
-```bash
-asc app add myapp
-# Fill in Issuer ID / Key ID / .p8 path / App ID / data paths
-```
-
-The key file is copied to `~/.config/asc/keys/`. Profile is saved to `~/.config/asc/profiles/myapp.toml`.
 
 ## CSV Format
 
 Expected columns in `data/appstore_info.csv`:
 
-| Column (CN header) | Meaning |
+| Column | Meaning |
 |---|---|
-| `语言` | Locale in `DisplayName(code)` format, e.g. `简体中文(zh-Hans)` |
+| `语言` | Locale in `DisplayName(code)` format, for example `简体中文(zh-Hans)` |
 | `应用名称` | App name |
 | `副标题` | Subtitle |
 | `长描述` | Description |
 | `关键子` | Keywords, comma-separated |
-| `技术支持链接` | Support URL (optional) |
-| `营销网站` | Marketing URL (optional) |
+| `技术支持链接` | Support URL, optional |
+| `营销网站` | Marketing URL, optional |
 
-## Screenshot Folder Mapping
+## Screenshot Folders
 
 Screenshots are read from `data/screenshots/<folder>/`:
 
@@ -147,31 +145,41 @@ Screenshots are read from `data/screenshots/<folder>/`:
 | `ja` | `ja` |
 | `ko` | `ko` |
 
-Screenshots are uploaded in numeric filename order. Device type is detected from image dimensions.
+Files are uploaded in numeric filename order. Device type is detected from image dimensions; use `--display-type` to upload only one device family.
 
-## Usage
+## Command Reference
 
 ```bash
-# Install & init
-bash install.sh
+# Help / version
+asc --help
+asc -h
+asc --version
+
+# Guided setup and project templates
 asc install
+asc init
+asc init --path /path/to/MyApp
 
-# Build / deploy
-asc build --scheme MyApp
-asc build --project MyApp.xcworkspace --scheme MyApp --destination testflight
-asc deploy --ipa build/export/MyApp.ipa
-asc release --scheme MyApp --destination testflight
-asc release --dry-run
+# App profiles
+asc app add myapp
+asc app import
+asc app import --path /path/to/project --name myapp
+asc app list
+asc app default myapp
+asc app show myapp
+asc app edit myapp
+asc app remove myapp
 
-# Metadata / screenshots
+# Metadata and screenshots
 asc --app myapp upload
 asc --app myapp upload --dry-run
 asc --app myapp metadata
 asc --app myapp keywords
 asc --app myapp screenshots
 asc --app myapp screenshots --display-type APP_IPHONE_67
+asc --app myapp check
 
-# IAP / subscriptions
+# IAP and subscriptions
 asc --app myapp iap --iap-file data/iap_packages.json
 asc --app myapp iap --iap-file data/iap_packages.json --update-existing
 
@@ -180,7 +188,7 @@ asc --app myapp whats-new --text "Bug fixes and performance improvements."
 asc --app myapp whats-new --text "Bug fixes." --locales en-US
 asc --app myapp whats-new --file data/whats_new.txt
 
-# URLs
+# Store URLs
 asc --app myapp set-support-url --text "https://example.com/support"
 asc --app myapp set-marketing-url --text "https://example.com" --locales en-US
 asc --app myapp set-privacy-policy-url --text "https://example.com/privacy"
@@ -188,21 +196,19 @@ asc --app myapp support-url
 asc --app myapp marketing-url
 asc --app myapp privacy-policy-url
 
-# Validation
-asc --app myapp check
+# Build and deploy
+asc build
+asc build --project MyApp.xcworkspace --scheme MyApp
+asc build --signing manual --profile path/to/profile.mobileprovision --certificate "Apple Distribution: ACME"
+asc build --no-interactive --dry-run
+asc --app myapp deploy --ipa build/export/MyApp.ipa
+asc --app myapp release --destination testflight
+asc --app myapp release --destination appstore --reuse-archive
 
-# Profile management
-asc app list
-asc app default myapp
-asc app show myapp
-asc app edit myapp
-asc app remove myapp
-asc app import                          # import profile from AppStore/Config/.env
-asc app import --path /path/to/project --name myapp
-
-# Project scaffold
-asc init                                # create AppStore/ template in Xcode project dir
-asc init --path /path/to/MyApp
+# Local Web UI
+asc web
+asc web --port 9090
+asc web --host 0.0.0.0 --no-open
 
 # Guard
 asc guard status
@@ -211,39 +217,41 @@ asc guard disable
 asc guard unbind --current
 asc guard unbind --credential <KEY_ID>
 asc guard reset
+
+# Maintenance
+asc update
+asc update --version 0.1.12
+asc update --branch main
+asc uninstall
 ```
 
-### Updating
+## Build Defaults
 
-```bash
-asc update                    # Update to the latest version
-asc update --version 0.1.5    # Install a specific version
-asc update --branch main      # Install from a specific branch
-```
-
-## Build Defaults (`.asc/config.toml`)
+Build settings can be stored in local `.asc/config.toml`:
 
 ```toml
 [build]
 project = "MyApp.xcworkspace"
 scheme = "MyApp"
+bundle_id = "com.example.myapp"
 output = "build"
 signing = "auto"
+certificate = "Apple Distribution: Example Inc."
+profile = "/path/to/profile.mobileprovision"
+destination = "testflight"
 ```
 
-Then:
+`asc build` and `asc release` can auto-detect the project, scheme, bundle ID, signing certificates, and provisioning profiles. Resolved values are cached in `.asc/config.toml` for later runs.
 
-```bash
-asc release --destination testflight
-```
+## Default App Profile
 
-## Default App Profile (omit `--app`)
+Set a default profile to omit `--app`:
 
 ```bash
 asc app default myapp
 ```
 
-or manually:
+or write it manually:
 
 ```toml
 [defaults]
@@ -258,67 +266,23 @@ asc screenshots
 asc check
 ```
 
-## `whats_new.txt` Format
+## Configuration and Security
 
-```text
-zh-Hans:
-- Fix known issues
-- Improve generation speed
----
-en-US:
-- Bug fixes
-- Faster generation
-```
+- Global profiles live in `~/.config/asc/profiles/`.
+- Private keys are copied to `~/.config/asc/keys/`.
+- Local project config lives in `.asc/config.toml`.
+- Never commit `.p8` keys, `.env` files, local profiles, or generated credentials.
+- Run `--dry-run` before commands that modify metadata, screenshots, IAP, subscriptions, or release state.
+- Build and deploy require macOS and Xcode command line tools; metadata operations can run on Linux or Windows.
 
-## IAP JSON Format
+## Troubleshooting
 
-Supported top-level structures:
-
-- `[...]` (one-time IAP only)
-- `{ "items": [...] }` (one-time IAP)
-- `{ "items": [...], "subscriptionGroups": [...] }` (with subscriptions)
-
-See full schema in `data/iap_packages.example.json`.
-
-## Supported Screenshot Display Types
-
-| Display Type | Resolution |
-|---|---|
-| `APP_IPHONE_67` | 1290x2796 / 1320x2868 |
-| `APP_IPHONE_65` | 1284x2778 / 1242x2688 |
-| `APP_IPHONE_61` | 1179x2556 / 1170x2532 |
-| `APP_IPHONE_58` | 1125x2436 |
-| `APP_IPHONE_55` | 1242x2208 |
-| `APP_IPAD_PRO_3GEN_129` | 2048x2732 |
-| `APP_IPAD_PRO_3GEN_11` | 1668x2388 |
-
-## Notes
-
-- App Store Connect must already have an editable app version
-- Screenshot upload replaces existing screenshots for the same display type
-- JWT tokens are auto-refreshed every 15 minutes
-- Use `--dry-run` first for safer validation
-
-## FAQ
-
-### `asc: command not found`
+If `asc` is not found after install:
 
 ```bash
 source ~/.zshrc
-```
-
-If you use bash:
-
-```bash
+# or
 source ~/.bash_profile
 ```
 
-### Difference between `install.sh`, `asc install`, and `asc init`
-
-- `install.sh`: installs the CLI tool itself (Python env + `asc` command)
-- `asc install`: interactive guided setup — checks environment and configures app profile
-- `asc init`: scaffolds `AppStore/` template directory in an Xcode project (run once per project)
-
-### Version is not editable
-
-This tool does not create versions automatically. Prepare an editable version first in App Store Connect (for example `PREPARE_FOR_SUBMISSION`).
+If `asc check` reports no editable version, create an App Store version in App Store Connect first. The version must be in an editable state such as `PREPARE_FOR_SUBMISSION`.
