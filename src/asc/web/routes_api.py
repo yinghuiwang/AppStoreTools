@@ -710,15 +710,16 @@ def _start_iap_task(
             api, app_id = make_api_from_config(config)
 
             items, groups = _load_iap_config(iap_file)
-            if items:
-                _upload_iap_core(api, app_id, items,
-                                 dry_run=dry_run,
-                                 update_existing=update_existing)
-            if groups:
-                _upload_subscriptions_core(
-                    api, app_id, groups,
-                    update_existing=update_existing, dry_run=dry_run
-                )
+            with capture_stdout_to_queue(q):
+                if items:
+                    _upload_iap_core(api, app_id, items,
+                                     dry_run=dry_run,
+                                     update_existing=update_existing)
+                if groups:
+                    _upload_subscriptions_core(
+                        api, app_id, groups,
+                        update_existing=update_existing, dry_run=dry_run
+                    )
 
             done_flag.set()
             _task_store.set_status(task_id, _TaskStatus.DONE)
