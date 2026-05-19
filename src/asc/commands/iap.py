@@ -16,9 +16,28 @@ from asc.utils import make_api_from_config, resolve_app_profile
 from asc.i18n import t, ERRORS, HELP
 
 
+def _resolve_review_screenshot(obj: dict, config_dir: Path) -> None:
+    """Resolve relative review.screenshot path against config_dir (in-place)."""
+    review = obj.get("review")
+    if not isinstance(review, dict):
+        return
+    shot = review.get("screenshot")
+    if not shot or not isinstance(shot, str):
+        return
+    p = Path(shot)
+    if not p.is_absolute():
+        review["screenshot"] = str(config_dir / p)
+
+
 def _load_iap_config(file_path: str) -> tuple[list[dict], list[dict]]:
-    """Return (iap_items, subscription_groups) from the JSON file."""
-    raw = Path(file_path).read_text(encoding="utf-8-sig")
+    """Return (iap_items, subscription_groups) from the JSON file.
+
+    Relative file paths in the JSON (e.g. review.screenshot) are resolved
+    against the config file's parent directory so they work regardless of CWD.
+    """
+    config_path = Path(file_path).resolve()
+    config_dir = config_path.parent
+    raw = config_path.read_text(encoding="utf-8-sig")
     data = json.loads(raw)
 
     items: list[dict] = []
@@ -34,6 +53,14 @@ def _load_iap_config(file_path: str) -> tuple[list[dict], list[dict]]:
 
     if not items and not subs:
         raise ValueError("IAP 配置为空 (empty)：请至少提供 items 或 subscriptionGroups")
+
+    # Resolve relative file paths against the config file's directory
+    for item in items:
+        _resolve_review_screenshot(item, config_dir)
+    for group in subs:
+        for sub in group.get("subscriptions", []):
+            _resolve_review_screenshot(sub, config_dir)
+
     return items, subs
 
 
