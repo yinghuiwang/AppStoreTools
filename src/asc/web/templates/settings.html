@@ -233,12 +233,9 @@
         </div>
         <div>
           <label class="text-xs uppercase tracking-widest text-obsidian-500 font-medium mb-1.5 block">Model</label>
-          <select x-model="llm.model" class="field-select w-full">
-            <option value="gpt-4o">GPT-4o</option>
-            <option value="gpt-4o-mini">GPT-4o mini</option>
-            <option value="gpt-4-turbo">GPT-4 Turbo</option>
-            <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
-          </select>
+          <input type="text" x-model="llm.model"
+                 class="field-input w-full"
+                 placeholder="gpt-4o">
         </div>
         <div class="flex items-center gap-3">
           <button @click="
