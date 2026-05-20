@@ -1193,43 +1193,69 @@ async def update_run(version: str = _Form(""), branch: str = _Form(""), dry_run:
 
 @router.get("/settings/llm")
 async def get_llm_config(request: Request):
+    """Returns all LLM configs and the default config name."""
     from asc.config import Config
     profile = request.cookies.get("asc_profile")
     config = Config(app_name=profile)
     return {
-        "base_url": config.llm_base_url,
-        "api_key": config.llm_api_key or "",
-        "model": config.llm_model,
+        "configs": config.llm_configs,
+        "default": config.llm_default,
     }
 
 
 @router.post("/settings/llm")
 async def save_llm_config(request: Request, data: dict):
+    """Save a named LLM config to the profile. Set as default if specified."""
     from asc.config import Config
     profile = request.cookies.get("asc_profile")
-    config = Config(app_name=profile)
-    local_cfg = Path(".") / ".asc" / "config.toml"
-    local_cfg.parent.mkdir(parents=True, exist_ok=True)
-    import tomllib
-    existing = {}
-    if local_cfg.exists():
-        try:
-            with open(local_cfg, "rb") as f:
-                existing = tomllib.load(f)
-        except Exception:
-            existing = {}
-    llm_section = existing.get("llm", {})
-    llm_section["base_url"] = data.get("base_url", "https://api.openai.com/v1")
-    llm_section["model"] = data.get("model", "gpt-4o")
-    if data.get("api_key"):
-        llm_section["api_key"] = data["api_key"]
-    existing["llm"] = llm_section
-    content = ""
-    for section, items in existing.items():
-        content += f"[{section}]\n"
-        if isinstance(items, dict):
-            for k, v in items.items():
-                content += f'{k} = "{v}"\n'
-        content += "\n"
-    local_cfg.write_text(content)
-    return {"ok": True}
+    if not profile:
+        return JSONResponse({"error": "No profile selected"}, status_code=400)
+
+    name = data.get("name", "default")
+    base_url = data.get("base_url", "https://api.openai.com/v1")
+    api_key = data.get("api_key", "")
+    model = data.get("model", "gpt-4o")
+    set_default = data.get("set_default", True)
+
+    try:
+        config = Config(app_name=profile)
+        config.save_llm_config(name, base_url, api_key, model, set_default=set_default)
+        return {"ok": True}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.delete("/settings/llm")
+async def delete_llm_config(request: Request, name: str = _Form(...)):
+    """Delete a named LLM config from the profile."""
+    from asc.config import Config
+    profile = request.cookies.get("asc_profile")
+    if not profile:
+        return JSONResponse({"error": "No profile selected"}, status_code=400)
+
+    try:
+        config = Config(app_name=profile)
+        config.delete_llm_config(name)
+        return {"ok": True}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.post("/settings/llm/default")
+async def set_llm_default(request: Request, data: dict):
+    """Set the default LLM config."""
+    from asc.config import Config
+    profile = request.cookies.get("asc_profile")
+    if not profile:
+        return JSONResponse({"error": "No profile selected"}, status_code=400)
+
+    name = data.get("name")
+    if not name:
+        return JSONResponse({"error": "name is required"}, status_code=400)
+
+    try:
+        config = Config(app_name=profile)
+        config.set_llm_default(name)
+        return {"ok": True}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)

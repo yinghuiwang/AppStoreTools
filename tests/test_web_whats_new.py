@@ -152,44 +152,36 @@ def test_whats_new_run_invalid_json_returns_400(client):
 
 
 def test_settings_llm_get_returns_config(client):
-    """GET /api/settings/llm returns base_url, api_key, model."""
+    """GET /api/settings/llm returns configs dict and default name."""
     mock_config = MagicMock()
-    mock_config.llm_api_key = "secret-key-123"
-    mock_config.llm_base_url = "https://api.custom.com/v1"
-    mock_config.llm_model = "gpt-4o-mini"
+    mock_config.llm_configs = {
+        "openai": {"base_url": "https://api.openai.com/v1", "api_key": "secret-key-123", "model": "gpt-4o-mini"}
+    }
+    mock_config.llm_default = "openai"
 
     with patch("asc.config.Config", return_value=mock_config):
         response = client.get("/api/settings/llm", cookies={"asc_profile": "test"})
 
     assert response.status_code == 200
     data = response.json()
-    assert data["base_url"] == "https://api.custom.com/v1"
-    assert data["api_key"] == "secret-key-123"
-    assert data["model"] == "gpt-4o-mini"
+    assert data["configs"]["openai"]["base_url"] == "https://api.openai.com/v1"
+    assert data["configs"]["openai"]["api_key"] == "secret-key-123"
+    assert data["configs"]["openai"]["model"] == "gpt-4o-mini"
+    assert data["default"] == "openai"
 
 
 def test_settings_llm_post_saves_config(client):
     """POST /api/settings/llm with JSON body returns ok=True."""
     mock_config = MagicMock()
-    mock_config.llm_api_key = "secret-key-123"
-    mock_config.llm_base_url = "https://api.openai.com/v1"
-    mock_config.llm_model = "gpt-4o"
 
-    # Create mock tomllib module for Python 3.9 compatibility
-    mock_tomllib = types.ModuleType("tomllib")
-    mock_tomllib.load = MagicMock(return_value={})
-
-    with patch.dict(sys.modules, {"tomllib": mock_tomllib}):
-        with patch("asc.config.Config", return_value=mock_config):
-            with patch("pathlib.Path.mkdir", return_value=None):
-                with patch("pathlib.Path.exists", return_value=False):
-                    with patch("pathlib.Path.write_text", return_value=None):
-                        response = client.post(
-                            "/api/settings/llm",
-                            cookies={"asc_profile": "test"},
-                            json={"base_url": "https://api.new.com/v1", "model": "gpt-4o", "api_key": "new-key"},
-                        )
+    with patch("asc.config.Config", return_value=mock_config):
+        response = client.post(
+            "/api/settings/llm",
+            cookies={"asc_profile": "test"},
+            json={"name": "openai", "base_url": "https://api.new.com/v1", "model": "gpt-4o", "api_key": "new-key"},
+        )
 
     assert response.status_code == 200
     data = response.json()
     assert data["ok"] is True
+    mock_config.save_llm_config.assert_called_once_with("openai", "https://api.new.com/v1", "new-key", "gpt-4o", set_default=True)

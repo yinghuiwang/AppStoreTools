@@ -205,61 +205,144 @@
 
     <!-- LLM Configuration -->
 <div class="card"
-     x-data="{ llm: null, saving: false, saved: false }"
+     x-data="{
+       configs: {},
+       default: null,
+       activeName: null,
+       editName: '',
+       editBaseUrl: 'https://api.openai.com/v1',
+       editApiKey: '',
+       editModel: 'gpt-4o',
+       showForm: false,
+       saving: false,
+       saved: false,
+       loading: true,
+     }"
      x-init="
-       fetch('/api/settings/llm', {headers: {'Content-Type': 'application/json'}})
+       fetch('/api/settings/llm')
          .then(r => r.json())
-         .then(d => { llm = d; })
-         .catch(() => { llm = {base_url: 'https://api.openai.com/v1', api_key: '', model: 'gpt-4o'}; })
+         .then(d => {
+           configs = d.configs || {};
+           default = d.default;
+           activeName = d.default || Object.keys(configs)[0] || '';
+           loading = false;
+         })
+         .catch(() => { loading = false; })
      ">
   <div class="card-header flex items-center gap-2">
     <svg class="w-4 h-4 text-amber-500" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456Z"/></svg>
     <h2 class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">LLM 翻译配置</h2>
+    <button @click="showForm = true; editName = ''; editBaseUrl = 'https://api.openai.com/v1'; editApiKey = ''; editModel = 'gpt-4o'"
+            class="ml-auto text-xs btn-secondary py-1 px-2">+ 新增配置</button>
   </div>
   <div class="card-body space-y-4">
-    <template x-if="llm">
-      <div class="space-y-4">
-        <div>
-          <label class="text-xs uppercase tracking-widest text-obsidian-500 font-medium mb-1.5 block">Base URL</label>
-          <input type="text" x-model="llm.base_url"
-                 class="field-input w-full"
-                 placeholder="https://api.openai.com/v1">
+
+    <!-- Add/Edit Form -->
+    <template x-if="showForm">
+      <div class="space-y-3 p-3 border border-obsidian-600 rounded-lg bg-obsidian-800/30">
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-amber-400" x-show="!editName">新增配置</span>
+          <span class="text-xs text-amber-400" x-show="editName">编辑配置</span>
         </div>
         <div>
-          <label class="text-xs uppercase tracking-widest text-obsidian-500 font-medium mb-1.5 block">API Key</label>
-          <input type="password" x-model="llm.api_key"
-                 class="field-input w-full"
-                 placeholder="sk-...">
+          <label class="text-xs text-obsidian-500 mb-1 block">配置名称</label>
+          <input type="text" x-model="editName" placeholder="例如: openai, claude"
+                 class="field-input w-full text-xs" :disabled="editName !== ''">
         </div>
         <div>
-          <label class="text-xs uppercase tracking-widest text-obsidian-500 font-medium mb-1.5 block">Model</label>
-          <input type="text" x-model="llm.model"
-                 class="field-input w-full"
-                 placeholder="gpt-4o">
+          <label class="text-xs text-obsidian-500 mb-1 block">Base URL</label>
+          <input type="text" x-model="editBaseUrl" placeholder="https://api.openai.com/v1"
+                 class="field-input w-full text-xs">
         </div>
-        <div class="flex items-center gap-3">
+        <div>
+          <label class="text-xs text-obsidian-500 mb-1 block">API Key</label>
+          <input type="password" x-model="editApiKey" placeholder="sk-..." class="field-input w-full text-xs">
+        </div>
+        <div>
+          <label class="text-xs text-obsidian-500 mb-1 block">Model</label>
+          <input type="text" x-model="editModel" placeholder="gpt-4o" class="field-input w-full text-xs">
+        </div>
+        <div class="flex gap-2">
           <button @click="
             saving = true;
+            const name = editName || ('config' + (Object.keys(configs).length + 1));
             fetch('/api/settings/llm', {
               method: 'POST',
               headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify(llm)
-            })
-              .then(r => r.json())
-              .then(() => { saving = false; saved = true; setTimeout(() => saved = false, 2000); })
-              .catch(() => { saving = false; })
-          "
-                  :disabled="saving"
-                  class="btn-primary">
-            <span x-show="!saving && !saved">保存配置</span>
+              body: JSON.stringify({name, base_url: editBaseUrl, api_key: editApiKey, model: editModel, set_default: true})
+            }).then(r => r.json()).then(() => {
+              saving = false; saved = true;
+              return fetch('/api/settings/llm');
+            }).then(r => r.json()).then(d => {
+              configs = d.configs || {};
+              default = d.default;
+              activeName = d.default;
+              showForm = false;
+              setTimeout(() => saved = false, 2000);
+            }).catch(() => { saving = false; })
+          " :disabled="saving" class="btn-primary text-xs px-3 py-1.5">
+            <span x-show="!saving">保存</span>
             <span x-show="saving">保存中...</span>
-            <span x-show="saved" class="text-emerald-400">已保存</span>
           </button>
+          <button @click="showForm = false" class="btn-secondary text-xs px-3 py-1.5">取消</button>
         </div>
       </div>
     </template>
-    <template x-if="!llm">
-      <div class="text-sm text-obsidian-500">加载中...</div>
+
+    <!-- Config List -->
+    <template x-if="!loading && Object.keys(configs).length === 0">
+      <div class="text-sm text-obsidian-500 py-2">暂无配置，请点击「新增配置」添加</div>
+    </template>
+    <template x-if="!loading && Object.keys(configs).length > 0">
+      <div class="space-y-2">
+        <template x-for="(cfg, name) in configs" :key="name">
+          <div class="flex items-center gap-3 p-2 rounded-lg border"
+               :class="name === activeName ? 'border-amber-500/50 bg-amber-500/5' : 'border-obsidian-700'">
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-medium" :class="name === activeName ? 'text-amber-400' : 'text-obsidian-300'"
+                      x-text="name"></span>
+                <span x-show="name === default" class="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400">默认</span>
+              </div>
+              <div class="text-[10px] text-obsidian-500 truncate" x-text="cfg.base_url + ' / ' + cfg.model"></div>
+            </div>
+            <div class="flex gap-1">
+              <button @click="
+                fetch('/api/settings/llm/default', {
+                  method: 'POST',
+                  headers: {'Content-Type': 'application/json'},
+                  body: JSON.stringify({name})
+                }).then(() => {
+                  default = name;
+                  activeName = name;
+                })"
+                      x-show="name !== default"
+                      class="text-[10px] btn-secondary py-1 px-2">设为默认</button>
+              <button @click="
+                editName = name;
+                editBaseUrl = cfg.base_url;
+                editApiKey = cfg.api_key || '';
+                editModel = cfg.model;
+                showForm = true"
+                      class="text-[10px] btn-secondary py-1 px-2">编辑</button>
+              <button @click="
+                fetch('/api/settings/llm?name=' + encodeURIComponent(name), {method: 'DELETE'})
+                  .then(() => fetch('/api/settings/llm'))
+                  .then(r => r.json())
+                  .then(d => {
+                    configs = d.configs || {};
+                    default = d.default;
+                    activeName = d.default || Object.keys(configs)[0] || '';
+                  })"
+                      class="text-[10px] px-2 py-1 rounded border border-red-500/30 text-red-400 hover:bg-red-500/10">删除</button>
+            </div>
+          </div>
+        </template>
+      </div>
+    </template>
+
+    <template x-if="saved">
+      <div class="text-xs text-emerald-400">已保存</div>
     </template>
   </div>
 </div>
