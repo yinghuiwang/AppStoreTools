@@ -101,7 +101,7 @@
                       })
                         .then(r => r.json())
                         .then(data => {
-                          translations = data;
+                          translations = data.translations || {};
                           step = 2;
                           submitting = false;
                         })

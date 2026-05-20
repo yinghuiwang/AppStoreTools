@@ -27,7 +27,7 @@ class OpenAITranslator(Translator):
         "- Preserve professional terminology (e.g. do not translate 'TestFlight')\n"
         "- Keep character length close to the original\n"
         "- Do not add explanations\n\n"
-        "Source language: {source_locale}\n"
+        "{source_lang}"
         "Target language: {target_locale}\n\n"
         "Original text:\n"
         "{text}"
@@ -37,8 +37,9 @@ class OpenAITranslator(Translator):
         self.client = client
 
     def translate(self, text: str, target_locale: str, source_locale: str) -> str:
+        source_lang = f"Source language: {source_locale}\n" if source_locale and source_locale != "auto" else ""
         prompt = self.SYSTEM_PROMPT.format(
-            source_locale=source_locale,
+            source_lang=source_lang,
             target_locale=target_locale,
             text=text,
         )
