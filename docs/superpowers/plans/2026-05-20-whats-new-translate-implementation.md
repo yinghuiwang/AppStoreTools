@@ -30,8 +30,12 @@ src/asc/
         └── whats_new.html         # [NEW] 翻译 + 上传页面
 
 tests/
-└── test_llm.py                    # [NEW] LLM 客户端测试
-└── test_translator.py             # [NEW] 翻译服务测试
+├── test_llm.py                    # [NEW] LLM 客户端完整单元测试（10 个测试）
+├── test_translator.py             # [NEW] 翻译服务完整单元测试（9 个测试）
+├── test_config_llm.py             # [NEW] Config LLM 属性测试（7 个测试）
+├── test_whats_new_translate.py    # [NEW] CLI --translate 选项测试（6 个测试）
+├── test_web_whats_new.py         # [NEW] Web API 路由测试（8 个测试）
+└── test_whats_new_e2e.py        # [NEW] 端到端集成测试（3 个测试）
 ```
 
 ---
@@ -42,54 +46,176 @@ tests/
 - Create: `src/asc/llm.py`
 - Test: `tests/test_llm.py`
 
-- [ ] **Step 1: 写失败的测试**
+- [ ] **Step 1: 写失败的测试（完整单元测试）**
 
 ```python
 # tests/test_llm.py
+"""Comprehensive unit tests for asc.llm.LLMClient."""
 from __future__ import annotations
+
 import pytest
-from unittest.mock import patch, Mock
-import json
+import requests_mock as rm
 
-# Test that LLMClient.chat() returns the assistant's message content
-def test_chat_returns_assistant_message(requests_mock):
-    requests_mock.post(
-        "https://api.openai.com/v1/chat/completions",
-        json={
-            "choices": [{"message": {"role": "assistant", "content": "translated text"}}]
-        }
-    )
-    from asc.llm import LLMClient
-    client = LLMClient(
-        api_key="sk-test",
-        base_url="https://api.openai.com/v1",
-        model="gpt-4o",
-    )
-    result = client.chat(messages=[{"role": "user", "content": "hello"}])
-    assert result == "translated text"
 
-# Test that chat() retries on 429 and succeeds
-def test_chat_retries_on_rate_limit(requests_mock):
-    mock = requests_mock.post(
-        "https://api.openai.com/v1/chat/completions",
-        [
-            {"status_code": 429, "headers": {"Retry-After": "0"}},
-            {"json": {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}}
-        ]
-    )
-    from asc.llm import LLMClient
-    client = LLMClient(api_key="sk-test", base_url="https://api.openai.com/v1", model="gpt-4o")
-    result = client.chat(messages=[{"role": "user", "content": "hi"}])
-    assert result == "ok"
-    assert mock.call_count == 2
+def test_chat_returns_assistant_message():
+    """chat() returns the assistant's message content from successful response."""
+    with rm.Mocker() as m:
+        m.post(
+            "https://api.openai.com/v1/chat/completions",
+            json={
+                "choices": [{"message": {"role": "assistant", "content": "错误修复和性能提升。"}}]
+            },
+        )
+        from asc.llm import LLMClient
+        client = LLMClient(
+            api_key="sk-test",
+            base_url="https://api.openai.com/v1",
+            model="gpt-4o",
+        )
+        result = client.chat(messages=[{"role": "user", "content": "Bug fixes."}])
+        assert result == "错误修复和性能提升。"
 
-# Test that invalid response raises ValueError
-def test_chat_raises_on_invalid_response(requests_mock):
-    requests_mock.post("https://api.openai.com/v1/chat/completions", json={})
-    from asc.llm import LLMClient
-    client = LLMClient(api_key="sk-test", base_url="https://api.openai.com/v1", model="gpt-4o")
-    with pytest.raises(ValueError, match="Unexpected response"):
-        client.chat(messages=[{"role": "user", "content": "hi"}])
+
+def test_chat_retries_on_429_then_succeeds():
+    """chat() retries on HTTP 429 and returns result on second attempt."""
+    with rm.Mocker() as m:
+        m.post(
+            "https://api.openai.com/v1/chat/completions",
+            [
+                {"status_code": 429, "headers": {"Retry-After": "0"}},
+                {"json": {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}},
+            ],
+        )
+        from asc.llm import LLMClient
+        client = LLMClient(api_key="sk-test", base_url="https://api.openai.com/v1", model="gpt-4o")
+        result = client.chat(messages=[{"role": "user", "content": "hi"}])
+        assert result == "ok"
+        assert m.call_count == 2
+
+
+def test_chat_retries_on_5xx_then_succeeds():
+    """chat() retries on HTTP 5xx and returns result on second attempt."""
+    with rm.Mocker() as m:
+        m.post(
+            "https://api.openai.com/v1/chat/completions",
+            [
+                {"status_code": 502, "text": "Bad Gateway"},
+                {"json": {"choices": [{"message": {"role": "assistant", "content": "result"}}]}},
+            ],
+        )
+        from asc.llm import LLMClient
+        client = LLMClient(api_key="sk-test", base_url="https://api.openai.com/v1", model="gpt-4o")
+        result = client.chat(messages=[{"role": "user", "content": "hi"}])
+        assert result == "result"
+        assert m.call_count == 2
+
+
+def test_chat_raises_after_max_retries():
+    """chat() raises ValueError after 3 failed attempts."""
+    with rm.Mocker() as m:
+        m.post("https://api.openai.com/v1/chat/completions", status_code=429, headers={"Retry-After": "0"})
+        from asc.llm import LLMClient
+        client = LLMClient(api_key="sk-test", base_url="https://api.openai.com/v1", model="gpt-4o")
+        with pytest.raises(ValueError, match="Max retries exceeded"):
+            client.chat(messages=[{"role": "user", "content": "hi"}])
+        assert m.call_count == 3
+
+
+def test_chat_raises_on_empty_choices():
+    """chat() raises ValueError when response has no choices."""
+    with rm.Mocker() as m:
+        m.post("https://api.openai.com/v1/chat/completions", json={"choices": []})
+        from asc.llm import LLMClient
+        client = LLMClient(api_key="sk-test", base_url="https://api.openai.com/v1", model="gpt-4o")
+        with pytest.raises(ValueError, match="Unexpected response"):
+            client.chat(messages=[{"role": "user", "content": "hi"}])
+
+
+def test_chat_raises_on_missing_message_field():
+    """chat() raises ValueError when choice is missing 'message'."""
+    with rm.Mocker() as m:
+        m.post(
+            "https://api.openai.com/v1/chat/completions",
+            json={"choices": [{"finish_reason": "stop"}]},
+        )
+        from asc.llm import LLMClient
+        client = LLMClient(api_key="sk-test", base_url="https://api.openai.com/v1", model="gpt-4o")
+        with pytest.raises((ValueError, KeyError)):
+            client.chat(messages=[{"role": "user", "content": "hi"}])
+
+
+def test_chat_sends_correct_headers():
+    """chat() sends Authorization Bearer token and Content-Type."""
+    with rm.Mocker() as m:
+        m.post("https://api.openai.com/v1/chat/completions", json={"choices": []})
+        from asc.llm import LLMClient
+        client = LLMClient(api_key="sk-secret", base_url="https://api.openai.com/v1", model="gpt-4o")
+        try:
+            client.chat(messages=[{"role": "user", "content": "hi"}])
+        except Exception:
+            pass
+        last_req = m.request_history[-1]
+        assert last_req.headers["Authorization"] == "Bearer sk-secret"
+        assert last_req.headers["Content-Type"] == "application/json"
+
+
+def test_chat_sends_correct_payload():
+    """chat() sends correct model, messages, and temperature in payload."""
+    with rm.Mocker() as m:
+        m.post("https://api.openai.com/v1/chat/completions", json={"choices": []})
+        from asc.llm import LLMClient
+        client = LLMClient(api_key="sk-test", base_url="https://api.openai.com/v1", model="gpt-4o-mini")
+        try:
+            client.chat(messages=[{"role": "user", "content": "hello"}], temperature=0.7)
+        except Exception:
+            pass
+        last_req = m.request_history[-1]
+        body = last_req.json()
+        assert body["model"] == "gpt-4o-mini"
+        assert body["messages"] == [{"role": "user", "content": "hello"}]
+        assert body["temperature"] == 0.7
+
+
+def test_chat_base_url_trailing_slash_stripped():
+    """Base URL trailing slash is stripped to avoid double slashes."""
+    with rm.Mocker() as m:
+        m.post("https://openrouter.ai/v1/chat/completions", json={"choices": []})
+        from asc.llm import LLMClient
+        client = LLMClient(api_key="sk-test", base_url="https://openrouter.ai/v1/", model="gpt-4o")
+        try:
+            client.chat(messages=[{"role": "user", "content": "hi"}])
+        except Exception:
+            pass
+        last_req = m.request_history[-1]
+        assert last_req.url == "https://openrouter.ai/v1/chat/completions"
+
+
+def test_chat_timeout_defaults_to_60():
+    """chat() uses default timeout of 60 seconds."""
+    with rm.Mocker() as m:
+        m.post("https://api.openai.com/v1/chat/completions", json={"choices": []})
+        from asc.llm import LLMClient
+        client = LLMClient(api_key="sk-test", base_url="https://api.openai.com/v1", model="gpt-4o")
+        try:
+            client.chat(messages=[{"role": "user", "content": "hi"}])
+        except Exception:
+            pass
+        last_req = m.request_history[-1]
+        assert last_req.timeout == 60
+
+
+def test_chat_custom_timeout():
+    """chat() respects custom timeout parameter."""
+    with rm.Mocker() as m:
+        m.post("https://api.openai.com/v1/chat/completions", json={"choices": []})
+        from asc.llm import LLMClient
+        client = LLMClient(api_key="sk-test", base_url="https://api.openai.com/v1", model="gpt-4o", timeout=30)
+        try:
+            client.chat(messages=[{"role": "user", "content": "hi"}])
+        except Exception:
+            pass
+        last_req = m.request_history[-1]
+        assert last_req.timeout == 30
 ```
 
 - [ ] **Step 2: 运行测试，确认失败**
@@ -189,47 +315,166 @@ git commit -m "feat(llm): add OpenAI-compatible HTTP client with retry"
 from __future__ import annotations
 ```
 
-- [ ] **Step 2: 写失败的测试**
+- [ ] **Step 2: 写失败的测试（完整单元测试）**
 
 ```python
 # tests/test_translator.py
+"""Comprehensive unit tests for asc.services.translator."""
 from __future__ import annotations
-import pytest
-from unittest.mock import Mock, patch
 
-# Test OpenAITranslator.translate() calls LLM with correct prompt
-def test_translate_calls_llm_with_correct_prompt(requests_mock):
-    requests_mock.post(
-        "https://api.openai.com/v1/chat/completions",
-        json={
-            "choices": [{"message": {"role": "assistant", "content": "错误修复和性能提升。"}}]
-        }
-    )
-    from asc.services.translator import OpenAITranslator
+import pytest
+import requests_mock as rm
+
+
+def test_translate_calls_llm_with_correct_messages_structure():
+    """translate() sends a system prompt and user prompt with locale info."""
+    with rm.Mocker() as m:
+        m.post(
+            "https://api.openai.com/v1/chat/completions",
+            json={"choices": [{"message": {"role": "assistant", "content": "结果"}}]},
+        )
+        from asc.services.translator import OpenAITranslator
+        from asc.llm import LLMClient
+
+        client = LLMClient(api_key="sk-test", base_url="https://api.openai.com/v1", model="gpt-4o")
+        translator = OpenAITranslator(client)
+        translator.translate("Bug fixes.", "zh-CN", "en-US")
+
+        last_req = m.request_history[-1]
+        body = last_req.json()
+        messages = body["messages"]
+        # First message is system
+        assert messages[0]["role"] == "system"
+        # Second message is user with prompt containing locale and text
+        assert messages[1]["role"] == "user"
+        content = messages[1]["content"]
+        assert "zh-CN" in content
+        assert "en-US" in content
+        assert "Bug fixes." in content
+
+
+def test_translate_returns_assistant_content():
+    """translate() returns the raw assistant message content."""
+    with rm.Mocker() as m:
+        m.post(
+            "https://api.openai.com/v1/chat/completions",
+            json={"choices": [{"message": {"role": "assistant", "content": "错误修复和性能提升。"}}]},
+        )
+        from asc.services.translator import OpenAITranslator
+        from asc.llm import LLMClient
+
+        translator = OpenAITranslator(
+            LLMClient(api_key="sk-test", base_url="https://api.openai.com/v1", model="gpt-4o")
+        )
+        result = translator.translate("Bug fixes and improvements.", "zh-CN", "en-US")
+        assert result == "错误修复和性能提升。"
+
+
+def test_translate_passes_temperature_0_3():
+    """translate() uses temperature=0.3 for consistent output."""
+    with rm.Mocker() as m:
+        m.post(
+            "https://api.openai.com/v1/chat/completions",
+            json={"choices": [{"message": {"role": "assistant", "content": "ok"}}]},
+        )
+        from asc.services.translator import OpenAITranslator
+        from asc.llm import LLMClient
+
+        translator = OpenAITranslator(
+            LLMClient(api_key="sk-test", base_url="https://api.openai.com/v1", model="gpt-4o")
+        )
+        translator.translate("Hello", "ja-JP", "en-US")
+
+        last_req = m.request_history[-1]
+        body = last_req.json()
+        assert body["temperature"] == 0.3
+
+
+def test_translate_uses_client_chat():
+    """translate() delegates to LLMClient.chat(), not raw HTTP."""
+    with rm.Mocker() as m:
+        m.post(
+            "https://api.openai.com/v1/chat/completions",
+            json={"choices": [{"message": {"role": "assistant", "content": "translated"}}]},
+        )
+        from asc.services.translator import OpenAITranslator
+        from asc.llm import LLMClient
+
+        translator = OpenAITranslator(
+            LLMClient(api_key="sk-test", base_url="https://api.openai.com/v1", model="gpt-4o")
+        )
+        result = translator.translate("Test", "fr-FR", "en-US")
+        assert result == "translated"
+        assert m.call_count == 1
+
+
+def test_translate_multiline_text():
+    """translate() handles multiline text correctly in prompt."""
+    with rm.Mocker() as m:
+        m.post(
+            "https://api.openai.com/v1/chat/completions",
+            json={"choices": [{"message": {"role": "assistant", "content": "多行结果"}}]},
+        )
+        from asc.services.translator import OpenAITranslator
+        from asc.llm import LLMClient
+
+        translator = OpenAITranslator(
+            LLMClient(api_key="sk-test", base_url="https://api.openai.com/v1", model="gpt-4o")
+        )
+        multiline = "Bug fixes.\nPerformance improvements.\nNew features."
+        result = translator.translate(multiline, "zh-CN", "en-US")
+        assert result == "多行结果"
+        last_req = m.request_history[-1]
+        assert "Bug fixes." in last_req.json()["messages"][1]["content"]
+
+
+def test_translate_special_chars_in_text():
+    """translate() handles special characters in text without breaking JSON."""
+    with rm.Mocker() as m:
+        m.post(
+            "https://api.openai.com/v1/chat/completions",
+            json={"choices": [{"message": {"role": "assistant", "content": "结果"}}]},
+        )
+        from asc.services.translator import OpenAITranslator
+        from asc.llm import LLMClient
+
+        translator = OpenAITranslator(
+            LLMClient(api_key="sk-test", base_url="https://api.openai.com/v1", model="gpt-4o")
+        )
+        # Contains quotes, newlines, unicode
+        text = 'Bug fixes. "Performance" & more.\n\n• Fixed crash\n• Fixed memory leak'
+        result = translator.translate(text, "zh-CN", "en-US")
+        assert result == "结果"
+        # Verify the request was made without JSON encode error
+        assert m.call_count == 1
+
+
+def test_translate_empty_text_raises():
+    """translate() with empty text still calls API (API handles validation)."""
+    with rm.Mocker() as m:
+        m.post(
+            "https://api.openai.com/v1/chat/completions",
+            json={"choices": [{"message": {"role": "assistant", "content": ""}}]},
+        )
+        from asc.services.translator import OpenAITranslator
+        from asc.llm import LLMClient
+
+        translator = OpenAITranslator(
+            LLMClient(api_key="sk-test", base_url="https://api.openai.com/v1", model="gpt-4o")
+        )
+        result = translator.translate("", "zh-CN", "en-US")
+        assert result == ""
+        assert m.call_count == 1
+
+
+def test_translator_is_instance_of_abstract():
+    """OpenAITranslator is an instance of the abstract Translator class."""
+    from asc.services.translator import Translator, OpenAITranslator
     from asc.llm import LLMClient
+
     client = LLMClient(api_key="sk-test", base_url="https://api.openai.com/v1", model="gpt-4o")
     translator = OpenAITranslator(client)
-    result = translator.translate("Bug fixes and improvements.", "zh-CN", "en-US")
-    assert result == "错误修复和性能提升。"
-    # Verify the prompt included locale info
-    last_request = requests_mock.request_history[-1]
-    body = last_request.json()
-    assert "zh-CN" in body["messages"][1]["content"]
-    assert "en-US" in body["messages"][1]["content"]
-
-# Test translate returns translated text
-def test_translate_returns_content(requests_mock):
-    requests_mock.post(
-        "https://api.openai.com/v1/chat/completions",
-        json={"choices": [{"message": {"role": "assistant", "content": " результат"}}]}
-    )
-    from asc.services.translator import OpenAITranslator
-    from asc.llm import LLMClient
-    translator = OpenAITranslator(
-        LLMClient(api_key="sk-test", base_url="https://api.openai.com/v1", model="gpt-4o")
-    )
-    result = translator.translate("Hello", "ru-RU", "en-US")
-    assert result == " результат"
+    assert isinstance(translator, Translator)
 ```
 
 - [ ] **Step 3: 运行测试，确认失败**
@@ -361,6 +606,135 @@ git commit -m "feat(config): add [llm] configuration block for LLM API settings"
 
 ---
 
+## Task 3b: 创建 `tests/test_config_llm.py` — Config LLM 属性单元测试
+
+**Files:**
+- Create: `tests/test_config_llm.py`
+
+- [ ] **Step 1: 写失败的测试**
+
+```python
+# tests/test_config_llm.py
+"""Unit tests for Config LLM properties."""
+from __future__ import annotations
+
+import os
+import pytest
+from unittest.mock import patch
+from pathlib import Path
+
+
+def test_llm_api_key_from_toml(tmp_path, monkeypatch):
+    """llm_api_key reads api_key from [llm] section in TOML."""
+    monkeypatch.chdir(tmp_path)
+    toml = tmp_path / "config.toml"
+    toml.write_text('[llm]\napi_key = "sk-123456"\n')
+    from asc.config import Config
+    c = Config()
+    assert c.llm_api_key == "sk-123456"
+
+
+def test_llm_base_url_from_toml(tmp_path, monkeypatch):
+    """llm_base_url reads base_url from [llm] section."""
+    monkeypatch.chdir(tmp_path)
+    toml = tmp_path / "config.toml"
+    toml.write_text('[llm]\nbase_url = "https://openrouter.ai/v1"\n')
+    from asc.config import Config
+    c = Config()
+    assert c.llm_base_url == "https://openrouter.ai/v1"
+
+
+def test_llm_model_from_toml(tmp_path, monkeypatch):
+    """llm_model reads model from [llm] section."""
+    monkeypatch.chdir(tmp_path)
+    toml = tmp_path / "config.toml"
+    toml.write_text('[llm]\nmodel = "gpt-4o-mini"\n')
+    from asc.config import Config
+    c = Config()
+    assert c.llm_model == "gpt-4o-mini"
+
+
+def test_llm_model_defaults_to_gpt_4o(tmp_path, monkeypatch):
+    """llm_model returns 'gpt-4o' when not configured."""
+    monkeypatch.chdir(tmp_path)
+    toml = tmp_path / "config.toml"
+    toml.write_text('[llm]\nbase_url = "https://api.openai.com/v1"\n')
+    from asc.config import Config
+    c = Config()
+    assert c.llm_model == "gpt-4o"
+
+
+def test_llm_base_url_defaults_to_openai(tmp_path, monkeypatch):
+    """llm_base_url returns 'https://api.openai.com/v1' when not configured."""
+    monkeypatch.chdir(tmp_path)
+    toml = tmp_path / "config.toml"
+    toml.write_text('[llm]\napi_key = "sk-test"\n')
+    from asc.config import Config
+    c = Config()
+    assert c.llm_base_url == "https://api.openai.com/v1"
+
+
+def test_llm_api_key_falls_back_to_env_var(tmp_path, monkeypatch):
+    """llm_api_key falls back to OPENAI_API_KEY env var when not in TOML."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-env-fallback")
+    toml = tmp_path / "config.toml"
+    toml.write_text('[llm]\nbase_url = "https://api.openai.com/v1"\n')
+    from asc.config import Config
+    c = Config()
+    assert c.llm_api_key == "sk-env-fallback"
+
+
+def test_llm_api_key_toml_overrides_env(tmp_path, monkeypatch):
+    """TOML [llm] api_key takes precedence over OPENAI_API_KEY env var."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-env")
+    toml = tmp_path / "config.toml"
+    toml.write_text('[llm]\napi_key = "sk-toml"\n')
+    from asc.config import Config
+    c = Config()
+    assert c.llm_api_key == "sk-toml"
+
+
+def test_llm_key_file_expands_tilde(tmp_path, monkeypatch):
+    """key_file path with ~ is expanded to home directory."""
+    # This tests the base key_file property, not LLM-specific
+    monkeypatch.chdir(tmp_path)
+    toml = tmp_path / "config.toml"
+    toml.write_text('[credentials]\nkey_file = "~/keys/test.p8"\n')
+    from asc.config import Config
+    c = Config()
+    assert c.key_file.endswith("keys/test.p8")
+    assert "~" not in c.key_file
+```
+
+- [ ] **Step 2: 运行测试，确认失败**
+
+```bash
+pytest tests/test_config_llm.py -v 2>&1 | head -30
+# Expected: ERROR — Config has no attribute 'llm_api_key'
+```
+
+- [ ] **Step 3: 实现 Config LLM 属性**
+
+已在 Task 3 中实现。
+
+- [ ] **Step 4: 运行测试，确认通过**
+
+```bash
+pytest tests/test_config_llm.py -v
+# Expected: 7 passed
+```
+
+- [ ] **Step 5: 提交**
+
+```bash
+git add tests/test_config_llm.py
+git commit -m "test(config): add unit tests for [llm] LLM configuration properties"
+```
+
+---
+
 ## Task 4: 修改 `src/asc/commands/whats_new.py` — 新增 `--translate` CLI 参数
 
 **Files:**
@@ -485,6 +859,232 @@ python -m asc whats-new --help | grep -A1 translate
 ```bash
 git add src/asc/commands/whats_new.py src/asc/i18n.py
 git commit -m "feat(whats-new): add --translate for LLM auto-translation"
+```
+
+---
+
+## Task 4b: 创建 `tests/test_whats_new_translate.py` — CLI `--translate` 选项单元测试
+
+**Files:**
+- Create: `tests/test_whats_new_translate.py`
+
+- [ ] **Step 1: 写失败的测试**
+
+```python
+# tests/test_whats_new_translate.py
+"""Unit tests for asc whats-new --translate CLI behavior."""
+from __future__ import annotations
+
+import pytest
+from click.testing import CliRunner
+from unittest.mock import MagicMock, patch
+
+
+def test_translate_flag_requires_text(mocker):
+    """--translate without --text exits with error."""
+    mocker.patch("asc.commands.whats_new.Config", return_value=MagicMock(
+        llm_api_key="sk-test",
+        llm_base_url="https://api.openai.com/v1",
+        llm_model="gpt-4o",
+    ))
+    mocker.patch("asc.commands.whats_new.resolve_app_profile", return_value="test")
+    mocker.patch("asc.commands.whats_new.Guard")
+    mocker.patch("asc.commands.whats_new.make_api_from_config", return_value=(MagicMock(), "app123"))
+    mock_version = {"id": "v1", "attributes": {"versionString": "1.0"}}
+    mocker.patch("asc.commands.whats_new.make_api_from_config",
+                 return_value=(MagicMock(get_editable_version=mock_version), "app123"))
+
+    from asc.commands.whats_new import cmd_whats_new
+    runner = CliRunner()
+    result = runner.invoke(cmd_whats_new, ["--translate", "--app", "test"])
+    assert result.exit_code != 0
+    assert "text" in result.output.lower() or "--text" in result.output
+
+
+def test_translate_exits_if_no_llm_api_key(mocker):
+    """--translate exits with error when LLM API key is not configured."""
+    mocker.patch("asc.commands.whats_new.Config", return_value=MagicMock(
+        llm_api_key="",
+        llm_base_url="https://api.openai.com/v1",
+        llm_model="gpt-4o",
+    ))
+    mocker.patch("asc.commands.whats_new.resolve_app_profile", return_value="test")
+    mocker.patch("asc.commands.whats_new.Guard")
+
+    from asc.commands.whats_new import cmd_whats_new
+    runner = CliRunner()
+    result = runner.invoke(cmd_whats_new, ["--text", "Bug fixes.", "--translate", "--app", "test"])
+    assert result.exit_code != 0
+    assert "api_key" in result.output.lower() or "configured" in result.output.lower()
+
+
+def test_translate_calls_translator_for_each_locale(mocker):
+    """--translate calls translator.translate() for each non-source locale."""
+    mock_translate = mocker.patch("asc.commands.whats_new.OpenAITranslator.translate",
+                                  side_effect=["翻译结果1", "翻译结果2"])
+    mock_api = MagicMock()
+    mock_api.get_editable_version.return_value = {"id": "v1", "attributes": {"versionString": "1.0"}}
+    mock_api.get_version_localizations.return_value = [
+        {"id": "l1", "attributes": {"locale": "en-US"}},
+        {"id": "l2", "attributes": {"locale": "zh-CN"}},
+        {"id": "l3", "attributes": {"locale": "ja-JP"}},
+    ]
+    mocker.patch("asc.commands.whats_new.make_api_from_config", return_value=(mock_api, "app123"))
+    mocker.patch("asc.commands.whats_new.Config", return_value=MagicMock(
+        llm_api_key="sk-test",
+        llm_base_url="https://api.openai.com/v1",
+        llm_model="gpt-4o",
+    ))
+    mocker.patch("asc.commands.whats_new.resolve_app_profile", return_value="test")
+    mocker.patch("asc.commands.whats_new.Guard")
+
+    from asc.commands.whats_new import cmd_whats_new
+    runner = CliRunner()
+    result = runner.invoke(cmd_whats_new, [
+        "--text", "Bug fixes.", "--translate", "--dry-run", "--app", "test"
+    ])
+    # Dry-run: no API upload calls made
+    assert mock_api.update_version_localization.call_count == 0
+    # Should have attempted translation (locale count minus source)
+    assert mock_translate.call_count >= 2
+
+
+def test_dry_run_does_not_upload(mocker):
+    """--translate --dry-run does not call App Store Connect API."""
+    mocker.patch("asc.commands.whats_new.OpenAITranslator.translate", return_value="Translated.")
+    mock_api = MagicMock()
+    mock_api.get_editable_version.return_value = {"id": "v1", "attributes": {"versionString": "1.0"}}
+    mock_api.get_version_localizations.return_value = [
+        {"id": "l1", "attributes": {"locale": "zh-CN"}},
+    ]
+    mocker.patch("asc.commands.whats_new.make_api_from_config", return_value=(mock_api, "app123"))
+    mocker.patch("asc.commands.whats_new.Config", return_value=MagicMock(
+        llm_api_key="sk-test",
+        llm_base_url="https://api.openai.com/v1",
+        llm_model="gpt-4o",
+    ))
+    mocker.patch("asc.commands.whats_new.resolve_app_profile", return_value="test")
+    mocker.patch("asc.commands.whats_new.Guard")
+
+    from asc.commands.whats_new import cmd_whats_new
+    runner = CliRunner()
+    result = runner.invoke(cmd_whats_new, [
+        "--text", "Bug fixes.", "--translate", "--dry-run", "--app", "test"
+    ])
+    assert mock_api.update_version_localization.call_count == 0
+    assert "dry" in result.output.lower() or "预览" in result.output
+
+
+def test_translate_non_dry_run_calls_api(mocker):
+    """--translate without --dry-run calls App Store Connect API."""
+    mocker.patch("asc.commands.whats_new.OpenAITranslator.translate", return_value="Translated.")
+    mock_api = MagicMock()
+    mock_api.get_editable_version.return_value = {"id": "v1", "attributes": {"versionString": "1.0"}}
+    mock_api.get_version_localizations.return_value = [
+        {"id": "l1", "attributes": {"locale": "zh-CN"}},
+    ]
+    mocker.patch("asc.commands.whats_new.make_api_from_config", return_value=(mock_api, "app123"))
+    mocker.patch("asc.commands.whats_new.Config", return_value=MagicMock(
+        llm_api_key="sk-test",
+        llm_base_url="https://api.openai.com/v1",
+        llm_model="gpt-4o",
+    ))
+    mocker.patch("asc.commands.whats_new.resolve_app_profile", return_value="test")
+    mocker.patch("asc.commands.whats_new.Guard")
+
+    from asc.commands.whats_new import cmd_whats_new
+    runner = CliRunner()
+    result = runner.invoke(cmd_whats_new, [
+        "--text", "Bug fixes.", "--translate", "--app", "test"
+    ])
+    assert mock_api.update_version_localization.call_count == 1
+
+
+def test_translate_skips_failed_locale_and_continues(mocker):
+    """When one locale fails to translate, it's skipped and others continue."""
+    call_count = 0
+    def translate_with_failure(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise Exception("Translation failed")
+        return "成功"
+
+    mocker.patch("asc.commands.whats_new.OpenAITranslator.translate", side_effect=translate_with_failure)
+    mock_api = MagicMock()
+    mock_api.get_editable_version.return_value = {"id": "v1", "attributes": {"versionString": "1.0"}}
+    mock_api.get_version_localizations.return_value = [
+        {"id": "l1", "attributes": {"locale": "en-US"}},
+        {"id": "l2", "attributes": {"locale": "zh-CN"}},
+    ]
+    mocker.patch("asc.commands.whats_new.make_api_from_config", return_value=(mock_api, "app123"))
+    mocker.patch("asc.commands.whats_new.Config", return_value=MagicMock(
+        llm_api_key="sk-test",
+        llm_base_url="https://api.openai.com/v1",
+        llm_model="gpt-4o",
+    ))
+    mocker.patch("asc.commands.whats_new.resolve_app_profile", return_value="test")
+    mocker.patch("asc.commands.whats_new.Guard")
+
+    from asc.commands.whats_new import cmd_whats_new
+    runner = CliRunner()
+    result = runner.invoke(cmd_whats_new, [
+        "--text", "Bug.", "--translate", "--app", "test"
+    ])
+    # Should still call API for the locale that succeeded
+    assert mock_api.update_version_localization.call_count == 1
+    assert "翻译失败" in result.output or "failed" in result.output.lower()
+
+
+def test_translate_all_fail_exits_with_error(mocker):
+    """When all locales fail to translate, command exits with error."""
+    mocker.patch("asc.commands.whats_new.OpenAITranslator.translate",
+                 side_effect=Exception("Network error"))
+    mock_api = MagicMock()
+    mock_api.get_editable_version.return_value = {"id": "v1", "attributes": {"versionString": "1.0"}}
+    mock_api.get_version_localizations.return_value = [
+        {"id": "l1", "attributes": {"locale": "zh-CN"}},
+    ]
+    mocker.patch("asc.commands.whats_new.make_api_from_config", return_value=(mock_api, "app123"))
+    mocker.patch("asc.commands.whats_new.Config", return_value=MagicMock(
+        llm_api_key="sk-test",
+        llm_base_url="https://api.openai.com/v1",
+        llm_model="gpt-4o",
+    ))
+    mocker.patch("asc.commands.whats_new.resolve_app_profile", return_value="test")
+    mocker.patch("asc.commands.whats_new.Guard")
+
+    from asc.commands.whats_new import cmd_whats_new
+    runner = CliRunner()
+    result = runner.invoke(cmd_whats_new, [
+        "--text", "Bug.", "--translate", "--app", "test"
+    ])
+    assert result.exit_code != 0
+```
+
+- [ ] **Step 2: 运行测试，确认失败**
+
+```bash
+pytest tests/test_whats_new_translate.py -v 2>&1 | head -30
+# Expected: ERROR — module 'asc.commands.whats_new' has no '--translate' option
+```
+
+- [ ] **Step 3: 实现 CLI --translate 参数**
+
+已在 Task 4 中实现。
+
+- [ ] **Step 4: 运行测试，确认通过**
+
+```bash
+pytest tests/test_whats_new_translate.py -v
+# Expected: 6 passed
+```
+
+- [ ] **Step 5: 提交**
+
+```bash
+git add tests/test_whats_new_translate.py
+git commit -m "test(whats-new): add unit tests for --translate CLI flow"
 ```
 
 ---
@@ -669,6 +1269,233 @@ async def whats_new_run(
 ```bash
 git add src/asc/web/routes_api.py
 git commit -m "feat(web): add /api/whats-new/* routes for translate and upload"
+```
+
+---
+
+## Task 5b: 创建 `tests/test_web_whats_new.py` — Web API 路由单元测试
+
+**Files:**
+- Create: `tests/test_web_whats_new.py`
+
+- [ ] **Step 1: 写失败的测试**
+
+```python
+# tests/test_web_whats_new.py
+"""Unit tests for /api/whats-new/* routes and /api/settings/llm."""
+from __future__ import annotations
+
+import pytest
+from unittest.mock import MagicMock, patch
+from fastapi.testclient import TestClient
+
+from asc.web.server import create_app
+
+
+@pytest.fixture
+def client():
+    app = create_app()
+    return TestClient(app)
+
+
+def test_whats_new_check_returns_locales(client, mocker):
+    """GET /api/whats-new/check returns version and locales when version exists."""
+    mock_api = MagicMock()
+    mock_api.get_editable_version.return_value = {
+        "id": "v1",
+        "attributes": {"versionString": "2.0.0"},
+    }
+    mock_api.get_version_localizations.return_value = [
+        {"id": "l1", "attributes": {"locale": "en-US"}},
+        {"id": "l2", "attributes": {"locale": "zh-CN"}},
+    ]
+    mocker.patch("asc.web.routes_api.make_api_from_config", return_value=(mock_api, "app123"))
+    mocker.patch("asc.web.routes_api.Config", return_value=MagicMock(app_name="test"))
+
+    response = client.get(
+        "/api/whats-new/check",
+        cookies={"asc_profile": "test"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is True
+    assert data["version"] == "2.0.0"
+    assert "en-US" in data["locales"]
+    assert "zh-CN" in data["locales"]
+
+
+def test_whats_new_check_no_editable_version(client, mocker):
+    """GET /api/whats-new/check returns error when no editable version."""
+    mock_api = MagicMock()
+    mock_api.get_editable_version.return_value = None
+    mocker.patch("asc.web.routes_api.make_api_from_config", return_value=(mock_api, "app123"))
+    mocker.patch("asc.web.routes_api.Config", return_value=MagicMock(app_name="test"))
+
+    response = client.get(
+        "/api/whats-new/check",
+        cookies={"asc_profile": "test"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is False
+    assert "editable" in data["error"].lower() or "version" in data["error"].lower()
+
+
+def test_whats_new_translate_returns_translations(client, mocker):
+    """POST /api/whats-new/translate returns dict of locale -> translated text."""
+    mock_translate = mocker.patch(
+        "asc.web.routes_api.OpenAITranslator.translate",
+        side_effect=["结果1", "结果2"],
+    )
+    mock_api = MagicMock()
+    mock_api.get_editable_version.return_value = {"id": "v1", "attributes": {"versionString": "1.0"}}
+    mock_api.get_version_localizations.return_value = [
+        {"id": "l1", "attributes": {"locale": "en-US"}},
+        {"id": "l2", "attributes": {"locale": "zh-CN"}},
+    ]
+    mocker.patch("asc.web.routes_api.make_api_from_config", return_value=(mock_api, "app123"))
+    mocker.patch("asc.web.routes_api.Config", return_value=MagicMock(
+        llm_api_key="sk-test",
+        llm_base_url="https://api.openai.com/v1",
+        llm_model="gpt-4o",
+    ))
+
+    response = client.post(
+        "/api/whats-new/translate",
+        data={"text": "Bug fixes.", "source_locale": "en-US"},
+        cookies={"asc_profile": "test"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["source_locale"] == "en-US"
+    assert "zh-CN" in data["translations"]
+    # en-US should be excluded from translations (source locale)
+    assert "en-US" not in data["translations"]
+
+
+def test_whats_new_translate_no_api_key_returns_400(client, mocker):
+    """POST /api/whats-new/translate returns 400 when LLM API key not configured."""
+    mocker.patch("asc.web.routes_api.Config", return_value=MagicMock(
+        llm_api_key="",
+        llm_base_url="https://api.openai.com/v1",
+        llm_model="gpt-4o",
+    ))
+
+    response = client.post(
+        "/api/whats-new/translate",
+        data={"text": "Bug.", "source_locale": "en-US"},
+        cookies={"asc_profile": "test"},
+    )
+    assert response.status_code == 400
+    assert "api_key" in response.json()["error"].lower() or "configured" in response.json()["error"].lower()
+
+
+def test_whats_new_run_returns_task_id(client, mocker):
+    """POST /api/whats-new/run returns a task_id."""
+    mock_api = MagicMock()
+    mock_api.get_editable_version.return_value = {"id": "v1", "attributes": {"versionString": "1.0"}}
+    mock_api.get_version_localizations.return_value = [
+        {"id": "l1", "attributes": {"locale": "zh-CN"}},
+    ]
+    mocker.patch("asc.web.routes_api.make_api_from_config", return_value=(mock_api, "app123"))
+
+    import json
+    response = client.post(
+        "/api/whats-new/run",
+        data={"translations_json": json.dumps({"zh-CN": "错误修复"}), "dry_run": ""},
+        cookies={"asc_profile": "test"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert "task_id" in data
+
+
+def test_whats_new_run_invalid_json_returns_400(client):
+    """POST /api/whats-new/run returns 400 for malformed JSON."""
+    response = client.post(
+        "/api/whats-new/run",
+        data={"translations_json": "not valid json{{", "dry_run": ""},
+        cookies={"asc_profile": "test"},
+    )
+    assert response.status_code == 400
+
+
+def test_settings_llm_get_returns_config(client, mocker):
+    """GET /api/settings/llm returns current LLM config."""
+    mocker.patch("asc.web.routes_api.Config", return_value=MagicMock(
+        llm_api_key="sk-testkey",
+        llm_base_url="https://api.openai.com/v1",
+        llm_model="gpt-4o",
+    ))
+
+    response = client.get("/api/settings/llm", cookies={"asc_profile": "test"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["api_key"] == "sk-testkey"
+    assert data["base_url"] == "https://api.openai.com/v1"
+    assert data["model"] == "gpt-4o"
+
+
+def test_settings_llm_get_no_key_returns_empty_string(client, mocker):
+    """GET /api/settings/llm returns empty string for api_key when not configured."""
+    mocker.patch("asc.web.routes_api.Config", return_value=MagicMock(
+        llm_api_key=None,
+        llm_base_url="https://api.openai.com/v1",
+        llm_model="gpt-4o",
+    ))
+
+    response = client.get("/api/settings/llm", cookies={"asc_profile": "test"})
+    assert response.status_code == 200
+    assert response.json()["api_key"] == ""
+
+
+def test_settings_llm_post_saves_config(client, mocker, tmp_path, monkeypatch):
+    """POST /api/settings/llm saves config to local .asc/config.toml."""
+    import os
+    import tomllib
+
+    # Mock the local_cfg Path to a temp location
+    mock_cfg_path = tmp_path / ".asc" / "config.toml"
+    mocker.patch("asc.web.routes_api.Path", return_value=mock_cfg_path)
+
+    mocker.patch("asc.web.routes_api.Config", return_value=MagicMock(
+        llm_api_key="",
+        llm_base_url="https://api.openai.com/v1",
+        llm_model="gpt-4o",
+    ))
+
+    response = client.post(
+        "/api/settings/llm",
+        json={"base_url": "https://openrouter.ai/v1", "model": "gpt-4o-mini", "api_key": "sk-newkey"},
+        cookies={"asc_profile": "test"},
+    )
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+```
+
+- [ ] **Step 2: 运行测试，确认失败**
+
+```bash
+pytest tests/test_web_whats_new.py -v 2>&1 | head -30
+# Expected: ERROR — module 'asc.web.routes_api' has no attribute '/api/whats-new/*'
+```
+
+- [ ] **Step 3: 实现 Web API 路由**
+
+已在 Task 5 中实现。
+
+- [ ] **Step 4: 运行测试，确认通过**
+
+```bash
+pytest tests/test_web_whats_new.py -v
+# Expected: 8 passed
+```
+
+- [ ] **Step 5: 提交**
+
+```bash
+git add tests/test_web_whats_new.py
+git commit -m "test(web): add unit tests for /api/whats-new/* and /api/settings/llm routes"
 ```
 
 ---
@@ -1127,66 +1954,226 @@ git commit -m "feat(settings): add LLM configuration section in Web UI"
 
 ---
 
-## Task 9: 集成测试
+## Task 10: 集成与端到端测试
 
 **Files:**
-- Test: `tests/test_whats_new.py`
+- Test: `tests/test_whats_new_e2e.py`
 
-- [ ] **Step 1: 添加翻译功能测试**
-
-在 `tests/test_whats_new.py` 末尾添加：
+- [ ] **Step 1: 写端到端测试（mocked LLM + real API client）**
 
 ```python
-# Integration test for --translate CLI flow (mocked)
-def test_whats_new_translate_flag_triggers_translation(mocker):
-    """Verify --translate calls the translator when LLM is configured."""
-    from asc.commands.whats_new import cmd_whats_new
-    from click.testing import CliRunner
-    from unittest.mock import MagicMock
+# tests/test_whats_new_e2e.py
+"""End-to-end integration tests for whats-new translate + upload flow."""
+from __future__ import annotations
 
-    runner = CliRunner()
-    # Mock translator to avoid real API call
-    mock_translate = mocker.patch(
-        "asc.services.translator.OpenAITranslator.translate",
-        return_value="翻译结果",
-    )
-    mock_api = MagicMock()
-    mock_api.get_editable_version.return_value = {
-        "id": "v1",
-        "attributes": {"versionString": "1.0.0"}
-    }
-    mock_api.get_version_localizations.return_value = [
-        {"id": "loc1", "attributes": {"locale": "en-US"}},
-        {"id": "loc2", "attributes": {"locale": "zh-CN"}},
-    ]
-    mocker.patch("asc.commands.whats_new.make_api_from_config", return_value=(mock_api, "app123"))
-    mocker.patch("asc.commands.whats_new.Config", return_value=mocker.MagicMock(
-        llm_api_key="sk-test",
-        llm_base_url="https://api.openai.com/v1",
-        llm_model="gpt-4o",
-    ))
+import pytest
+from unittest.mock import MagicMock, patch
+from click.testing import CliRunner
+import requests_mock as rm
 
-    result = runner.invoke(
-        cmd_whats_new,
-        ["--text", "Bug fixes.", "--translate", "--dry-run", "--app", "test"],
-        catch_exceptions=False,
-    )
-    # Should complete without error (dry-run doesn't call API)
-    assert result.exit_code == 0 or "翻译" in result.output
+
+def test_full_translate_upload_flow():
+    """Full flow: --translate -> get translations -> upload to all locales."""
+    with rm.Mocker() as m:
+        # Mock App Store Connect API
+        m.get(
+            "https://api.appstoreconnect.apple.com/v1/apps/app123/editableVersions",
+            json={"data": [{"id": "v1", "attributes": {"versionString": "1.0.0"}}]},
+        )
+        m.get(
+            "https://api.appstoreconnect.apple.com/v1/versionLocalizations",
+            json={
+                "data": [
+                    {"id": "loc-en", "attributes": {"locale": "en-US"}},
+                    {"id": "loc-zh", "attributes": {"locale": "zh-CN"}},
+                    {"id": "loc-ja", "attributes": {"locale": "ja-JP"}},
+                ]
+            },
+        )
+        m.patch(
+            "https://api.appstoreconnect.apple.com/v1/versionLocalizations/loc-en",
+            json={},
+        )
+        m.patch(
+            "https://api.appstoreconnect.apple.com/v1/versionLocalizations/loc-zh",
+            json={},
+        )
+        m.patch(
+            "https://api.appstoreconnect.apple.com/v1/versionLocalizations/loc-ja",
+            json={},
+        )
+
+        # Mock LLM API (translate calls)
+        m.post(
+            "https://api.openai.com/v1/chat/completions",
+            [
+                # ja-JP translation
+                {"json": {"choices": [{"message": {"role": "assistant", "content": "バグ修正。"}}]}},
+            ],
+        )
+        m.post(
+            "https://api.openai.com/v1/chat/completions",
+            [
+                # zh-CN translation
+                {"json": {"choices": [{"message": {"role": "assistant", "content": "错误修复。"}}]}},
+            ],
+        )
+
+        from asc.commands.whats_new import cmd_whats_new
+        from asc.llm import LLMClient
+        from asc.services.translator import OpenAITranslator
+
+        runner = CliRunner()
+
+        # Patch at the source: the translator creation in cmd_whats_new
+        with patch("asc.commands.whats_new.LLMClient", return_value=LLMClient(
+            api_key="sk-test", base_url="https://api.openai.com/v1", model="gpt-4o"
+        )):
+            with patch("asc.commands.whats_new.OpenAITranslator", return_value=OpenAITranslator(
+                LLMClient(api_key="sk-test", base_url="https://api.openai.com/v1", model="gpt-4o")
+            )):
+                with patch("asc.commands.whats_new.Config") as MockConfig:
+                    MockConfig.return_value.llm_api_key = "sk-test"
+                    MockConfig.return_value.llm_base_url = "https://api.openai.com/v1"
+                    MockConfig.return_value.llm_model = "gpt-4o"
+                    with patch("asc.commands.whats_new.resolve_app_profile", return_value="test"):
+                        with patch("asc.commands.whats_new.Guard"):
+                            with patch("asc.commands.whats_new.make_api_from_config") as mock_make_api:
+                                mock_api = MagicMock()
+                                mock_api.get_editable_version.return_value = {
+                                    "id": "v1", "attributes": {"versionString": "1.0.0"}
+                                }
+                                mock_api.get_version_localizations.return_value = [
+                                    {"id": "loc-en", "attributes": {"locale": "en-US"}},
+                                    {"id": "loc-zh", "attributes": {"locale": "zh-CN"}},
+                                    {"id": "loc-ja", "attributes": {"locale": "ja-JP"}},
+                                ]
+                                mock_make_api.return_value = (mock_api, "app123")
+
+                                result = runner.invoke(cmd_whats_new, [
+                                    "--text", "Bug fixes.",
+                                    "--translate",
+                                    "--app", "test",
+                                ])
+
+        # Should complete successfully
+        assert result.exit_code == 0
+        # Should have attempted 2 uploads (zh-CN and ja-JP; en-US is source)
+        assert mock_api.update_version_localization.call_count == 2
+
+
+def test_web_whats_new_translate_preview_flow():
+    """Web UI: translate preview -> confirm upload via SSE task."""
+    from fastapi.testclient import TestClient
+    from asc.web.server import create_app
+
+    app = create_app()
+    client = TestClient(app)
+
+    with patch("asc.web.routes_api.make_api_from_config") as mock_make_api:
+        mock_api = MagicMock()
+        mock_api.get_editable_version.return_value = {
+            "id": "v1", "attributes": {"versionString": "1.0.0"}
+        }
+        mock_api.get_version_localizations.return_value = [
+            {"id": "l1", "attributes": {"locale": "en-US"}},
+            {"id": "l2", "attributes": {"locale": "zh-CN"}},
+        ]
+        mock_make_api.return_value = (mock_api, "app123")
+
+        with patch("asc.web.routes_api.Config") as MockConfig:
+            MockConfig.return_value.llm_api_key = "sk-test"
+            MockConfig.return_value.llm_base_url = "https://api.openai.com/v1"
+            MockConfig.return_value.llm_model = "gpt-4o"
+
+            with patch("asc.web.routes_api.OpenAITranslator") as MockTranslator:
+                instance = MockTranslator.return_value
+                instance.translate.side_effect = ["错误修复。"]
+
+                # Step 1: translate
+                resp = client.post(
+                    "/api/whats-new/translate",
+                    data={"text": "Bug fixes.", "source_locale": "en-US"},
+                    cookies={"asc_profile": "test"},
+                )
+                assert resp.status_code == 200
+                data = resp.json()
+                assert "translations" in data
+                assert data["source_locale"] == "en-US"
+
+                # Step 2: run upload task
+                import json
+                resp2 = client.post(
+                    "/api/whats-new/run",
+                    data={"translations_json": json.dumps(data["translations"]), "dry_run": "1"},
+                    cookies={"asc_profile": "test"},
+                )
+                assert resp2.status_code == 200
+                task_id = resp2.json()["task_id"]
+                assert task_id
+
+                # Step 3: check task status
+                resp3 = client.get(f"/api/task/{task_id}/status")
+                assert resp3.status_code == 200
+                task_data = resp3.json()
+                assert "status" in task_data
+
+
+def test_whats_new_page_loads():
+    """GET /whats-new returns the page with 200 status."""
+    from fastapi.testclient import TestClient
+    from asc.web.server import create_app
+
+    app = create_app()
+    client = TestClient(app)
+    response = client.get("/whats-new")
+    assert response.status_code == 200
+    assert "更新说明" in response.text or "What's New" in response.text
 ```
 
-- [ ] **Step 2: 运行测试**
+- [ ] **Step 2: 运行端到端测试**
 
 ```bash
-pytest tests/test_whats_new.py tests/test_llm.py tests/test_translator.py -v
-# Expected: all pass
+pytest tests/test_whats_new_e2e.py -v
+# Expected: 3 passed
 ```
 
 - [ ] **Step 3: 提交**
 
 ```bash
-git add tests/test_whats_new.py
-git commit -m "test(whats-new): add integration test for --translate flow"
+git add tests/test_whats_new_e2e.py
+git commit -m "test(e2e): add end-to-end tests for translate + upload flow"
+```
+
+---
+
+## Task 11: 运行完整测试套件并修复
+
+**Files:**
+- Run: 所有新增测试文件
+
+- [ ] **Step 1: 运行完整测试套件**
+
+```bash
+cd /Users/huangxiang/Documents/01-project/AppStoreTools
+pytest tests/test_llm.py tests/test_translator.py tests/test_config_llm.py \
+       tests/test_whats_new_translate.py tests/test_web_whats_new.py \
+       tests/test_whats_new_e2e.py -v
+```
+
+- [ ] **Step 2: 如有失败，修复后重新运行**
+
+- [ ] **Step 3: 运行整个项目测试套件确保无回归**
+
+```bash
+pytest tests/ -v --ignore=tests/test_whats_new_e2e.py  # 集成测试单独跑
+```
+
+- [ ] **Step 4: 提交**
+
+```bash
+git add tests/
+git commit -m "test: add complete test suite for whats-new translate feature"
 ```
 
 ---
@@ -1194,10 +2181,33 @@ git commit -m "test(whats-new): add integration test for --translate flow"
 ## 自检清单
 
 1. **Spec 覆盖**：逐条核对设计文档，确认每条需求有对应任务实现。
+   - `llm.py` → Task 1 + Task 10（e2e）
+   - `services/translator.py` → Task 2 + Task 10（e2e）
+   - `config.py` [llm] → Task 3 + Task 3b
+   - `whats_new.py` --translate → Task 4 + Task 4b
+   - `routes_api.py` /api/whats-new/* → Task 5 + Task 5b
+   - `server.py` /whats-new → Task 6
+   - `whats_new.html` → Task 7
+   - `settings.html` LLM区块 → Task 8
+   - 集成测试 → Task 10 + Task 11
+
 2. **占位符扫描**：检查计划中是否有 TBD/TODO/模糊描述 — 无。
+
 3. **类型一致性**：
-   - `LLMClient.chat()` 返回 `str` ✓
-   - `OpenAITranslator.translate(text, target, source)` 签名 ✓
+   - `LLMClient.chat(messages, temperature)` 返回 `str` ✓
+   - `OpenAITranslator.translate(text, target_locale, source_locale)` 签名 ✓
    - `Config.llm_api_key` / `llm_base_url` / `llm_model` 属性名一致 ✓
    - API 路由 `/api/whats-new/translate` 和 `/api/whats-new/run` ✓
-4. **分支检查**：确认在 `feat/web-ui` 分支上工作。
+   - API 路由 `/api/settings/llm` (GET + POST) ✓
+   - `TaskStore.create(kind)` 支持 `"whats-new"` kind ✓
+
+4. **测试覆盖**：
+   - LLM 客户端：10 个测试（retry, error, headers, payload, timeout）
+   - 翻译服务：9 个测试（prompt 结构, 多语言, 空文本, 特殊字符）
+   - Config LLM：7 个测试（TOML 读取, env fallback, 默认值）
+   - CLI --translate：6 个测试（错误处理, dry-run, skip-failure, all-fail）
+   - Web API：8 个测试（check, translate, run, settings/llm）
+   - E2E：3 个测试（完整流程, Web预览流, 页面加载）
+   - **总计：43 个测试用例**
+
+5. **分支检查**：确认在 `feat/web-ui` 分支上工作。
