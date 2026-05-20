@@ -179,6 +179,14 @@ HELP = {
         'en': 'Comma-separated target locales (e.g. en-US,zh-CN). Only used with --text. If not set, applies to all available locales.',
         'zh': '逗号分隔的目标语言（例如 en-US,zh-CN）。仅与 --text 一起使用。如果不设置，则应用于所有可用语言。'
     },
+    'llm_translate': {
+        'en': 'Auto-translate input text to all locales using LLM',
+        'zh': '使用 LLM 自动将输入文本翻译到所有语言',
+    },
+    'llm_source_locale': {
+        'en': 'Source locale for translation (default: auto-detect)',
+        'zh': '翻译源语言（默认：自动检测）',
+    },
     'preview_uploads': {
         'en': 'Preview uploads without sending to App Store',
         'zh': '预览上传但不发送到 App Store'
@@ -465,6 +473,23 @@ ERRORS = {
     'guard_conflict': {
         'en': 'Guard binding conflict detected. Run "asc guard unbind" or "asc guard disable".',
         'zh': 'Guard 绑定冲突。请运行 "asc guard unbind" 或 "asc guard disable" 禁用 Guard。',
+    },
+    # LLM translation errors
+    'llm_api_key_required': {
+        'en': 'LLM API key not configured. Set [llm] api_key in config or OPENAI_API_KEY env var.',
+        'zh': 'LLM API 密钥未配置。请在配置文件中设置 [llm] api_key 或设置 OPENAI_API_KEY 环境变量。',
+    },
+    'llm_translation_failed': {
+        'en': 'Translation failed for {locale}: {error}',
+        'zh': '{locale} 翻译失败: {error}',
+    },
+    'llm_all_translations_failed': {
+        'en': 'All translations failed.',
+        'zh': '所有语言翻译均失败。',
+    },
+    'llm_translate_requires_text': {
+        'en': '--translate requires --text',
+        'zh': '--translate 需要配合 --text 使用',
     },
 }
 

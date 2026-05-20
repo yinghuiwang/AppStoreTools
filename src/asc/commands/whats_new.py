@@ -71,6 +71,14 @@ def cmd_whats_new(
     ),
     app: Optional[str] = typer.Option(None, "--app", "-a", help=t(HELP['app_profile_name'])),
     dry_run: bool = typer.Option(False, "--dry-run", "-d", help=t(HELP['preview_without_upload'])),
+    translate: bool = typer.Option(
+        False, "--translate", "-T",
+        help=t(HELP['llm_translate']),
+    ),
+    source_locale: Optional[str] = typer.Option(
+        None, "--source-locale", "-s",
+        help=t(HELP['llm_source_locale']),
+    ),
 ):
     """Update What's New (release notes) for the current version.
 
@@ -190,6 +198,73 @@ def cmd_whats_new(
                     f"❌ 指定的语言不存在，可用语言: {existing_locales}", err=True
                 )
                 raise typer.Exit(1)
+
+        if translate:
+            if not text:
+                typer.echo(f"❌ {t(ERRORS['llm_translate_requires_text'])}", err=True)
+                raise typer.Exit(1)
+
+            if not config.llm_api_key:
+                typer.echo(f"❌ {t(ERRORS['llm_api_key_required'])}", err=True)
+                raise typer.Exit(1)
+
+            from asc.llm import LLMClient
+            from asc.services.translator import OpenAITranslator
+
+            llm_client = LLMClient(
+                api_key=config.llm_api_key,
+                base_url=config.llm_base_url,
+                model=config.llm_model,
+            )
+            translator = OpenAITranslator(llm_client)
+
+            # Source locale for translation (exclude from targets)
+            source = source_locale or "auto"
+            target_locs_for_translate = [
+                loc for loc in target_locs
+                if loc["attributes"]["locale"] != source
+            ] if source != "auto" else target_locs
+
+            translations: dict[str, str] = {}
+            failed_locales: list[str] = []
+
+            print(f"\n🌐 翻译模式: 源语言={source}, 目标={len(target_locs_for_translate)} 个语言")
+
+            for loc in target_locs_for_translate:
+                locale = loc["attributes"]["locale"]
+                try:
+                    result = translator.translate(text, locale, source)
+                    translations[locale] = result
+                    preview = result[:50] + "..." if len(result) > 50 else result
+                    print(f"  {locale}: {preview}")
+                except Exception as e:
+                    failed_locales.append(locale)
+                    print(f"  ⚠️  {locale} 翻译失败: {e}")
+
+            if not translations:
+                typer.echo(f"❌ {t(ERRORS['llm_all_translations_failed'])}", err=True)
+                raise typer.Exit(1)
+
+            if dry_run:
+                print("\n  ⚠️  预览模式，不实际上传")
+                return
+
+            # Upload
+            success_count = 0
+            for loc in target_locs_for_translate:
+                locale = loc["attributes"]["locale"]
+                if locale not in translations:
+                    print(f"  ⚠️  {locale}: 跳过（翻译失败）")
+                    continue
+                loc_id = loc["id"]
+                api.update_version_localization(loc_id, {"whatsNew": translations[locale]})
+                print(f"  ✅ {locale}: 已上传")
+                success_count += 1
+
+            if failed_locales:
+                print(f"\n⚠️  以下语言翻译失败: {', '.join(failed_locales)}")
+            print(f"\n✅ 版本描述更新完成 ({success_count}/{len(translations) + len(failed_locales)} 成功)")
+            return
 
         preview = text[:80] + "..." if len(text) > 80 else text
         print(f"  更新内容: {preview}")
