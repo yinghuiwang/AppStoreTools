@@ -217,6 +217,7 @@
        saving: false,
        saved: false,
        loading: true,
+       isEditing: false,
      }"
      x-init="
        fetch('/api/settings/llm')
@@ -232,7 +233,7 @@
   <div class="card-header flex items-center gap-2">
     <svg class="w-4 h-4 text-amber-500" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456Z"/></svg>
     <h2 class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">LLM 翻译配置</h2>
-    <button @click="showForm = true; editName = ''; editBaseUrl = 'https://api.openai.com/v1'; editApiKey = ''; editModel = 'gpt-4o'"
+    <button @click="showForm = true; isEditing = false; editName = ''; editBaseUrl = 'https://api.openai.com/v1'; editApiKey = ''; editModel = 'gpt-4o'"
             class="ml-auto text-xs btn-secondary py-1 px-2">+ 新增配置</button>
   </div>
   <div class="card-body space-y-4">
@@ -247,7 +248,7 @@
         <div>
           <label class="text-xs text-obsidian-500 mb-1 block">配置名称</label>
           <input type="text" x-model="editName" placeholder="例如: openai, claude"
-                 class="field-input w-full text-xs" :disabled="editName !== ''">
+                 class="field-input w-full text-xs" :disabled="isEditing">
         </div>
         <div>
           <label class="text-xs text-obsidian-500 mb-1 block">Base URL</label>
@@ -265,11 +266,21 @@
         <div class="flex gap-2">
           <button @click="
             saving = true;
-            const name = editName || ('config' + (Object.keys(configs).length + 1));
+            const payload = {
+              base_url: editBaseUrl,
+              api_key: editApiKey,
+              model: editModel,
+              set_default: true
+            };
+            if (isEditing) {
+              payload.name = editName;
+            } else {
+              payload.name = editName || ('config' + (Object.keys(configs).length + 1));
+            }
             fetch('/api/settings/llm', {
               method: 'POST',
               headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({name, base_url: editBaseUrl, api_key: editApiKey, model: editModel, set_default: true})
+              body: JSON.stringify(payload)
             }).then(r => r.json()).then(() => {
               saving = false; saved = true;
               return fetch('/api/settings/llm');
@@ -319,6 +330,7 @@
                       x-show="name !== default"
                       class="text-[10px] btn-secondary py-1 px-2">设为默认</button>
               <button @click="
+                isEditing = true;
                 editName = name;
                 editBaseUrl = cfg.base_url;
                 editApiKey = cfg.api_key || '';
