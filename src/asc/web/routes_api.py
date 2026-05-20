@@ -697,24 +697,32 @@ async def whats_new_check(request: Request):
     """Check environment and return available locales for the current app version."""
     profile = request.cookies.get("asc_profile", "")
     if not profile:
-        return {"ok": False, "error": "No profile selected"}
+        return {"ok": False, "level": "error", "message": "No profile selected", "detail": {}}
     try:
         from asc.config import Config
         config = Config(app_name=profile)
         api, app_id = make_api_from_config(config)
         version = api.get_editable_version(app_id)
         if not version:
-            return {"ok": False, "error": "No editable version found"}
-        version_id = version["id"]
-        ver_locs = api.get_version_localizations(version_id)
-        locales = [loc["attributes"]["locale"] for loc in ver_locs]
+            return {
+                "ok": False,
+                "level": "warning",
+                "message": "无可编辑版本",
+                "detail": {},
+            }
+        version_string = version["attributes"].get("versionString", "?")
+        locales = _get_available_locales(api, app_id)
         return {
             "ok": True,
-            "version": version["attributes"].get("versionString", "?"),
-            "locales": locales,
+            "level": "success",
+            "message": f"版本 {version_string}，找到 {len(locales)} 个语言",
+            "detail": {
+                "version": version_string,
+                "locales": [l["locale"] for l in locales],
+            },
         }
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "level": "error", "message": str(e), "detail": {}}
 
 
 @router.post("/whats-new/translate")
@@ -763,8 +771,10 @@ async def whats_new_translate(
 
 def _start_whats_new_task(
     profile: str,
-    translations: dict[str, str],
     dry_run: bool,
+    translations: dict[str, str] | None = None,
+    text: str | None = None,
+    locales: list[str] | None = None,
 ) -> str:
     task_id = _task_store.create("whats-new", profile=profile)
 
@@ -803,21 +813,57 @@ def _start_whats_new_task(
             config = Config(app_name=profile)
             api, app_id = make_api_from_config(config)
             version = api.get_editable_version(app_id)
+            if not version:
+                raise Exception("无可编辑版本")
+
+            app_store_state = version["attributes"].get("appStoreState", "")
+            editable_states = {"PREPARE_FOR_SUBMISSION", "DEVELOPER_REJECTED", "REJECTED"}
+            if app_store_state not in editable_states:
+                state_hint = {
+                    "READY_FOR_SALE": "版本已上架，无法编辑更新说明。如需修改，请创建新版本。",
+                    "WAITING_FOR_REVIEW": "版本正在等待审核，请先拒绝版本后再修改。",
+                    "IN_REVIEW": "版本正在审核中，无法修改更新说明。",
+                    "PENDING_APPLE_RELEASE": "版本待 Apple 发布，无法修改更新说明。",
+                    "ACCEPTED": "版本已通过审核，无法修改更新说明。",
+                }.get(app_store_state, f"当前版本状态「{app_store_state}」不允许编辑更新说明。")
+                raise Exception(
+                    f"无法编辑 What's New：{state_hint}\n"
+                    f"💡 可编辑状态：{', '.join(editable_states)}"
+                )
+
             version_id = version["id"]
             ver_locs = api.get_version_localizations(version_id)
             ver_loc_map = {loc["attributes"]["locale"]: loc for loc in ver_locs}
 
-            total = len(translations)
-            for i, (locale, content) in enumerate(translations.items()):
-                if locale not in ver_loc_map:
-                    _task_store.append_log(task_id, f"⚠️  {locale}: 不存在，跳过")
-                    continue
+            if translations is not None:
+                # Translation flow: use pre-translated dict
+                total = len(translations)
+                for i, (locale, content) in enumerate(translations.items()):
+                    if locale not in ver_loc_map:
+                        _task_store.append_log(task_id, f"⚠️  {locale}: 不存在，跳过")
+                        continue
+                    if dry_run:
+                        _task_store.append_log(task_id, f"[DRYRUN] {locale}: {content[:50]}...")
+                        continue
+                    api.update_version_localization(ver_loc_map[locale]["id"], {"whatsNew": content})
+                    _task_store.append_log(task_id, f"✅ {locale}: 已上传")
+                    _task_store.set_progress(task_id, int((i + 1) / total * 100), f"上传 {locale}")
+            else:
+                # Direct text flow: apply same text to target locales
+                target_locs = ver_locs
+                if locales:
+                    target_locs = [loc for loc in ver_locs if loc["attributes"]["locale"] in locales]
+                    if not target_locs:
+                        raise Exception(f"指定的语言不存在，可用语言: {list(ver_loc_map.keys())}")
+
                 if dry_run:
-                    _task_store.append_log(task_id, f"[DRYRUN] {locale}: {content[:50]}...")
-                    continue
-                api.update_version_localization(ver_loc_map[locale]["id"], {"whatsNew": content})
-                _task_store.append_log(task_id, f"✅ {locale}: 已上传")
-                _task_store.set_progress(task_id, int((i + 1) / total * 100), f"上传 {locale}")
+                    _task_store.append_log(task_id, f"[DRYRUN] 预览模式，目标语言: {[l['attributes']['locale'] for l in target_locs]}")
+                else:
+                    for i, loc in enumerate(target_locs):
+                        locale = loc["attributes"]["locale"]
+                        api.update_version_localization(loc["id"], {"whatsNew": text or ""})
+                        _task_store.append_log(task_id, f"✅ {locale}: 已更新")
+                        _task_store.set_progress(task_id, int((i + 1) / len(target_locs) * 100), f"上传 {locale}")
 
             done_flag.set()
             _task_store.set_status(task_id, _TaskStatus.DONE)
@@ -835,21 +881,38 @@ def _start_whats_new_task(
 @router.post("/whats-new/run")
 async def whats_new_run(
     request: Request,
-    translations_json: str = _Form(...),
+    translations_json: str = _Form(""),
+    text: str = _Form(""),
+    locales: str = _Form(""),
     dry_run: str = _Form(""),
 ):
+    """Run whats-new upload. Supports both translate mode (translations_json) and direct mode (text+locales)."""
     import json
     profile = request.cookies.get("asc_profile", "")
     if not profile:
         return JSONResponse({"error": "No profile selected"}, status_code=400)
-    try:
-        translations = json.loads(translations_json)
-    except json.JSONDecodeError:
-        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    translations = None
+    locale_list = None
+
+    if translations_json:
+        # Translate mode: pre-translated dict
+        try:
+            translations = json.loads(translations_json)
+        except json.JSONDecodeError:
+            return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+    elif text:
+        # Direct mode: same text to specified locales
+        locale_list = [l.strip() for l in locales.split(",")] if locales else None
+    else:
+        return JSONResponse({"error": "Either translations_json or text is required"}, status_code=400)
+
     task_id = _start_whats_new_task(
         profile=profile,
-        translations=translations,
         dry_run=bool(dry_run),
+        translations=translations,
+        text=text or None,
+        locales=locale_list,
     )
     return {"task_id": task_id}
 
@@ -937,28 +1000,6 @@ async def iap_run(
         iap_file=iap_file,
         dry_run=bool(dry_run),
         update_existing=bool(update_existing),
-    )
-    return {"task_id": task_id}
-
-
-@router.post("/whats-new/run")
-async def whats_new_run(
-    request: Request,
-    translations_json: str = _Form(...),
-    dry_run: str = _Form(""),
-):
-    import json
-    profile = request.cookies.get("asc_profile", "")
-    if not profile:
-        return JSONResponse({"error": "No profile selected"}, status_code=400)
-    try:
-        translations = json.loads(translations_json)
-    except json.JSONDecodeError:
-        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
-    task_id = _start_whats_new_task(
-        profile=profile,
-        translations=translations,
-        dry_run=bool(dry_run),
     )
     return {"task_id": task_id}
 
@@ -1073,136 +1114,6 @@ async def urls_set(
                     _update_version_field_core(
                         api, app_id, field, field, url, locale_list, bool(dry_run)
                     )
-
-            done_flag.set()
-            _task_store.set_status(task_id, _TaskStatus.DONE)
-            _task_store.set_result(task_id, {"success": True})
-        except Exception as e:
-            done_flag.set()
-            _task_store.append_log(task_id, f"❌ 错误：{e}")
-            _task_store.set_status(task_id, _TaskStatus.ERROR)
-            _task_store.set_result(task_id, {"success": False, "error": str(e)})
-
-    _threading.Thread(target=_run, daemon=True).start()
-    return {"task_id": task_id}
-
-
-# ---------- What's New API ----------
-
-@router.get("/whatsnew/check")
-async def whatsnew_check(request: Request):
-    """Check environment for What's New."""
-    profile = request.cookies.get("asc_profile", "")
-    try:
-        config = Config(app_name=profile)
-        api, app_id = make_api_from_config(config)
-        version = api.get_editable_version(app_id)
-        if not version:
-            return {
-                "ok": False,
-                "level": "warning",
-                "message": "无可编辑版本",
-                "detail": {},
-            }
-        version_string = version["attributes"].get("versionString", "?")
-        locales = _get_available_locales(api, app_id)
-        return {
-            "ok": True,
-            "level": "success",
-            "message": f"版本 {version_string}，找到 {len(locales)} 个语言",
-            "detail": {"version": version_string, "locales": [l["locale"] for l in locales]},
-        }
-    except Exception as e:
-        return {"ok": False, "level": "error", "message": str(e), "detail": {}}
-
-
-@router.post("/whatsnew/set")
-async def whatsnew_set(
-    request: Request,
-    text: str = _Form(...),
-    locales: str = _Form(""),  # comma-separated or empty for all
-    dry_run: str = _Form(""),
-):
-    """Set What's New (release notes) for the current version."""
-    profile = request.cookies.get("asc_profile", "")
-    task_id = _task_store.create("whatsnew", profile=profile)
-
-    def _run():
-        import queue
-        from asc.web.sse import capture_stdout_to_queue
-        from asc.commands.whats_new import cmd_whats_new
-        import argparse
-
-        _task_store.set_status(task_id, _TaskStatus.RUNNING)
-        q: "queue.Queue" = queue.Queue()
-        done_flag = _threading.Event()
-
-        def _drain_loop():
-            while not done_flag.is_set():
-                while not q.empty():
-                    _task_store.append_log(task_id, q.get_nowait())
-                done_flag.wait(timeout=0.05)
-            while not q.empty():
-                _task_store.append_log(task_id, q.get_nowait())
-
-        _threading.Thread(target=_drain_loop, daemon=True).start()
-
-        try:
-            config = Config(app_name=profile)
-            api, app_id = make_api_from_config(config)
-            locale_list = [l.strip() for l in locales.split(",")] if locales else None
-
-            version = api.get_editable_version(app_id)
-            if not version:
-                raise Exception("无可编辑版本")
-
-            # Check if whatsNew can be edited in current state
-            app_store_state = version["attributes"].get("appStoreState", "")
-            # States where whatsNew CAN be edited
-            editable_states_for_whatsnew = {
-                "PREPARE_FOR_SUBMISSION",
-                "DEVELOPER_REJECTED",
-                "REJECTED",
-            }
-            if app_store_state not in editable_states_for_whatsnew:
-                state_hint = {
-                    "READY_FOR_SALE": "版本已上架，无法编辑更新说明。如需修改，请创建新版本。",
-                    "WAITING_FOR_REVIEW": "版本正在等待审核，请先拒绝版本后再修改。",
-                    "IN_REVIEW": "版本正在审核中，无法修改更新说明。",
-                    "PENDING_APPLE_RELEASE": "版本待 Apple 发布，无法修改更新说明。",
-                    "ACCEPTED": "版本已通过审核，无法修改更新说明。",
-                }.get(app_store_state, f"当前版本状态「{app_store_state}」不允许编辑更新说明。")
-                raise Exception(
-                    f"无法编辑 What's New：{state_hint}\n"
-                    f"💡 可编辑状态：{', '.join(editable_states_for_whatsnew)}"
-                )
-
-            version_id = version["id"]
-            ver_locs = api.get_version_localizations(version_id)
-            ver_loc_map = {loc["attributes"]["locale"]: loc for loc in ver_locs}
-
-            target_locs = ver_locs
-            if locale_list:
-                target_locs = [
-                    loc for loc in ver_locs if loc["attributes"]["locale"] in locale_list
-                ]
-                if not target_locs:
-                    raise Exception(f"指定的语言不存在，可用语言: {list(ver_loc_map.keys())}")
-
-            with capture_stdout_to_queue(q):
-                print(f"📋 更新版本描述 (What's New)")
-                print(f"  版本状态: {app_store_state}")
-                print(f"  更新内容: {text[:80]}..." if len(text) > 80 else f"  更新内容: {text}")
-                print(f"  目标语言: {[loc['attributes']['locale'] for loc in target_locs]}")
-
-                if dry_run:
-                    print("  ⚠️  预览模式，不实际更新")
-                else:
-                    for loc in target_locs:
-                        locale = loc["attributes"]["locale"]
-                        loc_id = loc["id"]
-                        api.update_version_localization(loc_id, {"whatsNew": text})
-                        print(f"  ✅ {locale}: 已更新")
 
             done_flag.set()
             _task_store.set_status(task_id, _TaskStatus.DONE)

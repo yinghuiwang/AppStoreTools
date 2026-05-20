@@ -36,8 +36,9 @@ def test_whats_new_check_returns_locales(client):
     assert response.status_code == 200
     data = response.json()
     assert data["ok"] is True
-    assert data["version"] == "2.0.0"
-    assert data["locales"] == ["en-US", "zh-CN"]
+    assert data["level"] == "success"
+    assert data["detail"]["version"] == "2.0.0"
+    assert data["detail"]["locales"] == ["en-US", "zh-CN"]
 
 
 def test_whats_new_check_no_editable_version(client):
@@ -56,7 +57,8 @@ def test_whats_new_check_no_editable_version(client):
     assert response.status_code == 200
     data = response.json()
     assert data["ok"] is False
-    assert "error" in data
+    assert data["level"] == "warning"
+    assert "message" in data
 
 
 def test_whats_new_translate_returns_translations(client):
