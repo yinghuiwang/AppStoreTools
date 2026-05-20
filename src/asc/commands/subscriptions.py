@@ -151,6 +151,10 @@ def _upload_subscriptions_core(
     }
     failures: list[tuple[str, str]] = []
 
+    total_subs = sum(len(g.get("subscriptions", [])) for g in groups)
+    total_items = len(groups) + total_subs
+    completed = 0
+
     for group_cfg in groups:
         ref_name = group_cfg["referenceName"]
         print(f"\n── 订阅组: {ref_name} ──")
@@ -158,6 +162,9 @@ def _upload_subscriptions_core(
             api, app_id, group_cfg, update_existing, dry_run
         )
         stats[f"groups_{group_status}"] += 1
+        completed += 1
+        pct = int(completed / total_items * 100) if total_items else 0
+        print(f"[PROGRESS:{pct}:订阅组 {completed}/{total_items}]")
         if group_id is None:
             group_id = "DRY_RUN_GROUP"
 
@@ -172,6 +179,10 @@ def _upload_subscriptions_core(
                 stats["subs_failed"] += 1
                 failures.append((pid, str(e)))
                 print(f"  ❌ {pid} 失败: {e}")
+
+            completed += 1
+            pct = int(completed / total_items * 100) if total_items else 0
+            print(f"[PROGRESS:{pct}:订阅 {completed}/{total_items}]")
 
     _print_summary(stats, failures)
     return stats["subs_failed"]

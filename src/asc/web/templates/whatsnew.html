@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block content %}
+<div>
+  <!-- Header -->
+  <div class="mb-8">
+    <h1 class="text-2xl font-bold tracking-tight text-obsidian-50 flex items-center gap-3">
+      <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: var(--accent-glow);">
+        <svg class="w-4.5 h-4.5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>
+      </div>
+      What's New
+    </h1>
+    <p class="text-sm text-obsidian-400 mt-1">更新当前版本的应用商店"新功能"描述</p>
+  </div>
+
+  <div x-data="{ step: 1, taskId: null, logs: [], status: 'idle', checkResult: null, availableLocales: [], selectedLocales: '' }">
+
+    <!-- Step 1: 配置表单 -->
+    <div x-show="step === 1">
+      <form id="whatsnew-form"
+            @submit.prevent="
+              document.getElementById('locales-hidden').value = selectedLocales;
+              fetch('/api/whatsnew/set', {
+                method: 'POST',
+                body: new FormData($el)
+              })
+              .then(r => r.json())
+              .then(data => {
+                taskId = data.task_id;
+                step = 2;
+                startSSE(taskId);
+              });
+            ">
+
+        <div class="card">
+          <div class="card-body space-y-5">
+
+            <!-- Release notes -->
+            <div>
+              <div class="flex items-center gap-1.5 mb-2">
+                <label for="whatsnew-text" class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">更新说明</label>
+              </div>
+              <textarea name="text" id="whatsnew-text" rows="6" required
+                        class="field-input w-full resize-none"
+                        placeholder="在此输入更新说明，支持多行文本..."
+                        x-model="$el.value"></textarea>
+              <p class="text-xs text-obsidian-500 mt-1">将更新到所有目标语言的 App Store 版本信息中</p>
+            </div>
+
+            <!-- Locales -->
+            <div>
+              <label for="locales-input" class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">目标语言</label>
+              <input type="text" name="locales_display" id="locales-input"
+                     x-model="selectedLocales"
+                     class="field-input w-full"
+                     placeholder="留空表示所有语言，如：zh-Hans, en-US">
+              <input type="hidden" name="locales" id="locales-hidden">
+              <p class="text-xs text-obsidian-500 mt-1">多个语言用逗号分隔。检查后显示可用的语言版本。</p>
+            </div>
+
+            <!-- Dry run -->
+            <div>
+              <label class="flex items-center gap-2.5 text-sm text-obsidian-300 cursor-pointer">
+                <input type="checkbox" name="dry_run" value="on" class="w-4 h-4"> Dry Run（预览，不实际上传）
+              </label>
+            </div>
+
+            <!-- Actions -->
+            <div class="flex gap-3 pt-3 border-t border-obsidian-700">
+              <button type="submit" class="btn-primary">
+                更新 What's New
+              </button>
+              <button type="button" class="btn-ghost"
+                      @click="
+                        fetch('/api/whatsnew/check', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}})
+                          .then(r => r.json())
+                          .then(data => {
+                            checkResult = data;
+                            if (data.detail && data.detail.locales) {
+                              availableLocales = data.detail.locales;
+                              if (!selectedLocales) {
+                                selectedLocales = data.detail.locales.join(', ');
+                              }
+                            }
+                          })
+                          .catch(() => { checkResult = {ok: false, level: 'error', message: '请求失败'}; })
+                      ">
+                验证环境
+              </button>
+            </div>
+
+            <!-- Check result -->
+            <template x-if="checkResult">
+              <div class="rounded-lg p-4 text-sm"
+                   :class="{
+                     'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20': checkResult.level === 'success',
+                     'bg-amber-500/10 text-amber-400 border border-amber-500/20': checkResult.level === 'warning',
+                     'bg-red-500/10 text-red-400 border border-red-500/20': checkResult.level === 'error',
+                   }">
+                <p class="font-medium" x-text="checkResult.message"></p>
+                <template x-if="checkResult.detail && checkResult.detail.locales">
+                  <p class="text-xs mt-1 opacity-80" x-text="'可用语言: ' + checkResult.detail.locales.join(', ')"></p>
+                </template>
+              </div>
+            </template>
+
+            <!-- Format help -->
+            <div class="rounded-lg p-4 text-xs" style="background: var(--accent-glow); border: 1px solid rgba(232,161,37,0.2);">
+              <p class="font-medium text-amber-500 mb-2">提示</p>
+              <ul class="space-y-1 text-obsidian-300">
+                <li>• 此内容将显示在 App Store 的"新功能"区域</li>
+                <li>• 建议简洁明了，列出主要更新内容</li>
+                <li>• 可以使用多行文本</li>
+                <li>• 不同语言可以设置不同的内容</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </form>
+    </div>
+
+    <!-- Step 2: 执行面板 -->
+    <div x-show="step === 2">
+      <div class="card">
+        <div class="card-body">
+          <div class="flex items-center justify-between mb-5">
+            <h2 class="font-semibold text-obsidian-100" x-text="status === 'done' ? '更新完成' : status === 'error' ? '更新失败' : '更新中...'"></h2>
+            <button type="button" class="text-xs text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium" @click="step=1; logs=[]; status='idle'">重新运行</button>
+          </div>
+
+          <div class="log-panel max-h-64" id="log-panel">
+            <template x-for="(line, idx) in logs" :key="idx">
+              <div x-text="line"></div>
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function startSSE(taskId) {
+  const root = document.querySelector('[x-data]');
+  const d = Alpine.$data(root);
+  const es = new EventSource(`/api/task/${taskId}/stream`);
+  es.addEventListener('log', e => {
+    d.logs.push(e.data);
+    const panel = document.getElementById('log-panel');
+    if (panel) requestAnimationFrame(() => { panel.scrollTop = panel.scrollHeight; });
+  });
+  es.addEventListener('done', () => { d.status = 'done'; es.close(); });
+  es.addEventListener('error_event', () => { d.status = 'error'; es.close(); });
+}
+</script>
+{% endblock %}

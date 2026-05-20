@@ -131,6 +131,46 @@ def test_profiles_list_api(client):
         assert resp.status_code == 200
         assert "myapp" in resp.json()["profiles"]
 
+
+def test_profiles_list_api_includes_profile_details(client):
+    from unittest.mock import patch, MagicMock
+
+    mock_config = MagicMock()
+    mock_config.list_apps.return_value = ["myapp"]
+    mock_config.app_name = "myapp"
+    mock_config.get_app_profile.return_value = {
+        "issuer_id": "issuer-123",
+        "key_id": "KEY123",
+        "key_file": "/Users/me/.config/asc/keys/AuthKey_KEY123.p8",
+        "app_id": "123456789",
+        "csv": "data/appstore_info.csv",
+        "screenshots": "data/screenshots",
+    }
+
+    with patch("asc.config.Config", return_value=mock_config):
+        resp = client.get("/api/profiles")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["profile_details"]["myapp"] == {
+        "issuer_id": "issuer-123",
+        "key_id": "KEY123",
+        "key_file_name": "AuthKey_KEY123.p8",
+        "app_id": "123456789",
+        "csv": "data/appstore_info.csv",
+        "screenshots": "data/screenshots",
+    }
+
+
+def test_profiles_page_shows_profile_detail_fields(client):
+    resp = client.get("/profiles")
+    assert resp.status_code == 200
+    assert "App ID" in resp.text
+    assert "Issuer ID" in resp.text
+    assert "Key ID" in resp.text
+    assert "CSV" in resp.text
+    assert "截图" in resp.text
+
 def test_profile_create_api(client, tmp_path):
     """POST /api/profiles 创建新 profile"""
     p8_content = b"-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----\n"
@@ -161,6 +201,7 @@ def test_guard_status_returns_json(client):
     mock_guard = MagicMock()
     mock_guard.get_status.return_value = {
         "enabled": True,
+        "app_notes": {},
         "bindings": {"machine": {}, "ip": {}, "credential": {}},
     }
     with patch("asc.guard.Guard", return_value=mock_guard):
@@ -172,7 +213,7 @@ def test_guard_status_returns_json(client):
     assert "current_profile" in data
 
 
-def test_guard_status_truncates_fingerprint(client):
+def test_guard_status_returns_full_fingerprint(client):
     from unittest.mock import patch, MagicMock
     long_fp = "a1b2c3d4e5f6g7h8i9j0"
     mock_guard = MagicMock()
@@ -189,7 +230,111 @@ def test_guard_status_truncates_fingerprint(client):
     data = resp.json()
     machine_keys = list(data["bindings"]["machine"].keys())
     assert len(machine_keys) == 1
-    assert machine_keys[0] == "a1b2c3d4..."
+    assert machine_keys[0] == long_fp
+
+
+def test_guard_note_api_updates_app_note(client):
+    from unittest.mock import patch, MagicMock
+    mock_guard = MagicMock()
+    mock_guard.set_app_note.return_value = True
+    with patch("asc.guard.Guard", return_value=mock_guard):
+        resp = client.post("/api/guard/note", data={
+            "app_id": "123456789",
+            "note": "办公室 Mac",
+        })
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
+    mock_guard.set_app_note.assert_called_once_with("123456789", "办公室 Mac")
+
+
+def test_guard_note_api_missing_app_returns_404(client):
+    from unittest.mock import patch, MagicMock
+    mock_guard = MagicMock()
+    mock_guard.set_app_note.return_value = False
+    with patch("asc.guard.Guard", return_value=mock_guard):
+        resp = client.post("/api/guard/note", data={
+            "app_id": "missing.app",
+            "note": "home",
+        })
+    assert resp.status_code == 404
+
+
+def test_guard_note_api_persists_for_status_refresh(client, tmp_path):
+    import json
+    from unittest.mock import patch
+
+    guard_file = tmp_path / "guard.json"
+    guard_file.write_text(json.dumps({
+        "enabled": True,
+        "bindings": {
+            "machine": {
+                "SERIAL-C02ABC123456": {
+                    "app_id": "123456789",
+                    "app_name": "myapp",
+                    "issuer_id": "ISS1",
+                    "bound_at": "2026-05-18T10:00:00",
+                    "last_checked": "2026-05-18T10:00:00",
+                },
+            },
+            "ip": {},
+            "credential": {},
+        },
+        "app_notes": {},
+    }))
+
+    with patch("asc.guard.GUARD_FILE", guard_file):
+        save_resp = client.post("/api/guard/note", data={
+            "app_id": "123456789",
+            "note": "办公室 Mac",
+        })
+        status_resp = client.get("/api/guard/status")
+
+    assert save_resp.status_code == 200
+    assert status_resp.status_code == 200
+    assert status_resp.json()["app_notes"]["123456789"] == "办公室 Mac"
+
+
+def test_guard_note_api_persists_when_binding_app_id_is_numeric(client, tmp_path):
+    import json
+    from unittest.mock import patch
+
+    guard_file = tmp_path / "guard.json"
+    guard_file.write_text(json.dumps({
+        "enabled": True,
+        "bindings": {
+            "machine": {
+                "SERIAL-C02ABC123456": {
+                    "app_id": 123456789,
+                    "app_name": "myapp",
+                    "issuer_id": "ISS1",
+                    "bound_at": "2026-05-18T10:00:00",
+                    "last_checked": "2026-05-18T10:00:00",
+                },
+            },
+            "ip": {},
+            "credential": {},
+        },
+        "app_notes": {},
+    }))
+
+    with patch("asc.guard.GUARD_FILE", guard_file):
+        save_resp = client.post("/api/guard/note", data={
+            "app_id": "123456789",
+            "note": "办公室 Mac",
+        })
+        status_resp = client.get("/api/guard/status")
+
+    assert save_resp.status_code == 200
+    assert status_resp.json()["app_notes"]["123456789"] == "办公室 Mac"
+
+
+def test_settings_page_has_guard_note_editor(client):
+    resp = client.get("/settings")
+    assert resp.status_code == 200
+    assert "/api/guard/note" in resp.text
+    assert "保存备注" in resp.text
+    assert "App ID" in resp.text
+    assert "凭证 Key ID" not in resp.text
 
 
 def test_guard_status_error_returns_json(client):
@@ -368,3 +513,47 @@ def test_examples_screenshots_download(client):
     assert resp.headers["content-type"] == "application/zip"
     assert "screenshots_example.zip" in resp.headers.get("content-disposition", "")
     assert len(resp.content) > 0
+
+# IAP endpoint tests
+def test_iap_check_api(client):
+    from unittest.mock import patch, MagicMock
+    from pathlib import Path
+    mock_config = MagicMock()
+    mock_config.iap_file = str(Path('data/iap_packages.json'))
+    with patch('asc.web.routes_api.Config', return_value=mock_config),          patch('pathlib.Path.exists', return_value=True),          patch('asc.web.routes_api._load_iap_config', return_value=([{'productId': 'com.test.item1'}], [])):
+        resp = client.post('/api/iap/check', cookies={'asc_profile': 'testapp'})
+        assert resp.status_code == 200, f'Got {resp.status_code}'
+        data = resp.json()
+        assert data['ok'] is True
+        assert data['level'] == 'success'
+        print('test_iap_check_api: PASS')
+
+def test_iap_run_api_starts_task(client):
+    from unittest.mock import patch, MagicMock
+    mock_config = MagicMock()
+    mock_config.iap_file = 'data/iap_packages.json'
+    with patch('asc.web.routes_api.Config', return_value=mock_config),          patch('asc.web.routes_api._task_store') as mock_store:
+        mock_store.create.return_value = 'fake-task-id'
+        resp = client.post(
+            '/api/iap/run',
+            data={'iap_file': 'data/iap_packages.json'},
+            cookies={'asc_profile': 'testapp'},
+        )
+        assert resp.status_code == 200, f'Got {resp.status_code}: {resp.text}'
+        data = resp.json()
+        assert 'task_id' in data
+        mock_store.create.assert_called_once()
+        print('test_iap_run_api_starts_task: PASS')
+
+def test_iap_check_missing_file(client):
+    from unittest.mock import patch, MagicMock
+    from pathlib import Path
+    mock_config = MagicMock()
+    mock_config.iap_file = 'nonexistent.json'
+    with patch('asc.web.routes_api.Config', return_value=mock_config),          patch('pathlib.Path.exists', return_value=False):
+        resp = client.post('/api/iap/check', cookies={'asc_profile': 'testapp'})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data['ok'] is False
+        assert data['level'] == 'error'
+        print('test_iap_check_missing_file: PASS')

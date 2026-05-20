@@ -1,0 +1,274 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="">
+  <!-- Header -->
+  <div class="mb-8">
+    <h1 class="text-2xl font-bold tracking-tight text-obsidian-50 flex items-center gap-3">
+      <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: var(--accent-glow);">
+        <svg class="w-4.5 h-4.5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M20.25 7.5v-.085a2.25 2.25 0 0 0-.329-.985l-7.877-3.51a2.25 2.25 0 0 0-1.278 0l-7.877 3.51c-.128.058-.245.132-.329.21ZM16.5 19.125a2.25 2.25 0 0 0-2.475 2.25H5.475a2.25 2.25 0 0 0-2.475-2.25V6.375a2.25 2.25 0 0 0 2.475-2.25H10.5m3.75 0h3.75m-9 8.25h.008v.008H12v-.008Zm.375 0a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm-.375 3.75h.008v.008h-.008v-.008Zm.375 0a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm1.125-3.75h.008v.008h-.008v-.008Z"/></svg>
+      </div>
+      IAP 管理
+    </h1>
+  </div>
+
+  <div x-data="{
+    step: 1,
+    taskId: null,
+    logs: [],
+    status: 'idle',
+    progress: 0,
+    progressMsg: '',
+    checkResult: null,
+    submitting: false
+  }">
+
+    <!-- Step1: Config form -->
+    <div x-show="step === 1">
+      <form id="iap-form"
+            hx-post="/api/iap/run"
+            hx-target="#iap-run-result"
+            hx-swap="innerHTML"
+            @htmx:after-request.camel="
+              const data = JSON.parse(event.detail.xhr.responseText);
+              taskId = data.task_id;
+              step = 2;
+              submitting = false;
+              startIapSSE(taskId);
+            "
+            @htmx:before-request.camel="submitting = true">
+
+        <div class="card max-w-xl">
+          <div class="card-body space-y-5">
+
+            <!-- IAP config file -->
+            <div>
+              <label for="iap-file-input" class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">IAP 配置文件</label>
+              <div class="flex gap-2">
+                <input type="text" name="iap_file" value="{{ profile_iap_file }}" id="iap-file-input" class="field-input flex-1">
+                <button type="button" class="btn-ghost whitespace-nowrap" onclick="openFileBrowser('iap-file-input', 'file', '.json')">浏览</button>
+              </div>
+            </div>
+
+            <!-- Upload scope -->
+            <div>
+              <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2.5 block">上传范围</label>
+              <div class="space-y-2">
+                <label class="flex items-center gap-2.5 text-sm text-obsidian-200 cursor-pointer group">
+                  <input type="checkbox" name="include_items" value="on" checked class="w-4 h-4">
+                  <span class="group-hover:text-obsidian-50 transition-colors duration-150">IAP 项目</span>
+                </label>
+                <label class="flex items-center gap-2.5 text-sm text-obsidian-200 cursor-pointer group">
+                  <input type="checkbox" name="include_groups" value="on" checked class="w-4 h-4">
+                  <span class="group-hover:text-obsidian-50 transition-colors duration-150">订阅组</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Options -->
+            <div class="space-y-2">
+              <label class="flex items-center gap-2.5 text-sm text-obsidian-300 cursor-pointer">
+                <input type="checkbox" name="dry_run" value="on" class="w-4 h-4">
+                预览模式（不实际上传）
+              </label>
+              <label class="flex items-center gap-2.5 text-sm text-obsidian-300 cursor-pointer">
+                <input type="checkbox" name="update_existing" value="on" class="w-4 h-4">
+                更新已存在的项目
+              </label>
+            </div>
+
+            <!-- Actions -->
+            <div class="flex gap-3 pt-3 border-t border-obsidian-700">
+              <button type="submit"
+                      class="btn-primary"
+                      :disabled="submitting">
+                <span x-show="!submitting">开始上传</span>
+                <span x-show="submitting" class="flex items-center gap-1.5">
+                  <svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 0 1 8-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                  提交中...
+                </span>
+              </button>
+              <button type="button"
+                      class="btn-ghost"
+                      @click="
+                        fetch('/api/iap/check', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}})
+                          .then(r => r.json())
+                          .then(data => { checkResult = data; })
+                          .catch(() => { checkResult = {ok: false, level: 'error', message: '请求失败'}; })
+                      ">
+                验证配置
+              </button>
+            </div>
+
+            <!-- Check result -->
+            <template x-if="checkResult">
+              <div class="rounded-lg p-4 text-sm"
+                   :class="{
+                     'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20': checkResult.level === 'success',
+                     'bg-amber-500/10 text-amber-400 border border-amber-500/20': checkResult.level === 'warning',
+                     'bg-red-500/10 text-red-400 border border-red-500/20': checkResult.level === 'error',
+                   }">
+                <p class="font-medium" x-text="checkResult.message"></p>
+                <template x-if="checkResult.detail && checkResult.detail.total">
+                  <p class="text-xs mt-1 opacity-80"
+                     x-text="'共 ' + checkResult.detail.items + ' 个 IAP，' + checkResult.detail.groups + ' 个订阅组'"></p>
+                </template>
+              </div>
+            </template>
+
+          </div>
+        </div>
+      </form>
+    </div>
+
+    <!-- Step2: Execution panel -->
+    <div x-show="step === 2" class="max-w-xl">
+      <div class="card">
+        <div class="card-body">
+          <div class="flex items-center justify-between mb-5">
+            <h2 class="font-semibold text-obsidian-100" x-text="status === 'done' ? '上传完成' : status === 'error' ? '上传失败' : '上传中...'"></h2>
+            <button type="button" class="text-xs text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium" @click="step=1; logs=[]; status='idle'">重新运行</button>
+          </div>
+
+          <!-- Progress -->
+          <div class="progress-track mb-2">
+            <div class="progress-fill" :style="`width: ${progress}%`"></div>
+          </div>
+          <div class="flex items-center justify-between mb-5">
+            <p class="text-xs text-obsidian-400" x-text="progressMsg"></p>
+            <span class="text-xs font-mono text-obsidian-500 tabular-nums" x-text="progress > 0 ? progress + '%' : ''"></span>
+          </div>
+
+          <!-- Log toggle -->
+          <div x-data="{ open: true }">
+            <button type="button" class="text-xs text-obsidian-400 hover:text-obsidian-200 cursor-pointer transition-colors duration-150 flex items-center gap-1.5 uppercase tracking-wider font-medium" @click="open = !open">
+              <svg class="w-3 h-3 transition-transform duration-150" :class="open ? 'rotate-0' : '-rotate-90'" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg>
+              <span x-text="open ? '收起日志' : '展开日志'"></span>
+            </button>
+            <div x-show="open" x-transition.duration.150ms class="mt-2 log-panel max-h-64" id="iap-log-panel">
+              <template x-for="(line, idx) in logs" :key="idx">
+                <div x-text="line"></div>
+              </template>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <div id="iap-run-result"></div>
+  </div>
+</div>
+
+<!-- File browser modal (reuse same as other pages) -->
+<div id="filebrowser-modal" class="hidden fixed inset-0 flex items-center justify-center z-50" style="background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);">
+  <div class="card w-[420px]">
+    <div class="card-header flex items-center justify-between">
+      <h3 class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">选择路径</h3>
+      <button onclick="closeFileBrowser()" class="text-obsidian-500 hover:text-obsidian-300 cursor-pointer transition-colors duration-150 p-1 rounded focus-ring">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div id="filebrowser-content" class="card-body"></div>
+    <div class="px-5 py-3 border-t border-obsidian-700 flex justify-end">
+      <button onclick="closeFileBrowser()" class="btn-ghost">取消</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const _IAP_STORE_KEY = 'asc_iap_form_{{ current_profile }}';
+
+function _saveIapForm() {
+  const f = document.getElementById('iap-form');
+  if (!f) return;
+  const data = {
+    iap_file: f.querySelector('[name=iap_file]').value,
+    include_items: f.querySelector('[name=include_items]').checked,
+    include_groups: f.querySelector('[name=include_groups]').checked,
+    dry_run: f.querySelector('[name=dry_run]').checked,
+    update_existing: f.querySelector('[name=update_existing]').checked,
+  };
+  localStorage.setItem(_IAP_STORE_KEY, JSON.stringify(data));
+}
+
+function _restoreIapForm() {
+  const raw = localStorage.getItem(_IAP_STORE_KEY);
+  if (!raw) return;
+  try {
+    const data = JSON.parse(raw);
+    const f = document.getElementById('iap-form');
+    if (!f) return;
+    if (data.iap_file) f.querySelector('[name=iap_file]').value = data.iap_file;
+    if (data.include_items !== undefined) f.querySelector('[name=include_items]').checked = data.include_items;
+    if (data.include_groups !== undefined) f.querySelector('[name=include_groups]').checked = data.include_groups;
+    f.querySelector('[name=dry_run]').checked = !!data.dry_run;
+    f.querySelector('[name=update_existing]').checked = !!data.update_existing;
+  } catch(e) {}
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  _restoreIapForm();
+  const f = document.getElementById('iap-form');
+  if (f) {
+    f.addEventListener('change', _saveIapForm);
+    f.addEventListener('input', _saveIapForm);
+    f.addEventListener('submit', _saveIapForm);
+  }
+});
+
+let _fbTargetInput = null;
+let _fbMode = 'dir';
+let _fbExt = '';
+
+function openFileBrowser(inputId, mode, ext) {
+  _fbTargetInput = inputId;
+  _fbMode = mode;
+  _fbExt = ext;
+  document.getElementById('filebrowser-modal').classList.remove('hidden');
+  const currentVal = document.getElementById(inputId).value || '.';
+  const url = `/api/browse?path=${encodeURIComponent(currentVal)}&mode=${mode}&ext=${ext}`;
+  const contentEl = document.getElementById('filebrowser-content');
+  contentEl.innerHTML = '<div class="p-4 text-obsidian-400 text-sm">Loading...</div>';
+  fetch(url)
+    .then(r => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}: ${r.statusText}`);
+      return r.text();
+    })
+    .then(html => { contentEl.innerHTML = html; })
+    .catch(e => {
+      contentEl.innerHTML = `<div class="p-4 text-red-400 text-sm">Request failed: ${e.message}<br>URL: ${url}</div>`;
+    });
+}
+function closeFileBrowser() {
+  document.getElementById('filebrowser-modal').classList.add('hidden');
+}
+function selectFile(path) {
+  if (_fbTargetInput) {
+    const el = document.getElementById(_fbTargetInput);
+    el.value = path;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  closeFileBrowser();
+}
+
+function startIapSSE(taskId) {
+  const root = document.querySelector('[x-data]');
+  const d = Alpine.$data(root);
+  const es = new EventSource(`/api/task/${taskId}/stream`);
+  es.addEventListener('log', e => {
+    d.logs.push(e.data);
+    const panel = document.getElementById('iap-log-panel');
+    if (panel) requestAnimationFrame(() => { panel.scrollTop = panel.scrollHeight; });
+  });
+  es.addEventListener('progress', e => {
+    const p = JSON.parse(e.data);
+    d.progress = p.pct || 0;
+    d.progressMsg = p.msg || '';
+  });
+  es.addEventListener('done', () => { d.status = 'done'; d.progress = 100; es.close(); });
+  es.addEventListener('error_event', () => { d.status = 'error'; es.close(); });
+}
+</script>
+{% endblock %}
+
+{% block right_panel %}{% endblock %}

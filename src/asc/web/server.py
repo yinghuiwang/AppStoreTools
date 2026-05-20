@@ -28,6 +28,7 @@ def create_app() -> FastAPI:
             "current_profile": current,
             "profile_csv": config.csv_path,
             "profile_screenshots": config.screenshots_path,
+            "profile_iap_file": config.iap_path or "data/iap_packages.json",
         }
 
     @app.get("/", response_class=HTMLResponse)
@@ -51,6 +52,11 @@ def create_app() -> FastAPI:
         ctx = _get_profile_context(request)
         return templates.TemplateResponse(request, "profiles.html", ctx)
 
+    @app.get("/iap", response_class=HTMLResponse)
+    async def iap_page(request: Request):
+        ctx = _get_profile_context(request)
+        return templates.TemplateResponse(request, "iap.html", ctx)
+
     @app.get("/settings", response_class=HTMLResponse)
     async def settings_page(request: Request):
         ctx = _get_profile_context(request)
@@ -60,6 +66,21 @@ def create_app() -> FastAPI:
     async def whats_new_page(request: Request):
         ctx = _get_profile_context(request)
         return templates.TemplateResponse(request, "whats_new.html", ctx)
+
+    @app.get("/urls", response_class=HTMLResponse)
+    async def urls_page(request: Request):
+        ctx = _get_profile_context(request)
+        return templates.TemplateResponse(request, "urls.html", ctx)
+
+    @app.get("/whatsnew", response_class=HTMLResponse)
+    async def whatsnew_page(request: Request):
+        ctx = _get_profile_context(request)
+        return templates.TemplateResponse(request, "whatsnew.html", ctx)
+
+    @app.get("/update", response_class=HTMLResponse)
+    async def update_page(request: Request):
+        ctx = _get_profile_context(request)
+        return templates.TemplateResponse(request, "update.html", ctx)
 
     from asc.web import routes_api
     app.include_router(routes_api.router, prefix="/api")

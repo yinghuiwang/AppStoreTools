@@ -25,7 +25,7 @@
           },
           "promotionalOffers": [],
           "review": {
-            "screenshot": "data/iap_review/premium_monthly.png",
+            "screenshot": "./iap_review/premium_monthly.png",
             "note": "Auto-renewable subscription. Test account: test@example.com / Test1234"
           }
         }

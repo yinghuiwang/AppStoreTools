@@ -21,27 +21,28 @@ def cmd_guard_status():
     fp = g._get_machine_fingerprint()
     ip = g._get_public_ip()
     typer.echo("当前环境:")
-    typer.echo(f"  机器指纹: {fp[:16]}...")
+    typer.echo(f"  机器指纹: {fp}")
     typer.echo(f"  IP 地址:  {ip}\n")
 
     bindings = data.get("bindings", {})
+    app_notes = data.get("app_notes", {})
     rows = []
     for entry_key, entry_val in bindings.get("machine", {}).items():
-        rows.append(("机器", entry_key[:16] + "...", entry_val.get("app_name", ""), entry_val.get("bound_at", "")[:19].replace("T", " ")))
+        rows.append(("机器", entry_key, entry_val.get("app_name", ""), entry_val.get("bound_at", "")[:19].replace("T", " "), app_notes.get(entry_val.get("app_id", ""), "")))
     for entry_key, entry_val in bindings.get("ip", {}).items():
-        rows.append(("IP", entry_key, entry_val.get("app_name", ""), entry_val.get("bound_at", "")[:19].replace("T", " ")))
+        rows.append(("IP", entry_key, entry_val.get("app_name", ""), entry_val.get("bound_at", "")[:19].replace("T", " "), app_notes.get(entry_val.get("app_id", ""), "")))
     for entry_key, entry_val in bindings.get("credential", {}).items():
-        rows.append(("凭证", entry_key, entry_val.get("app_name", ""), entry_val.get("bound_at", "")[:19].replace("T", " ")))
+        rows.append(("凭证", entry_key, entry_val.get("app_name", ""), entry_val.get("bound_at", "")[:19].replace("T", " "), app_notes.get(entry_val.get("app_id", ""), "")))
 
     if not rows:
         typer.echo("绑定记录: (无)\n")
         return
 
     typer.echo("绑定记录:")
-    typer.echo(f"  {'类型':<8} {'标识':<20} {'绑定 App':<14} {'绑定时间'}")
-    typer.echo("  " + "-" * 64)
-    for btype, bkey, bapp, bat in rows:
-        typer.echo(f"  {btype:<8} {bkey:<20} {bapp:<14} {bat}")
+    typer.echo(f"  {'类型':<8} {'标识':<20} {'绑定 App':<14} {'绑定时间':<19} {'备注'}")
+    typer.echo("  " + "-" * 84)
+    for btype, bkey, bapp, bat, note in rows:
+        typer.echo(f"  {btype:<8} {bkey:<20} {bapp:<14} {bat:<19} {note}")
     typer.echo(f"\n提示: 使用 'asc guard unbind' 解除绑定")
 
 
@@ -75,6 +76,7 @@ def cmd_guard_reset():
         typer.echo("已取消")
         raise typer.Exit(0)
     g._data["bindings"] = {"machine": {}, "ip": {}, "credential": {}}
+    g._data["app_notes"] = {}
     g._save()
     typer.echo("✅ 所有绑定记录已清除")
 
@@ -95,11 +97,11 @@ def cmd_guard_unbind(
         for btype, bkey in [("machine", fp), ("ip", pub_ip)]:
             if bkey in g._data["bindings"].get(btype, {}):
                 g.unbind(btype, bkey)
-                typer.echo(f"✅ 已解除 {btype} 绑定: {bkey[:16]}...")
+                typer.echo(f"✅ 已解除 {btype} 绑定: {bkey}")
                 removed += 1
     if machine:
         g.unbind("machine", machine)
-        typer.echo(f"✅ 已解除机器绑定: {machine[:16]}...")
+        typer.echo(f"✅ 已解除机器绑定: {machine}")
         removed += 1
     if ip:
         g.unbind("ip", ip)
@@ -112,3 +114,16 @@ def cmd_guard_unbind(
     if removed == 0:
         typer.echo("未指定任何解绑目标，请使用 --machine / --ip / --credential / --current", err=True)
         raise typer.Exit(1)
+
+
+@guard_app.command("note")
+def cmd_guard_note(
+    app_id: str = typer.Option(..., "--app-id", help="App ID"),
+    note: str = typer.Option("", "--note", help="备注内容"),
+):
+    """添加或更新 App 备注。"""
+    g = Guard()
+    if not g.set_app_note(app_id, note):
+        typer.echo(f"未找到 App 绑定: {app_id}", err=True)
+        raise typer.Exit(1)
+    typer.echo(f"✅ 已更新 App 备注: {app_id} -> {note}")
