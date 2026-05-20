@@ -8,6 +8,7 @@ import tempfile
 from pathlib import Path
 
 from fastapi import APIRouter, Request
+from asc.utils import make_api_from_config
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 
@@ -655,3 +656,209 @@ async def download_example_screenshots():
         media_type="application/zip",
         headers={"Content-Disposition": "attachment; filename=screenshots_example.zip"},
     )
+
+
+@router.get("/whats-new/check")
+async def whats_new_check(request: Request):
+    """Check environment and return available locales for the current app version."""
+    profile = request.cookies.get("asc_profile", "")
+    if not profile:
+        return {"ok": False, "error": "No profile selected"}
+    try:
+        from asc.config import Config
+        config = Config(app_name=profile)
+        api, app_id = make_api_from_config(config)
+        version = api.get_editable_version(app_id)
+        if not version:
+            return {"ok": False, "error": "No editable version found"}
+        version_id = version["id"]
+        ver_locs = api.get_version_localizations(version_id)
+        locales = [loc["attributes"]["locale"] for loc in ver_locs]
+        return {
+            "ok": True,
+            "version": version["attributes"].get("versionString", "?"),
+            "locales": locales,
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@router.post("/whats-new/translate")
+async def whats_new_translate(
+    request: Request,
+    text: str = _Form(...),
+    source_locale: str = _Form("auto"),
+):
+    """Translate text to all available locales using LLM."""
+    profile = request.cookies.get("asc_profile", "")
+    if not profile:
+        return JSONResponse({"error": "No profile selected"}, status_code=400)
+    try:
+        from asc.config import Config
+        from asc.llm import LLMClient
+        from asc.services.translator import OpenAITranslator
+        config = Config(app_name=profile)
+        if not config.llm_api_key:
+            return JSONResponse({"error": "LLM API key not configured. Set [llm] api_key in config or OPENAI_API_KEY env var."}, status_code=400)
+        llm_client = LLMClient(
+            api_key=config.llm_api_key,
+            base_url=config.llm_base_url,
+            model=config.llm_model,
+        )
+        translator = OpenAITranslator(llm_client)
+        # Get available locales
+        api, app_id = make_api_from_config(config)
+        version = api.get_editable_version(app_id)
+        version_id = version["id"]
+        ver_locs = api.get_version_localizations(version_id)
+        all_locales = [loc["attributes"]["locale"] for loc in ver_locs]
+        target_locales = [l for l in all_locales if l != source_locale] if source_locale != "auto" else all_locales
+        translations = {}
+        for locale in target_locales:
+            try:
+                translations[locale] = translator.translate(text, locale, source_locale)
+            except Exception:
+                translations[locale] = ""  # empty = failed
+        return {
+            "source_locale": source_locale,
+            "translations": translations,
+        }
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+def _start_whats_new_task(
+    profile: str,
+    translations: dict[str, str],
+    dry_run: bool,
+) -> str:
+    task_id = _task_store.create("whats-new", profile=profile)
+
+    def _run():
+        import queue
+        from asc.web.sse import capture_stdout_to_queue
+        from asc.config import Config
+
+        _task_store.set_status(task_id, _TaskStatus.RUNNING)
+        q: queue.Queue = queue.Queue()
+        done_flag = _threading.Event()
+
+        _PROGRESS_RE = re.compile(r"\[PROGRESS:(\d+):(.+)\]")
+
+        def _drain_loop():
+            while not done_flag.is_set():
+                while not q.empty():
+                    line = q.get_nowait()
+                    m = _PROGRESS_RE.match(line)
+                    if m:
+                        _task_store.set_progress(task_id, int(m.group(1)), m.group(2))
+                    else:
+                        _task_store.append_log(task_id, line)
+                done_flag.wait(timeout=0.05)
+            while not q.empty():
+                line = q.get_nowait()
+                m = _PROGRESS_RE.match(line)
+                if m:
+                    _task_store.set_progress(task_id, int(m.group(1)), m.group(2))
+                else:
+                    _task_store.append_log(task_id, line)
+
+        _threading.Thread(target=_drain_loop, daemon=True).start()
+
+        try:
+            config = Config(app_name=profile)
+            api, app_id = make_api_from_config(config)
+            version = api.get_editable_version(app_id)
+            version_id = version["id"]
+            ver_locs = api.get_version_localizations(version_id)
+            ver_loc_map = {loc["attributes"]["locale"]: loc for loc in ver_locs}
+
+            total = len(translations)
+            for i, (locale, content) in enumerate(translations.items()):
+                if locale not in ver_loc_map:
+                    _task_store.append_log(task_id, f"⚠️  {locale}: 不存在，跳过")
+                    continue
+                if dry_run:
+                    _task_store.append_log(task_id, f"[DRYRUN] {locale}: {content[:50]}...")
+                    continue
+                api.update_version_localization(ver_loc_map[locale]["id"], {"whatsNew": content})
+                _task_store.append_log(task_id, f"✅ {locale}: 已上传")
+                _task_store.set_progress(task_id, int((i + 1) / total * 100), f"上传 {locale}")
+
+            done_flag.set()
+            _task_store.set_status(task_id, _TaskStatus.DONE)
+            _task_store.set_result(task_id, {"success": True})
+        except Exception as e:
+            done_flag.set()
+            _task_store.append_log(task_id, f"❌ 错误：{e}")
+            _task_store.set_status(task_id, _TaskStatus.ERROR)
+            _task_store.set_result(task_id, {"success": False, "error": str(e)})
+
+    _threading.Thread(target=_run, daemon=True).start()
+    return task_id
+
+
+@router.post("/whats-new/run")
+async def whats_new_run(
+    request: Request,
+    translations_json: str = _Form(...),
+    dry_run: str = _Form(""),
+):
+    import json
+    profile = request.cookies.get("asc_profile", "")
+    if not profile:
+        return JSONResponse({"error": "No profile selected"}, status_code=400)
+    try:
+        translations = json.loads(translations_json)
+    except json.JSONDecodeError:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+    task_id = _start_whats_new_task(
+        profile=profile,
+        translations=translations,
+        dry_run=bool(dry_run),
+    )
+    return {"task_id": task_id}
+
+
+@router.get("/settings/llm")
+async def get_llm_config(request: Request):
+    from asc.config import Config
+    profile = request.cookies.get("asc_profile")
+    config = Config(app_name=profile)
+    return {
+        "base_url": config.llm_base_url,
+        "api_key": config.llm_api_key or "",
+        "model": config.llm_model,
+    }
+
+
+@router.post("/settings/llm")
+async def save_llm_config(request: Request, data: dict):
+    from asc.config import Config
+    profile = request.cookies.get("asc_profile")
+    config = Config(app_name=profile)
+    local_cfg = Path(".") / ".asc" / "config.toml"
+    local_cfg.parent.mkdir(parents=True, exist_ok=True)
+    import tomllib
+    existing = {}
+    if local_cfg.exists():
+        try:
+            with open(local_cfg, "rb") as f:
+                existing = tomllib.load(f)
+        except Exception:
+            existing = {}
+    llm_section = existing.get("llm", {})
+    llm_section["base_url"] = data.get("base_url", "https://api.openai.com/v1")
+    llm_section["model"] = data.get("model", "gpt-4o")
+    if data.get("api_key"):
+        llm_section["api_key"] = data["api_key"]
+    existing["llm"] = llm_section
+    content = ""
+    for section, items in existing.items():
+        content += f"[{section}]\n"
+        if isinstance(items, dict):
+            for k, v in items.items():
+                content += f'{k} = "{v}"\n'
+        content += "\n"
+    local_cfg.write_text(content)
+    return {"ok": True}
