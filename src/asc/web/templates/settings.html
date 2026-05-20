@@ -266,31 +266,30 @@
         <div class="flex gap-2">
           <button @click="
             saving = true;
-            const payload = {
-              base_url: editBaseUrl,
-              api_key: editApiKey,
-              model: editModel,
-              set_default: true
-            };
-            if (isEditing) {
-              payload.name = editName;
-            } else {
-              payload.name = editName || ('config' + (Object.keys(configs).length + 1));
-            }
+            const name = isEditing ? editName : (editName || ('config' + (Object.keys(configs).length + 1)));
             fetch('/api/settings/llm', {
               method: 'POST',
               headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify(payload)
-            }).then(r => r.json()).then(() => {
-              saving = false; saved = true;
-              return fetch('/api/settings/llm');
-            }).then(r => r.json()).then(d => {
+              body: JSON.stringify({
+                name: name,
+                base_url: editBaseUrl,
+                api_key: editApiKey,
+                model: editModel,
+                set_default: true
+              })
+            })
+            .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+            .then(() => { return fetch('/api/settings/llm'); })
+            .then(r => r.json())
+            .then(d => {
               configs = d.configs || {};
               defaultName = d.default;
-              activeName = d.default;
+              activeName = d.default || Object.keys(configs)[0] || '';
               showForm = false;
-              setTimeout(() => saved = false, 2000);
-            }).catch(() => { saving = false; })
+              saved = true;
+              setTimeout(() => { saved = false; saving = false; }, 2000);
+            })
+            .catch(err => { console.error('LLM config save error:', err); saving = false; })
           " :disabled="saving" class="btn-primary text-xs px-3 py-1.5">
             <span x-show="!saving">保存</span>
             <span x-show="saving">保存中...</span>
