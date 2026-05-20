@@ -153,6 +153,18 @@ class Config:
         return self._data.get("_iap_path") or os.getenv("_ASC_IAP_PATH")
 
     @property
+    def llm_api_key(self) -> Optional[str]:
+        return self.get("api_key", section="llm") or os.getenv("OPENAI_API_KEY")
+
+    @property
+    def llm_base_url(self) -> Optional[str]:
+        return self.get("base_url", section="llm") or "https://api.openai.com/v1"
+
+    @property
+    def llm_model(self) -> str:
+        return self.get("model", section="llm") or "gpt-4o"
+
+    @property
     def build_project(self) -> Optional[str]:
         return self.get("project", section="build")
 
