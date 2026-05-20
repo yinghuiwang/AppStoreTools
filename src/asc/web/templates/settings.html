@@ -207,7 +207,7 @@
 <div class="card"
      x-data="{
        configs: {},
-       default: null,
+       defaultName: null,
        activeName: null,
        editName: '',
        editBaseUrl: 'https://api.openai.com/v1',
@@ -224,7 +224,7 @@
          .then(r => r.json())
          .then(d => {
            configs = d.configs || {};
-           default = d.default;
+           defaultName = d.default;
            activeName = d.default || Object.keys(configs)[0] || '';
            loading = false;
          })
@@ -286,7 +286,7 @@
               return fetch('/api/settings/llm');
             }).then(r => r.json()).then(d => {
               configs = d.configs || {};
-              default = d.default;
+              defaultName = d.default;
               activeName = d.default;
               showForm = false;
               setTimeout(() => saved = false, 2000);
@@ -313,7 +313,7 @@
               <div class="flex items-center gap-2">
                 <span class="text-xs font-medium" :class="name === activeName ? 'text-amber-400' : 'text-obsidian-300'"
                       x-text="name"></span>
-                <span x-show="name === default" class="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400">默认</span>
+                <span x-show="name === defaultName" class="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400">默认</span>
               </div>
               <div class="text-[10px] text-obsidian-500 truncate" x-text="cfg.base_url + ' / ' + cfg.model"></div>
             </div>
@@ -324,10 +324,10 @@
                   headers: {'Content-Type': 'application/json'},
                   body: JSON.stringify({name})
                 }).then(() => {
-                  default = name;
+                  defaultName = name;
                   activeName = name;
                 })"
-                      x-show="name !== default"
+                      x-show="name !== defaultName"
                       class="text-[10px] btn-secondary py-1 px-2">设为默认</button>
               <button @click="
                 isEditing = true;
@@ -343,7 +343,7 @@
                   .then(r => r.json())
                   .then(d => {
                     configs = d.configs || {};
-                    default = d.default;
+                    defaultName = d.default;
                     activeName = d.default || Object.keys(configs)[0] || '';
                   })"
                       class="text-[10px] px-2 py-1 rounded border border-red-500/30 text-red-400 hover:bg-red-500/10">删除</button>
