@@ -292,7 +292,7 @@
 <script>
 document.addEventListener('DOMContentLoaded', () => {
   // Fetch environment check on mount
-  fetch('/api/whats-new/check', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}})
+  fetch('/api/whats-new/check')
     .then(r => r.json())
     .then(data => {
       window.dispatchEvent(new CustomEvent('check-result', {detail: data}));

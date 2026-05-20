@@ -7,7 +7,7 @@ import re
 import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from asc.utils import make_api_from_config
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
@@ -726,16 +726,15 @@ async def whats_new_check(request: Request):
 
 
 @router.post("/whats-new/translate")
-async def whats_new_translate(
-    request: Request,
-    text: str = _Form(...),
-    source_locale: str = _Form("auto"),
-):
+async def whats_new_translate(request: Request):
     """Translate text to all available locales using LLM."""
     profile = request.cookies.get("asc_profile", "")
     if not profile:
         return JSONResponse({"error": "No profile selected"}, status_code=400)
     try:
+        data = await request.json()
+        text = data.get("text", "")
+        source_locale = data.get("source_locale", "auto")
         from asc.config import Config
         from asc.llm import LLMClient
         from asc.services.translator import OpenAITranslator
@@ -1195,8 +1194,7 @@ async def update_run(version: str = _Form(""), branch: str = _Form(""), dry_run:
 async def get_llm_config(request: Request):
     """Returns all LLM configs and the default config name."""
     from asc.config import Config
-    profile = request.cookies.get("asc_profile")
-    config = Config(app_name=profile)
+    config = Config()
     return {
         "configs": config.llm_configs,
         "default": config.llm_default,
@@ -1205,11 +1203,8 @@ async def get_llm_config(request: Request):
 
 @router.post("/settings/llm")
 async def save_llm_config(request: Request):
-    """Save a named LLM config to the profile. Set as default if specified."""
+    """Save a named LLM config to the global llm.toml. Set as default if specified."""
     from asc.config import Config
-    profile = request.cookies.get("asc_profile")
-    if not profile:
-        return JSONResponse({"error": "No profile selected"}, status_code=400)
 
     try:
         data = await request.json()
@@ -1223,7 +1218,7 @@ async def save_llm_config(request: Request):
     set_default = data.get("set_default", True)
 
     try:
-        config = Config(app_name=profile)
+        config = Config()
         config.save_llm_config(name, base_url, api_key, model, set_default=set_default)
         return {"ok": True}
     except Exception as e:
@@ -1231,15 +1226,12 @@ async def save_llm_config(request: Request):
 
 
 @router.delete("/settings/llm")
-async def delete_llm_config(request: Request, name: str = _Form(...)):
-    """Delete a named LLM config from the profile."""
+async def delete_llm_config(request: Request, name: str = Query(...)):
+    """Delete a named LLM config from the global llm.toml."""
     from asc.config import Config
-    profile = request.cookies.get("asc_profile")
-    if not profile:
-        return JSONResponse({"error": "No profile selected"}, status_code=400)
 
     try:
-        config = Config(app_name=profile)
+        config = Config()
         config.delete_llm_config(name)
         return {"ok": True}
     except Exception as e:
@@ -1250,9 +1242,6 @@ async def delete_llm_config(request: Request, name: str = _Form(...)):
 async def set_llm_default(request: Request):
     """Set the default LLM config."""
     from asc.config import Config
-    profile = request.cookies.get("asc_profile")
-    if not profile:
-        return JSONResponse({"error": "No profile selected"}, status_code=400)
 
     try:
         data = await request.json()
@@ -1264,7 +1253,7 @@ async def set_llm_default(request: Request):
         return JSONResponse({"error": "name is required"}, status_code=400)
 
     try:
-        config = Config(app_name=profile)
+        config = Config()
         config.set_llm_default(name)
         return {"ok": True}
     except Exception as e:

@@ -218,6 +218,7 @@
        saved: false,
        loading: true,
        isEditing: false,
+       saveError: '',
      }"
      x-init="
        fetch('/api/settings/llm')
@@ -263,9 +264,13 @@
           <label class="text-xs text-obsidian-500 mb-1 block">Model</label>
           <input type="text" x-model="editModel" placeholder="gpt-4o" class="field-input w-full text-xs">
         </div>
+        <template x-if="saveError">
+          <div class="text-xs text-red-400 py-1" x-text="saveError"></div>
+        </template>
         <div class="flex gap-2">
           <button @click="
             saving = true;
+            saveError = '';
             const name = isEditing ? editName : (editName || ('config' + (Object.keys(configs).length + 1)));
             fetch('/api/settings/llm', {
               method: 'POST',
@@ -278,8 +283,8 @@
                 set_default: true
               })
             })
-            .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-            .then(() => { return fetch('/api/settings/llm'); })
+            .then(r => r.json())
+            .then(d => { if (d.error) throw new Error(d.error); return fetch('/api/settings/llm'); })
             .then(r => r.json())
             .then(d => {
               configs = d.configs || {};
@@ -289,7 +294,15 @@
               saved = true;
               setTimeout(() => { saved = false; saving = false; }, 2000);
             })
-            .catch(err => { console.error('LLM config save error:', err); saving = false; })
+            .catch(err => {
+                saving = false;
+                if (err.message && err.message.includes('HTTP')) {
+                    saveError = '保存失败：' + err.message;
+                } else {
+                    saveError = '保存失败，请重试';
+                }
+                console.error('LLM config save error:', err);
+            })
           " :disabled="saving" class="btn-primary text-xs px-3 py-1.5">
             <span x-show="!saving">保存</span>
             <span x-show="saving">保存中...</span>

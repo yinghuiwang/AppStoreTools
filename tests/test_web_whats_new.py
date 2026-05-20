@@ -84,7 +84,7 @@ def test_whats_new_translate_returns_translations(client):
                     response = client.post(
                         "/api/whats-new/translate",
                         cookies={"asc_profile": "test"},
-                        data={"text": "Hello world", "source_locale": "en-US"},
+                        json={"text": "Hello world", "source_locale": "en-US"},
                     )
 
     assert response.status_code == 200
@@ -107,7 +107,7 @@ def test_whats_new_translate_no_api_key_returns_400(client):
         response = client.post(
             "/api/whats-new/translate",
             cookies={"asc_profile": "test"},
-            data={"text": "Hello world", "source_locale": "en-US"},
+            json={"text": "Hello world", "source_locale": "en-US"},
         )
 
     assert response.status_code == 400

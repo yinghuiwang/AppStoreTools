@@ -154,15 +154,30 @@ class Config:
         """IAP packages JSON path, set when using local config 'use once'."""
         return self._data.get("_iap_path") or os.getenv("_ASC_IAP_PATH")
 
+    def _llm_config_path(self) -> Path:
+        """Path to the global LLM config file."""
+        self._global_dir.mkdir(parents=True, exist_ok=True)
+        return self._global_dir / "llm.toml"
+
+    def _load_llm_config(self) -> dict:
+        """Load LLM config from global llm.toml."""
+        path = self._llm_config_path()
+        if not path.exists():
+            return {}
+        try:
+            return self._load_toml(path)
+        except Exception:
+            return {}
+
     @property
     def llm_configs(self) -> dict[str, dict]:
         """Returns all LLM configs: {name: {base_url, api_key, model}}"""
-        return self._data.get("llm_configs", {})
+        return self._load_llm_config().get("llm_configs", {})
 
     @property
     def llm_default(self) -> Optional[str]:
         """Returns the name of the default LLM config."""
-        return self._data.get("llm_default")
+        return self._load_llm_config().get("llm_default")
 
     def get_llm_config(self, name: str) -> Optional[dict]:
         """Returns a specific LLM config by name."""
@@ -207,19 +222,14 @@ class Config:
         model: str,
         set_default: bool = True,
     ) -> None:
-        """Save an LLM config to the profile's TOML file."""
-        if not self.app_name:
-            raise ValueError("No profile selected")
+        """Save an LLM config to the global llm.toml file."""
+        llm_path = self._llm_config_path()
 
-        profiles_dir = self._global_dir / "profiles"
-        profiles_dir.mkdir(parents=True, exist_ok=True)
-        profile_path = profiles_dir / f"{self.app_name}.toml"
-
-        # Load existing profile data
+        # Load existing LLM config data
         data: dict = {}
-        if profile_path.exists():
+        if llm_path.exists():
             try:
-                data = self._load_toml(profile_path)
+                data = self._load_toml(llm_path)
             except Exception:
                 data = {}
 
@@ -238,23 +248,16 @@ class Config:
 
         # Write back
         content = toml.dumps(data)
-        profile_path.write_text(content)
-
-        # Also update in-memory data
-        self._data = data
+        llm_path.write_text(content)
 
     def delete_llm_config(self, name: str) -> None:
-        """Delete an LLM config from the profile's TOML file."""
-        if not self.app_name:
-            raise ValueError("No profile selected")
-
-        profiles_dir = self._global_dir / "profiles"
-        profile_path = profiles_dir / f"{self.app_name}.toml"
+        """Delete an LLM config from the global llm.toml file."""
+        llm_path = self._llm_config_path()
 
         data: dict = {}
-        if profile_path.exists():
+        if llm_path.exists():
             try:
-                data = self._load_toml(profile_path)
+                data = self._load_toml(llm_path)
             except Exception:
                 data = {}
 
@@ -267,29 +270,23 @@ class Config:
             data["llm_default"] = next(iter(llm_configs), None) if llm_configs else None
 
         content = toml.dumps(data)
-        profile_path.write_text(content)
-        self._data = data
+        llm_path.write_text(content)
 
     def set_llm_default(self, name: str) -> None:
-        """Set the default LLM config."""
-        if not self.app_name:
-            raise ValueError("No profile selected")
-
-        profiles_dir = self._global_dir / "profiles"
-        profile_path = profiles_dir / f"{self.app_name}.toml"
+        """Set the default LLM config in global llm.toml."""
+        llm_path = self._llm_config_path()
 
         data: dict = {}
-        if profile_path.exists():
+        if llm_path.exists():
             try:
-                data = self._load_toml(profile_path)
+                data = self._load_toml(llm_path)
             except Exception:
                 data = {}
 
         data["llm_default"] = name
 
         content = toml.dumps(data)
-        profile_path.write_text(content)
-        self._data = data
+        llm_path.write_text(content)
 
     @property
     def build_project(self) -> Optional[str]:
