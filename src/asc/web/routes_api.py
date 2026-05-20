@@ -755,15 +755,20 @@ async def whats_new_translate(request: Request):
         all_locales = [loc["attributes"]["locale"] for loc in ver_locs]
         target_locales = [l for l in all_locales if l != source_locale] if source_locale != "auto" else all_locales
         translations = {}
+        errors = []
         for locale in target_locales:
             try:
                 translations[locale] = translator.translate(text, locale, source_locale)
-            except Exception:
-                translations[locale] = ""  # empty = failed
-        return {
+            except Exception as e:
+                translations[locale] = ""
+                errors.append(f"{locale}: {e}")
+        resp = {
             "source_locale": source_locale,
             "translations": translations,
         }
+        if errors:
+            resp["errors"] = errors
+        return resp
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
