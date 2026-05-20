@@ -53,6 +53,57 @@ def test_translate_returns_assistant_content():
         assert result == "Translated: Bonjour monde"
 
 
+def test_translate_extracts_translation_from_json_object():
+    """parses structured JSON content and returns the translation field."""
+    with rm.Mocker() as m:
+        m.post(
+            "https://api.openai.com/v1/chat/completions",
+            json={"choices": [{"message": {"content": '{"translation":"测试应用"}'}}]},
+        )
+        client = LLMClient(
+            api_key="test-key",
+            base_url="https://api.openai.com/v1",
+            model="gpt-4",
+        )
+        translator = OpenAITranslator(client)
+        result = translator.translate("test app", target_locale="zh-Hans", source_locale="auto")
+        assert result == "测试应用"
+
+
+def test_translate_extracts_translation_from_fenced_json_object():
+    """parses fenced JSON content and returns the translation field."""
+    with rm.Mocker() as m:
+        m.post(
+            "https://api.openai.com/v1/chat/completions",
+            json={"choices": [{"message": {"content": "```json\n{\"translation\": \"test app\"}\n```"}}]},
+        )
+        client = LLMClient(
+            api_key="test-key",
+            base_url="https://api.openai.com/v1",
+            model="gpt-4",
+        )
+        translator = OpenAITranslator(client)
+        result = translator.translate("test app", target_locale="en-US", source_locale="auto")
+        assert result == "test app"
+
+
+def test_translate_strips_think_block_when_present():
+    """strips stray think blocks if a provider still returns them."""
+    with rm.Mocker() as m:
+        m.post(
+            "https://api.openai.com/v1/chat/completions",
+            json={"choices": [{"message": {"content": "<think>reasoning</think>\n\n测试应用"}}]},
+        )
+        client = LLMClient(
+            api_key="test-key",
+            base_url="https://api.openai.com/v1",
+            model="gpt-4",
+        )
+        translator = OpenAITranslator(client)
+        result = translator.translate("test app", target_locale="zh-Hans", source_locale="auto")
+        assert result == "测试应用"
+
+
 def test_translate_passes_temperature_0_3():
     """uses temperature=0.3"""
     with rm.Mocker() as m:

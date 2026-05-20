@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import re
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
@@ -27,6 +29,7 @@ class OpenAITranslator(Translator):
         "- Preserve professional terminology (e.g. do not translate 'TestFlight')\n"
         "- Keep character length close to the original\n"
         "- Do not add explanations\n\n"
+        "Return a JSON object with a single key named `translation` and no extra text.\n\n"
         "{source_lang}"
         "Target language: {target_locale}\n\n"
         "Original text:\n"
@@ -47,4 +50,43 @@ class OpenAITranslator(Translator):
             {"role": "system", "content": "You are a professional translator."},
             {"role": "user", "content": prompt},
         ]
-        return self.client.chat(messages=messages, temperature=0.3)
+        content = self.client.chat(messages=messages, temperature=0.3)
+        return self._extract_translation(content)
+
+    @staticmethod
+    def _extract_translation(content: str) -> str:
+        """Extract translated text from JSON responses or strip stray thinking blocks."""
+        text = (content or "").strip()
+        if not text:
+            return ""
+
+        if "<think>" in text and "</think>" in text:
+            text = text.split("</think>", 1)[-1].strip()
+
+        text = OpenAITranslator._strip_code_fence(text)
+
+        if text.startswith("{") and text.endswith("}"):
+            try:
+                data = json.loads(text)
+            except json.JSONDecodeError:
+                return text
+
+            if isinstance(data, dict):
+                for key in ("translation", "text", "content", "result"):
+                    value = data.get(key)
+                    if isinstance(value, str):
+                        return value.strip()
+                if len(data) == 1:
+                    value = next(iter(data.values()))
+                    if isinstance(value, str):
+                        return value.strip()
+
+        return text
+
+    @staticmethod
+    def _strip_code_fence(text: str) -> str:
+        """Remove a single fenced markdown code block wrapper if present."""
+        match = re.fullmatch(r"```(?:[a-zA-Z0-9_-]+)?\s*\n?(.*?)\n?```", text, flags=re.DOTALL)
+        if match:
+            return match.group(1).strip()
+        return text

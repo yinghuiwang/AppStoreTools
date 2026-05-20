@@ -5,6 +5,13 @@ import pytest
 from asc.config import Config
 
 
+@pytest.fixture(autouse=True)
+def isolated_home(tmp_path, monkeypatch):
+    """Keep tests independent from the developer's ~/.config/asc/llm.toml."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+
 def test_llm_api_key_from_toml(tmp_path, monkeypatch):
     """reads api_key from [llm] section in TOML"""
     monkeypatch.chdir(tmp_path)

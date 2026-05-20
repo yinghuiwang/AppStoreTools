@@ -151,6 +151,63 @@ def test_whats_new_run_invalid_json_returns_400(client):
     assert "error" in data
 
 
+def test_whats_new_run_accepts_json_translations_payload(client):
+    """POST /api/whats-new/run accepts JSON payload from the Web UI translation preview."""
+    with patch("asc.web.routes_api._start_whats_new_task", return_value="task-123") as mock_start:
+        response = client.post(
+            "/api/whats-new/run",
+            cookies={"asc_profile": "test"},
+            json={
+                "translations": {"zh-CN": "你好世界"},
+                "text": "Hello world",
+                "dry_run": 0,
+            },
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["task_id"] == "task-123"
+    mock_start.assert_called_once()
+    kwargs = mock_start.call_args.kwargs
+    assert kwargs["dry_run"] is False
+    assert kwargs["translations"] == {"zh-CN": "你好世界"}
+    assert kwargs["text"] == "Hello world"
+
+
+def test_whats_new_run_accepts_json_direct_payload(client):
+    """POST /api/whats-new/run accepts JSON payload from the Web UI direct upload button."""
+    with patch("asc.web.routes_api._start_whats_new_task", return_value="task-456") as mock_start:
+        response = client.post(
+            "/api/whats-new/run",
+            cookies={"asc_profile": "test"},
+            json={
+                "text": "Bug fixes.",
+                "source_locale": "en-US",
+                "locales": "en-US,zh-CN",
+                "dry_run": 1,
+            },
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["task_id"] == "task-456"
+    mock_start.assert_called_once()
+    kwargs = mock_start.call_args.kwargs
+    assert kwargs["dry_run"] is True
+    assert kwargs["translations"] is None
+    assert kwargs["text"] == "Bug fixes."
+    assert kwargs["locales"] == ["en-US", "zh-CN"]
+
+
+def test_whats_new_template_uses_alpine_data_helper():
+    """whats_new template must use Alpine.$data, not Alpine.$Data."""
+    from pathlib import Path
+
+    template = Path("src/asc/web/templates/whats_new.html").read_text(encoding="utf-8")
+    assert "Alpine.$Data" not in template
+    assert "Alpine.$data" in template
+
+
 def test_settings_llm_get_returns_config(client):
     """GET /api/settings/llm returns configs dict and default name."""
     mock_config = MagicMock()

@@ -732,7 +732,11 @@ async def whats_new_translate(request: Request):
     if not profile:
         return JSONResponse({"error": "No profile selected"}, status_code=400)
     try:
-        data = await request.json()
+        if request.headers.get("content-type", "").startswith("application/json"):
+            data = await request.json()
+        else:
+            form = await request.form()
+            data = dict(form)
         text = data.get("text", "")
         source_locale = data.get("source_locale", "auto")
         from asc.config import Config
@@ -896,8 +900,33 @@ async def whats_new_run(
     if not profile:
         return JSONResponse({"error": "No profile selected"}, status_code=400)
 
+    def _as_bool(value) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        if value is None:
+            return False
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
     translations = None
     locale_list = None
+    payload = None
+
+    try:
+        if request.headers.get("content-type", "").startswith("application/json"):
+            payload = await request.json()
+    except Exception:
+        payload = None
+
+    if payload is not None:
+        payload_translations = payload.get("translations")
+        if payload_translations is not None and not translations_json:
+            translations_json = json.dumps(payload_translations)
+        text = text or payload.get("text", "")
+        locales = locales or payload.get("locales", "")
+        if not dry_run and "dry_run" in payload:
+            dry_run = payload["dry_run"]
 
     if translations_json:
         # Translate mode: pre-translated dict
@@ -913,7 +942,7 @@ async def whats_new_run(
 
     task_id = _start_whats_new_task(
         profile=profile,
-        dry_run=bool(dry_run),
+        dry_run=_as_bool(dry_run),
         translations=translations,
         text=text or None,
         locales=locale_list,

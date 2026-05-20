@@ -310,7 +310,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function startSSE(taskId) {
   const root = document.querySelector('[x-data]');
-  const d = Alpine.$Data(root);
+  const d = Alpine.$data(root);
   const es = new EventSource('/api/task/' + taskId + '/stream');
   d.status = 'running';
   es.addEventListener('log', e => {
