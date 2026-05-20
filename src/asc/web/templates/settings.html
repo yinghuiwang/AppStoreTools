@@ -133,6 +133,70 @@
       </div>
     </div>
 
+    <!-- LLM Configuration -->
+<div class="card"
+     x-data="{ llm: null, saving: false, saved: false }"
+     x-init="
+       fetch('/api/settings/llm', {headers: {'Content-Type': 'application/json'}})
+         .then(r => r.json())
+         .then(d => { llm = d; })
+         .catch(() => { llm = {base_url: 'https://api.openai.com/v1', api_key: '', model: 'gpt-4o'}; })
+     ">
+  <div class="card-header flex items-center gap-2">
+    <svg class="w-4 h-4 text-amber-500" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456Z"/></svg>
+    <h2 class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">LLM 翻译配置</h2>
+  </div>
+  <div class="card-body space-y-4">
+    <template x-if="llm">
+      <div class="space-y-4">
+        <div>
+          <label class="text-xs uppercase tracking-widest text-obsidian-500 font-medium mb-1.5 block">Base URL</label>
+          <input type="text" x-model="llm.base_url"
+                 class="field-input w-full"
+                 placeholder="https://api.openai.com/v1">
+        </div>
+        <div>
+          <label class="text-xs uppercase tracking-widest text-obsidian-500 font-medium mb-1.5 block">API Key</label>
+          <input type="password" x-model="llm.api_key"
+                 class="field-input w-full"
+                 placeholder="sk-...">
+        </div>
+        <div>
+          <label class="text-xs uppercase tracking-widest text-obsidian-500 font-medium mb-1.5 block">Model</label>
+          <select x-model="llm.model" class="field-select w-full">
+            <option value="gpt-4o">GPT-4o</option>
+            <option value="gpt-4o-mini">GPT-4o mini</option>
+            <option value="gpt-4-turbo">GPT-4 Turbo</option>
+            <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+          </select>
+        </div>
+        <div class="flex items-center gap-3">
+          <button @click="
+            saving = true;
+            fetch('/api/settings/llm', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify(llm)
+            })
+              .then(r => r.json())
+              .then(() => { saving = false; saved = true; setTimeout(() => saved = false, 2000); })
+              .catch(() => { saving = false; })
+          "
+                  :disabled="saving"
+                  class="btn-primary">
+            <span x-show="!saving && !saved">保存配置</span>
+            <span x-show="saving">保存中...</span>
+            <span x-show="saved" class="text-emerald-400">已保存</span>
+          </button>
+        </div>
+      </div>
+    </template>
+    <template x-if="!llm">
+      <div class="text-sm text-obsidian-500">加载中...</div>
+    </template>
+  </div>
+</div>
+
     <!-- Language -->
     <div class="card">
       <div class="card-header">
