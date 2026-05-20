@@ -1204,12 +1204,17 @@ async def get_llm_config(request: Request):
 
 
 @router.post("/settings/llm")
-async def save_llm_config(request: Request, data: dict):
+async def save_llm_config(request: Request):
     """Save a named LLM config to the profile. Set as default if specified."""
     from asc.config import Config
     profile = request.cookies.get("asc_profile")
     if not profile:
         return JSONResponse({"error": "No profile selected"}, status_code=400)
+
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
 
     name = data.get("name", "default")
     base_url = data.get("base_url", "https://api.openai.com/v1")
@@ -1242,12 +1247,17 @@ async def delete_llm_config(request: Request, name: str = _Form(...)):
 
 
 @router.post("/settings/llm/default")
-async def set_llm_default(request: Request, data: dict):
+async def set_llm_default(request: Request):
     """Set the default LLM config."""
     from asc.config import Config
     profile = request.cookies.get("asc_profile")
     if not profile:
         return JSONResponse({"error": "No profile selected"}, status_code=400)
+
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
 
     name = data.get("name")
     if not name:
