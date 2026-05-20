@@ -1,0 +1,330 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="">
+  <!-- Header -->
+  <div class="mb-8">
+    <h1 class="text-2xl font-bold tracking-tight text-obsidian-50 flex items-center gap-3">
+      <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: var(--accent-glow);">
+        <svg class="w-[18px] h-[18px] shrink-0 text-amber-500" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 0 1 .865-.501 48.172 48.172 0 0 0 3.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z"/></svg>
+      </div>
+      更新说明（What's New）
+    </h1>
+  </div>
+
+  <div x-data="{
+    step: 1,
+    taskId: null,
+    logs: [],
+    status: 'idle',
+    progress: 0,
+    progressMsg: '',
+    submitting: false,
+    checkResult: null,
+    translateMode: false,
+    sourceLocale: 'auto',
+    text: '',
+    translations: {},
+    availableLocales: [],
+    version: '',
+    editingLocale: null,
+    editText: ''
+  }"
+  @check-result.window="checkResult = $event.detail"
+  @translations-result.window="translations = $event.detail; step = 2"
+  @run-result.window="taskId = $event.detail.task_id; step = 3; startSSE(taskId)">
+
+    <!-- Environment check result (shown on mount) -->
+    <template x-if="checkResult">
+      <div class="mb-5 rounded-lg p-4 text-sm"
+           :class="{
+             'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20': checkResult.level === 'success',
+             'bg-amber-500/10 text-amber-400 border border-amber-500/20': checkResult.level === 'warning',
+             'bg-red-500/10 text-red-400 border border-red-500/20': checkResult.level === 'error',
+           }">
+        <p class="font-medium" x-text="checkResult.message"></p>
+        <template x-if="checkResult.detail && checkResult.detail.version">
+          <p class="text-xs mt-1 opacity-80"
+             x-text="'版本 ' + checkResult.detail.version + ' · 状态 ' + checkResult.detail.state + ' · ' + checkResult.detail.locales + ' 个语言'"></p>
+        </template>
+      </div>
+    </template>
+
+    <!-- Step 1: Form -->
+    <div x-show="step === 1">
+      <div class="card">
+        <div class="card-body space-y-5">
+
+          <!-- Source locale -->
+          <div>
+            <label for="source-locale-select" class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">源语言</label>
+            <select id="source-locale-select"
+                    x-model="sourceLocale"
+                    class="field-select w-full">
+              <option value="auto">自动检测</option>
+              <template x-for="locale in availableLocales" :key="locale">
+                <option :value="locale" x-text="locale"></option>
+              </template>
+            </select>
+          </div>
+
+          <!-- Update notes textarea -->
+          <div>
+            <label for="update-text" class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">更新说明</label>
+            <textarea id="update-text"
+                      x-model="text"
+                      rows="5"
+                      class="field-input w-full resize-y"
+                      placeholder="输入本次更新的说明文字..."></textarea>
+          </div>
+
+          <!-- Translate mode checkbox -->
+          <div>
+            <label class="flex items-center gap-2.5 text-sm text-obsidian-300 cursor-pointer">
+              <input type="checkbox" x-model="translateMode" class="w-4 h-4">
+              <span>翻译模式：自动翻译到所有语言</span>
+            </label>
+          </div>
+
+          <!-- Actions -->
+          <div class="flex gap-3 pt-3 border-t border-obsidian-700">
+            <!-- Preview translate (only when translateMode is true) -->
+            <button type="button"
+                    x-show="translateMode"
+                    class="btn-primary"
+                    :disabled="submitting || !text.trim()"
+                    @click="
+                      submitting = true;
+                      fetch('/api/whats-new/translate', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({source_locale: sourceLocale, text: text})
+                      })
+                        .then(r => r.json())
+                        .then(data => {
+                          translations = data;
+                          step = 2;
+                          submitting = false;
+                        })
+                        .catch(() => { submitting = false; });
+                    ">
+              <span x-show="!submitting">预览翻译</span>
+              <span x-show="submitting" class="flex items-center gap-1.5">
+                <svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                处理中...
+              </span>
+            </button>
+            <!-- Direct upload (no translate) -->
+            <button type="button"
+                    class="btn-ghost"
+                    :disabled="submitting || !text.trim()"
+                    @click="
+                      submitting = true;
+                      fetch('/api/whats-new/run', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({text: text, source_locale: sourceLocale, dry_run: 0})
+                      })
+                        .then(r => r.json())
+                        .then(data => {
+                          taskId = data.task_id;
+                          step = 3;
+                          submitting = false;
+                          startSSE(taskId);
+                        })
+                        .catch(() => { submitting = false; });
+                    ">
+              直接上传（不翻译）
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 2: Translation Preview -->
+    <div x-show="step === 2 && translateMode">
+      <div class="mb-5 flex items-center gap-3">
+        <button type="button"
+                class="btn-ghost flex items-center gap-1.5"
+                @click="step = 1; translations = {}">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18"/></svg>
+          返回
+        </button>
+        <h2 class="text-lg font-semibold text-obsidian-100">翻译预览</h2>
+      </div>
+
+      <div class="space-y-4 mb-6">
+        <template x-for="(transText, locale) in translations" :key="locale">
+          <div class="card">
+            <div class="card-header flex items-center justify-between">
+              <h3 class="text-sm font-medium text-obsidian-200" x-text="locale"></h3>
+              <button type="button"
+                      class="text-xs text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium"
+                      @click="editingLocale = locale; editText = transText">
+                编辑
+              </button>
+            </div>
+            <div class="card-body">
+              <p class="text-sm text-obsidian-200 whitespace-pre-wrap" x-text="transText"></p>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <!-- Bottom actions -->
+      <div class="flex gap-3">
+        <button type="button"
+                class="btn-ghost"
+                @click="step = 1; translations = {}">
+          取消
+        </button>
+        <button type="button"
+                class="btn-ghost"
+                @click="
+                  fetch('/api/whats-new/run', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({text: text, source_locale: sourceLocale, translations: translations, dry_run: 1})
+                  })
+                    .then(r => r.json())
+                    .then(data => { taskId = data.task_id; step = 3; startSSE(taskId); });
+                ">
+          预览（Dry Run）
+        </button>
+        <button type="button"
+                class="btn-primary"
+                @click="
+                  fetch('/api/whats-new/run', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({text: text, source_locale: sourceLocale, translations: translations, dry_run: 0})
+                  })
+                    .then(r => r.json())
+                    .then(data => { taskId = data.task_id; step = 3; startSSE(taskId); });
+                ">
+          确认并上传
+        </button>
+      </div>
+    </div>
+
+    <!-- Step 3: Execution Panel -->
+    <div x-show="step === 3">
+      <div class="card">
+        <div class="card-body">
+          <div class="flex items-center justify-between mb-5">
+            <h2 class="font-semibold text-obsidian-100 flex items-center gap-2.5" x-text="status === 'done' ? '上传完成' : status === 'error' ? '上传失败' : '上传中...'">
+            </h2>
+            <div class="flex items-center gap-3">
+              <template x-if="status === 'done'">
+                <div class="w-7 h-7 rounded-full flex items-center justify-center bg-emerald-500/15">
+                  <svg class="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>
+                </div>
+              </template>
+              <template x-if="status === 'error'">
+                <div class="w-7 h-7 rounded-full flex items-center justify-center bg-red-500/15">
+                  <svg class="w-4 h-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"/></svg>
+                </div>
+              </template>
+              <template x-if="status === 'running'">
+                <div class="w-7 h-7 rounded-full flex items-center justify-center" style="background: var(--accent-glow);">
+                  <svg class="w-4 h-4 text-amber-500 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                </div>
+              </template>
+              <button type="button" class="text-xs text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium" @click="step=1; logs=[]; status='idle'; taskId=null">重新运行</button>
+            </div>
+          </div>
+
+          <!-- Progress -->
+          <div class="progress-track mb-2">
+            <div class="progress-fill" :style="`width: ${progress}%`"></div>
+          </div>
+          <div class="flex items-center justify-between mb-5">
+            <p class="text-xs text-obsidian-400" x-text="progressMsg"></p>
+            <span class="text-xs font-mono text-obsidian-500 tabular-nums" x-text="progress > 0 ? progress + '%' : ''"></span>
+          </div>
+
+          <!-- Log toggle -->
+          <div x-data="{ open: true }">
+            <button type="button" class="text-xs text-obsidian-400 hover:text-obsidian-200 cursor-pointer transition-colors duration-150 flex items-center gap-1.5 uppercase tracking-wider font-medium" @click="open = !open">
+              <svg class="w-3 h-3 transition-transform duration-150" :class="open ? 'rotate-0' : '-rotate-90'" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg>
+              <span x-text="open ? '收起日志' : '展开日志'"></span>
+            </button>
+            <div x-show="open" x-transition.duration.150ms class="mt-2 log-panel max-h-64" id="whats-new-log-panel">
+              <template x-for="(line, idx) in logs" :key="idx">
+                <div x-text="line"></div>
+              </template>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Edit Modal -->
+    <div x-show="editingLocale !== null"
+         class="fixed inset-0 flex items-center justify-center z-50"
+         style="background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);"
+         @click.self="editingLocale = null">
+      <div class="card w-[500px]">
+        <div class="card-header flex items-center justify-between">
+          <h3 class="text-xs uppercase tracking-widest text-obsidian-400 font-medium" x-text="'编辑: ' + (editingLocale || '')"></h3>
+          <button @click="editingLocale = null" class="text-obsidian-500 hover:text-obsidian-300 cursor-pointer transition-colors duration-150 p-1 rounded focus-ring">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div class="card-body">
+          <textarea x-model="editText"
+                    rows="6"
+                    class="field-input w-full resize-y"></textarea>
+        </div>
+        <div class="px-5 py-3 border-t border-obsidian-700 flex justify-end gap-2">
+          <button @click="editingLocale = null" class="btn-ghost">取消</button>
+          <button @click="
+            if (editingLocale) {
+              translations[editingLocale] = editText;
+            }
+            editingLocale = null;
+          " class="btn-primary">保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  // Fetch environment check on mount
+  fetch('/api/whats-new/check', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}})
+    .then(r => r.json())
+    .then(data => {
+      window.dispatchEvent(new CustomEvent('check-result', {detail: data}));
+      const root = document.querySelector('[x-data]');
+      const d = Alpine.$data(root);
+      if (data.detail && data.detail.available_locales) {
+        d.availableLocales = data.detail.available_locales;
+      }
+      if (data.detail && data.detail.version) {
+        d.version = data.detail.version;
+      }
+    })
+    .catch(() => {});
+});
+
+function startSSE(taskId) {
+  const root = document.querySelector('[x-data]');
+  const d = Alpine.$Data(root);
+  const es = new EventSource('/api/task/' + taskId + '/stream');
+  d.status = 'running';
+  es.addEventListener('log', e => {
+    d.logs.push(e.data);
+    const panel = document.getElementById('whats-new-log-panel');
+    if (panel) requestAnimationFrame(() => { panel.scrollTop = panel.scrollHeight; });
+  });
+  es.addEventListener('progress', e => {
+    const p = JSON.parse(e.data);
+    d.progress = p.pct || 0;
+    d.progressMsg = p.msg || '';
+  });
+  es.addEventListener('done', () => { d.status = 'done'; d.progress = 100; es.close(); });
+  es.addEventListener('error_event', () => { d.status = 'error'; es.close(); });
+}
+</script>
+{% endblock %}
