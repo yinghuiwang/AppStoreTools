@@ -90,6 +90,82 @@ def test_build_run_api_starts_task(client):
         assert "task_id" in resp.json()
 
 
+def test_build_run_api_passes_interactive_release_options(client):
+    from unittest.mock import patch
+    with patch("asc.web.routes_api._start_build_task") as mock_start:
+        mock_start.return_value = "fake-build-task-id"
+        resp = client.post("/api/build/run", cookies={"asc_profile": "myapp"}, data={
+            "mode": "full",
+            "project": "MyApp.xcworkspace",
+            "scheme": "MyApp",
+            "destination": "testflight",
+            "signing": "manual",
+            "certificate": "Apple Distribution: ACME",
+            "provisioning_profile": "/tmp/acme.mobileprovision",
+            "reuse_archive": "reuse",
+            "dry_run": "on",
+            "verbose": "on",
+        })
+        assert resp.status_code == 200
+        mock_start.assert_called_once()
+        kwargs = mock_start.call_args.kwargs
+        assert kwargs["scheme"] == "MyApp"
+        assert kwargs["signing"] == "manual"
+        assert kwargs["certificate"] == "Apple Distribution: ACME"
+        assert kwargs["provisioning_profile"] == "/tmp/acme.mobileprovision"
+        assert kwargs["reuse_archive"] == "reuse"
+        assert kwargs["dry_run"] is True
+
+
+def test_build_options_api_returns_release_choices(client):
+    from datetime import datetime, timezone
+    from unittest.mock import MagicMock, patch
+
+    from asc.commands.build_inputs import Certificate, ProfileInfo
+
+    mock_config = MagicMock()
+    mock_config.build_project = None
+    mock_config.build_scheme = None
+    mock_config.build_bundle_id = None
+    mock_config.build_certificate = ""
+    mock_config.build_profile = ""
+
+    profile = ProfileInfo(
+        path="/tmp/acme.mobileprovision",
+        uuid="UUID",
+        name="ACME AppStore",
+        team_id="TEAM123",
+        bundle_id="com.acme.app",
+        expiration=datetime(2030, 1, 1, tzinfo=timezone.utc),
+        cert_sha1s=["SHA1"],
+    )
+
+    with patch("asc.web.routes_api.Config", return_value=mock_config), \
+         patch("asc.commands.build_inputs.detect_project", return_value=("MyApp.xcworkspace", "workspace")), \
+         patch("asc.commands.build_inputs.list_schemes", return_value=["MyApp", "MyAppTests"]), \
+         patch("asc.commands.build_inputs.detect_bundle_id", return_value="com.acme.app"), \
+         patch("asc.commands.build_inputs.detect_certificates", return_value=[Certificate(sha1="SHA1", name="Apple Distribution: ACME")]), \
+         patch("asc.commands.build_inputs.detect_profiles", return_value=[profile]):
+        resp = client.get(
+            "/api/build/options",
+            cookies={"asc_profile": "myapp"},
+            params={
+                "project": ".",
+                "scheme": "MyApp",
+                "signing": "manual",
+                "certificate": "Apple Distribution: ACME",
+            },
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["schemes"] == ["MyApp", "MyAppTests"]
+    assert data["bundle_id"] == "com.acme.app"
+    assert data["certificates"][0]["name"] == "Apple Distribution: ACME"
+    assert data["profiles"][0]["path"] == "/tmp/acme.mobileprovision"
+
+
 def test_task_stream_done_task(client):
     """已完成任务的 SSE 流应立即发送所有日志并关闭。"""
     from asc.web.tasks import task_store, TaskStatus

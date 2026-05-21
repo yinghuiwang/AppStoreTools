@@ -240,6 +240,10 @@ def _start_build_task(
     ipa_path: str,
     verbose: bool,
     signing: str = "auto",
+    certificate: str = "",
+    provisioning_profile: str = "",
+    dry_run: bool = False,
+    reuse_archive: str = "",
 ) -> str:
     task_id = _task_store.create("build", profile=profile)
 
@@ -288,9 +292,23 @@ def _start_build_task(
                         scheme=scheme or None,
                         destination=destination or None,
                         signing=signing or None,
+                        certificate=certificate or None,
+                        profile=provisioning_profile or None,
                     )
                     resolved = prepare_build_inputs(cli, config, interactive=False)
-                    ipa = build_core(resolved, config.build_output, verbose=verbose)
+                    reuse_value = None
+                    if reuse_archive == "reuse":
+                        reuse_value = True
+                    elif reuse_archive == "rebuild":
+                        reuse_value = False
+                    ipa = build_core(
+                        resolved,
+                        config.build_output,
+                        dry_run=dry_run,
+                        reuse_archive=reuse_value,
+                        interactive=False,
+                        verbose=verbose,
+                    )
                     if mode == "full" and ipa:
                         from asc.commands.build import deploy_core
                         deploy_core(
@@ -299,7 +317,7 @@ def _start_build_task(
                             key_id=config.key_id,
                             key_file=config.key_file,
                             destination=destination or "appstore",
-                            dry_run=False,
+                            dry_run=dry_run,
                             verbose=verbose,
                         )
                 elif mode == "deploy":
@@ -310,7 +328,7 @@ def _start_build_task(
                         key_id=config.key_id,
                         key_file=config.key_file,
                         destination=destination or "appstore",
-                        dry_run=False,
+                        dry_run=dry_run,
                         verbose=verbose,
                     )
 
@@ -337,6 +355,10 @@ async def build_run(
     ipa_path: str = _Form(""),
     verbose: str = _Form(""),
     signing: str = _Form("auto"),
+    certificate: str = _Form(""),
+    provisioning_profile: str = _Form(""),
+    dry_run: str = _Form(""),
+    reuse_archive: str = _Form(""),
 ):
     profile = request.cookies.get("asc_profile", "")
     task_id = _start_build_task(
@@ -348,6 +370,10 @@ async def build_run(
         ipa_path=ipa_path,
         verbose=bool(verbose),
         signing=signing,
+        certificate=certificate,
+        provisioning_profile=provisioning_profile,
+        dry_run=bool(dry_run),
+        reuse_archive=reuse_archive,
     )
     return {"task_id": task_id}
 
@@ -362,6 +388,69 @@ async def build_schemes(project: str = "."):
         return {"schemes": schemes}
     except Exception as e:
         return {"schemes": [], "error": str(e)}
+
+
+@router.get("/build/options")
+async def build_options(
+    request: Request,
+    project: str = ".",
+    scheme: str = "",
+    signing: str = "auto",
+    certificate: str = "",
+):
+    """Return selectable build inputs for the Web UI.
+
+    This mirrors the choices that `asc release --interactive` would prompt for
+    in a terminal, but keeps the Web UI non-interactive at execution time.
+    """
+    try:
+        from asc.commands.build_inputs import (
+            detect_bundle_id,
+            detect_certificates,
+            detect_project,
+            detect_profiles,
+            list_schemes,
+        )
+
+        profile = request.cookies.get("asc_profile", "")
+        config = Config(app_name=profile)
+        source_project = project or config.build_project or "."
+        project_path, kind = detect_project(source_project)
+        schemes = list_schemes(project_path, kind)
+        selected_scheme = scheme or config.build_scheme or (schemes[0] if len(schemes) == 1 else "")
+
+        bundle_id = ""
+        if selected_scheme:
+            bundle_id = config.build_bundle_id or detect_bundle_id(project_path, kind, selected_scheme) or ""
+
+        certs = detect_certificates() if signing == "manual" else []
+        selected_cert = certificate or config.build_certificate or ""
+        cert_sha1 = next((c.sha1 for c in certs if c.name == selected_cert), None)
+        profiles = detect_profiles(bundle_id, cert_sha1) if signing == "manual" and bundle_id else []
+
+        return {
+            "ok": True,
+            "project": project_path,
+            "kind": kind,
+            "schemes": schemes,
+            "selected_scheme": selected_scheme,
+            "bundle_id": bundle_id,
+            "certificates": [{"name": c.name, "sha1": c.sha1} for c in certs],
+            "selected_certificate": selected_cert,
+            "profiles": [
+                {
+                    "path": p.path,
+                    "name": p.name,
+                    "team_id": p.team_id,
+                    "bundle_id": p.bundle_id,
+                    "expiration": p.expiration.strftime("%Y-%m-%d"),
+                }
+                for p in profiles
+            ],
+            "selected_profile": config.build_profile or "",
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e), "schemes": [], "certificates": [], "profiles": []}
 
 
 import asyncio as _asyncio

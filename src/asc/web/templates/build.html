@@ -68,6 +68,7 @@
               <select name="scheme" id="scheme-select" class="field-select w-full">
                 <option value="">自动检测</option>
               </select>
+              <p id="build-options-hint" class="text-xs text-obsidian-500 mt-1"></p>
             </div>
 
             <!-- Destination -->
@@ -95,9 +96,21 @@
                   <input type="radio" name="signing" value="manual" x-model="signing" class="w-4 h-4">
                   <span class="group-hover:text-obsidian-50 transition-colors duration-150">手动签名</span>
                 </label>
-                <div x-show="signing === 'manual'" x-transition class="ml-6 mt-1 p-3 rounded-lg text-xs" style="background: var(--accent-glow); border: 1px solid rgba(232,161,37,0.2);">
-                  <p class="text-obsidian-300">手动签名将使用配置文件中的证书和描述文件。</p>
-                  <p class="text-obsidian-500 mt-1">可通过 <code class="font-mono text-amber-550 bg-obsidian-800 px-1.5 py-0.5 rounded">asc config</code> 或编辑 <code class="font-mono text-amber-550 bg-obsidian-800 px-1.5 py-0.5 rounded">.asc/config.toml</code> 配置。</p>
+                <div x-show="signing === 'manual'" x-transition class="ml-6 mt-1 p-3 rounded-lg text-xs space-y-3" style="background: var(--accent-glow); border: 1px solid rgba(232,161,37,0.2);">
+                  <p class="text-obsidian-300">手动签名需要选择可用证书和匹配 Bundle ID 的描述文件。</p>
+                  <div>
+                    <label for="certificate-select" class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-1.5 block">证书</label>
+                    <select name="certificate" id="certificate-select" class="field-select w-full">
+                      <option value="">自动检测</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label for="profile-select" class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-1.5 block">描述文件</label>
+                    <select name="provisioning_profile" id="profile-select" class="field-select w-full">
+                      <option value="">自动检测</option>
+                    </select>
+                  </div>
+                  <p id="bundle-id-hint" class="text-obsidian-500"></p>
                 </div>
               </div>
             </div>
@@ -119,6 +132,28 @@
             <div>
               <label class="flex items-center gap-2.5 text-sm text-obsidian-300 cursor-pointer">
                 <input type="checkbox" name="verbose" value="on" class="w-4 h-4"> Verbose（实时显示原始日志）
+              </label>
+            </div>
+
+            <!-- Release-style options -->
+            <div x-show="mode !== 'deploy'" class="space-y-2">
+              <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2.5 block">交互选项</label>
+              <div class="flex flex-wrap gap-6">
+                <label class="flex items-center gap-2.5 text-sm text-obsidian-200 cursor-pointer">
+                  <input type="radio" name="reuse_archive" value="" checked class="w-4 h-4"> 自动判断
+                </label>
+                <label class="flex items-center gap-2.5 text-sm text-obsidian-200 cursor-pointer">
+                  <input type="radio" name="reuse_archive" value="reuse" class="w-4 h-4"> 复用匹配 Archive
+                </label>
+                <label class="flex items-center gap-2.5 text-sm text-obsidian-200 cursor-pointer">
+                  <input type="radio" name="reuse_archive" value="rebuild" class="w-4 h-4"> 强制重新打包
+                </label>
+              </div>
+            </div>
+
+            <div>
+              <label class="flex items-center gap-2.5 text-sm text-obsidian-300 cursor-pointer">
+                <input type="checkbox" name="dry_run" value="on" class="w-4 h-4"> 预览模式（不实际构建/上传）
               </label>
             </div>
 
@@ -235,10 +270,15 @@ function _saveBuildForm() {
   const data = {
     mode: f.querySelector('[name=mode]:checked')?.value || 'full',
     project: f.querySelector('[name=project]').value,
+    scheme: f.querySelector('[name=scheme]').value,
     destination: f.querySelector('[name=destination]:checked')?.value || 'testflight',
     signing: f.querySelector('[name=signing]:checked')?.value || 'auto',
+    certificate: f.querySelector('[name=certificate]').value,
+    provisioning_profile: f.querySelector('[name=provisioning_profile]').value,
+    reuse_archive: f.querySelector('[name=reuse_archive]:checked')?.value || '',
     ipa_path: f.querySelector('[name=ipa_path]').value,
     verbose: f.querySelector('[name=verbose]').checked,
+    dry_run: f.querySelector('[name=dry_run]').checked,
   };
   localStorage.setItem(_BUILD_STORE_KEY, JSON.stringify(data));
 }
@@ -255,6 +295,7 @@ function _restoreBuildForm() {
       if (r) { r.checked = true; r.dispatchEvent(new Event('change')); }
     }
     if (data.project) f.querySelector('[name=project]').value = data.project;
+    if (data.scheme) f.querySelector('[name=scheme]').dataset.pendingValue = data.scheme;
     if (data.destination) {
       const r = f.querySelector(`[name=destination][value="${data.destination}"]`);
       if (r) r.checked = true;
@@ -263,8 +304,15 @@ function _restoreBuildForm() {
       const r = f.querySelector(`[name=signing][value="${data.signing}"]`);
       if (r) { r.checked = true; r.dispatchEvent(new Event('change')); }
     }
+    if (data.certificate) f.querySelector('[name=certificate]').dataset.pendingValue = data.certificate;
+    if (data.provisioning_profile) f.querySelector('[name=provisioning_profile]').dataset.pendingValue = data.provisioning_profile;
+    if (data.reuse_archive !== undefined) {
+      const r = f.querySelector(`[name=reuse_archive][value="${data.reuse_archive}"]`);
+      if (r) r.checked = true;
+    }
     if (data.ipa_path) f.querySelector('[name=ipa_path]').value = data.ipa_path;
     f.querySelector('[name=verbose]').checked = !!data.verbose;
+    f.querySelector('[name=dry_run]').checked = !!data.dry_run;
   } catch(e) {}
 }
 
@@ -275,8 +323,90 @@ document.addEventListener('DOMContentLoaded', () => {
     f.addEventListener('change', _saveBuildForm);
     f.addEventListener('input', _saveBuildForm);
     f.addEventListener('submit', _saveBuildForm);
+    f.querySelector('[name=project]').addEventListener('change', () => loadBuildOptions({resetScheme: true}));
+    f.querySelector('[name=scheme]').addEventListener('change', () => loadBuildOptions());
+    f.querySelectorAll('[name=signing]').forEach(el => el.addEventListener('change', () => loadBuildOptions()));
+    f.querySelector('[name=certificate]').addEventListener('change', () => loadBuildOptions({keepCertificate: true}));
+    loadBuildOptions();
   }
 });
+
+function _setSelectOptions(select, rows, placeholder, valueFor, labelFor, preferredValue) {
+  const previous = preferredValue || select.dataset.pendingValue || select.value;
+  select.innerHTML = '';
+  const opt = document.createElement('option');
+  opt.value = '';
+  opt.textContent = placeholder;
+  select.appendChild(opt);
+  rows.forEach(row => {
+    const item = document.createElement('option');
+    item.value = valueFor(row);
+    item.textContent = labelFor(row);
+    select.appendChild(item);
+  });
+  if (previous && Array.from(select.options).some(o => o.value === previous)) {
+    select.value = previous;
+  }
+  delete select.dataset.pendingValue;
+}
+
+function loadBuildOptions(opts = {}) {
+  const f = document.getElementById('build-form');
+  if (!f) return;
+  const project = f.querySelector('[name=project]').value || '.';
+  const schemeSelect = f.querySelector('[name=scheme]');
+  if (opts.resetScheme) schemeSelect.value = '';
+  const signing = f.querySelector('[name=signing]:checked')?.value || 'auto';
+  const certSelect = f.querySelector('[name=certificate]');
+  const profileSelect = f.querySelector('[name=provisioning_profile]');
+  const certificate = opts.keepCertificate ? certSelect.value : (certSelect.value || certSelect.dataset.pendingValue || '');
+  const params = new URLSearchParams({
+    project,
+    scheme: schemeSelect.value || schemeSelect.dataset.pendingValue || '',
+    signing,
+    certificate,
+  });
+  fetch(`/api/build/options?${params.toString()}`)
+    .then(r => r.json())
+    .then(data => {
+      const hint = document.getElementById('build-options-hint');
+      const bundleHint = document.getElementById('bundle-id-hint');
+      if (!data.ok) {
+        if (hint) hint.textContent = data.error || '无法读取构建选项';
+        return;
+      }
+      _setSelectOptions(
+        schemeSelect,
+        data.schemes || [],
+        '自动检测',
+        row => row,
+        row => row,
+        data.selected_scheme || ''
+      );
+      _setSelectOptions(
+        certSelect,
+        data.certificates || [],
+        '自动检测',
+        row => row.name,
+        row => row.name,
+        data.selected_certificate || ''
+      );
+      _setSelectOptions(
+        profileSelect,
+        data.profiles || [],
+        '自动检测',
+        row => row.path,
+        row => `${row.name} (${row.team_id}, ${row.expiration})`,
+        data.selected_profile || ''
+      );
+      if (hint) hint.textContent = data.project ? `项目: ${data.project}` : '';
+      if (bundleHint) bundleHint.textContent = data.bundle_id ? `Bundle ID: ${data.bundle_id}` : '选择 Scheme 后可筛选匹配的描述文件。';
+    })
+    .catch(e => {
+      const hint = document.getElementById('build-options-hint');
+      if (hint) hint.textContent = `读取构建选项失败: ${e.message}`;
+    });
+}
 
 let _fbTargetInput = null, _fbMode = 'dir', _fbExt = '';
 function openFileBrowser(inputId, mode, ext) {
@@ -291,6 +421,7 @@ function selectFile(path) {
     const el = document.getElementById(_fbTargetInput);
     el.value = path;
     el.dispatchEvent(new Event('input', { bubbles: true }));
+    if (_fbTargetInput === 'project-input') loadBuildOptions({resetScheme: true});
   }
   closeFileBrowser();
 }
