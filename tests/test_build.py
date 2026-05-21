@@ -377,6 +377,40 @@ def test_upload_ipa_uses_altool(tmp_path, monkeypatch):
     assert "--upload-app" in cmd
 
 
+def test_upload_ipa_verbose_streams_altool_output(tmp_path, monkeypatch):
+    """upload_ipa(verbose=True) should enable raw altool output passthrough."""
+    from asc.commands.build import upload_ipa
+    ipa = tmp_path / "MyApp.ipa"
+    ipa.write_bytes(b"fake")
+
+    captured = {}
+
+    class _TrackingSpinner(_FakeSpinner):
+        def __init__(self, label, *, log_path, verbose=False, tty=None):
+            super().__init__(label, log_path=log_path, verbose=verbose, tty=tty)
+            captured["verbose"] = verbose
+
+        def run(self, cmd, output_callback=None):
+            captured["has_output_callback"] = output_callback is not None
+            return super().run(cmd, output_callback=output_callback)
+
+    _TrackingSpinner.returncode = 0
+    _TrackingSpinner.stderr = "Uploading package: 25%"
+    monkeypatch.setattr("asc.commands.build.Spinner", _TrackingSpinner)
+
+    upload_ipa(
+        ipa_path=str(ipa),
+        issuer_id="issuer-123",
+        key_id="key-456",
+        key_file="/path/to/key.p8",
+        destination="testflight",
+        verbose=True,
+    )
+
+    assert captured["verbose"] is True
+    assert captured["has_output_callback"] is True
+
+
 def test_upload_ipa_raises_on_failure(tmp_path, monkeypatch):
     """upload_ipa raises RuntimeError on non-zero returncode."""
     from asc.commands.build import upload_ipa
