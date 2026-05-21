@@ -208,6 +208,9 @@ asc --app myapp release --destination appstore --reuse-archive
 # 本地 Web UI
 asc web
 asc web --port 9090
+asc web --foreground
+asc web status
+asc web stop
 asc web --host 0.0.0.0 --no-open
 
 # Guard

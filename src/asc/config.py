@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 from typing import Any, Optional
 
+import toml
+
 try:
     import tomllib
 except ImportError:
@@ -151,6 +153,140 @@ class Config:
     def iap_path(self) -> Optional[str]:
         """IAP packages JSON path, set when using local config 'use once'."""
         return self._data.get("_iap_path") or os.getenv("_ASC_IAP_PATH")
+
+    def _llm_config_path(self) -> Path:
+        """Path to the global LLM config file."""
+        self._global_dir.mkdir(parents=True, exist_ok=True)
+        return self._global_dir / "llm.toml"
+
+    def _load_llm_config(self) -> dict:
+        """Load LLM config from global llm.toml."""
+        path = self._llm_config_path()
+        if not path.exists():
+            return {}
+        try:
+            return self._load_toml(path)
+        except Exception:
+            return {}
+
+    @property
+    def llm_configs(self) -> dict[str, dict]:
+        """Returns all LLM configs: {name: {base_url, api_key, model}}"""
+        return self._load_llm_config().get("llm_configs", {})
+
+    @property
+    def llm_default(self) -> Optional[str]:
+        """Returns the name of the default LLM config."""
+        return self._load_llm_config().get("llm_default")
+
+    def get_llm_config(self, name: str) -> Optional[dict]:
+        """Returns a specific LLM config by name."""
+        return self.llm_configs.get(name)
+
+    def get_active_llm_config(self) -> Optional[dict]:
+        """Returns the active LLM config (or first available if no default set)."""
+        default_name = self.llm_default
+        if default_name and default_name in self.llm_configs:
+            return self.llm_configs[default_name]
+        configs = self.llm_configs
+        if configs:
+            return next(iter(configs.values()))
+        return None
+
+    @property
+    def llm_api_key(self) -> Optional[str]:
+        active = self.get_active_llm_config()
+        if active:
+            return active.get("api_key") or os.getenv("OPENAI_API_KEY")
+        return self.get("api_key", section="llm") or os.getenv("OPENAI_API_KEY")
+
+    @property
+    def llm_base_url(self) -> str:
+        active = self.get_active_llm_config()
+        if active:
+            return active.get("base_url", "https://api.openai.com/v1")
+        return self.get("base_url", section="llm") or "https://api.openai.com/v1"
+
+    @property
+    def llm_model(self) -> str:
+        active = self.get_active_llm_config()
+        if active:
+            return active.get("model", "gpt-4o")
+        return self.get("model", section="llm") or "gpt-4o"
+
+    def save_llm_config(
+        self,
+        name: str,
+        base_url: str,
+        api_key: str,
+        model: str,
+        set_default: bool = True,
+    ) -> None:
+        """Save an LLM config to the global llm.toml file."""
+        llm_path = self._llm_config_path()
+
+        # Load existing LLM config data
+        data: dict = {}
+        if llm_path.exists():
+            try:
+                data = self._load_toml(llm_path)
+            except Exception:
+                data = {}
+
+        # Update llm_configs
+        llm_configs = dict(data.get("llm_configs", {}))
+        llm_configs[name] = {
+            "base_url": base_url,
+            "api_key": api_key,
+            "model": model,
+        }
+        data["llm_configs"] = llm_configs
+
+        # Update default if needed
+        if set_default or not data.get("llm_default"):
+            data["llm_default"] = name
+
+        # Write back
+        content = toml.dumps(data)
+        llm_path.write_text(content)
+
+    def delete_llm_config(self, name: str) -> None:
+        """Delete an LLM config from the global llm.toml file."""
+        llm_path = self._llm_config_path()
+
+        data: dict = {}
+        if llm_path.exists():
+            try:
+                data = self._load_toml(llm_path)
+            except Exception:
+                data = {}
+
+        llm_configs = dict(data.get("llm_configs", {}))
+        if name in llm_configs:
+            del llm_configs[name]
+            data["llm_configs"] = llm_configs
+
+        if data.get("llm_default") == name:
+            data["llm_default"] = next(iter(llm_configs), None) if llm_configs else None
+
+        content = toml.dumps(data)
+        llm_path.write_text(content)
+
+    def set_llm_default(self, name: str) -> None:
+        """Set the default LLM config in global llm.toml."""
+        llm_path = self._llm_config_path()
+
+        data: dict = {}
+        if llm_path.exists():
+            try:
+                data = self._load_toml(llm_path)
+            except Exception:
+                data = {}
+
+        data["llm_default"] = name
+
+        content = toml.dumps(data)
+        llm_path.write_text(content)
 
     @property
     def build_project(self) -> Optional[str]:
