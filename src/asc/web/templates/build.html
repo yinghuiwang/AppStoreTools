@@ -11,25 +11,26 @@
     </h1>
   </div>
 
-  <div x-data="{ step: 1, taskId: null, logs: [], status: 'idle', progress: 0, progressMsg: '', phase: 0, mode: 'full', signing: 'auto', submitting: false }">
+  <div id="build-page-state" x-data="{ step: 1, taskId: null, logs: [], status: 'idle', progress: 0, progressMsg: '', phase: 0, mode: 'full', signing: 'auto', submitting: false }">
 
     <!-- Step 1: 配置表单 -->
     <div x-show="step === 1">
-      <form id="build-form"
-            hx-post="/api/build/run"
-            hx-target="#build-run-result"
-            hx-swap="innerHTML"
-            @htmx:after-request.camel="
-              const data = JSON.parse(event.detail.xhr.responseText);
-              taskId = data.task_id;
-              step = 2;
-              submitting = false;
-              startBuildSSE(taskId);
-            "
-            @htmx:before-request.camel="submitting = true">
+      <div class="max-w-3xl">
+        <form id="build-form"
+              hx-post="/api/build/run"
+              hx-target="#build-run-result"
+              hx-swap="innerHTML"
+              @htmx:after-request.camel="
+                const data = JSON.parse(event.detail.xhr.responseText);
+                taskId = data.task_id;
+                step = 2;
+                submitting = false;
+                startBuildSSE(taskId);
+              "
+              @htmx:before-request.camel="submitting = true">
 
-        <div class="card">
-          <div class="card-body space-y-5">
+          <div class="card">
+            <div class="card-body space-y-5">
 
             <!-- Mode -->
             <div>
@@ -170,8 +171,9 @@
               </button>
             </div>
           </div>
-        </div>
-      </form>
+          </div>
+        </form>
+      </div>
     </div>
 
     <!-- Step 2: 执行面板 -->
@@ -264,6 +266,48 @@
 <script>
 const _BUILD_STORE_KEY = 'asc_build_form_{{ current_profile }}';
 
+function _getBuildFormState() {
+  const f = document.getElementById('build-form');
+  if (!f) return { mode: 'full', signing: 'auto' };
+  return {
+    mode: f.querySelector('[name=mode]:checked')?.value || 'full',
+    signing: f.querySelector('[name=signing]:checked')?.value || 'auto',
+  };
+}
+
+function _emitBuildPanelState(detail = {}) {
+  window.dispatchEvent(new CustomEvent('build-panel-state', {
+    detail: { ..._getBuildFormState(), ...detail },
+  }));
+}
+
+function _buildScanMessage(state) {
+  if (state.mode === 'deploy') return '';
+  const steps = ['检测 Xcode 项目与 Scheme'];
+  if (state.signing === 'manual') {
+    steps.push('读取签名证书与描述文件');
+  }
+  steps.push('读取版本号并扫描可复用 Archive');
+  return steps.join(' -> ');
+}
+
+function buildScanPanel() {
+  return {
+    mode: 'full',
+    signing: 'auto',
+    loadingScan: false,
+    scanStatus: 'idle',
+    scanMessage: '等待自动检测',
+    scanResult: null,
+    init() {
+      Object.assign(this, _getBuildFormState());
+      window.addEventListener('build-panel-state', event => {
+        Object.assign(this, event.detail);
+      });
+    },
+  };
+}
+
 function _saveBuildForm() {
   const f = document.getElementById('build-form');
   if (!f) return;
@@ -320,7 +364,10 @@ document.addEventListener('DOMContentLoaded', () => {
   _restoreBuildForm();
   const f = document.getElementById('build-form');
   if (f) {
-    f.addEventListener('change', _saveBuildForm);
+    f.addEventListener('change', () => {
+      _saveBuildForm();
+      _emitBuildPanelState();
+    });
     f.addEventListener('input', _saveBuildForm);
     f.addEventListener('submit', _saveBuildForm);
     f.querySelector('[name=project]').addEventListener('change', () => loadBuildOptions({resetScheme: true}));
@@ -366,13 +413,30 @@ function loadBuildOptions(opts = {}) {
     signing,
     certificate,
   });
+  const root = document.getElementById('build-page-state');
+  const d = root ? Alpine.$data(root) : null;
+  if (d) d.loadingScan = true;
+  const scanState = _getBuildFormState();
+  _emitBuildPanelState({
+    loadingScan: true,
+    scanStatus: 'running',
+    scanMessage: _buildScanMessage(scanState),
+  });
   fetch(`/api/build/options?${params.toString()}`)
     .then(r => r.json())
     .then(data => {
       const hint = document.getElementById('build-options-hint');
       const bundleHint = document.getElementById('bundle-id-hint');
+      if (d) d.scanResult = data;
+      _emitBuildPanelState({ scanResult: data });
       if (!data.ok) {
         if (hint) hint.textContent = data.error || '无法读取构建选项';
+        if (d) d.loadingScan = false;
+        _emitBuildPanelState({
+          loadingScan: false,
+          scanStatus: 'error',
+          scanMessage: data.error || '自动检测失败',
+        });
         return;
       }
       _setSelectOptions(
@@ -400,11 +464,27 @@ function loadBuildOptions(opts = {}) {
         data.selected_profile || ''
       );
       if (hint) hint.textContent = data.project ? `项目: ${data.project}` : '';
-      if (bundleHint) bundleHint.textContent = data.bundle_id ? `Bundle ID: ${data.bundle_id}` : '选择 Scheme 后可筛选匹配的描述文件。';
+      if (bundleHint) {
+        bundleHint.textContent = data.bundle_id
+          ? `Bundle ID: ${data.bundle_id}`
+          : '选择 Scheme 后可筛选匹配的描述文件。';
+      }
+      if (d) d.loadingScan = false;
+      _emitBuildPanelState({
+        loadingScan: false,
+        scanStatus: 'success',
+        scanMessage: '自动检测完成',
+      });
     })
     .catch(e => {
       const hint = document.getElementById('build-options-hint');
       if (hint) hint.textContent = `读取构建选项失败: ${e.message}`;
+      if (d) d.loadingScan = false;
+      _emitBuildPanelState({
+        loadingScan: false,
+        scanStatus: 'error',
+        scanMessage: `读取构建选项失败: ${e.message}`,
+      });
     });
 }
 
@@ -427,7 +507,7 @@ function selectFile(path) {
 }
 
 function startBuildSSE(taskId) {
-  const root = document.querySelector('[x-data]');
+  const root = document.getElementById('build-page-state');
   const d = Alpine.$data(root);
   const es = new EventSource(`/api/task/${taskId}/stream`);
   es.addEventListener('log', e => {
@@ -443,4 +523,119 @@ function startBuildSSE(taskId) {
   es.addEventListener('error_event', () => { d.status = 'error'; es.close(); });
 }
 </script>
+{% endblock %}
+
+{% block right_panel %}
+<aside x-data="buildScanPanel()"
+       x-show="mode !== 'deploy'"
+       class="max-lg:hidden w-[390px] xl:w-[430px] shrink-0 border-l border-obsidian-700 bg-obsidian-950/40 p-6 overflow-hidden">
+  <div class="card h-full flex flex-col">
+    <div class="card-header flex items-center justify-between gap-3 shrink-0">
+      <h2 class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">自动检测结果</h2>
+      <div class="flex items-center gap-2">
+        <span class="text-[11px]"
+              :class="{
+                'text-amber-500': scanStatus === 'running',
+                'text-emerald-400': scanStatus === 'success',
+                'text-red-400': scanStatus === 'error',
+                'text-obsidian-500': scanStatus === 'idle',
+              }"
+              x-text="scanStatus === 'running' ? '扫描中...' : scanStatus === 'success' ? '已完成' : scanStatus === 'error' ? '失败' : ''"></span>
+        <button type="button"
+                class="text-[11px] px-2 py-1 rounded border border-obsidian-700 text-obsidian-300 hover:text-obsidian-100 hover:border-obsidian-500 transition-colors duration-150"
+                @click="loadBuildOptions()"
+                :disabled="loadingScan">
+          刷新
+        </button>
+      </div>
+    </div>
+    <div class="card-body space-y-4 flex-1 min-h-0 overflow-y-auto">
+      <div class="rounded-lg border px-3 py-2.5 text-xs leading-relaxed"
+           :class="{
+             'border-amber-500/20 bg-amber-500/10 text-amber-400': scanStatus === 'running',
+             'border-emerald-500/20 bg-emerald-500/10 text-emerald-400': scanStatus === 'success',
+             'border-red-500/20 bg-red-500/10 text-red-400': scanStatus === 'error',
+             'border-obsidian-700 bg-obsidian-900/30 text-obsidian-500': scanStatus === 'idle',
+           }">
+        <div class="flex items-start gap-2">
+          <svg x-show="scanStatus === 'running'" class="w-3.5 h-3.5 mt-0.5 animate-spin shrink-0" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+          <span x-text="scanMessage"></span>
+        </div>
+      </div>
+
+      <template x-if="scanResult && scanResult.ok">
+        <div class="space-y-3 text-sm text-obsidian-300">
+          <div class="space-y-1">
+            <div class="text-[11px] uppercase tracking-widest text-obsidian-500">项目</div>
+            <div class="break-all" x-text="`${scanResult.project || '-'} (${scanResult.kind || '-'})`"></div>
+          </div>
+          <div class="space-y-1">
+            <div class="text-[11px] uppercase tracking-widest text-obsidian-500">Scheme 候选</div>
+            <div class="break-all" x-text="(scanResult.schemes || []).length ? scanResult.schemes.join(' / ') : '未检测到'"></div>
+          </div>
+          <div class="space-y-1">
+            <div class="text-[11px] uppercase tracking-widest text-obsidian-500">当前选中</div>
+            <div class="break-all" x-text="scanResult.selected_scheme || '未选择'"></div>
+          </div>
+          <div class="space-y-1">
+            <div class="text-[11px] uppercase tracking-widest text-obsidian-500">Bundle ID</div>
+            <div class="break-all" x-text="scanResult.bundle_id_selected || '未检测到'"></div>
+          </div>
+          <div class="space-y-1" x-show="signing === 'manual'">
+            <div class="text-[11px] uppercase tracking-widest text-obsidian-500">证书候选</div>
+            <template x-if="(scanResult.certificates || []).length">
+              <div class="space-y-1">
+                <template x-for="item in scanResult.certificates" :key="item.sha1">
+                  <div class="text-xs text-obsidian-300 break-all" :title="item.name">
+                    <span x-text="item.name"></span>
+                  </div>
+                </template>
+              </div>
+            </template>
+            <div x-show="!(scanResult.certificates || []).length" class="break-all">未检测到</div>
+          </div>
+          <div class="space-y-1" x-show="signing === 'manual'">
+            <div class="text-[11px] uppercase tracking-widest text-obsidian-500">当前证书</div>
+            <div class="break-all" x-text="scanResult.selected_certificate || '未选择'"></div>
+          </div>
+          <div class="space-y-1" x-show="signing === 'manual'">
+            <div class="text-[11px] uppercase tracking-widest text-obsidian-500">描述文件候选</div>
+            <template x-if="(scanResult.profiles || []).length">
+              <div class="space-y-1">
+                <template x-for="item in scanResult.profiles" :key="item.path">
+                  <div class="rounded-md border border-obsidian-700/70 bg-obsidian-900/30 px-2.5 py-2">
+                    <div class="text-xs text-obsidian-200 break-all" :title="item.path" x-text="item.name || item.path.split('/').pop()"></div>
+                    <div class="mt-1 text-[11px] text-obsidian-500 break-all" :title="item.path" x-text="`${item.path.split('/').pop()} · ${item.team_id} · ${item.expiration}`"></div>
+                  </div>
+                </template>
+              </div>
+            </template>
+            <div x-show="!(scanResult.profiles || []).length" class="break-all">未检测到</div>
+          </div>
+          <div class="space-y-1" x-show="signing === 'manual'">
+            <div class="text-[11px] uppercase tracking-widest text-obsidian-500">当前描述文件</div>
+            <div class="break-all" x-text="scanResult.selected_profile || '未选择'"></div>
+          </div>
+          <div class="space-y-1">
+            <div class="text-[11px] uppercase tracking-widest text-obsidian-500">Archive 复用</div>
+            <template x-if="scanResult.archive_match">
+              <div class="space-y-1 break-all">
+                <div x-text="`命中：${scanResult.archive_match.path}`"></div>
+                <div class="text-obsidian-500 text-xs" x-text="`版本：${scanResult.archive_match.marketing_version} (${scanResult.archive_match.build_number})`"></div>
+                <div class="text-obsidian-500 text-xs" x-text="`创建：${scanResult.archive_match.created}`"></div>
+              </div>
+            </template>
+            <template x-if="!scanResult.archive_match">
+              <div class="break-all" x-text="scanResult.version_info ? `未找到可复用 archive，当前版本：${scanResult.version_info.marketing_version} (${scanResult.version_info.build_number})` : '未检测版本信息'"></div>
+            </template>
+          </div>
+        </div>
+      </template>
+
+      <div x-show="!loadingScan && !(scanResult && scanResult.ok)" class="text-xs text-obsidian-500 leading-relaxed">
+        选择项目后会自动扫描可选项，并展示当前选中的值。
+      </div>
+    </div>
+  </div>
+</aside>
 {% endblock %}

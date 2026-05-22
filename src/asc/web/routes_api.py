@@ -345,6 +345,18 @@ def _start_build_task(
     return task_id
 
 
+def _archive_summary(archive):
+    if not archive:
+        return None
+    return {
+        "path": archive.path,
+        "bundle_id": archive.bundle_id,
+        "marketing_version": archive.marketing_version,
+        "build_number": archive.build_number,
+        "created": archive.created.strftime("%Y-%m-%d %H:%M"),
+    }
+
+
 @router.post("/build/run")
 async def build_run(
     request: Request,
@@ -379,7 +391,7 @@ async def build_run(
 
 
 @router.get("/build/schemes")
-async def build_schemes(project: str = "."):
+def build_schemes(project: str = "."):
     """Return list of schemes for a given project path."""
     try:
         from asc.commands.build_inputs import detect_project, list_schemes
@@ -391,7 +403,7 @@ async def build_schemes(project: str = "."):
 
 
 @router.get("/build/options")
-async def build_options(
+def build_options(
     request: Request,
     project: str = ".",
     scheme: str = "",
@@ -409,7 +421,10 @@ async def build_options(
             detect_certificates,
             detect_project,
             detect_profiles,
+            detect_versions,
+            find_matching_archive,
             list_schemes,
+            scan_archives,
         )
 
         profile = request.cookies.get("asc_profile", "")
@@ -418,6 +433,7 @@ async def build_options(
         project_path, kind = detect_project(source_project)
         schemes = list_schemes(project_path, kind)
         selected_scheme = scheme or config.build_scheme or (schemes[0] if len(schemes) == 1 else "")
+        scheme_auto = not scheme and not config.build_scheme and len(schemes) == 1
 
         bundle_id = ""
         if selected_scheme:
@@ -428,13 +444,30 @@ async def build_options(
         cert_sha1 = next((c.sha1 for c in certs if c.name == selected_cert), None)
         profiles = detect_profiles(bundle_id, cert_sha1) if signing == "manual" and bundle_id else []
 
+        version_info = None
+        archive_match = None
+        if selected_scheme:
+            version_info = detect_versions(project_path, kind, selected_scheme)
+        if version_info:
+            mv, bn = version_info
+            archives = scan_archives(config.build_output, selected_scheme)
+            archive_match = find_matching_archive(
+                archives,
+                bundle_id=bundle_id or config.build_bundle_id or "",
+                marketing_version=mv,
+                build_number=bn,
+            )
+
         return {
             "ok": True,
             "project": project_path,
             "kind": kind,
+            "project_selected": project_path,
             "schemes": schemes,
             "selected_scheme": selected_scheme,
+            "scheme_auto": scheme_auto,
             "bundle_id": bundle_id,
+            "bundle_id_selected": bundle_id,
             "certificates": [{"name": c.name, "sha1": c.sha1} for c in certs],
             "selected_certificate": selected_cert,
             "profiles": [
@@ -448,6 +481,11 @@ async def build_options(
                 for p in profiles
             ],
             "selected_profile": config.build_profile or "",
+            "version_info": {
+                "marketing_version": version_info[0],
+                "build_number": version_info[1],
+            } if version_info else None,
+            "archive_match": _archive_summary(archive_match),
         }
     except Exception as e:
         return {"ok": False, "error": str(e), "schemes": [], "certificates": [], "profiles": []}
@@ -782,7 +820,7 @@ async def download_example_screenshots():
 # ---------- Whats-New Translate ----------
 
 @router.get("/whats-new/check")
-async def whats_new_check(request: Request):
+def whats_new_check(request: Request):
     """Check environment and return available locales for the current app version."""
     profile = request.cookies.get("asc_profile", "")
     if not profile:

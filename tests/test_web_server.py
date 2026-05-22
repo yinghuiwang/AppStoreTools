@@ -1,5 +1,6 @@
 # tests/test_web_server.py
 from __future__ import annotations
+import inspect
 import pytest
 from fastapi.testclient import TestClient
 from asc.web.server import create_app
@@ -24,6 +25,14 @@ def test_metadata_page_returns_200(client):
 def test_build_page_returns_200(client):
     resp = client.get("/build")
     assert resp.status_code == 200
+
+
+def test_blocking_web_probes_run_in_threadpool():
+    from asc.web import routes_api
+
+    assert not inspect.iscoroutinefunction(routes_api.build_schemes)
+    assert not inspect.iscoroutinefunction(routes_api.build_options)
+    assert not inspect.iscoroutinefunction(routes_api.whats_new_check)
 
 
 def test_profiles_page_returns_200(client):
@@ -129,6 +138,7 @@ def test_build_options_api_returns_release_choices(client):
     mock_config.build_bundle_id = None
     mock_config.build_certificate = ""
     mock_config.build_profile = ""
+    mock_config.build_output = "/tmp/build"
 
     profile = ProfileInfo(
         path="/tmp/acme.mobileprovision",
@@ -145,7 +155,10 @@ def test_build_options_api_returns_release_choices(client):
          patch("asc.commands.build_inputs.list_schemes", return_value=["MyApp", "MyAppTests"]), \
          patch("asc.commands.build_inputs.detect_bundle_id", return_value="com.acme.app"), \
          patch("asc.commands.build_inputs.detect_certificates", return_value=[Certificate(sha1="SHA1", name="Apple Distribution: ACME")]), \
-         patch("asc.commands.build_inputs.detect_profiles", return_value=[profile]):
+         patch("asc.commands.build_inputs.detect_profiles", return_value=[profile]), \
+         patch("asc.commands.build_inputs.detect_versions", return_value=("1.0", "42")), \
+         patch("asc.commands.build_inputs.scan_archives", return_value=[]), \
+         patch("asc.commands.build_inputs.find_matching_archive", return_value=None):
         resp = client.get(
             "/api/build/options",
             cookies={"asc_profile": "myapp"},
@@ -160,10 +173,17 @@ def test_build_options_api_returns_release_choices(client):
     assert resp.status_code == 200
     data = resp.json()
     assert data["ok"] is True
+    assert data["project_selected"] == "MyApp.xcworkspace"
     assert data["schemes"] == ["MyApp", "MyAppTests"]
+    assert data["selected_scheme"] == "MyApp"
     assert data["bundle_id"] == "com.acme.app"
+    assert data["bundle_id_selected"] == "com.acme.app"
     assert data["certificates"][0]["name"] == "Apple Distribution: ACME"
+    assert data["selected_certificate"] == "Apple Distribution: ACME"
     assert data["profiles"][0]["path"] == "/tmp/acme.mobileprovision"
+    assert data["selected_profile"] == ""
+    assert data["version_info"] == {"marketing_version": "1.0", "build_number": "42"}
+    assert data["archive_match"] is None
 
 
 def test_task_stream_done_task(client):
