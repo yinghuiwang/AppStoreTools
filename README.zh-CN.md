@@ -32,18 +32,22 @@
 
 ## 快速开始
 
-### 方式一：curl 一键安装
+### 方式一：curl 安装
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh | bash
-asc install
-asc upload --dry-run
+curl -fL --retry 5 --connect-timeout 20 \
+  -o /tmp/asc-install.sh \
+  https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh
+bash /tmp/asc-install.sh
 ```
 
 安装指定分支用于测试：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh | bash -s -- --branch feat/web-build-interactive-release-options
+curl -fL --retry 5 --connect-timeout 20 \
+  -o /tmp/asc-install.sh \
+  https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh
+bash /tmp/asc-install.sh --branch feat/web-build-interactive-release-options
 ```
 
 ### 方式二：克隆仓库安装
