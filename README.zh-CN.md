@@ -35,9 +35,15 @@
 ### 方式一：curl 一键安装
 
 ```bash
-source <(curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh)
+curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh | bash
 asc install
 asc upload --dry-run
+```
+
+安装指定分支用于测试：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh | bash -s -- --branch feat/web-build-interactive-release-options
 ```
 
 ### 方式二：克隆仓库安装

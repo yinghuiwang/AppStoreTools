@@ -35,9 +35,15 @@ Step-by-step guides for every major workflow:
 ### Option 1: One-line install via curl
 
 ```bash
-source <(curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh)
+curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh | bash
 asc install
 asc upload --dry-run
+```
+
+Install a specific branch for testing:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh | bash -s -- --branch feat/web-build-interactive-release-options
 ```
 
 ### Option 2: Install from repository

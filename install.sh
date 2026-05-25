@@ -4,6 +4,46 @@
 # Save current options and restore them at the end of this script.
 _asc_saved_opts="$-"
 set -euo pipefail
+_asc_sourced=0
+(return 0 2>/dev/null) && _asc_sourced=1
+
+_asc_restore_shell() {
+  # Restore the caller's shell options that were active before this script ran.
+  # This prevents set -euo pipefail from leaking into the interactive shell when
+  # the script is sourced (source <(...)), including early failure paths.
+  [[ "$_asc_saved_opts" != *e* ]] && set +e
+  [[ "$_asc_saved_opts" != *u* ]] && set +u
+  set +o pipefail 2>/dev/null || true
+
+  # Apply PATH to the current (parent) shell now that options are safe again.
+  if [ "${_asc_need_path_export:-0}" = "1" ] && [ -d "${USER_BIN:-}" ]; then
+    export PATH="$USER_BIN:$PATH"
+  fi
+  if [ "${_asc_need_local_bin_export:-0}" = "1" ] && [ -d "${LOCAL_BIN:-}" ]; then
+    export PATH="$LOCAL_BIN:$PATH"
+  fi
+}
+
+_asc_finish() {
+  local _asc_status="${1:-0}"
+  local _asc_was_sourced="$_asc_sourced"
+
+  _asc_restore_shell
+
+  unset _asc_saved_opts _asc_sourced _asc_need_path_export _asc_need_local_bin_export _asc_restore_shell _asc_finish _asc_stop
+  if [ "$_asc_was_sourced" = "1" ]; then
+    local _asc_return_status="$_asc_status"
+    return "$_asc_return_status"
+  fi
+  local _asc_exit_status="$_asc_status"
+  exit "$_asc_exit_status"
+}
+
+_asc_stop() {
+  local _asc_stop_status="${1:-0}"
+  _asc_finish "$_asc_stop_status"
+  return "$_asc_stop_status" 2>/dev/null || exit "$_asc_stop_status"
+}
 
 RED='\033[0;31m'
 YELLOW='\033[1;33m'
@@ -13,8 +53,38 @@ NC='\033[0m'
 info()    { echo -e "${GREEN}[✓]${NC} $*"; }
 warn()    { echo -e "${YELLOW}[!]${NC} $*"; }
 error()   { echo -e "${RED}[✗]${NC} $*" >&2; }
-# Use 'return' instead of 'exit' so sourcing this script doesn't kill the shell.
-fatal()   { error "$*"; return 1; }
+fatal()   { error "$*"; }
+
+INSTALL_REF="${ASC_INSTALL_REF:-}"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --branch|--ref)
+      if [ -z "${2:-}" ]; then
+        fatal "$1 需要指定分支、tag 或 commit"
+        _asc_stop 1
+      fi
+      INSTALL_REF="$2"
+      shift 2
+      ;;
+    -h|--help)
+      echo "App Store Connect Tools installer"
+      echo ""
+      echo "Usage:"
+      echo "  curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh | bash"
+      echo "  curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh | bash -s -- --branch BRANCH"
+      echo ""
+      echo "Options:"
+      echo "  --branch, --ref VALUE  Install a specific branch, tag, or commit"
+      echo "  -h, --help            Show this help"
+      _asc_stop 0
+      ;;
+    *)
+      fatal "未知参数: $1"
+      _asc_stop 1
+      ;;
+  esac
+done
 
 echo "================================================"
 echo "  App Store Connect Tools — 安装程序"
@@ -26,7 +96,7 @@ OS="$(uname -s)"
 case "$OS" in
   Darwin) PLATFORM="macOS" ;;
   Linux)  PLATFORM="Linux" ;;
-  *)      fatal "不支持的操作系统: $OS" ;;
+  *)      fatal "不支持的操作系统: $OS"; _asc_stop 1 ;;
 esac
 info "操作系统: $PLATFORM"
 
@@ -52,7 +122,7 @@ if [ -z "$PYTHON" ]; then
     echo "  安装方式：sudo apt install python3  （Debian/Ubuntu）"
     echo "  或使用 pyenv：https://github.com/pyenv/pyenv"
   fi
-  return 1
+  _asc_stop 1
 fi
 info "Python: $($PYTHON --version)"
 
@@ -64,7 +134,7 @@ if ! "$PYTHON" -m pip --version &>/dev/null; then
   else
     error "pip 安装失败，请手动安装："
     echo "  https://pip.pypa.io/en/stable/installation/"
-    return 1
+    _asc_stop 1
   fi
 else
   info "pip: $($PYTHON -m pip --version | cut -d' ' -f1-2)"
@@ -90,38 +160,69 @@ fi
 
 # ── 6. 安装 asc-appstore-tools ──
 echo ""
-echo "正在获取最新版本信息..."
 
-# 通过 GitHub Releases API 获取最新 tag
-LATEST_TAG=""
-if command -v curl &>/dev/null; then
-  LATEST_TAG=$(curl -fsSL "https://api.github.com/repos/yinghuiwang/AppStoreTools/releases/latest" 2>/dev/null \
-    | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print(d.get('tag_name',''))" 2>/dev/null || true)
-fi
-
-if [ -n "$LATEST_TAG" ]; then
-  GITHUB_URL="git+https://github.com/yinghuiwang/AppStoreTools.git@${LATEST_TAG}"
-  echo "正在从 GitHub 安装 asc-appstore-tools ${LATEST_TAG} ..."
+if [ -n "$INSTALL_REF" ]; then
+  GITHUB_URL="git+https://github.com/yinghuiwang/AppStoreTools.git@${INSTALL_REF}"
+  echo "正在从 GitHub 安装 asc-appstore-tools ${INSTALL_REF} ..."
 else
-  GITHUB_URL="git+https://github.com/yinghuiwang/AppStoreTools.git"
-  echo "正在从 GitHub 安装 asc-appstore-tools (main) ..."
+  echo "正在获取最新版本信息..."
+
+  # 通过 GitHub Releases API 获取最新 tag
+  LATEST_TAG=""
+  if command -v curl &>/dev/null; then
+    LATEST_TAG=$(curl -fsSL "https://api.github.com/repos/yinghuiwang/AppStoreTools/releases/latest" 2>/dev/null \
+      | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print(d.get('tag_name',''))" 2>/dev/null || true)
+  fi
+
+  if [ -n "$LATEST_TAG" ]; then
+    GITHUB_URL="git+https://github.com/yinghuiwang/AppStoreTools.git@${LATEST_TAG}"
+    echo "正在从 GitHub 安装 asc-appstore-tools ${LATEST_TAG} ..."
+  else
+    GITHUB_URL="git+https://github.com/yinghuiwang/AppStoreTools.git"
+    echo "正在从 GitHub 安装 asc-appstore-tools (main) ..."
+  fi
 fi
 
-# 先卸载旧版本，避免旧版 pip 因版本号相同而跳过升级
-"$PYTHON" -m pip uninstall -y asc-appstore-tools 2>/dev/null || true
+LOCAL_BIN="$HOME/.local/bin"
+VENV_DIR="$HOME/.local/share/asc-appstore-tools/venv"
+_asc_need_local_bin_export=0
 
-if "$PYTHON" -m pip install "$GITHUB_URL" 2>/dev/null; then
-  info "asc-appstore-tools 安装成功"
-elif "$PYTHON" -m pip install --user "$GITHUB_URL"; then
+mkdir -p "$LOCAL_BIN"
+
+if command -v pipx &>/dev/null; then
+  if pipx install --force "$GITHUB_URL"; then
+    info "asc-appstore-tools 安装成功（pipx）"
+  else
+    fatal "pipx install 失败，请检查网络或权限后重试"
+    _asc_stop 1
+  fi
+elif "$PYTHON" -m pip install --user --upgrade "$GITHUB_URL" 2>/dev/null; then
   info "asc-appstore-tools 安装成功（--user 模式）"
 else
-  fatal "pip install 失败，请检查网络或权限后重试"
+  warn "当前 Python 环境禁止直接 pip 安装，改用独立虚拟环境..."
+  if ! "$PYTHON" -m venv "$VENV_DIR"; then
+    error "创建虚拟环境失败。"
+    if [ "$PLATFORM" = "Linux" ]; then
+      echo "  Debian/Ubuntu 可尝试：sudo apt install python3-venv"
+    fi
+    _asc_stop 1
+  fi
+
+  VENV_PYTHON="$VENV_DIR/bin/python"
+  "$VENV_PYTHON" -m pip install --upgrade pip >/dev/null
+  if "$VENV_PYTHON" -m pip install --upgrade --force-reinstall "$GITHUB_URL"; then
+    ln -sf "$VENV_DIR/bin/asc" "$LOCAL_BIN/asc"
+    info "asc-appstore-tools 安装成功（独立虚拟环境）"
+  else
+    fatal "虚拟环境内 pip install 失败，请检查网络后重试"
+    _asc_stop 1
+  fi
 fi
 
 # ── 7. 检测 pip bin 目录并写入 PATH ──
 USER_BIN=$("$PYTHON" -m site --user-base 2>/dev/null)/bin
 _asc_need_path_export=0
-if [ -d "$USER_BIN" ] && [[ ":$PATH:" != *":$USER_BIN:"* ]]; then
+if { [ -d "$USER_BIN" ] && [[ ":$PATH:" != *":$USER_BIN:"* ]]; } || { [ -d "$LOCAL_BIN" ] && [[ ":$PATH:" != *":$LOCAL_BIN:"* ]]; }; then
   # 写入 shell 配置文件
   SHELL_NAME="$(basename "${SHELL:-bash}")"
   if [ "$SHELL_NAME" = "zsh" ]; then
@@ -132,16 +233,23 @@ if [ -d "$USER_BIN" ] && [[ ":$PATH:" != *":$USER_BIN:"* ]]; then
     RC_FILE="$HOME/.profile"
   fi
 
-  EXPORT_LINE="export PATH=\"$USER_BIN:\$PATH\""
-  if ! grep -qF "$USER_BIN" "$RC_FILE" 2>/dev/null; then
+  if [ -d "$USER_BIN" ] && [[ ":$PATH:" != *":$USER_BIN:"* ]] && ! grep -qF "$USER_BIN" "$RC_FILE" 2>/dev/null; then
     echo "" >> "$RC_FILE"
     echo "# Added by asc-appstore-tools installer" >> "$RC_FILE"
-    echo "$EXPORT_LINE" >> "$RC_FILE"
+    echo "export PATH=\"$USER_BIN:\$PATH\"" >> "$RC_FILE"
     info "已将 $USER_BIN 写入 $RC_FILE"
+  fi
+
+  if [ -d "$LOCAL_BIN" ] && [[ ":$PATH:" != *":$LOCAL_BIN:"* ]] && ! grep -qF "$LOCAL_BIN" "$RC_FILE" 2>/dev/null; then
+    echo "" >> "$RC_FILE"
+    echo "# Added by asc-appstore-tools installer" >> "$RC_FILE"
+    echo "export PATH=\"$LOCAL_BIN:\$PATH\"" >> "$RC_FILE"
+    info "已将 $LOCAL_BIN 写入 $RC_FILE"
   fi
 
   # 标记需要在父 shell 中 export（不能在这里做，因为下面要恢复 set 选项）
   _asc_need_path_export=1
+  _asc_need_local_bin_export=1
 fi
 
 # ── 8. 验证安装 ──
@@ -178,17 +286,4 @@ echo ""
 echo "这将引导你配置 App Store Connect 凭证。"
 
 # ── 10. 恢复调用方 shell 的选项，并应用 PATH ──
-# Restore the caller's shell options that were active before this script ran.
-# This prevents set -euo pipefail from leaking into the interactive shell when
-# the script is sourced (source <(...)), which would cause any mistyped command
-# to terminate the entire shell session.
-[[ "$_asc_saved_opts" != *e* ]] && set +e
-[[ "$_asc_saved_opts" != *u* ]] && set +u
-set +o pipefail 2>/dev/null || true
-unset _asc_saved_opts
-
-# Apply PATH to the current (parent) shell now that options are safe again.
-if [ "${_asc_need_path_export:-0}" = "1" ] && [ -d "${USER_BIN:-}" ]; then
-  export PATH="$USER_BIN:$PATH"
-fi
-unset _asc_need_path_export
+_asc_stop 0

@@ -17,10 +17,14 @@
 **Option A — one-line curl install (recommended)**
 
 ```bash
-source <(curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh)
+curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh | bash
 ```
 
-The `source` prefix makes `asc` available immediately in the current shell.
+Install a specific branch for testing:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh | bash -s -- --branch feat/web-build-interactive-release-options
+```
 
 **Option B — clone and install**
 
