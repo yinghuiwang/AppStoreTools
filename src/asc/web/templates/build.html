@@ -496,6 +496,9 @@ function openFileBrowser(inputId, mode, ext) {
   htmx.ajax('GET', `/api/browse?path=${encodeURIComponent(val)}&mode=${mode}&ext=${ext}`, {target: '#filebrowser-content', swap: 'innerHTML'});
 }
 function closeFileBrowser() { document.getElementById('filebrowser-modal').classList.add('hidden'); }
+function browseFileBrowser(path) {
+  htmx.ajax('GET', `/api/browse?path=${encodeURIComponent(path)}&mode=${_fbMode}&ext=${_fbExt}`, {target: '#filebrowser-content', swap: 'innerHTML'});
+}
 function selectFile(path) {
   if (_fbTargetInput) {
     const el = document.getElementById(_fbTargetInput);

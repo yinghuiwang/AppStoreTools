@@ -56,6 +56,15 @@ def test_filebrowser_lists_files(client, tmp_path):
     assert resp.status_code == 200
     assert "test.csv" in resp.text
 
+
+def test_filebrowser_directory_click_browses_into_directory(client, tmp_path):
+    (tmp_path / "nested").mkdir()
+    resp = client.get(f"/api/browse?path={tmp_path}&mode=dir")
+    assert resp.status_code == 200
+    assert "browseFileBrowser(" in resp.text
+    assert "nested" in resp.text
+
+
 def test_filebrowser_rejects_outside_home(client):
     resp = client.get("/api/browse?path=/etc&mode=dir")
     assert resp.status_code == 403
