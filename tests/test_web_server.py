@@ -61,7 +61,7 @@ def test_filebrowser_directory_click_browses_into_directory(client, tmp_path):
     (tmp_path / "nested").mkdir()
     resp = client.get(f"/api/browse?path={tmp_path}&mode=dir")
     assert resp.status_code == 200
-    assert "browseFileBrowser(" in resp.text
+    assert 'data-fb-action="browse"' in resp.text
     assert "nested" in resp.text
 
 
