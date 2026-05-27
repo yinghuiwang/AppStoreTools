@@ -17,10 +17,14 @@
 **方式 A — curl 一键安装（推荐）**
 
 ```bash
-source <(curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh)
+curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh | bash
 ```
 
-安装完成后 `asc` 命令立即可用（`source` 会自动更新当前 shell 的 PATH）。
+安装指定分支用于测试：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh | bash -s -- --branch feat/web-build-interactive-release-options
+```
 
 **方式 B — 克隆仓库安装**
 

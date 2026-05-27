@@ -417,6 +417,7 @@ def upload_ipa(
     xcrun altool --upload-app is the correct tool for iOS App Store Connect submissions.
     Note: destination parameter is reserved for future use (both TestFlight and App Store
     use the same altool upload path; App Store Connect routes the build based on version state).
+    Set verbose=True to stream raw altool output to the terminal while still writing upload.log.
     """
     cmd = [
         "xcrun", "altool", "--upload-app",

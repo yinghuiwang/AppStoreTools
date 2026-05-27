@@ -258,6 +258,21 @@ function closeFileBrowser() {
   document.getElementById('filebrowser-modal').classList.add('hidden');
 }
 
+function browseFileBrowser(path) {
+  const url = `/api/browse?path=${encodeURIComponent(path)}&mode=${_fbMode}&ext=${_fbExt}`;
+  const contentEl = document.getElementById('filebrowser-content');
+  contentEl.innerHTML = '<div class="p-4 text-obsidian-400 text-sm">Loading...</div>';
+  fetch(url)
+    .then(r => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}: ${r.statusText}`);
+      return r.text();
+    })
+    .then(html => { contentEl.innerHTML = html; })
+    .catch(e => {
+      contentEl.innerHTML = `<div class="p-4 text-red-400 text-sm">Request failed: ${e.message}<br>URL: ${url}</div>`;
+    });
+}
+
 function selectFile(path) {
   if (_fbTargetInput) {
     const el = document.getElementById(_fbTargetInput);

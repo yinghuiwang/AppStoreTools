@@ -11,25 +11,26 @@
     </h1>
   </div>
 
-  <div x-data="{ step: 1, taskId: null, logs: [], status: 'idle', progress: 0, progressMsg: '', phase: 0, mode: 'full', signing: 'auto', submitting: false }">
+  <div id="build-page-state" x-data="{ step: 1, taskId: null, logs: [], status: 'idle', progress: 0, progressMsg: '', phase: 0, mode: 'full', signing: 'auto', submitting: false }">
 
     <!-- Step 1: 配置表单 -->
     <div x-show="step === 1">
-      <form id="build-form"
-            hx-post="/api/build/run"
-            hx-target="#build-run-result"
-            hx-swap="innerHTML"
-            @htmx:after-request.camel="
-              const data = JSON.parse(event.detail.xhr.responseText);
-              taskId = data.task_id;
-              step = 2;
-              submitting = false;
-              startBuildSSE(taskId);
-            "
-            @htmx:before-request.camel="submitting = true">
+      <div class="max-w-3xl">
+        <form id="build-form"
+              hx-post="/api/build/run"
+              hx-target="#build-run-result"
+              hx-swap="innerHTML"
+              @htmx:after-request.camel="
+                const data = JSON.parse(event.detail.xhr.responseText);
+                taskId = data.task_id;
+                step = 2;
+                submitting = false;
+                startBuildSSE(taskId);
+              "
+              @htmx:before-request.camel="submitting = true">
 
-        <div class="card">
-          <div class="card-body space-y-5">
+          <div class="card">
+            <div class="card-body space-y-5">
 
             <!-- Mode -->
             <div>
@@ -68,6 +69,7 @@
               <select name="scheme" id="scheme-select" class="field-select w-full">
                 <option value="">自动检测</option>
               </select>
+              <p id="build-options-hint" class="text-xs text-obsidian-500 mt-1"></p>
             </div>
 
             <!-- Destination -->
@@ -95,9 +97,21 @@
                   <input type="radio" name="signing" value="manual" x-model="signing" class="w-4 h-4">
                   <span class="group-hover:text-obsidian-50 transition-colors duration-150">手动签名</span>
                 </label>
-                <div x-show="signing === 'manual'" x-transition class="ml-6 mt-1 p-3 rounded-lg text-xs" style="background: var(--accent-glow); border: 1px solid rgba(232,161,37,0.2);">
-                  <p class="text-obsidian-300">手动签名将使用配置文件中的证书和描述文件。</p>
-                  <p class="text-obsidian-500 mt-1">可通过 <code class="font-mono text-amber-550 bg-obsidian-800 px-1.5 py-0.5 rounded">asc config</code> 或编辑 <code class="font-mono text-amber-550 bg-obsidian-800 px-1.5 py-0.5 rounded">.asc/config.toml</code> 配置。</p>
+                <div x-show="signing === 'manual'" x-transition class="ml-6 mt-1 p-3 rounded-lg text-xs space-y-3" style="background: var(--accent-glow); border: 1px solid rgba(232,161,37,0.2);">
+                  <p class="text-obsidian-300">手动签名需要选择可用证书和匹配 Bundle ID 的描述文件。</p>
+                  <div>
+                    <label for="certificate-select" class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-1.5 block">证书</label>
+                    <select name="certificate" id="certificate-select" class="field-select w-full">
+                      <option value="">自动检测</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label for="profile-select" class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-1.5 block">描述文件</label>
+                    <select name="provisioning_profile" id="profile-select" class="field-select w-full">
+                      <option value="">自动检测</option>
+                    </select>
+                  </div>
+                  <p id="bundle-id-hint" class="text-obsidian-500"></p>
                 </div>
               </div>
             </div>
@@ -122,6 +136,28 @@
               </label>
             </div>
 
+            <!-- Release-style options -->
+            <div x-show="mode !== 'deploy'" class="space-y-2">
+              <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2.5 block">交互选项</label>
+              <div class="flex flex-wrap gap-6">
+                <label class="flex items-center gap-2.5 text-sm text-obsidian-200 cursor-pointer">
+                  <input type="radio" name="reuse_archive" value="" checked class="w-4 h-4"> 自动判断
+                </label>
+                <label class="flex items-center gap-2.5 text-sm text-obsidian-200 cursor-pointer">
+                  <input type="radio" name="reuse_archive" value="reuse" class="w-4 h-4"> 复用匹配 Archive
+                </label>
+                <label class="flex items-center gap-2.5 text-sm text-obsidian-200 cursor-pointer">
+                  <input type="radio" name="reuse_archive" value="rebuild" class="w-4 h-4"> 强制重新打包
+                </label>
+              </div>
+            </div>
+
+            <div>
+              <label class="flex items-center gap-2.5 text-sm text-obsidian-300 cursor-pointer">
+                <input type="checkbox" name="dry_run" value="on" class="w-4 h-4"> 预览模式（不实际构建/上传）
+              </label>
+            </div>
+
             <!-- Actions -->
             <div class="pt-3 border-t border-obsidian-700">
               <button type="submit"
@@ -135,8 +171,9 @@
               </button>
             </div>
           </div>
-        </div>
-      </form>
+          </div>
+        </form>
+      </div>
     </div>
 
     <!-- Step 2: 执行面板 -->
@@ -229,16 +266,63 @@
 <script>
 const _BUILD_STORE_KEY = 'asc_build_form_{{ current_profile }}';
 
+function _getBuildFormState() {
+  const f = document.getElementById('build-form');
+  if (!f) return { mode: 'full', signing: 'auto' };
+  return {
+    mode: f.querySelector('[name=mode]:checked')?.value || 'full',
+    signing: f.querySelector('[name=signing]:checked')?.value || 'auto',
+  };
+}
+
+function _emitBuildPanelState(detail = {}) {
+  window.dispatchEvent(new CustomEvent('build-panel-state', {
+    detail: { ..._getBuildFormState(), ...detail },
+  }));
+}
+
+function _buildScanMessage(state) {
+  if (state.mode === 'deploy') return '';
+  const steps = ['检测 Xcode 项目与 Scheme'];
+  if (state.signing === 'manual') {
+    steps.push('读取签名证书与描述文件');
+  }
+  steps.push('读取版本号并扫描可复用 Archive');
+  return steps.join(' -> ');
+}
+
+function buildScanPanel() {
+  return {
+    mode: 'full',
+    signing: 'auto',
+    loadingScan: false,
+    scanStatus: 'idle',
+    scanMessage: '等待自动检测',
+    scanResult: null,
+    init() {
+      Object.assign(this, _getBuildFormState());
+      window.addEventListener('build-panel-state', event => {
+        Object.assign(this, event.detail);
+      });
+    },
+  };
+}
+
 function _saveBuildForm() {
   const f = document.getElementById('build-form');
   if (!f) return;
   const data = {
     mode: f.querySelector('[name=mode]:checked')?.value || 'full',
     project: f.querySelector('[name=project]').value,
+    scheme: f.querySelector('[name=scheme]').value,
     destination: f.querySelector('[name=destination]:checked')?.value || 'testflight',
     signing: f.querySelector('[name=signing]:checked')?.value || 'auto',
+    certificate: f.querySelector('[name=certificate]').value,
+    provisioning_profile: f.querySelector('[name=provisioning_profile]').value,
+    reuse_archive: f.querySelector('[name=reuse_archive]:checked')?.value || '',
     ipa_path: f.querySelector('[name=ipa_path]').value,
     verbose: f.querySelector('[name=verbose]').checked,
+    dry_run: f.querySelector('[name=dry_run]').checked,
   };
   localStorage.setItem(_BUILD_STORE_KEY, JSON.stringify(data));
 }
@@ -255,6 +339,7 @@ function _restoreBuildForm() {
       if (r) { r.checked = true; r.dispatchEvent(new Event('change')); }
     }
     if (data.project) f.querySelector('[name=project]').value = data.project;
+    if (data.scheme) f.querySelector('[name=scheme]').dataset.pendingValue = data.scheme;
     if (data.destination) {
       const r = f.querySelector(`[name=destination][value="${data.destination}"]`);
       if (r) r.checked = true;
@@ -263,8 +348,15 @@ function _restoreBuildForm() {
       const r = f.querySelector(`[name=signing][value="${data.signing}"]`);
       if (r) { r.checked = true; r.dispatchEvent(new Event('change')); }
     }
+    if (data.certificate) f.querySelector('[name=certificate]').dataset.pendingValue = data.certificate;
+    if (data.provisioning_profile) f.querySelector('[name=provisioning_profile]').dataset.pendingValue = data.provisioning_profile;
+    if (data.reuse_archive !== undefined) {
+      const r = f.querySelector(`[name=reuse_archive][value="${data.reuse_archive}"]`);
+      if (r) r.checked = true;
+    }
     if (data.ipa_path) f.querySelector('[name=ipa_path]').value = data.ipa_path;
     f.querySelector('[name=verbose]').checked = !!data.verbose;
+    f.querySelector('[name=dry_run]').checked = !!data.dry_run;
   } catch(e) {}
 }
 
@@ -272,11 +364,129 @@ document.addEventListener('DOMContentLoaded', () => {
   _restoreBuildForm();
   const f = document.getElementById('build-form');
   if (f) {
-    f.addEventListener('change', _saveBuildForm);
+    f.addEventListener('change', () => {
+      _saveBuildForm();
+      _emitBuildPanelState();
+    });
     f.addEventListener('input', _saveBuildForm);
     f.addEventListener('submit', _saveBuildForm);
+    f.querySelector('[name=project]').addEventListener('change', () => loadBuildOptions({resetScheme: true}));
+    f.querySelector('[name=scheme]').addEventListener('change', () => loadBuildOptions());
+    f.querySelectorAll('[name=signing]').forEach(el => el.addEventListener('change', () => loadBuildOptions()));
+    f.querySelector('[name=certificate]').addEventListener('change', () => loadBuildOptions({keepCertificate: true}));
+    loadBuildOptions();
   }
 });
+
+function _setSelectOptions(select, rows, placeholder, valueFor, labelFor, preferredValue) {
+  const previous = preferredValue || select.dataset.pendingValue || select.value;
+  select.innerHTML = '';
+  const opt = document.createElement('option');
+  opt.value = '';
+  opt.textContent = placeholder;
+  select.appendChild(opt);
+  rows.forEach(row => {
+    const item = document.createElement('option');
+    item.value = valueFor(row);
+    item.textContent = labelFor(row);
+    select.appendChild(item);
+  });
+  if (previous && Array.from(select.options).some(o => o.value === previous)) {
+    select.value = previous;
+  }
+  delete select.dataset.pendingValue;
+}
+
+function loadBuildOptions(opts = {}) {
+  const f = document.getElementById('build-form');
+  if (!f) return;
+  const project = f.querySelector('[name=project]').value || '.';
+  const schemeSelect = f.querySelector('[name=scheme]');
+  if (opts.resetScheme) schemeSelect.value = '';
+  const signing = f.querySelector('[name=signing]:checked')?.value || 'auto';
+  const certSelect = f.querySelector('[name=certificate]');
+  const profileSelect = f.querySelector('[name=provisioning_profile]');
+  const certificate = opts.keepCertificate ? certSelect.value : (certSelect.value || certSelect.dataset.pendingValue || '');
+  const params = new URLSearchParams({
+    project,
+    scheme: schemeSelect.value || schemeSelect.dataset.pendingValue || '',
+    signing,
+    certificate,
+  });
+  const root = document.getElementById('build-page-state');
+  const d = root ? Alpine.$data(root) : null;
+  if (d) d.loadingScan = true;
+  const scanState = _getBuildFormState();
+  _emitBuildPanelState({
+    loadingScan: true,
+    scanStatus: 'running',
+    scanMessage: _buildScanMessage(scanState),
+  });
+  fetch(`/api/build/options?${params.toString()}`)
+    .then(r => r.json())
+    .then(data => {
+      const hint = document.getElementById('build-options-hint');
+      const bundleHint = document.getElementById('bundle-id-hint');
+      if (d) d.scanResult = data;
+      _emitBuildPanelState({ scanResult: data });
+      if (!data.ok) {
+        if (hint) hint.textContent = data.error || '无法读取构建选项';
+        if (d) d.loadingScan = false;
+        _emitBuildPanelState({
+          loadingScan: false,
+          scanStatus: 'error',
+          scanMessage: data.error || '自动检测失败',
+        });
+        return;
+      }
+      _setSelectOptions(
+        schemeSelect,
+        data.schemes || [],
+        '自动检测',
+        row => row,
+        row => row,
+        data.selected_scheme || ''
+      );
+      _setSelectOptions(
+        certSelect,
+        data.certificates || [],
+        '自动检测',
+        row => row.name,
+        row => row.name,
+        data.selected_certificate || ''
+      );
+      _setSelectOptions(
+        profileSelect,
+        data.profiles || [],
+        '自动检测',
+        row => row.path,
+        row => `${row.name} (${row.team_id}, ${row.expiration})`,
+        data.selected_profile || ''
+      );
+      if (hint) hint.textContent = data.project ? `项目: ${data.project}` : '';
+      if (bundleHint) {
+        bundleHint.textContent = data.bundle_id
+          ? `Bundle ID: ${data.bundle_id}`
+          : '选择 Scheme 后可筛选匹配的描述文件。';
+      }
+      if (d) d.loadingScan = false;
+      _emitBuildPanelState({
+        loadingScan: false,
+        scanStatus: 'success',
+        scanMessage: '自动检测完成',
+      });
+    })
+    .catch(e => {
+      const hint = document.getElementById('build-options-hint');
+      if (hint) hint.textContent = `读取构建选项失败: ${e.message}`;
+      if (d) d.loadingScan = false;
+      _emitBuildPanelState({
+        loadingScan: false,
+        scanStatus: 'error',
+        scanMessage: `读取构建选项失败: ${e.message}`,
+      });
+    });
+}
 
 let _fbTargetInput = null, _fbMode = 'dir', _fbExt = '';
 function openFileBrowser(inputId, mode, ext) {
@@ -286,17 +496,21 @@ function openFileBrowser(inputId, mode, ext) {
   htmx.ajax('GET', `/api/browse?path=${encodeURIComponent(val)}&mode=${mode}&ext=${ext}`, {target: '#filebrowser-content', swap: 'innerHTML'});
 }
 function closeFileBrowser() { document.getElementById('filebrowser-modal').classList.add('hidden'); }
+function browseFileBrowser(path) {
+  htmx.ajax('GET', `/api/browse?path=${encodeURIComponent(path)}&mode=${_fbMode}&ext=${_fbExt}`, {target: '#filebrowser-content', swap: 'innerHTML'});
+}
 function selectFile(path) {
   if (_fbTargetInput) {
     const el = document.getElementById(_fbTargetInput);
     el.value = path;
     el.dispatchEvent(new Event('input', { bubbles: true }));
+    if (_fbTargetInput === 'project-input') loadBuildOptions({resetScheme: true});
   }
   closeFileBrowser();
 }
 
 function startBuildSSE(taskId) {
-  const root = document.querySelector('[x-data]');
+  const root = document.getElementById('build-page-state');
   const d = Alpine.$data(root);
   const es = new EventSource(`/api/task/${taskId}/stream`);
   es.addEventListener('log', e => {
@@ -312,4 +526,119 @@ function startBuildSSE(taskId) {
   es.addEventListener('error_event', () => { d.status = 'error'; es.close(); });
 }
 </script>
+{% endblock %}
+
+{% block right_panel %}
+<aside x-data="buildScanPanel()"
+       x-show="mode !== 'deploy'"
+       class="max-lg:hidden w-[390px] xl:w-[430px] shrink-0 border-l border-obsidian-700 bg-obsidian-950/40 p-6 overflow-hidden">
+  <div class="card h-full flex flex-col">
+    <div class="card-header flex items-center justify-between gap-3 shrink-0">
+      <h2 class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">自动检测结果</h2>
+      <div class="flex items-center gap-2">
+        <span class="text-[11px]"
+              :class="{
+                'text-amber-500': scanStatus === 'running',
+                'text-emerald-400': scanStatus === 'success',
+                'text-red-400': scanStatus === 'error',
+                'text-obsidian-500': scanStatus === 'idle',
+              }"
+              x-text="scanStatus === 'running' ? '扫描中...' : scanStatus === 'success' ? '已完成' : scanStatus === 'error' ? '失败' : ''"></span>
+        <button type="button"
+                class="text-[11px] px-2 py-1 rounded border border-obsidian-700 text-obsidian-300 hover:text-obsidian-100 hover:border-obsidian-500 transition-colors duration-150"
+                @click="loadBuildOptions()"
+                :disabled="loadingScan">
+          刷新
+        </button>
+      </div>
+    </div>
+    <div class="card-body space-y-4 flex-1 min-h-0 overflow-y-auto">
+      <div class="rounded-lg border px-3 py-2.5 text-xs leading-relaxed"
+           :class="{
+             'border-amber-500/20 bg-amber-500/10 text-amber-400': scanStatus === 'running',
+             'border-emerald-500/20 bg-emerald-500/10 text-emerald-400': scanStatus === 'success',
+             'border-red-500/20 bg-red-500/10 text-red-400': scanStatus === 'error',
+             'border-obsidian-700 bg-obsidian-900/30 text-obsidian-500': scanStatus === 'idle',
+           }">
+        <div class="flex items-start gap-2">
+          <svg x-show="scanStatus === 'running'" class="w-3.5 h-3.5 mt-0.5 animate-spin shrink-0" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+          <span x-text="scanMessage"></span>
+        </div>
+      </div>
+
+      <template x-if="scanResult && scanResult.ok">
+        <div class="space-y-3 text-sm text-obsidian-300">
+          <div class="space-y-1">
+            <div class="text-[11px] uppercase tracking-widest text-obsidian-500">项目</div>
+            <div class="break-all" x-text="`${scanResult.project || '-'} (${scanResult.kind || '-'})`"></div>
+          </div>
+          <div class="space-y-1">
+            <div class="text-[11px] uppercase tracking-widest text-obsidian-500">Scheme 候选</div>
+            <div class="break-all" x-text="(scanResult.schemes || []).length ? scanResult.schemes.join(' / ') : '未检测到'"></div>
+          </div>
+          <div class="space-y-1">
+            <div class="text-[11px] uppercase tracking-widest text-obsidian-500">当前选中</div>
+            <div class="break-all" x-text="scanResult.selected_scheme || '未选择'"></div>
+          </div>
+          <div class="space-y-1">
+            <div class="text-[11px] uppercase tracking-widest text-obsidian-500">Bundle ID</div>
+            <div class="break-all" x-text="scanResult.bundle_id_selected || '未检测到'"></div>
+          </div>
+          <div class="space-y-1" x-show="signing === 'manual'">
+            <div class="text-[11px] uppercase tracking-widest text-obsidian-500">证书候选</div>
+            <template x-if="(scanResult.certificates || []).length">
+              <div class="space-y-1">
+                <template x-for="item in scanResult.certificates" :key="item.sha1">
+                  <div class="text-xs text-obsidian-300 break-all" :title="item.name">
+                    <span x-text="item.name"></span>
+                  </div>
+                </template>
+              </div>
+            </template>
+            <div x-show="!(scanResult.certificates || []).length" class="break-all">未检测到</div>
+          </div>
+          <div class="space-y-1" x-show="signing === 'manual'">
+            <div class="text-[11px] uppercase tracking-widest text-obsidian-500">当前证书</div>
+            <div class="break-all" x-text="scanResult.selected_certificate || '未选择'"></div>
+          </div>
+          <div class="space-y-1" x-show="signing === 'manual'">
+            <div class="text-[11px] uppercase tracking-widest text-obsidian-500">描述文件候选</div>
+            <template x-if="(scanResult.profiles || []).length">
+              <div class="space-y-1">
+                <template x-for="item in scanResult.profiles" :key="item.path">
+                  <div class="rounded-md border border-obsidian-700/70 bg-obsidian-900/30 px-2.5 py-2">
+                    <div class="text-xs text-obsidian-200 break-all" :title="item.path" x-text="item.name || item.path.split('/').pop()"></div>
+                    <div class="mt-1 text-[11px] text-obsidian-500 break-all" :title="item.path" x-text="`${item.path.split('/').pop()} · ${item.team_id} · ${item.expiration}`"></div>
+                  </div>
+                </template>
+              </div>
+            </template>
+            <div x-show="!(scanResult.profiles || []).length" class="break-all">未检测到</div>
+          </div>
+          <div class="space-y-1" x-show="signing === 'manual'">
+            <div class="text-[11px] uppercase tracking-widest text-obsidian-500">当前描述文件</div>
+            <div class="break-all" x-text="scanResult.selected_profile || '未选择'"></div>
+          </div>
+          <div class="space-y-1">
+            <div class="text-[11px] uppercase tracking-widest text-obsidian-500">Archive 复用</div>
+            <template x-if="scanResult.archive_match">
+              <div class="space-y-1 break-all">
+                <div x-text="`命中：${scanResult.archive_match.path}`"></div>
+                <div class="text-obsidian-500 text-xs" x-text="`版本：${scanResult.archive_match.marketing_version} (${scanResult.archive_match.build_number})`"></div>
+                <div class="text-obsidian-500 text-xs" x-text="`创建：${scanResult.archive_match.created}`"></div>
+              </div>
+            </template>
+            <template x-if="!scanResult.archive_match">
+              <div class="break-all" x-text="scanResult.version_info ? `未找到可复用 archive，当前版本：${scanResult.version_info.marketing_version} (${scanResult.version_info.build_number})` : '未检测版本信息'"></div>
+            </template>
+          </div>
+        </div>
+      </template>
+
+      <div x-show="!loadingScan && !(scanResult && scanResult.ok)" class="text-xs text-obsidian-500 leading-relaxed">
+        选择项目后会自动扫描可选项，并展示当前选中的值。
+      </div>
+    </div>
+  </div>
+</aside>
 {% endblock %}

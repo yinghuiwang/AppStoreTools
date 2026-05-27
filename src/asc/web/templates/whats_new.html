@@ -11,7 +11,7 @@
     </h1>
   </div>
 
-  <div x-data="{
+  <div id="whats-new-state" x-data="{
     step: 1,
     taskId: null,
     logs: [],
@@ -19,6 +19,8 @@
     progress: 0,
     progressMsg: '',
     submitting: false,
+    checkLoading: true,
+    checkStatusMessage: '正在连接 App Store Connect，检查可编辑版本和语言列表...',
     checkResult: null,
     translateMode: false,
     sourceLocale: 'auto',
@@ -34,6 +36,18 @@
   @run-result.window="taskId = $event.detail.task_id; step = 3; startSSE(taskId)">
 
     <!-- Environment check result (shown on mount) -->
+    <template x-if="checkLoading">
+      <div class="mb-5 rounded-lg p-4 text-sm bg-amber-500/10 text-amber-400 border border-amber-500/20">
+        <div class="flex items-start gap-2.5">
+          <svg class="w-4 h-4 mt-0.5 animate-spin shrink-0" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+          <div>
+            <p class="font-medium">正在检查发布环境</p>
+            <p class="text-xs mt-1 opacity-80" x-text="checkStatusMessage"></p>
+          </div>
+        </div>
+      </div>
+    </template>
+
     <template x-if="checkResult">
       <div class="mb-5 rounded-lg p-4 text-sm"
            :class="{
@@ -44,7 +58,14 @@
         <p class="font-medium" x-text="checkResult.message"></p>
         <template x-if="checkResult.detail && checkResult.detail.version">
           <p class="text-xs mt-1 opacity-80"
-             x-text="'版本 ' + checkResult.detail.version + ' · 状态 ' + checkResult.detail.state + ' · ' + checkResult.detail.locales + ' 个语言'"></p>
+             x-text="'版本 ' + checkResult.detail.version + ' · ' + ((checkResult.detail.locales || []).length) + ' 个语言：' + ((checkResult.detail.locales || []).join(' / ') || '未检测到')"></p>
+        </template>
+        <template x-if="checkResult.level === 'error'">
+          <button type="button"
+                  class="mt-3 text-xs px-2.5 py-1.5 rounded border border-red-400/30 text-red-300 hover:text-red-100 hover:border-red-300/60 transition-colors duration-150"
+                  @click="runWhatsNewCheck()">
+            重新检查
+          </button>
         </template>
       </div>
     </template>
@@ -290,26 +311,47 @@
 </div>
 
 <script>
-document.addEventListener('DOMContentLoaded', () => {
-  // Fetch environment check on mount
+function runWhatsNewCheck() {
+  const root = document.getElementById('whats-new-state');
+  const d = root ? Alpine.$data(root) : null;
+  if (d) {
+    d.checkLoading = true;
+    d.checkResult = null;
+    d.checkStatusMessage = '正在连接 App Store Connect，检查可编辑版本和语言列表...';
+  }
   fetch('/api/whats-new/check')
     .then(r => r.json())
     .then(data => {
       window.dispatchEvent(new CustomEvent('check-result', {detail: data}));
-      const root = document.querySelector('[x-data]');
-      const d = Alpine.$data(root);
-      if (data.detail && data.detail.available_locales) {
-        d.availableLocales = data.detail.available_locales;
+      if (!d) return;
+      const locales = data.detail?.available_locales || data.detail?.locales || [];
+      d.checkLoading = false;
+      d.checkStatusMessage = data.message || '检查完成';
+      if (locales.length) {
+        d.availableLocales = locales;
       }
       if (data.detail && data.detail.version) {
         d.version = data.detail.version;
       }
     })
-    .catch(() => {});
+    .catch(e => {
+      if (!d) return;
+      d.checkLoading = false;
+      d.checkResult = {
+        ok: false,
+        level: 'error',
+        message: `检查失败: ${e.message}`,
+        detail: {},
+      };
+    });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  runWhatsNewCheck();
 });
 
 function startSSE(taskId) {
-  const root = document.querySelector('[x-data]');
+  const root = document.getElementById('whats-new-state');
   const d = Alpine.$data(root);
   const es = new EventSource('/api/task/' + taskId + '/stream');
   d.status = 'running';

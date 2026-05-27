@@ -468,5 +468,23 @@
     {% block right_panel %}{% endblock %}
   </main>
 
+  <script>
+    document.addEventListener('click', (event) => {
+      const button = event.target.closest('#filebrowser-content [data-fb-action]');
+      if (!button) return;
+
+      const path = button.dataset.fbPath || '';
+      const action = button.dataset.fbAction;
+
+      if (action === 'browse' && typeof window.browseFileBrowser === 'function') {
+        event.preventDefault();
+        window.browseFileBrowser(path);
+      } else if (action === 'select' && typeof window.selectFile === 'function') {
+        event.preventDefault();
+        window.selectFile(path);
+      }
+    });
+  </script>
+
 </body>
 </html>

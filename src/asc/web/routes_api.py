@@ -240,6 +240,10 @@ def _start_build_task(
     ipa_path: str,
     verbose: bool,
     signing: str = "auto",
+    certificate: str = "",
+    provisioning_profile: str = "",
+    dry_run: bool = False,
+    reuse_archive: str = "",
 ) -> str:
     task_id = _task_store.create("build", profile=profile)
 
@@ -288,9 +292,23 @@ def _start_build_task(
                         scheme=scheme or None,
                         destination=destination or None,
                         signing=signing or None,
+                        certificate=certificate or None,
+                        profile=provisioning_profile or None,
                     )
                     resolved = prepare_build_inputs(cli, config, interactive=False)
-                    ipa = build_core(resolved, config.build_output, verbose=verbose)
+                    reuse_value = None
+                    if reuse_archive == "reuse":
+                        reuse_value = True
+                    elif reuse_archive == "rebuild":
+                        reuse_value = False
+                    ipa = build_core(
+                        resolved,
+                        config.build_output,
+                        dry_run=dry_run,
+                        reuse_archive=reuse_value,
+                        interactive=False,
+                        verbose=verbose,
+                    )
                     if mode == "full" and ipa:
                         from asc.commands.build import deploy_core
                         deploy_core(
@@ -299,7 +317,7 @@ def _start_build_task(
                             key_id=config.key_id,
                             key_file=config.key_file,
                             destination=destination or "appstore",
-                            dry_run=False,
+                            dry_run=dry_run,
                             verbose=verbose,
                         )
                 elif mode == "deploy":
@@ -310,7 +328,7 @@ def _start_build_task(
                         key_id=config.key_id,
                         key_file=config.key_file,
                         destination=destination or "appstore",
-                        dry_run=False,
+                        dry_run=dry_run,
                         verbose=verbose,
                     )
 
@@ -327,6 +345,18 @@ def _start_build_task(
     return task_id
 
 
+def _archive_summary(archive):
+    if not archive:
+        return None
+    return {
+        "path": archive.path,
+        "bundle_id": archive.bundle_id,
+        "marketing_version": archive.marketing_version,
+        "build_number": archive.build_number,
+        "created": archive.created.strftime("%Y-%m-%d %H:%M"),
+    }
+
+
 @router.post("/build/run")
 async def build_run(
     request: Request,
@@ -337,6 +367,10 @@ async def build_run(
     ipa_path: str = _Form(""),
     verbose: str = _Form(""),
     signing: str = _Form("auto"),
+    certificate: str = _Form(""),
+    provisioning_profile: str = _Form(""),
+    dry_run: str = _Form(""),
+    reuse_archive: str = _Form(""),
 ):
     profile = request.cookies.get("asc_profile", "")
     task_id = _start_build_task(
@@ -348,12 +382,16 @@ async def build_run(
         ipa_path=ipa_path,
         verbose=bool(verbose),
         signing=signing,
+        certificate=certificate,
+        provisioning_profile=provisioning_profile,
+        dry_run=bool(dry_run),
+        reuse_archive=reuse_archive,
     )
     return {"task_id": task_id}
 
 
 @router.get("/build/schemes")
-async def build_schemes(project: str = "."):
+def build_schemes(project: str = "."):
     """Return list of schemes for a given project path."""
     try:
         from asc.commands.build_inputs import detect_project, list_schemes
@@ -362,6 +400,95 @@ async def build_schemes(project: str = "."):
         return {"schemes": schemes}
     except Exception as e:
         return {"schemes": [], "error": str(e)}
+
+
+@router.get("/build/options")
+def build_options(
+    request: Request,
+    project: str = ".",
+    scheme: str = "",
+    signing: str = "auto",
+    certificate: str = "",
+):
+    """Return selectable build inputs for the Web UI.
+
+    This mirrors the choices that `asc release --interactive` would prompt for
+    in a terminal, but keeps the Web UI non-interactive at execution time.
+    """
+    try:
+        from asc.commands.build_inputs import (
+            detect_bundle_id,
+            detect_certificates,
+            detect_project,
+            detect_profiles,
+            detect_versions,
+            find_matching_archive,
+            list_schemes,
+            scan_archives,
+        )
+
+        profile = request.cookies.get("asc_profile", "")
+        config = Config(app_name=profile)
+        source_project = project or config.build_project or "."
+        project_path, kind = detect_project(source_project)
+        schemes = list_schemes(project_path, kind)
+        selected_scheme = scheme or config.build_scheme or (schemes[0] if len(schemes) == 1 else "")
+        scheme_auto = not scheme and not config.build_scheme and len(schemes) == 1
+
+        bundle_id = ""
+        if selected_scheme:
+            bundle_id = config.build_bundle_id or detect_bundle_id(project_path, kind, selected_scheme) or ""
+
+        certs = detect_certificates() if signing == "manual" else []
+        selected_cert = certificate or config.build_certificate or ""
+        cert_sha1 = next((c.sha1 for c in certs if c.name == selected_cert), None)
+        profiles = detect_profiles(bundle_id, cert_sha1) if signing == "manual" and bundle_id else []
+
+        version_info = None
+        archive_match = None
+        if selected_scheme:
+            version_info = detect_versions(project_path, kind, selected_scheme)
+        if version_info:
+            mv, bn = version_info
+            archives = scan_archives(config.build_output, selected_scheme)
+            archive_match = find_matching_archive(
+                archives,
+                bundle_id=bundle_id or config.build_bundle_id or "",
+                marketing_version=mv,
+                build_number=bn,
+            )
+
+        return {
+            "ok": True,
+            "project": project_path,
+            "kind": kind,
+            "project_selected": project_path,
+            "schemes": schemes,
+            "selected_scheme": selected_scheme,
+            "scheme_auto": scheme_auto,
+            "bundle_id": bundle_id,
+            "bundle_id_selected": bundle_id,
+            "certificates": [{"name": c.name, "sha1": c.sha1} for c in certs],
+            "selected_certificate": selected_cert,
+            "profiles": [
+                {
+                    "path": p.path,
+                    "name": p.name,
+                    "team_id": p.team_id,
+                    "bundle_id": p.bundle_id,
+                    "expiration": p.expiration.strftime("%Y-%m-%d"),
+                }
+                for p in profiles
+            ],
+            "selected_profile": config.build_profile or "",
+            "version_info": {
+                "marketing_version": version_info[0],
+                "build_number": version_info[1],
+            } if version_info else None,
+            "archive_match": _archive_summary(archive_match),
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e), "schemes": [], "certificates": [], "profiles": []}
 
 
 import asyncio as _asyncio
@@ -693,7 +820,7 @@ async def download_example_screenshots():
 # ---------- Whats-New Translate ----------
 
 @router.get("/whats-new/check")
-async def whats_new_check(request: Request):
+def whats_new_check(request: Request):
     """Check environment and return available locales for the current app version."""
     profile = request.cookies.get("asc_profile", "")
     if not profile:
