@@ -427,17 +427,17 @@ def _do_import_from_env(
         shutil.copy2(key_path, dest_key)
         typer.echo(f"  ✅ 密钥文件已拷贝到 {dest_key}")
 
-    # 自动推断 csv 和 screenshots 路径（相对于 project_root）
+    # 自动推断 csv 和 screenshots 路径（存绝对路径，避免 CWD 依赖）
     data_dir = project_root / "AppStore" / "data"
-    csv_path = "data/appstore_info.csv"
-    screenshots_path = "data/screenshots"
+    csv_path = str(project_root / "AppStore" / "data" / "appstore_info.csv")
+    screenshots_path = str(project_root / "AppStore" / "data" / "screenshots")
     if data_dir.exists():
         csv_files = sorted(data_dir.glob("*.csv"))
         if csv_files:
-            csv_path = str(csv_files[0].relative_to(project_root))
+            csv_path = str(csv_files[0])
         screenshots_candidate = data_dir / "screenshots"
         if screenshots_candidate.exists():
-            screenshots_path = str(screenshots_candidate.relative_to(project_root))
+            screenshots_path = str(screenshots_candidate)
 
     # Profile 名称：--name 优先，否则用目录名
     profile_name = name or project_root.name
@@ -491,8 +491,22 @@ def cmd_app_import(
         asc app import --path /path/to/MyProject
         asc app import --path /path/to/MyProject --name myapp
     """
-    project_root = Path(path).expanduser().resolve() if path else Path.cwd()
-    env_file = project_root / "AppStore" / "Config" / ".env"
+    if path:
+        project_root = Path(path).expanduser().resolve()
+        env_file = project_root / "AppStore" / "Config" / ".env"
+    else:
+        # 从当前目录向上查找包含 AppStore/Config/.env 的项目根目录
+        cwd = Path.cwd()
+        env_file = None
+        for candidate in [cwd, *cwd.parents]:
+            candidate_env = candidate / "AppStore" / "Config" / ".env"
+            if candidate_env.exists():
+                project_root = candidate
+                env_file = candidate_env
+                break
+        if env_file is None:
+            project_root = cwd
+            env_file = cwd / "AppStore" / "Config" / ".env"
 
     if not env_file.exists():
         typer.echo(f"❌ {t(ERRORS['config_file_not_found']).format(path=env_file)}", err=True)

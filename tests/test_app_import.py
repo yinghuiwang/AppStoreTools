@@ -105,7 +105,7 @@ def test_import_skips_existing_key_file(project_root, isolated_global_dir):
 
 
 def test_import_infers_csv_and_screenshots(project_root, isolated_global_dir):
-    """csv and screenshots paths are inferred from AppStore/data/"""
+    """csv and screenshots paths are inferred from AppStore/data/ as absolute paths"""
     runner.invoke(
         app,
         ["app", "import", "--path", str(project_root), "--name", "testapp"],
@@ -113,8 +113,30 @@ def test_import_infers_csv_and_screenshots(project_root, isolated_global_dir):
     )
     profile_path = isolated_global_dir / ".config" / "asc" / "profiles" / "testapp.toml"
     content = profile_path.read_text()
-    assert "AppStore/data/appstore_info.csv" in content
-    assert "AppStore/data/screenshots" in content
+    expected_csv = str(project_root / "AppStore" / "data" / "appstore_info.csv")
+    expected_ss = str(project_root / "AppStore" / "data" / "screenshots")
+    # Paths must be absolute so they resolve regardless of the CWD at run time
+    assert f'csv = "{expected_csv}"' in content
+    assert f'screenshots = "{expected_ss}"' in content
+    assert Path(expected_csv).is_absolute()
+
+
+def test_import_from_subdir_detects_project_name(project_root, isolated_global_dir, monkeypatch):
+    """Running 'asc app import' (no --path) from a subdir finds the project root,
+    so the profile name is the project dir name, not the subdir name."""
+    subdir = project_root / "AppStore" / "Config"
+    monkeypatch.chdir(subdir)
+    result = runner.invoke(app, ["app", "import"], input="n\n")
+    assert result.exit_code == 0, result.output
+    # Profile name should be the project root dir name, NOT "Config"
+    expected_name = project_root.name
+    profile_path = (
+        isolated_global_dir / ".config" / "asc" / "profiles" / f"{expected_name}.toml"
+    )
+    assert profile_path.exists()
+    assert not (
+        isolated_global_dir / ".config" / "asc" / "profiles" / "Config.toml"
+    ).exists()
 
 
 def test_import_set_as_default(project_root, isolated_global_dir, tmp_path):
