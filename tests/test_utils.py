@@ -320,6 +320,7 @@ def test_resolve_app_profile_includes_local_config_in_choices(monkeypatch, tmp_p
     monkeypatch.chdir(tmp_path)
 
     mock_config = MagicMock()
+    mock_config.app_name = None  # no default_app configured
     mock_config.list_apps.return_value = ["profile1"]
     mock_config.get_app_profile.return_value = {
         "issuer_id": "other", "key_id": "other", "key_file": "/p", "app_id": "1"
@@ -334,3 +335,21 @@ def test_resolve_app_profile_includes_local_config_in_choices(monkeypatch, tmp_p
     # Should return "__local__" since we chose "use once"
     assert result == "__local__"
     assert os.environ.get("_ASC_LOCAL_CONFIG_PATH") is not None
+
+
+def test_resolve_app_profile_falls_back_to_default_app(monkeypatch):
+    """When no --app is given, resolve_app_profile uses config.app_name
+    (loaded from local .asc/config.toml default_app)."""
+    from unittest.mock import MagicMock
+    from asc.utils import resolve_app_profile
+
+    mock_config = MagicMock()
+    mock_config.app_name = "mydefault"  # came from default_app in .asc/config.toml
+    mock_config.get_app_profile.return_value = {
+        "issuer_id": "i", "key_id": "k", "key_file": "/p.p8", "app_id": "1",
+    }
+
+    # Pass None for the CLI arg; it must resolve to the default_app
+    result = resolve_app_profile(None, mock_config)
+    assert result == "mydefault"
+    mock_config.get_app_profile.assert_called_with("mydefault")

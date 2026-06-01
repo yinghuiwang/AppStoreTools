@@ -166,6 +166,10 @@ def resolve_app_profile(app_name: Optional[str], config: "Config") -> str:
     """
     from asc.i18n import t
 
+    # Fall back to default_app from local .asc/config.toml (loaded into config.app_name)
+    if not app_name:
+        app_name = config.app_name
+
     # If app_name provided, validate it
     if app_name:
         profile = config.get_app_profile(app_name)
