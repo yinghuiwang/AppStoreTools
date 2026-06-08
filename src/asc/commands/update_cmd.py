@@ -70,6 +70,44 @@ def _all_versions_from_github() -> Optional[list[str]]:
         return None
 
 
+def _resolve_git_ref_commit(ref: str) -> Optional[str]:
+    """Resolve a branch or tag ref to the commit hash that should be installed."""
+    candidates = [
+        f"refs/tags/{ref}^{{}}",
+        f"refs/tags/{ref}",
+        f"refs/heads/{ref}",
+        ref,
+    ]
+    try:
+        output = subprocess.check_output(
+            ["git", "ls-remote", INSTALL_URL, *candidates],
+            text=True,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+        )
+    except Exception:
+        return None
+
+    matches: dict[str, str] = {}
+    for line in output.splitlines():
+        parts = line.split()
+        if len(parts) >= 2:
+            matches[parts[1]] = parts[0]
+
+    for candidate in candidates:
+        if candidate in matches:
+            return matches[candidate]
+    return None
+
+
+def _install_git_ref(ref: str, commit: Optional[str] = None) -> None:
+    install_ref = commit or ref
+    subprocess.check_call([
+        sys.executable, "-m", "pip", "install", "--quiet",
+        f"git+{INSTALL_URL}@{install_ref}",
+    ])
+
+
 def _similar_versions(target: str, all_versions: list[str], limit: int = 3) -> list[str]:
     """Return the most similar versions to target using version distance."""
     from packaging.version import Version
@@ -111,12 +149,15 @@ def cmd_update(
     if branch:
         # Branch installation
         typer.echo(f"Installing from branch '{branch}'...")
+        commit = _resolve_git_ref_commit(branch)
+        if commit:
+            typer.echo(f"Install commit : {commit}")
+        else:
+            typer.echo("Install commit : unable to resolve before install")
         try:
-            subprocess.check_call([
-                sys.executable, "-m", "pip", "install", "--quiet",
-                f"git+https://github.com/yinghuiwang/AppStoreTools.git@{branch}",
-            ])
-            typer.echo(f"Done. asc installed from branch '{branch}'.")
+            _install_git_ref(branch, commit)
+            suffix = f" (commit {commit})" if commit else ""
+            typer.echo(f"Done. asc installed from branch '{branch}'{suffix}.")
         except subprocess.CalledProcessError:
             typer.echo("Update failed. Try manually:", err=True)
             typer.echo(f"  pip install git+https://github.com/yinghuiwang/AppStoreTools.git@{branch}", err=True)
@@ -139,12 +180,15 @@ def cmd_update(
             raise typer.Exit(1)
 
         install_version = f"v{target_version}"
+        commit = _resolve_git_ref_commit(install_version)
+        if commit:
+            typer.echo(f"Install commit : {commit}")
+        else:
+            typer.echo("Install commit : unable to resolve before install")
         try:
-            subprocess.check_call([
-                sys.executable, "-m", "pip", "install", "--quiet",
-                f"git+https://github.com/yinghuiwang/AppStoreTools.git@{install_version}",
-            ])
-            typer.echo(f"Done. asc updated to v{target_version}.")
+            _install_git_ref(install_version, commit)
+            suffix = f" (commit {commit})" if commit else ""
+            typer.echo(f"Done. asc updated to v{target_version}{suffix}.")
         except subprocess.CalledProcessError:
             typer.echo("Update failed. Try manually:", err=True)
             typer.echo(f"  pip install git+https://github.com/yinghuiwang/AppStoreTools.git@{install_version}", err=True)
@@ -174,12 +218,16 @@ def cmd_update(
             return
 
     typer.echo(f"Updating asc to {latest}...")
+    install_version = f"v{latest}"
+    commit = _resolve_git_ref_commit(install_version)
+    if commit:
+        typer.echo(f"Install commit : {commit}")
+    else:
+        typer.echo("Install commit : unable to resolve before install")
     try:
-        subprocess.check_call([
-            sys.executable, "-m", "pip", "install", "--quiet",
-            f"git+https://github.com/yinghuiwang/AppStoreTools.git@v{latest}",
-        ])
-        typer.echo(f"Done. asc updated to {latest}.")
+        _install_git_ref(install_version, commit)
+        suffix = f" (commit {commit})" if commit else ""
+        typer.echo(f"Done. asc updated to {latest}{suffix}.")
         typer.echo("Restart your shell or re-run asc for the new version.")
     except subprocess.CalledProcessError:
         typer.echo("Update failed. Try manually:", err=True)
