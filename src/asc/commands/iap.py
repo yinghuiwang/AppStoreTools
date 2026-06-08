@@ -16,7 +16,7 @@ from asc.guard import Guard, GuardViolationError
 from asc.utils import make_api_from_config, resolve_app_profile
 from asc.i18n import t, ERRORS, HELP
 
-MAX_REVIEW_SCREENSHOT_BYTES = 5 * 1024 * 1024
+REVIEW_SCREENSHOT_WARNING_BYTES = 5 * 1024 * 1024
 REVIEW_SCREENSHOT_EXTS = {".png", ".jpg", ".jpeg"}
 
 
@@ -50,8 +50,11 @@ def _validate_review_screenshot(item: dict, label: str) -> Optional[Path]:
             f"{label}.review.screenshot must be .png/.jpg/.jpeg, got {path.suffix}"
         )
     size = path.stat().st_size
-    if size > MAX_REVIEW_SCREENSHOT_BYTES:
-        raise ValueError(f"{label}.review.screenshot exceeds 5MB ({size} bytes)")
+    if size > REVIEW_SCREENSHOT_WARNING_BYTES:
+        typer.echo(
+            f"⚠️  {label}.review.screenshot exceeds 5MB ({size} bytes); "
+            "continuing and leaving final validation to App Store Connect"
+        )
     return path
 
 

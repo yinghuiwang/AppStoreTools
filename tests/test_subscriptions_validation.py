@@ -140,7 +140,7 @@ def test_free_trial_intro_offer_accepts_territory_without_amount(tmp_png):
     validate_subscription_config([g])
 
 
-def test_screenshot_too_large(tmp_path):
+def test_large_screenshot_warns_but_passes(tmp_path, capsys):
     big = tmp_path / "big.png"
     big.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * (6 * 1024 * 1024))
     g = {
@@ -158,5 +158,6 @@ def test_screenshot_too_large(tmp_path):
             }
         ],
     }
-    with pytest.raises(ValidationError, match="5MB"):
-        validate_subscription_config([g])
+    validate_subscription_config([g])
+    out = capsys.readouterr().out
+    assert "exceeds 5MB" in out

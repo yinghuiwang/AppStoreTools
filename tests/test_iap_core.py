@@ -315,3 +315,24 @@ def test_load_iap_config_validates_iap_review_screenshot(tmp_path):
 
     with pytest.raises(ValueError, match="review.screenshot file not found"):
         _load_iap_config(str(cfg_path))
+
+
+def test_load_iap_config_warns_for_large_iap_review_screenshot(tmp_path, capsys):
+    import json
+    shot = tmp_path / "large.png"
+    shot.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * (6 * 1024 * 1024))
+    cfg = {
+        "items": [{
+            "productId": "com.test.item",
+            "review": {"screenshot": "./large.png"},
+        }],
+    }
+    cfg_path = tmp_path / "iap.json"
+    cfg_path.write_text(json.dumps(cfg), encoding="utf-8")
+
+    items, subs = _load_iap_config(str(cfg_path))
+
+    assert items[0]["review"]["screenshot"] == str(shot)
+    assert subs == []
+    out = capsys.readouterr().out
+    assert "exceeds 5MB" in out

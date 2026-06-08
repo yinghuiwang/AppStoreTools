@@ -14,7 +14,7 @@ VALID_PERIODS = {
 }
 VALID_INTRO_MODES = {"FREE_TRIAL", "PAY_AS_YOU_GO", "PAY_UP_FRONT"}
 VALID_PROMO_MODES = {"PAY_AS_YOU_GO", "PAY_UP_FRONT"}
-MAX_SCREENSHOT_BYTES = 5 * 1024 * 1024
+SCREENSHOT_WARNING_BYTES = 5 * 1024 * 1024
 SCREENSHOT_EXTS = {".png", ".jpg", ".jpeg"}
 
 
@@ -99,8 +99,11 @@ def _validate_subscription(sub: dict, tag: str) -> None:
     _require(shot_path.suffix.lower() in SCREENSHOT_EXTS,
              f"{tag}.review.screenshot must be .png/.jpg/.jpeg, got {shot_path.suffix}")
     size = shot_path.stat().st_size
-    _require(size <= MAX_SCREENSHOT_BYTES,
-             f"{tag}.review.screenshot exceeds 5MB ({size} bytes)")
+    if size > SCREENSHOT_WARNING_BYTES:
+        print(
+            f"⚠️  {tag}.review.screenshot exceeds 5MB ({size} bytes); "
+            "continuing and leaving final validation to App Store Connect"
+        )
     intro = sub.get("introductoryOffer")
     if intro is not None:
         _validate_intro_offer(intro, f"{tag}.introductoryOffer")
