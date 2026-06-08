@@ -40,6 +40,26 @@ def test_creates_new_group(fake_api, tmp_png):
     assert "en-US" in fake_api.group_locs[gid]
 
 
+def test_omits_blank_review_note_on_create(fake_api, tmp_png):
+    sub = _min_sub(tmp_png)
+    sub["review"]["note"] = "  "
+    groups = [{
+        "referenceName": "Pro",
+        "localizations": {"en-US": {"name": "Pro"}},
+        "subscriptions": [sub],
+    }]
+    fake_api.find_subscription_price_point = lambda s, t, a: "pp_usd_999"
+
+    failed = _upload_subscriptions_core(
+        fake_api, "app1", groups, update_existing=False, dry_run=False
+    )
+
+    assert failed == 0
+    create_calls = [c for c in fake_api.calls if c[0] == "create_subscription"]
+    assert create_calls
+    assert "reviewNote" not in create_calls[0][2]
+
+
 def test_skips_existing_group_by_default(fake_api, tmp_png):
     fake_api.create_subscription_group("app1", "Pro")
     groups = [{

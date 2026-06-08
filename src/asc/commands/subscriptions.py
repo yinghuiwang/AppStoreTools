@@ -91,8 +91,6 @@ def _validate_subscription(sub: dict, tag: str) -> None:
         )
     review = sub.get("review")
     _require(isinstance(review, dict), f"{tag}.review required (object)")
-    _require(_non_empty_str(review.get("note")),
-             f"{tag}.review.note required (non-empty string)")
     shot = review.get("screenshot")
     _require(_non_empty_str(shot), f"{tag}.review.screenshot path required")
     shot_path = Path(shot)
@@ -362,8 +360,10 @@ def _sync_subscription_main(
         "subscriptionPeriod": sub_cfg["subscriptionPeriod"],
         "groupLevel": sub_cfg["groupLevel"],
         "familySharable": bool(sub_cfg.get("familySharable", False)),
-        "reviewNote": sub_cfg["review"]["note"],
     }
+    review_note = str(sub_cfg.get("review", {}).get("note", "")).strip()
+    if review_note:
+        attrs["reviewNote"] = review_note
 
     if pid in by_pid:
         sub_id = by_pid[pid]["id"]

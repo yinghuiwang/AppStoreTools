@@ -78,11 +78,16 @@ def test_price_rejects_two_letter_territory(tmp_png):
         validate_subscription_config([g])
 
 
-def test_missing_review_note(tmp_png):
+def test_review_note_is_optional(tmp_png):
+    g = _valid_group(tmp_png)
+    del g["subscriptions"][0]["review"]["note"]
+    validate_subscription_config([g])
+
+
+def test_blank_review_note_is_ignored(tmp_png):
     g = _valid_group(tmp_png)
     g["subscriptions"][0]["review"]["note"] = "  "
-    with pytest.raises(ValidationError, match="review.note"):
-        validate_subscription_config([g])
+    validate_subscription_config([g])
 
 
 def test_missing_review_screenshot_file(tmp_png):
