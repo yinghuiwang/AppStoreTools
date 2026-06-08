@@ -361,6 +361,66 @@ class AppStoreConnectAPI:
             },
         )
 
+    def list_in_app_purchase_review_screenshots(self, iap_id: str) -> list:
+        resp = self.get(f"/v2/inAppPurchases/{iap_id}/appStoreReviewScreenshot")
+        data = resp.get("data")
+        if not data:
+            return []
+        return [data] if isinstance(data, dict) else data
+
+    def create_in_app_purchase_review_screenshot_reservation(
+        self, iap_id: str, filename: str, filesize: int
+    ) -> dict:
+        return self.post(
+            "/v1/inAppPurchaseAppStoreReviewScreenshots",
+            {
+                "data": {
+                    "type": "inAppPurchaseAppStoreReviewScreenshots",
+                    "attributes": {"fileName": filename, "fileSize": filesize},
+                    "relationships": {
+                        "inAppPurchaseV2": {
+                            "data": {"type": "inAppPurchases", "id": iap_id}
+                        }
+                    },
+                }
+            },
+        )
+
+    def upload_in_app_purchase_review_screenshot(
+        self, upload_operations: list, file_bytes: bytes
+    ):
+        for op in upload_operations:
+            url = op["url"]
+            offset = op["offset"]
+            length = op["length"]
+            req_headers = {h["name"]: h["value"] for h in op["requestHeaders"]}
+            chunk = file_bytes[offset : offset + length]
+            resp = requests.put(url, headers=req_headers, data=chunk)
+            if resp.status_code not in (200, 201):
+                raise Exception(
+                    f"IAP 审核截图上传失败 [{resp.status_code}]: {resp.text[:200]}"
+                )
+
+    def commit_in_app_purchase_review_screenshot(
+        self, screenshot_id: str, source_file_checksum: str
+    ) -> dict:
+        return self.patch(
+            f"/v1/inAppPurchaseAppStoreReviewScreenshots/{screenshot_id}",
+            {
+                "data": {
+                    "type": "inAppPurchaseAppStoreReviewScreenshots",
+                    "id": screenshot_id,
+                    "attributes": {
+                        "uploaded": True,
+                        "sourceFileChecksum": source_file_checksum,
+                    },
+                }
+            },
+        )
+
+    def delete_in_app_purchase_review_screenshot(self, screenshot_id: str):
+        return self.delete(f"/v1/inAppPurchaseAppStoreReviewScreenshots/{screenshot_id}")
+
     # ── 订阅组 ──
 
     def list_subscription_groups(self, app_id: str) -> list:
@@ -515,7 +575,7 @@ class AppStoreConnectAPI:
         # filter[territory] is required to get territory-specific price points
         resp = self.get(
             f"/v1/subscriptions/{sub_id}/pricePoints",
-            limit=200,
+            limit=8000,
             **{"filter[territory]": territory},
         )
         target = str(amount).strip()
@@ -530,38 +590,118 @@ class AppStoreConnectAPI:
     ) -> list:
         resp = self.get(
             f"/v1/subscriptions/{sub_id}/pricePoints",
-            limit=200,
+            limit=8000,
             **{"filter[territory]": territory},
         )
         return resp.get("data", [])
 
+    def list_subscription_price_point_equalizations(
+        self,
+        price_point_id: str,
+        sub_id: Optional[str] = None,
+        territory: Optional[str] = None,
+    ) -> list:
+        params = {"limit": 8000, "include": "territory"}
+        if sub_id:
+            params["filter[subscription]"] = sub_id
+        if territory:
+            params["filter[territory]"] = territory
+        resp = self.get(
+            f"/v1/subscriptionPricePoints/{price_point_id}/equalizations",
+            **params,
+        )
+        return resp.get("data", [])
+
     def create_subscription_price(
-        self, sub_id: str, price_point_id: str, territory: str, start_date: Optional[str] = None
+        self,
+        sub_id: str,
+        price_point_id: str,
+        territory: Optional[str] = None,
+        start_date: Optional[str] = None,
+        preserve_current_price: Optional[bool] = None,
     ) -> dict:
         attrs = {}
         if start_date:
             attrs["startDate"] = start_date
+        if preserve_current_price is not None:
+            attrs["preserveCurrentPrice"] = preserve_current_price
+        relationships = {
+            "subscription": {
+                "data": {"type": "subscriptions", "id": sub_id}
+            },
+            "subscriptionPricePoint": {
+                "data": {
+                    "type": "subscriptionPricePoints",
+                    "id": price_point_id,
+                }
+            },
+        }
+        if territory:
+            relationships["territory"] = {
+                "data": {"type": "territories", "id": territory}
+            }
         return self.post(
             "/v1/subscriptionPrices",
             {
                 "data": {
                     "type": "subscriptionPrices",
                     "attributes": attrs,
-                    "relationships": {
-                        "subscription": {
-                            "data": {"type": "subscriptions", "id": sub_id}
-                        },
-                        "subscriptionPricePoint": {
-                            "data": {
-                                "type": "subscriptionPricePoints",
-                                "id": price_point_id,
-                            }
-                        },
-                        "territory": {
-                            "data": {"type": "territories", "id": territory}
-                        },
-                    },
+                    "relationships": relationships,
                 }
+            },
+        )
+
+    def update_subscription_prices_inline(
+        self,
+        sub_id: str,
+        price_points: list[tuple[str, str]],
+        start_date: Optional[str] = None,
+        preserve_current_price: Optional[bool] = None,
+    ) -> dict:
+        linkages = []
+        included = []
+        attrs = {}
+        if start_date:
+            attrs["startDate"] = start_date
+        if preserve_current_price is not None:
+            attrs["preserveCurrentPrice"] = preserve_current_price
+
+        for territory_id, price_point_id in price_points:
+            inline_id = f"${{price-{territory_id}}}"
+            linkages.append({"type": "subscriptionPrices", "id": inline_id})
+            inline = {
+                "type": "subscriptionPrices",
+                "id": inline_id,
+                "relationships": {
+                    "subscription": {
+                        "data": {"type": "subscriptions", "id": sub_id}
+                    },
+                    "territory": {
+                        "data": {"type": "territories", "id": territory_id}
+                    },
+                    "subscriptionPricePoint": {
+                        "data": {
+                            "type": "subscriptionPricePoints",
+                            "id": price_point_id,
+                        }
+                    },
+                },
+            }
+            if attrs:
+                inline["attributes"] = attrs
+            included.append(inline)
+
+        return self.patch(
+            f"/v1/subscriptions/{sub_id}",
+            {
+                "data": {
+                    "type": "subscriptions",
+                    "id": sub_id,
+                    "relationships": {
+                        "prices": {"data": linkages}
+                    },
+                },
+                "included": included,
             },
         )
 
@@ -571,6 +711,49 @@ class AppStoreConnectAPI:
 
     def delete_subscription_price(self, price_id: str):
         return self.delete(f"/v1/subscriptionPrices/{price_id}")
+
+    # ── 订阅销售地区 ──
+
+    def list_territories(self) -> list:
+        resp = self.get("/v1/territories", limit=200)
+        return resp.get("data", [])
+
+    def get_subscription_availability(self, sub_id: str) -> Optional[dict]:
+        resp = self.get(
+            f"/v1/subscriptions/{sub_id}/subscriptionAvailability",
+            include="availableTerritories",
+            **{"limit[availableTerritories]": 50},
+        )
+        return resp.get("data")
+
+    def create_subscription_availability(
+        self,
+        sub_id: str,
+        available_in_new_territories: bool,
+        territory_ids: list[str],
+    ) -> dict:
+        return self.post(
+            "/v1/subscriptionAvailabilities",
+            {
+                "data": {
+                    "type": "subscriptionAvailabilities",
+                    "attributes": {
+                        "availableInNewTerritories": available_in_new_territories,
+                    },
+                    "relationships": {
+                        "subscription": {
+                            "data": {"type": "subscriptions", "id": sub_id}
+                        },
+                        "availableTerritories": {
+                            "data": [
+                                {"type": "territories", "id": territory_id}
+                                for territory_id in territory_ids
+                            ]
+                        },
+                    },
+                }
+            },
+        )
 
     # ── 入门优惠 ──
 

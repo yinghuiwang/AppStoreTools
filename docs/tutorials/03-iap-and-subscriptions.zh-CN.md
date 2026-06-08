@@ -128,7 +128,7 @@ asc --app myapp iap --iap-file data/iap_packages.json --update-existing
 
 ## 定价说明
 
-设置 `baseTerritory`（如 `"USA"`）和 `baseAmount`（如 `"0.99"`），工具会自动解析为 Apple 价格点，Apple 负责其他地区的自动换算。
+设置 `baseTerritory` 为 Apple 三字母地区 ID（如 `"USA"` 或 `"CHN"`）和 `baseAmount`（如 `"0.99"`），工具会自动解析为 Apple 价格点，读取该价格点的 equalizations，并默认为等价地区创建价格（`"applyEqualizedPrices": true`）。价格创建默认使用 Apple 的 inline subscription update 请求（`"creationMode": "inlinePatch"`，`"inlineBatchSize": 50`），如果 inline 创建被拒绝，会自动回退到并发 `subscriptionPrices` POST。如果你已经从 Apple 查询结果或错误信息中拿到了价格点 ID，也可以直接配置 `pricePointId`。
 
 常用美元价格：`0.99`、`1.99`、`2.99`、`4.99`、`9.99`、`14.99`、`19.99`
 

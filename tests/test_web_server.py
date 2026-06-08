@@ -624,7 +624,7 @@ def test_iap_check_api(client):
     from unittest.mock import patch, MagicMock
     from pathlib import Path
     mock_config = MagicMock()
-    mock_config.iap_file = str(Path('data/iap_packages.json'))
+    mock_config.iap_path = str(Path('data/iap_packages.json'))
     with patch('asc.web.routes_api.Config', return_value=mock_config),          patch('pathlib.Path.exists', return_value=True),          patch('asc.web.routes_api._load_iap_config', return_value=([{'productId': 'com.test.item1'}], [])):
         resp = client.post('/api/iap/check', cookies={'asc_profile': 'testapp'})
         assert resp.status_code == 200, f'Got {resp.status_code}'
@@ -636,7 +636,7 @@ def test_iap_check_api(client):
 def test_iap_run_api_starts_task(client):
     from unittest.mock import patch, MagicMock
     mock_config = MagicMock()
-    mock_config.iap_file = 'data/iap_packages.json'
+    mock_config.iap_path = 'data/iap_packages.json'
     with patch('asc.web.routes_api.Config', return_value=mock_config),          patch('asc.web.routes_api._task_store') as mock_store:
         mock_store.create.return_value = 'fake-task-id'
         resp = client.post(
@@ -654,7 +654,7 @@ def test_iap_check_missing_file(client):
     from unittest.mock import patch, MagicMock
     from pathlib import Path
     mock_config = MagicMock()
-    mock_config.iap_file = 'nonexistent.json'
+    mock_config.iap_path = 'nonexistent.json'
     with patch('asc.web.routes_api.Config', return_value=mock_config),          patch('pathlib.Path.exists', return_value=False):
         resp = client.post('/api/iap/check', cookies={'asc_profile': 'testapp'})
         assert resp.status_code == 200

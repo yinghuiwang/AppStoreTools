@@ -125,7 +125,7 @@ Use this when you need to update prices, localizations, or descriptions on alrea
 
 ## How pricing works
 
-Set `baseTerritory` (e.g. `"USA"`) and `baseAmount` (e.g. `"0.99"`). The tool resolves this to Apple's price point and Apple handles cross-territory conversion automatically.
+Set `baseTerritory` to Apple’s three-letter territory ID (for example `"USA"` or `"CHN"`) and `baseAmount` (for example `"0.99"`). The tool resolves this to Apple's price point, reads that price point’s equalizations, and creates prices for the equalized territories by default (`"applyEqualizedPrices": true`). Price creation uses Apple’s inline subscription update request by default (`"creationMode": "inlinePatch"`, `"inlineBatchSize": 50`) and falls back to concurrent `subscriptionPrices` POST requests if inline creation is rejected. If Apple returns a price point ID from a previous lookup or error message, you can configure it directly with `pricePointId`.
 
 Common base amounts for USD: `0.99`, `1.99`, `2.99`, `4.99`, `9.99`, `14.99`, `19.99`
 

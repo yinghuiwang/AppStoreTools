@@ -1,6 +1,8 @@
 """Shared test fixtures."""
 from __future__ import annotations
 
+import threading
+
 import pytest
 
 
@@ -16,13 +18,16 @@ class FakeAPI:
         self.intro_offers = {}
         self.promo_offers = {}
         self.review_shots = {}
+        self.subscription_availabilities = {}
         self.price_points = {}
         self.calls = []
         self._next = 1000
+        self._lock = threading.Lock()
 
     def _nid(self, prefix):
-        self._next += 1
-        return f"{prefix}_{self._next}"
+        with self._lock:
+            self._next += 1
+            return f"{prefix}_{self._next}"
 
     # Groups
     def list_subscription_groups(self, app_id):
@@ -109,13 +114,90 @@ class FakeAPI:
                 return pp["id"]
         return None
 
-    def create_subscription_price(self, sub_id, price_point_id, territory, start_date=None):
-        self.calls.append(("create_subscription_price", sub_id, price_point_id, territory))
+    def list_subscription_price_point_equalizations(
+        self, price_point_id, sub_id=None, territory=None
+    ):
+        self.calls.append(
+            ("list_subscription_price_point_equalizations", price_point_id, sub_id, territory)
+        )
+        equalizations = []
+        for pp_list in self.price_points.values():
+            for pp in pp_list:
+                if pp["id"] == price_point_id or pp.get("equalizationOf") == price_point_id:
+                    if territory and pp["territory"] != territory:
+                        continue
+                    equalizations.append(
+                        {
+                            "id": pp["id"],
+                            "type": "subscriptionPricePoints",
+                            "attributes": {"customerPrice": pp["customerPrice"]},
+                            "relationships": {
+                                "territory": {
+                                    "data": {"type": "territories", "id": pp["territory"]}
+                                }
+                            },
+                        }
+                    )
+        return equalizations
+
+    def create_subscription_price(
+        self,
+        sub_id,
+        price_point_id,
+        territory=None,
+        start_date=None,
+        preserve_current_price=None,
+    ):
+        self.calls.append(
+            (
+                "create_subscription_price",
+                sub_id,
+                price_point_id,
+                territory,
+                start_date,
+                preserve_current_price,
+            )
+        )
         pid = self._nid("price")
         self.prices.setdefault(sub_id, []).append(
-            {"id": pid, "pricePointId": price_point_id, "territory": territory}
+            {
+                "id": pid,
+                "pricePointId": price_point_id,
+                "territory": territory,
+                "startDate": start_date,
+                "preserveCurrentPrice": preserve_current_price,
+            }
         )
         return {"data": {"id": pid}}
+
+    def update_subscription_prices_inline(
+        self,
+        sub_id,
+        price_points,
+        start_date=None,
+        preserve_current_price=None,
+    ):
+        self.calls.append(
+            (
+                "update_subscription_prices_inline",
+                sub_id,
+                list(price_points),
+                start_date,
+                preserve_current_price,
+            )
+        )
+        for territory, price_point_id in price_points:
+            pid = self._nid("price")
+            self.prices.setdefault(sub_id, []).append(
+                {
+                    "id": pid,
+                    "pricePointId": price_point_id,
+                    "territory": territory,
+                    "startDate": start_date,
+                    "preserveCurrentPrice": preserve_current_price,
+                }
+            )
+        return {"data": {"id": sub_id}}
 
     def list_subscription_prices(self, sub_id):
         return [{"id": p["id"], "attributes": {}} for p in self.prices.get(sub_id, [])]
@@ -124,6 +206,37 @@ class FakeAPI:
         self.calls.append(("delete_subscription_price", price_id))
         for sid, plist in self.prices.items():
             self.prices[sid] = [p for p in plist if p["id"] != price_id]
+
+    # Availability
+    def list_territories(self):
+        self.calls.append(("list_territories",))
+        return [
+            {"id": "USA", "type": "territories"},
+            {"id": "CHN", "type": "territories"},
+        ]
+
+    def get_subscription_availability(self, sub_id):
+        self.calls.append(("get_subscription_availability", sub_id))
+        return self.subscription_availabilities.get(sub_id)
+
+    def create_subscription_availability(
+        self, sub_id, available_in_new_territories, territory_ids
+    ):
+        self.calls.append(
+            (
+                "create_subscription_availability",
+                sub_id,
+                available_in_new_territories,
+                territory_ids,
+            )
+        )
+        availability = {
+            "id": self._nid("availability"),
+            "availableInNewTerritories": available_in_new_territories,
+            "territoryIds": list(territory_ids),
+        }
+        self.subscription_availabilities[sub_id] = availability
+        return {"data": {"id": availability["id"]}}
 
     # Intro offers
     def list_subscription_intro_offers(self, sub_id):

@@ -65,6 +65,19 @@ def test_missing_price(tmp_png):
         validate_subscription_config([g])
 
 
+def test_price_accepts_explicit_price_point_id_without_base_amount(tmp_png):
+    g = _valid_group(tmp_png)
+    g["subscriptions"][0]["price"] = {"territory": "USA", "pricePointId": "pp_123"}
+    validate_subscription_config([g])
+
+
+def test_price_rejects_two_letter_territory(tmp_png):
+    g = _valid_group(tmp_png)
+    g["subscriptions"][0]["price"] = {"baseTerritory": "US", "baseAmount": "9.99"}
+    with pytest.raises(ValidationError, match="3-letter territory"):
+        validate_subscription_config([g])
+
+
 def test_missing_review_note(tmp_png):
     g = _valid_group(tmp_png)
     g["subscriptions"][0]["review"]["note"] = "  "
@@ -98,6 +111,28 @@ def test_duplicate_promo_offer_code(tmp_png):
     ]
     with pytest.raises(ValidationError, match="offerCode"):
         validate_subscription_config([g])
+
+
+def test_free_trial_intro_offer_requires_territory(tmp_png):
+    g = _valid_group(tmp_png)
+    g["subscriptions"][0]["introductoryOffer"] = {
+        "offerMode": "FREE_TRIAL",
+        "duration": "ONE_WEEK",
+        "numberOfPeriods": 1,
+    }
+    with pytest.raises(ValidationError, match="baseTerritory"):
+        validate_subscription_config([g])
+
+
+def test_free_trial_intro_offer_accepts_territory_without_amount(tmp_png):
+    g = _valid_group(tmp_png)
+    g["subscriptions"][0]["introductoryOffer"] = {
+        "offerMode": "FREE_TRIAL",
+        "baseTerritory": "USA",
+        "duration": "ONE_WEEK",
+        "numberOfPeriods": 1,
+    }
+    validate_subscription_config([g])
 
 
 def test_screenshot_too_large(tmp_path):

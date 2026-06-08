@@ -17,9 +17,10 @@
             "zh-Hans": { "name": "高级会员（月）", "description": "解锁全部高级功能，无广告。" },
             "en-US": { "name": "Premium Monthly", "description": "Unlock all premium features, no ads." }
           },
-          "price": { "baseTerritory": "US", "baseAmount": "9.99" },
+          "price": { "baseTerritory": "USA", "baseAmount": "9.99", "applyEqualizedPrices": true, "creationMode": "inlinePatch", "inlineBatchSize": 50, "maxWorkers": 6 },
           "introductoryOffer": {
             "offerMode": "FREE_TRIAL",
+            "baseTerritory": "USA",
             "duration": "ONE_WEEK",
             "numberOfPeriods": 1
           },

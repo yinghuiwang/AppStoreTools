@@ -115,6 +115,78 @@ def test_request_204_returns_empty_dict(api):
     assert result == {}
 
 
+def test_find_subscription_price_point_requests_all_price_points(api):
+    price_points = {"data": [{"id": "pp1", "attributes": {"customerPrice": "9.99"}}]}
+    with patch.object(api, "get", return_value=price_points) as mock_get:
+        result = api.find_subscription_price_point("sub1", "USA", "9.99")
+
+    assert result == "pp1"
+    mock_get.assert_called_once_with(
+        "/v1/subscriptions/sub1/pricePoints",
+        limit=8000,
+        **{"filter[territory]": "USA"},
+    )
+
+
+def test_create_subscription_price_allows_official_optional_fields(api):
+    with patch.object(api, "post", return_value={"data": {"id": "price1"}}) as mock_post:
+        api.create_subscription_price(
+            "sub1",
+            "pp1",
+            "USA",
+            start_date="2026-07-01",
+            preserve_current_price=True,
+        )
+
+    payload = mock_post.call_args.args[1]
+    assert payload["data"]["attributes"] == {
+        "startDate": "2026-07-01",
+        "preserveCurrentPrice": True,
+    }
+    relationships = payload["data"]["relationships"]
+    assert relationships["subscription"]["data"]["id"] == "sub1"
+    assert relationships["subscriptionPricePoint"]["data"]["id"] == "pp1"
+    assert relationships["territory"]["data"]["id"] == "USA"
+
+
+def test_list_subscription_price_point_equalizations_uses_official_endpoint(api):
+    with patch.object(api, "get", return_value={"data": []}) as mock_get:
+        result = api.list_subscription_price_point_equalizations("pp1", "sub1")
+
+    assert result == []
+    mock_get.assert_called_once_with(
+        "/v1/subscriptionPricePoints/pp1/equalizations",
+        limit=8000,
+        include="territory",
+        **{"filter[subscription]": "sub1"},
+    )
+
+
+def test_update_subscription_prices_inline_builds_compound_request(api):
+    with patch.object(api, "patch", return_value={"data": {"id": "sub1"}}) as mock_patch:
+        api.update_subscription_prices_inline(
+            "sub1",
+            [("USA", "pp_usa"), ("CHN", "pp_chn")],
+            start_date="2026-07-01",
+            preserve_current_price=True,
+        )
+
+    path, payload = mock_patch.call_args.args
+    assert path == "/v1/subscriptions/sub1"
+    assert payload["data"]["relationships"]["prices"]["data"] == [
+        {"type": "subscriptionPrices", "id": "${price-USA}"},
+        {"type": "subscriptionPrices", "id": "${price-CHN}"},
+    ]
+    included = payload["included"]
+    assert included[0]["id"] == "${price-USA}"
+    assert included[0]["attributes"] == {
+        "startDate": "2026-07-01",
+        "preserveCurrentPrice": True,
+    }
+    assert included[0]["relationships"]["territory"]["data"]["id"] == "USA"
+    assert included[0]["relationships"]["subscriptionPricePoint"]["data"]["id"] == "pp_usa"
+
+
 # ── get_editable_version ──
 
 def _make_version(state: str, vid: str = "v1") -> dict:

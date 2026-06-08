@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import hashlib
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Optional, Tuple
 
@@ -68,10 +70,25 @@ def _validate_subscription(sub: dict, tag: str) -> None:
         _require(_non_empty_str(loc.get("description")), f"{ltag}.description required")
     price = sub.get("price")
     _require(isinstance(price, dict), f"{tag}.price required (object)")
-    _require(_non_empty_str(price.get("baseTerritory")),
-             f"{tag}.price.baseTerritory required")
-    _require(_non_empty_str(price.get("baseAmount")),
-             f"{tag}.price.baseAmount required (string)")
+    has_price_point = _non_empty_str(price.get("pricePointId"))
+    has_base_lookup = (
+        _non_empty_str(price.get("baseTerritory"))
+        and _non_empty_str(price.get("baseAmount"))
+    )
+    _require(
+        has_price_point or has_base_lookup,
+        f"{tag}.price requires either pricePointId or baseTerritory + baseAmount",
+    )
+    if price.get("baseTerritory") is not None:
+        _require(
+            _valid_territory_id(price.get("baseTerritory")),
+            f"{tag}.price.baseTerritory must be a 3-letter territory id such as USA or CHN",
+        )
+    if price.get("territory") is not None:
+        _require(
+            _valid_territory_id(price.get("territory")),
+            f"{tag}.price.territory must be a 3-letter territory id such as USA or CHN",
+        )
     review = sub.get("review")
     _require(isinstance(review, dict), f"{tag}.review required (object)")
     _require(_non_empty_str(review.get("note")),
@@ -107,13 +124,17 @@ def _validate_intro_offer(offer: dict, tag: str) -> None:
     mode = offer.get("offerMode")
     _require(mode in VALID_INTRO_MODES,
              f"{tag}.offerMode must be one of {sorted(VALID_INTRO_MODES)}")
+    _require(_non_empty_str(offer.get("baseTerritory")),
+             f"{tag}.baseTerritory required")
+    _require(
+        _valid_territory_id(offer.get("baseTerritory")),
+        f"{tag}.baseTerritory must be a 3-letter territory id such as USA or CHN",
+    )
     _require(offer.get("duration") in VALID_PERIODS,
              f"{tag}.duration must be one of {sorted(VALID_PERIODS)}")
     _require(isinstance(offer.get("numberOfPeriods"), int) and offer["numberOfPeriods"] >= 1,
              f"{tag}.numberOfPeriods must be positive int")
     if mode != "FREE_TRIAL":
-        _require(_non_empty_str(offer.get("baseTerritory")),
-                 f"{tag}.baseTerritory required for non-FREE_TRIAL")
         _require(_non_empty_str(offer.get("baseAmount")),
                  f"{tag}.baseAmount required for non-FREE_TRIAL")
 
@@ -130,6 +151,10 @@ def _validate_promo_offer(offer: dict, tag: str) -> None:
              f"{tag}.numberOfPeriods must be positive int")
     _require(_non_empty_str(offer.get("baseTerritory")), f"{tag}.baseTerritory required")
     _require(_non_empty_str(offer.get("baseAmount")), f"{tag}.baseAmount required")
+
+
+def _valid_territory_id(value: Any) -> bool:
+    return isinstance(value, str) and len(value.strip()) == 3 and value.strip().isalpha()
 
 
 # ---------- Orchestrator ----------
@@ -300,6 +325,9 @@ def _sync_subscription(
     if sub_id is None:
         return status
 
+    _sync_subscription_availability(
+        api, sub_id, sub_cfg, update_existing, dry_run
+    )
     _sync_subscription_localizations(
         api, sub_id, sub_cfg["localizations"], update_existing, dry_run
     )
@@ -360,6 +388,54 @@ def _sync_subscription_main(
     return sub_id, "created"
 
 
+def _sync_subscription_availability(api, sub_id, sub_cfg, update_existing, dry_run):
+    available_all = bool(sub_cfg.get("availableInAllTerritories", True))
+    territory_ids = sub_cfg.get("availableTerritories") or sub_cfg.get("territories")
+
+    if territory_ids is not None:
+        if not isinstance(territory_ids, list):
+            print("    ⚠️  销售地区: availableTerritories/territories 必须是列表，跳过")
+            return
+        territory_ids = [str(t).strip() for t in territory_ids if str(t).strip()]
+    elif available_all:
+        if dry_run:
+            print("    [预览] 销售地区: 全部国家/地区")
+            return
+        territory_ids = [t["id"] for t in api.list_territories()]
+    else:
+        territory_ids = []
+
+    if not territory_ids:
+        print("    ⚠️  销售地区: 无可用地区配置，跳过")
+        return
+
+    if dry_run:
+        print(f"    [预览] 销售地区: {len(territory_ids)} 个地区")
+        return
+
+    try:
+        existing = api.get_subscription_availability(sub_id)
+    except Exception:
+        existing = None
+
+    if existing and not update_existing:
+        print("    销售地区: 已存在，跳过")
+        return
+    if existing and update_existing:
+        print("    销售地区: 已存在（Apple API 不支持直接替换），跳过")
+        return
+
+    try:
+        api.create_subscription_availability(
+            sub_id,
+            available_in_new_territories=available_all,
+            territory_ids=territory_ids,
+        )
+        print(f"    销售地区: 已设置 {len(territory_ids)} 个地区 ✅")
+    except Exception as e:
+        print(f"    ⚠️  销售地区设置跳过: {e}")
+
+
 def _sync_subscription_localizations(api, sub_id, loc_cfg, update_existing, dry_run):
     if not loc_cfg:
         return
@@ -387,20 +463,28 @@ def _sync_subscription_localizations(api, sub_id, loc_cfg, update_existing, dry_
 
 
 def _sync_subscription_price(api, sub_id, price_cfg, update_existing, dry_run):
-    territory = price_cfg["baseTerritory"]
-    amount = price_cfg["baseAmount"]
+    territory = price_cfg.get("territory") or price_cfg.get("baseTerritory")
+    amount = price_cfg.get("baseAmount")
+    pp_id = str(price_cfg.get("pricePointId") or "").strip()
+    apply_equalized = bool(price_cfg.get("applyEqualizedPrices", True))
+    max_workers = _positive_int(price_cfg.get("maxWorkers"), default=6)
 
-    pp_id = api.find_subscription_price_point(sub_id, territory, amount)
-    if pp_id is None:
+    if not pp_id:
+        pp_id = api.find_subscription_price_point(sub_id, territory, amount)
+    if not pp_id:
         candidates = api.list_subscription_price_points(sub_id, territory)
         nearest = _nearest_price_points(candidates, amount, limit=3)
         hint = ", ".join(f"{c}" for c in nearest) or "无候选"
         raise Exception(
-            f"未找到 Price Point: {territory} {amount}. 最近候选: {hint}"
+            f"未找到 Price Point: {territory} {amount}. "
+            f"territory 必须使用 Apple 三字母 ID（如 USA/CHN），最近候选: {hint}"
         )
 
     if dry_run:
-        print(f"    [预览] 价格: 基准 {territory} {amount} → Price Point {pp_id}")
+        if amount:
+            print(f"    [预览] 价格: 基准 {territory} {amount} → Price Point {pp_id}")
+        else:
+            print(f"    [预览] 价格: Price Point {pp_id}")
         return
 
     existing = api.list_subscription_prices(sub_id)
@@ -412,26 +496,174 @@ def _sync_subscription_price(api, sub_id, price_cfg, update_existing, dry_run):
             api.delete_subscription_price(p["id"])
         print(f"    价格: 已删除 {len(existing)} 条旧价格")
 
+    price_points = [(territory, pp_id)]
+    if apply_equalized:
+        try:
+            equalizations = api.list_subscription_price_point_equalizations(pp_id, sub_id)
+            price_points = _price_points_by_territory(equalizations)
+            if not any(t == territory for t, _ in price_points):
+                price_points.insert(0, (territory, pp_id))
+        except Exception as e:
+            print(f"    ⚠️  等价价格点查询失败，仅设置基准地区: {e}")
+
+    created, failed = _create_subscription_prices(
+        api, sub_id, price_points, price_cfg, max_workers
+    )
+
+    if amount:
+        print(
+            f"    价格: 基准 {territory} {amount} → 已设置 {created} 个地区"
+            f"{f' / {failed} 失败' if failed else ''} ✅"
+        )
+    else:
+        print(
+            f"    价格: Price Point {pp_id} → 已设置 {created} 个地区"
+            f"{f' / {failed} 失败' if failed else ''} ✅"
+        )
+
+
+def _positive_int(value: Any, default: int) -> int:
     try:
-        api.create_subscription_price(sub_id, pp_id, territory)
-        print(f"    价格: 基准 {territory} {amount} → Price Point {pp_id} ✅")
-    except Exception as e:
-        # ASC subscription price creation requires the subscription to be in a complete state
-        # (all metadata, screenshot, and territory availability set). If creation fails, skip gracefully.
-        print(f"    ⚠️  价格创建跳过（可能需要在 ASC UI 手动设置）: {e}")
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
+
+
+def _create_subscription_prices(api, sub_id, price_points, price_cfg, max_workers):
+    mode = str(price_cfg.get("creationMode", "inlinePatch")).strip()
+    if (
+        mode != "post"
+        and len(price_points) > 1
+        and hasattr(api, "update_subscription_prices_inline")
+    ):
+        created, failed, fallback_points = _create_subscription_prices_inline(
+            api, sub_id, price_points, price_cfg
+        )
+        if not fallback_points:
+            return created, failed
+        fallback_created, fallback_failed = _create_subscription_prices_post(
+            api, sub_id, fallback_points, price_cfg, max_workers
+        )
+        return created + fallback_created, failed + fallback_failed
+
+    return _create_subscription_prices_post(api, sub_id, price_points, price_cfg, max_workers)
+
+
+def _create_subscription_prices_inline(api, sub_id, price_points, price_cfg):
+    batch_size = min(_positive_int(price_cfg.get("inlineBatchSize"), default=50), 50)
+    created = 0
+    failed = 0
+    batches = list(_chunks(price_points, batch_size))
+    print(f"    价格: inline PATCH 创建 {len(price_points)} 个地区（batch={batch_size}）")
+
+    for idx, batch in enumerate(batches):
+        try:
+            api.update_subscription_prices_inline(
+                sub_id,
+                batch,
+                start_date=price_cfg.get("startDate"),
+                preserve_current_price=price_cfg.get("preserveCurrentPrice"),
+            )
+            created += len(batch)
+        except Exception as e:
+            failed += len(batch)
+            remaining = batch[:]
+            for later in batches[idx + 1:]:
+                remaining.extend(later)
+            print(f"    ⚠️  inline 价格创建失败，回退并发 POST: {e}")
+            return created, failed, remaining
+
+    return created, failed, []
+
+
+def _chunks(items, size):
+    for idx in range(0, len(items), size):
+        yield items[idx:idx + size]
+
+
+def _create_subscription_prices_post(api, sub_id, price_points, price_cfg, max_workers):
+    if len(price_points) <= 1 or max_workers <= 1:
+        return _create_subscription_prices_sequential(api, sub_id, price_points, price_cfg)
+
+    created = 0
+    failed = 0
+    workers = min(max_workers, len(price_points))
+    print(f"    价格: 并发创建 {len(price_points)} 个地区（workers={workers}）")
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        future_map = {
+            executor.submit(
+                api.create_subscription_price,
+                sub_id,
+                target_pp_id,
+                target_territory,
+                start_date=price_cfg.get("startDate"),
+                preserve_current_price=price_cfg.get("preserveCurrentPrice"),
+            ): target_territory
+            for target_territory, target_pp_id in price_points
+        }
+        for future in as_completed(future_map):
+            target_territory = future_map[future]
+            try:
+                future.result()
+                created += 1
+            except Exception as e:
+                failed += 1
+                print(f"    ⚠️  价格创建跳过 {target_territory}: {e}")
+
+    return created, failed
+
+
+def _create_subscription_prices_sequential(api, sub_id, price_points, price_cfg):
+    created = 0
+    failed = 0
+    for target_territory, target_pp_id in price_points:
+        try:
+            api.create_subscription_price(
+                sub_id,
+                target_pp_id,
+                target_territory,
+                start_date=price_cfg.get("startDate"),
+                preserve_current_price=price_cfg.get("preserveCurrentPrice"),
+            )
+            created += 1
+        except Exception as e:
+            failed += 1
+            print(f"    ⚠️  价格创建跳过 {target_territory}: {e}")
+    return created, failed
+
+
+def _price_points_by_territory(price_points: list) -> list[tuple[str, str]]:
+    result = []
+    seen = set()
+    for pp in price_points:
+        territory_id = (
+            pp.get("relationships", {})
+            .get("territory", {})
+            .get("data", {})
+            .get("id")
+        )
+        if not territory_id:
+            territory_id = pp.get("territory")
+        pp_id = pp.get("id")
+        if territory_id and pp_id and territory_id not in seen:
+            result.append((territory_id, pp_id))
+            seen.add(territory_id)
+    return result
 
 
 def _nearest_price_points(candidates: list, target: str, limit: int) -> list[str]:
     try:
-        t = float(target)
-    except ValueError:
+        t = Decimal(str(target))
+    except (InvalidOperation, ValueError):
         return [c.get("attributes", {}).get("customerPrice", "?") for c in candidates[:limit]]
     scored = []
     for c in candidates:
         price_str = c.get("attributes", {}).get("customerPrice", "")
         try:
-            scored.append((abs(float(price_str) - t), price_str))
-        except ValueError:
+            scored.append((abs(Decimal(str(price_str)) - t), price_str))
+        except (InvalidOperation, ValueError):
             continue
     scored.sort()
     return [p for _, p in scored[:limit]]

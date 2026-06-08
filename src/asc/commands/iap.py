@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import hashlib
 from pathlib import Path
 from typing import Optional
 
@@ -14,6 +15,9 @@ from asc.error_handler import get_action_hint
 from asc.guard import Guard, GuardViolationError
 from asc.utils import make_api_from_config, resolve_app_profile
 from asc.i18n import t, ERRORS, HELP
+
+MAX_REVIEW_SCREENSHOT_BYTES = 5 * 1024 * 1024
+REVIEW_SCREENSHOT_EXTS = {".png", ".jpg", ".jpeg"}
 
 
 def _resolve_review_screenshot(obj: dict, config_dir: Path) -> None:
@@ -27,6 +31,28 @@ def _resolve_review_screenshot(obj: dict, config_dir: Path) -> None:
     p = Path(shot)
     if not p.is_absolute():
         review["screenshot"] = str(config_dir / p)
+
+
+def _validate_review_screenshot(item: dict, label: str) -> Optional[Path]:
+    review = item.get("review")
+    if not isinstance(review, dict):
+        return None
+    shot = review.get("screenshot")
+    if not shot:
+        return None
+    if not isinstance(shot, str) or not shot.strip():
+        raise ValueError(f"{label}.review.screenshot path required")
+    path = Path(shot)
+    if not path.exists() or not path.is_file():
+        raise ValueError(f"{label}.review.screenshot file not found: {shot}")
+    if path.suffix.lower() not in REVIEW_SCREENSHOT_EXTS:
+        raise ValueError(
+            f"{label}.review.screenshot must be .png/.jpg/.jpeg, got {path.suffix}"
+        )
+    size = path.stat().st_size
+    if size > MAX_REVIEW_SCREENSHOT_BYTES:
+        raise ValueError(f"{label}.review.screenshot exceeds 5MB ({size} bytes)")
+    return path
 
 
 def _load_iap_config(file_path: str) -> tuple[list[dict], list[dict]]:
@@ -55,8 +81,9 @@ def _load_iap_config(file_path: str) -> tuple[list[dict], list[dict]]:
         raise ValueError("IAP 配置为空 (empty)：请至少提供 items 或 subscriptionGroups")
 
     # Resolve relative file paths against the config file's directory
-    for item in items:
+    for idx, item in enumerate(items):
         _resolve_review_screenshot(item, config_dir)
+        _validate_review_screenshot(item, f"items[{idx}]")
     for group in subs:
         for sub in group.get("subscriptions", []):
             _resolve_review_screenshot(sub, config_dir)
@@ -94,6 +121,10 @@ def _upload_iap_core(api, app_id: str, iap_items: list[dict], dry_run: bool = Fa
         name = str(item.get("name", "")).strip()
         iap_type = str(item.get("inAppPurchaseType", "")).strip()
         review_note = str(item.get("reviewNote", "")).strip()
+        review = item.get("review") if isinstance(item.get("review"), dict) else {}
+        if not review_note:
+            review_note = str(review.get("note", "")).strip()
+        review_screenshot = review.get("screenshot")
         available_all = item.get("availableInAllTerritories", True)
         localizations = item.get("localizations", {})
 
@@ -118,7 +149,9 @@ def _upload_iap_core(api, app_id: str, iap_items: list[dict], dry_run: bool = Fa
                 continue
             print(f"    已存在 (ID: {iap_id})，执行更新")
             if not dry_run:
-                update_attrs = {k: v for k, v in attrs.items() if k != "productId"}
+                update_attrs = {}
+                if name:
+                    update_attrs["name"] = name
                 if update_attrs:
                     api.update_in_app_purchase(iap_id, update_attrs)
         else:
@@ -130,12 +163,21 @@ def _upload_iap_core(api, app_id: str, iap_items: list[dict], dry_run: bool = Fa
             else:
                 iap_id = "DRY_RUN_ID"
 
+        if review_screenshot:
+            _sync_iap_review_screenshot(
+                api, iap_id, review_screenshot, update_existing, dry_run
+            )
+
         if not isinstance(localizations, dict) or not localizations:
             print("    ⚠️  无本地化配置，跳过本地化上传")
+            pct = int((idx + 1) / total_items * 100)
+            print(f"[PROGRESS:{pct}:IAP {idx + 1}/{total_items}]")
             continue
 
         if dry_run:
             print(f"    [预览] 将更新本地化: {list(localizations.keys())}")
+            pct = int((idx + 1) / total_items * 100)
+            print(f"[PROGRESS:{pct}:IAP {idx + 1}/{total_items}]")
             continue
 
         existing_locs = api.get_in_app_purchase_localizations(iap_id)
@@ -174,6 +216,33 @@ def _upload_iap_core(api, app_id: str, iap_items: list[dict], dry_run: bool = Fa
     print("\n✅ IAP 上传完成")
 
 
+def _sync_iap_review_screenshot(api, iap_id, shot_path, update_existing, dry_run):
+    path = Path(shot_path)
+
+    if dry_run:
+        print(f"    [预览] IAP 审核截图: 将上传 {path.name}")
+        return
+
+    existing = api.list_in_app_purchase_review_screenshots(iap_id)
+    if existing and not update_existing:
+        print("    IAP 审核截图: 已存在，跳过")
+        return
+
+    for s in existing:
+        api.delete_in_app_purchase_review_screenshot(s["id"])
+
+    file_bytes = path.read_bytes()
+    reservation = api.create_in_app_purchase_review_screenshot_reservation(
+        iap_id, path.name, len(file_bytes)
+    )
+    shot_id = reservation["data"]["id"]
+    upload_ops = reservation["data"].get("attributes", {}).get("uploadOperations", [])
+    api.upload_in_app_purchase_review_screenshot(upload_ops, file_bytes)
+    md5 = hashlib.md5(file_bytes).hexdigest()
+    api.commit_in_app_purchase_review_screenshot(shot_id, md5)
+    print(f"    IAP 审核截图: {path.name} 上传 ✅")
+
+
 def cmd_iap(
     iap_file: str = typer.Option(..., "--iap-file", "-f",
         help=t(HELP['iap_file'])),
@@ -206,24 +275,26 @@ def cmd_iap(
 
     \b
     Subscription groups structure:
-    [
-      {
-        "referenceName": "Premium Subscription",
-        "subscriptions": [
-          {
-            "productId": "com.example.app.premium.monthly",
-            "name": "Premium Monthly",
-            "subscriptionPeriod": "ONE_MONTH",
-            "groupLevel": 1,
-            "localizations": {...},
-            "price": { "baseTerritory": "US", "baseAmount": "4.99" },
-            "introductoryOffer": {...},
-            "promotionalOffers": [...],
-            "review": { "note": "Review note", "screenshot": "path/to/screenshot.png" }
-          }
-        ]
-      }
-    ]
+    {
+      "subscriptionGroups": [
+        {
+          "referenceName": "Premium Subscription",
+          "subscriptions": [
+            {
+              "productId": "com.example.app.premium.monthly",
+              "name": "Premium Monthly",
+              "subscriptionPeriod": "ONE_MONTH",
+              "groupLevel": 1,
+              "localizations": {...},
+              "price": { "baseTerritory": "USA", "baseAmount": "4.99" },
+              "introductoryOffer": {...},
+              "promotionalOffers": [...],
+              "review": { "note": "Review note", "screenshot": "path/to/screenshot.png" }
+            }
+          ]
+        }
+      ]
+    }
 
     \b
     Default behavior: creates new items only. Use --update-existing to modify.

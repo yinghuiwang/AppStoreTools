@@ -76,6 +76,17 @@ def test_init_iap_json_is_valid_json(xcode_project):
     assert "subscriptionGroups" in data or "items" in data
 
 
+def test_init_iap_json_defaults_subscriptions_to_all_territories(xcode_project):
+    """Generated subscription template defaults sales availability to all territories."""
+    import json
+    runner.invoke(app, ["init", "--path", str(xcode_project)])
+    content = (xcode_project / "AppStore" / "data" / "iap_packages.json").read_text()
+    data = json.loads(content)
+    subscription = data["subscriptionGroups"][0]["subscriptions"][0]
+    assert subscription["availableInAllTerritories"] is True
+    assert subscription["price"]["baseTerritory"] == "USA"
+
+
 def test_init_non_xcode_dir_exits_nonzero(non_xcode_dir):
     """init exits with code 1 and an error message if no Xcode project detected."""
     result = runner.invoke(app, ["init", "--path", str(non_xcode_dir)])

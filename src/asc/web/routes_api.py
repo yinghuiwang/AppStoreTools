@@ -1170,7 +1170,7 @@ async def iap_check(request: Request):
     try:
         from pathlib import Path
         config = Config(app_name=profile)
-        iap_path = Path(config.iap_file) if hasattr(config, "iap_file") and config.iap_file else Path("data/iap_packages.json")
+        iap_path = Path(config.iap_path) if config.iap_path else Path("data/iap_packages.json")
         if not iap_path.exists():
             return {
                 "ok": False,
