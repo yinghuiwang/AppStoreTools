@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import os
+import json
+import subprocess
 import sys
 import warnings
+from pathlib import Path
 from typing import Optional
 
 # Suppress SSL warnings from urllib3 (not relevant to end users)
@@ -50,6 +53,8 @@ from asc.i18n import t, HELP, LANG, patch_typer_completion
 
 patch_typer_completion()
 
+PACKAGE_NAME = "asc-appstore-tools"
+
 
 def _handle_typer_exception(exc: Exception) -> None:
     """Handle Typer/Click exceptions with user-friendly messages in non-debug mode."""
@@ -94,10 +99,38 @@ app_cmd = typer.Typer(help=t(HELP['cmd_app']), no_args_is_help=True)
 app.add_typer(app_cmd, name="app")
 
 
+def _installed_commit_short() -> Optional[str]:
+    """Return the short commit hash for the installed package, when available."""
+    try:
+        from importlib.metadata import distribution
+        dist = distribution(PACKAGE_NAME)
+        direct_url = dist.read_text("direct_url.json")
+        if direct_url:
+            info = json.loads(direct_url)
+            commit = info.get("vcs_info", {}).get("commit_id")
+            if commit:
+                return commit[:7]
+    except Exception:
+        pass
+
+    try:
+        repo_root = Path(__file__).resolve().parents[2]
+        commit = subprocess.check_output(
+            ["git", "-C", str(repo_root), "rev-parse", "--short", "HEAD"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        ).strip()
+        return commit or None
+    except Exception:
+        return None
+
+
 def version_callback(value: bool):
     if value:
-        typer.echo(f"asc version {__version__}")
-        raise typer.Exit()
+        commit = _installed_commit_short() or "unknown"
+        typer.echo(f"asc version {__version__} (commit {commit})")
+        raise typer.Exit(0)
 
 
 @app.callback(invoke_without_command=True)
