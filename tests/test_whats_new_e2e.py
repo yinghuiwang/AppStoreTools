@@ -101,7 +101,7 @@ class TestWebWhatsNewTranslatePreviewFlow:
         mock_translator.translate.side_effect = lambda text, locale, source: f"translated_{locale}"
 
         with patch("asc.web.routes_api.make_api_from_config", return_value=(mock_api, "app123")):
-            with patch("asc.config.Config", return_value=mock_config):
+            with patch("asc.web.routes_api.Config", return_value=mock_config):
                 with patch("asc.llm.LLMClient", return_value=MagicMock()):
                     with patch("asc.services.translator.OpenAITranslator", return_value=mock_translator):
                         # Step 1: POST /api/whats-new/translate
@@ -119,7 +119,7 @@ class TestWebWhatsNewTranslatePreviewFlow:
 
         # Step 2: POST /api/whats-new/run with translations
         with patch("asc.web.routes_api.make_api_from_config", return_value=(mock_api, "app123")):
-            with patch("asc.config.Config", return_value=mock_config):
+            with patch("asc.web.routes_api.Config", return_value=mock_config):
                 run_resp = client.post(
                     "/api/whats-new/run",
                     cookies={"asc_profile": "test"},

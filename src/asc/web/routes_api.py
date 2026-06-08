@@ -864,35 +864,24 @@ async def whats_new_translate(request: Request):
         else:
             form = await request.form()
             data = dict(form)
-        text = data.get("text", "")
-        source_locale = data.get("source_locale", "auto")
-        from asc.config import Config
-        from asc.llm import LLMClient
-        from asc.services.translator import OpenAITranslator
+        text = str(data.get("text", "")).strip()
+        source_locale = data.get("source_locale", "auto") or "auto"
+        if not text:
+            return JSONResponse({"error": "Text is required"}, status_code=400)
         config = Config(app_name=profile)
-        if not config.llm_api_key:
-            return JSONResponse({"error": "LLM API key not configured. Set [llm] api_key in config or OPENAI_API_KEY env var."}, status_code=400)
-        llm_client = LLMClient(
-            api_key=config.llm_api_key,
-            base_url=config.llm_base_url,
-            model=config.llm_model,
-        )
-        translator = OpenAITranslator(llm_client)
-        # Get available locales
-        api, app_id = make_api_from_config(config)
-        version = api.get_editable_version(app_id)
-        version_id = version["id"]
-        ver_locs = api.get_version_localizations(version_id)
-        all_locales = [loc["attributes"]["locale"] for loc in ver_locs]
-        target_locales = [l for l in all_locales if l != source_locale] if source_locale != "auto" else all_locales
-        translations = {}
-        errors = []
-        for locale in target_locales:
-            try:
-                translations[locale] = translator.translate(text, locale, source_locale)
-            except Exception as e:
-                translations[locale] = ""
-                errors.append(f"{locale}: {e}")
+        try:
+            translations, errors = _translate_whats_new_text(
+                config=config,
+                text=text,
+                source_locale=source_locale,
+            )
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        if not translations:
+            message = "All translations failed."
+            if errors:
+                message = f"{message} {'; '.join(errors)}"
+            return JSONResponse({"error": message, "errors": errors}, status_code=500)
         resp = {
             "source_locale": source_locale,
             "translations": translations,
@@ -902,6 +891,52 @@ async def whats_new_translate(request: Request):
         return resp
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+def _translate_whats_new_text(
+    config: Config,
+    text: str,
+    source_locale: str,
+) -> tuple[dict[str, str], list[str]]:
+    """Translate What's New text to all version locales except the source locale."""
+    if not config.llm_api_key:
+        raise ValueError("LLM API key not configured. Set it in Web settings or OPENAI_API_KEY.")
+
+    from asc.llm import LLMClient
+    from asc.services.translator import OpenAITranslator
+
+    llm_client = LLMClient(
+        api_key=config.llm_api_key,
+        base_url=config.llm_base_url,
+        model=config.llm_model,
+    )
+    translator = OpenAITranslator(llm_client)
+
+    api, app_id = make_api_from_config(config)
+    version = api.get_editable_version(app_id)
+    if not version:
+        raise ValueError("无可编辑版本")
+    version_id = version["id"]
+    ver_locs = api.get_version_localizations(version_id)
+    all_locales = [loc["attributes"]["locale"] for loc in ver_locs]
+    target_locales = (
+        [locale for locale in all_locales if locale != source_locale]
+        if source_locale != "auto"
+        else all_locales
+    )
+
+    translations: dict[str, str] = {}
+    errors: list[str] = []
+    for locale in target_locales:
+        try:
+            result = translator.translate(text, locale, source_locale)
+            if result:
+                translations[locale] = result
+            else:
+                errors.append(f"{locale}: empty translation")
+        except Exception as e:
+            errors.append(f"{locale}: {e}")
+    return translations, errors
 
 
 def _start_whats_new_task(
@@ -1020,8 +1055,10 @@ async def whats_new_run(
     text: str = _Form(""),
     locales: str = _Form(""),
     dry_run: str = _Form(""),
+    translate: str = _Form(""),
+    source_locale: str = _Form("auto"),
 ):
-    """Run whats-new upload. Supports both translate mode (translations_json) and direct mode (text+locales)."""
+    """Run whats-new upload. Supports translated dicts, translate mode, and direct text mode."""
     import json
     profile = request.cookies.get("asc_profile", "")
     if not profile:
@@ -1052,8 +1089,13 @@ async def whats_new_run(
             translations_json = json.dumps(payload_translations)
         text = text or payload.get("text", "")
         locales = locales or payload.get("locales", "")
+        source_locale = payload.get("source_locale", source_locale) or "auto"
         if not dry_run and "dry_run" in payload:
             dry_run = payload["dry_run"]
+        if not translate and "translate" in payload:
+            translate = payload["translate"]
+
+    translate_requested = _as_bool(translate)
 
     if translations_json:
         # Translate mode: pre-translated dict
@@ -1061,6 +1103,21 @@ async def whats_new_run(
             translations = json.loads(translations_json)
         except json.JSONDecodeError:
             return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+    elif translate_requested and text:
+        try:
+            config = Config(app_name=profile)
+            translations, errors = _translate_whats_new_text(
+                config=config,
+                text=text.strip(),
+                source_locale=source_locale,
+            )
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        if not translations:
+            message = "All translations failed."
+            if errors:
+                message = f"{message} {'; '.join(errors)}"
+            return JSONResponse({"error": message, "errors": errors}, status_code=500)
     elif text:
         # Direct mode: same text to specified locales
         locale_list = [l.strip() for l in locales.split(",")] if locales else None

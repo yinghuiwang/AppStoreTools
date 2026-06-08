@@ -77,7 +77,7 @@ def test_whats_new_translate_returns_translations(client):
     mock_translator = MagicMock()
     mock_translator.translate.side_effect = lambda text, locale, source: f"translated_{locale}"
 
-    with patch("asc.config.Config", return_value=mock_config):
+    with patch("asc.web.routes_api.Config", return_value=mock_config):
         with patch("asc.web.routes_api.make_api_from_config", return_value=(mock_api, "app123")):
             with patch("asc.llm.LLMClient", return_value=MagicMock()):
                 with patch("asc.services.translator.OpenAITranslator", return_value=mock_translator):
@@ -103,7 +103,7 @@ def test_whats_new_translate_no_api_key_returns_400(client):
     mock_config.llm_base_url = "https://api.openai.com/v1"
     mock_config.llm_model = "gpt-4o"
 
-    with patch("asc.config.Config", return_value=mock_config):
+    with patch("asc.web.routes_api.Config", return_value=mock_config):
         response = client.post(
             "/api/whats-new/translate",
             cookies={"asc_profile": "test"},
@@ -199,6 +199,47 @@ def test_whats_new_run_accepts_json_direct_payload(client):
     assert kwargs["locales"] == ["en-US", "zh-CN"]
 
 
+def test_whats_new_run_translates_when_translate_requested(client):
+    """POST /api/whats-new/run with translate=true translates before starting the upload task."""
+    mock_api = MagicMock()
+    mock_api.get_editable_version.return_value = {"id": "v1", "attributes": {"versionString": "2.0.0"}}
+    mock_api.get_version_localizations.return_value = [
+        {"id": "l1", "attributes": {"locale": "en-US"}},
+        {"id": "l2", "attributes": {"locale": "zh-CN"}},
+    ]
+    mock_config = MagicMock()
+    mock_config.llm_api_key = "fake-api-key"
+    mock_config.llm_base_url = "https://api.openai.com/v1"
+    mock_config.llm_model = "gpt-4o"
+
+    mock_translator = MagicMock()
+    mock_translator.translate.side_effect = lambda text, locale, source: f"translated_{locale}"
+
+    with patch("asc.web.routes_api.Config", return_value=mock_config):
+        with patch("asc.web.routes_api.make_api_from_config", return_value=(mock_api, "app123")):
+            with patch("asc.llm.LLMClient", return_value=MagicMock()):
+                with patch("asc.services.translator.OpenAITranslator", return_value=mock_translator):
+                    with patch("asc.web.routes_api._start_whats_new_task", return_value="task-789") as mock_start:
+                        response = client.post(
+                            "/api/whats-new/run",
+                            cookies={"asc_profile": "test"},
+                            json={
+                                "text": "Bug fixes.",
+                                "source_locale": "en-US",
+                                "translate": True,
+                                "dry_run": 0,
+                            },
+                        )
+
+    assert response.status_code == 200
+    assert response.json()["task_id"] == "task-789"
+    mock_translator.translate.assert_called_once_with("Bug fixes.", "zh-CN", "en-US")
+    kwargs = mock_start.call_args.kwargs
+    assert kwargs["translations"] == {"zh-CN": "translated_zh-CN"}
+    assert kwargs["text"] == "Bug fixes."
+    assert kwargs["locales"] is None
+
+
 def test_whats_new_template_uses_alpine_data_helper():
     """whats_new template must use Alpine.$data, not Alpine.$Data."""
     from pathlib import Path
@@ -206,6 +247,15 @@ def test_whats_new_template_uses_alpine_data_helper():
     template = Path("src/asc/web/templates/whats_new.html").read_text(encoding="utf-8")
     assert "Alpine.$Data" not in template
     assert "Alpine.$data" in template
+
+
+def test_whats_new_template_hides_direct_upload_in_translate_mode():
+    """When translate mode is enabled, the direct upload button should not be shown."""
+    from pathlib import Path
+
+    template = Path("src/asc/web/templates/whats_new.html").read_text(encoding="utf-8")
+    assert 'x-show="!translateMode"' in template
+    assert "translateError" in template
 
 
 def test_settings_llm_get_returns_config(client):

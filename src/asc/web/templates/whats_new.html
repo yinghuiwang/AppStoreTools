@@ -26,6 +26,7 @@
     sourceLocale: 'auto',
     text: '',
     translations: {},
+    translateError: '',
     availableLocales: [],
     version: '',
     editingLocale: null,
@@ -106,6 +107,10 @@
             </label>
           </div>
 
+          <template x-if="translateError">
+            <div class="rounded-lg p-3 text-sm bg-red-500/10 text-red-300 border border-red-500/20" x-text="translateError"></div>
+          </template>
+
           <!-- Actions -->
           <div class="flex gap-3 pt-3 border-t border-obsidian-700">
             <!-- Preview translate (only when translateMode is true) -->
@@ -115,18 +120,26 @@
                     :disabled="submitting || !text.trim()"
                     @click="
                       submitting = true;
+                      translateError = '';
                       fetch('/api/whats-new/translate', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({source_locale: sourceLocale, text: text})
                       })
-                        .then(r => r.json())
+                        .then(r => r.json().then(data => {
+                          if (!r.ok || data.error) throw new Error(data.error || '翻译失败');
+                          return data;
+                        }))
                         .then(data => {
                           translations = data.translations || {};
+                          if (!Object.keys(translations).length) throw new Error('没有生成任何翻译结果');
                           step = 2;
                           submitting = false;
                         })
-                        .catch(() => { submitting = false; });
+                        .catch(err => {
+                          translateError = err.message || '翻译失败';
+                          submitting = false;
+                        });
                     ">
               <span x-show="!submitting">预览翻译</span>
               <span x-show="submitting" class="flex items-center gap-1.5">
@@ -136,10 +149,12 @@
             </button>
             <!-- Direct upload (no translate) -->
             <button type="button"
+                    x-show="!translateMode"
                     class="btn-ghost"
                     :disabled="submitting || !text.trim()"
                     @click="
                       submitting = true;
+                      translateError = '';
                       fetch('/api/whats-new/run', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
