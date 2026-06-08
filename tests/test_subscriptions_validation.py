@@ -97,11 +97,10 @@ def test_missing_review_screenshot_file(tmp_png):
         validate_subscription_config([g])
 
 
-def test_duplicate_group_level(tmp_png):
+def test_duplicate_group_level_is_allowed(tmp_png):
     g = _valid_group(tmp_png)
     g["subscriptions"].append(dict(g["subscriptions"][0], productId="com.a.yearly"))
-    with pytest.raises(ValidationError, match="groupLevel"):
-        validate_subscription_config([g])
+    validate_subscription_config([g])
 
 
 def test_duplicate_promo_offer_code(tmp_png):

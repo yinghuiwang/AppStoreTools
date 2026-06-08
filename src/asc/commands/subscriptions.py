@@ -41,14 +41,9 @@ def validate_subscription_config(groups: list[dict]) -> None:
         subs = group.get("subscriptions", [])
         _require(isinstance(subs, list) and subs,
                  f"{gtag}.subscriptions must be a non-empty list")
-        levels_seen = set()
         for si, sub in enumerate(subs):
             stag = f"{gtag}.subscriptions[{si}]"
             _validate_subscription(sub, stag)
-            lvl = sub.get("groupLevel")
-            _require(lvl not in levels_seen,
-                     f"{stag}.groupLevel={lvl} duplicates another in the group")
-            levels_seen.add(lvl)
 
 
 def _validate_subscription(sub: dict, tag: str) -> None:
