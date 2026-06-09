@@ -11,7 +11,7 @@
     </h1>
   </div>
 
-  <div x-data="{ step: 1, taskId: null, logs: [], status: 'idle', progress: 0, progressMsg: '', checkResult: null, submitting: false, showCsvHelp: false, showScreenshotsHelp: false }">
+  <div x-data="{ step: 1, taskId: null, logs: [], status: 'idle', progress: 0, progressMsg: '', checkResult: null, submitting: false, canceling: false, showCsvHelp: false, showScreenshotsHelp: false }">
 
     <!-- Step 1: 配置表单 -->
     <div x-show="step === 1">
@@ -165,7 +165,7 @@
       <div class="card">
         <div class="card-body">
           <div class="flex items-center justify-between mb-5">
-            <h2 class="font-semibold text-obsidian-100 flex items-center gap-2.5" x-text="status === 'done' ? '上传完成' : status === 'error' ? '上传失败' : '上传中...'">
+            <h2 class="font-semibold text-obsidian-100 flex items-center gap-2.5" x-text="status === 'done' ? '上传完成' : status === 'error' ? '上传失败' : status === 'canceled' ? '已终止' : '上传中...'">
             </h2>
             <div class="flex items-center gap-3">
               <template x-if="status === 'done'">
@@ -183,6 +183,12 @@
                   <svg class="w-4 h-4 text-amber-500 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
                 </div>
               </template>
+              <button type="button"
+                      x-show="status === 'running'"
+                      class="text-xs text-red-400 hover:text-red-300 cursor-pointer transition-colors duration-150 font-medium"
+                      :disabled="canceling"
+                      @click="cancelTask(taskId, () => { canceling = true; progressMsg = '正在终止上传...'; })"
+                      x-text="canceling ? '终止中...' : '终止上传'"></button>
               <button type="button" class="text-xs text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium" @click="step=1; logs=[]; status='idle'">重新运行</button>
             </div>
           </div>
@@ -325,9 +331,24 @@ function selectFile(path) {
   closeFileBrowser();
 }
 
+function cancelTask(taskId, beforeCancel) {
+  if (!taskId) return;
+  if (!confirm('确定要终止当前上传吗？已完成的 App Store Connect 操作不会自动回滚。')) return;
+  if (beforeCancel) beforeCancel();
+  fetch(`/api/task/${taskId}/cancel`, {method: 'POST'})
+    .catch(() => {
+      const root = document.querySelector('[x-data]');
+      const d = Alpine.$data(root);
+      d.logs.push('终止请求发送失败，请稍后重试');
+      d.canceling = false;
+    });
+}
+
 function startSSE(taskId) {
   const root = document.querySelector('[x-data]');
   const d = Alpine.$data(root);
+  d.status = 'running';
+  d.canceling = false;
   const es = new EventSource(`/api/task/${taskId}/stream`);
   es.addEventListener('log', e => {
     d.logs.push(e.data);
@@ -340,6 +361,7 @@ function startSSE(taskId) {
     d.progressMsg = p.msg || '';
   });
   es.addEventListener('done', () => { d.status = 'done'; d.progress = 100; es.close(); });
+  es.addEventListener('canceled', () => { d.status = 'canceled'; d.progressMsg = '上传已终止'; d.canceling = false; es.close(); });
   es.addEventListener('error_event', () => { d.status = 'error'; es.close(); });
 }
 </script>

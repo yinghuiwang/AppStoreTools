@@ -15,6 +15,7 @@ from asc.config import Config
 from asc.constants import DISPLAY_TYPE_BY_SIZE, SCREENSHOT_FOLDER_TO_LOCALE
 from asc.error_handler import get_action_hint
 from asc.guard import Guard, GuardViolationError
+from asc.progress import ProcessCanceled
 from asc.utils import make_api_from_config, resolve_app_profile, resolve_locale, md5_of_file
 from asc.i18n import t, ERRORS, HELP
 
@@ -50,6 +51,7 @@ def _upload_screenshots_core(
     screenshots_dir: str,
     display_type_override: Optional[str] = None,
     dry_run: bool = False,
+    cancel_event=None,
 ):
     """Core screenshots upload logic"""
     print("\n" + "=" * 60)
@@ -96,6 +98,8 @@ def _upload_screenshots_core(
     locale_keys = list(ver_loc_map.keys())
 
     for resolved, loc_data in sorted(ver_loc_map.items()):
+        if cancel_event is not None and cancel_event.is_set():
+            raise ProcessCanceled("screenshots upload canceled")
         current_idx = locale_keys.index(resolved) + 1
         pct = int(current_idx / total_locales * 100)
 
@@ -166,6 +170,8 @@ def _upload_screenshots_core(
             if existing_shots:
                 print(f"    🗑️  删除 {len(existing_shots)} 张已有截图...")
                 for shot in existing_shots:
+                    if cancel_event is not None and cancel_event.is_set():
+                        raise ProcessCanceled("screenshots upload canceled")
                     api.delete_screenshot(shot["id"])
                 time.sleep(1)
         else:
@@ -176,6 +182,8 @@ def _upload_screenshots_core(
         print(f"    截图集 ID: {set_id}")
 
         for idx, file_path in enumerate(files, 1):
+            if cancel_event is not None and cancel_event.is_set():
+                raise ProcessCanceled("screenshots upload canceled")
             filesize = file_path.stat().st_size
             filename = file_path.name
             print(
@@ -193,6 +201,8 @@ def _upload_screenshots_core(
             api.commit_screenshot(screenshot_id, checksum)
 
             for retry in range(30):
+                if cancel_event is not None and cancel_event.is_set():
+                    raise ProcessCanceled("screenshots upload canceled")
                 time.sleep(2)
                 check = api.get(f"/v1/appScreenshots/{screenshot_id}")
                 state = check["data"]["attributes"]["assetDeliveryState"]["state"]

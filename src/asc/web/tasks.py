@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from threading import Lock
+from threading import Event, Lock
 from typing import Any, Optional
 
 
@@ -17,6 +17,7 @@ class TaskStatus(str, Enum):
     RUNNING = "running"
     DONE = "done"
     ERROR = "error"
+    CANCELED = "canceled"
 
 
 TASK_KIND_LABELS = {
@@ -39,7 +40,7 @@ TASK_KIND_RETRY_PATHS = {
 }
 
 
-TERMINAL_STATUSES = {TaskStatus.DONE, TaskStatus.ERROR}
+TERMINAL_STATUSES = {TaskStatus.DONE, TaskStatus.ERROR, TaskStatus.CANCELED}
 
 
 class TaskStore:
@@ -48,6 +49,7 @@ class TaskStore:
     def __init__(self, storage_path: Optional[Path] = None) -> None:
         self._tasks: dict[str, dict] = {}
         self._order: list[str] = []
+        self._cancel_events: dict[str, Event] = {}
         self._lock = Lock()
         self._storage_path = storage_path
         if self._storage_path is not None:
@@ -67,10 +69,12 @@ class TaskStore:
             "updated_at": now,
             "completed_at": None,
             "progress": {"pct": 0, "msg": ""},
+            "cancel_requested": False,
         }
         with self._lock:
             self._tasks[task_id] = task
             self._order.append(task_id)
+            self._cancel_events[task_id] = Event()
             self._save()
         return task_id
 
@@ -99,6 +103,38 @@ class TaskStore:
                 if normalized in TERMINAL_STATUSES:
                     self._tasks[task_id]["completed_at"] = now
                 self._save()
+
+    def request_cancel(self, task_id: str) -> bool:
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if task is None:
+                return False
+            if self._normalize_status(task.get("status")) in TERMINAL_STATUSES:
+                return True
+            task["cancel_requested"] = True
+            task["updated_at"] = self._now()
+            event = self._cancel_events.get(task_id)
+            if event is None:
+                event = Event()
+                self._cancel_events[task_id] = event
+            event.set()
+            self._save()
+            return True
+
+    def is_cancel_requested(self, task_id: str) -> bool:
+        with self._lock:
+            task = self._tasks.get(task_id)
+            return bool(task and task.get("cancel_requested"))
+
+    def cancel_event(self, task_id: str) -> Event:
+        with self._lock:
+            event = self._cancel_events.get(task_id)
+            if event is None:
+                event = Event()
+                if self._tasks.get(task_id, {}).get("cancel_requested"):
+                    event.set()
+                self._cancel_events[task_id] = event
+            return event
 
     def set_result(self, task_id: str, result: Any) -> None:
         with self._lock:
@@ -196,6 +232,7 @@ class TaskStore:
                 "pct": self._coerce_int(progress.get("pct"), default=0),
                 "msg": str(progress.get("msg", "") or ""),
             },
+            "cancel_requested": bool(task.get("cancel_requested")),
         }
 
     def _normalize_status(self, value: Any) -> TaskStatus:

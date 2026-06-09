@@ -86,6 +86,7 @@ async def browse(request: Request, path: str = ".", mode: str = "dir", ext: str 
 import threading as _threading
 from fastapi import Form as _Form
 from asc.web.tasks import task_store as _task_store, TaskStatus as _TaskStatus
+from asc.progress import ProcessCanceled
 
 
 def _run_metadata_check(profile: str) -> dict:
@@ -153,6 +154,7 @@ def _start_metadata_task(
         from asc.utils import make_api_from_config, parse_csv
 
         _task_store.set_status(task_id, _TaskStatus.RUNNING)
+        cancel_event = _task_store.cancel_event(task_id)
         q: queue.Queue = queue.Queue()
         done_flag = _threading.Event()
 
@@ -186,14 +188,36 @@ def _start_metadata_task(
                 if include_metadata:
                     from asc.commands.metadata import _upload_metadata_core
                     metadata_list = parse_csv(csv_path)
-                    _upload_metadata_core(api, app_id, metadata_list, dry_run=dry_run)
+                    _upload_metadata_core(
+                        api,
+                        app_id,
+                        metadata_list,
+                        dry_run=dry_run,
+                        cancel_event=cancel_event,
+                    )
                 if include_screenshots:
                     from asc.commands.screenshots import _upload_screenshots_core
-                    _upload_screenshots_core(api, app_id, screenshots_dir, dry_run=dry_run)
+                    _upload_screenshots_core(
+                        api,
+                        app_id,
+                        screenshots_dir,
+                        dry_run=dry_run,
+                        cancel_event=cancel_event,
+                    )
 
             done_flag.set()
-            _task_store.set_status(task_id, _TaskStatus.DONE)
-            _task_store.set_result(task_id, {"success": True})
+            if cancel_event.is_set():
+                _task_store.append_log(task_id, "⏹ 用户已终止上传")
+                _task_store.set_status(task_id, _TaskStatus.CANCELED)
+                _task_store.set_result(task_id, {"success": False, "canceled": True})
+            else:
+                _task_store.set_status(task_id, _TaskStatus.DONE)
+                _task_store.set_result(task_id, {"success": True})
+        except ProcessCanceled:
+            done_flag.set()
+            _task_store.append_log(task_id, "⏹ 用户已终止上传")
+            _task_store.set_status(task_id, _TaskStatus.CANCELED)
+            _task_store.set_result(task_id, {"success": False, "canceled": True})
         except Exception as e:
             done_flag.set()
             _task_store.append_log(task_id, f"❌ 错误：{e}")
@@ -254,6 +278,7 @@ def _start_build_task(
         from asc.config import Config
 
         _task_store.set_status(task_id, _TaskStatus.RUNNING)
+        cancel_event = _task_store.cancel_event(task_id)
         q: queue.Queue = queue.Queue()
         done_flag = _threading.Event()
 
@@ -309,6 +334,7 @@ def _start_build_task(
                         reuse_archive=reuse_value,
                         interactive=False,
                         verbose=verbose,
+                        cancel_event=cancel_event,
                     )
                     if mode == "full" and ipa:
                         from asc.commands.build import deploy_core
@@ -320,6 +346,7 @@ def _start_build_task(
                             destination=destination or "appstore",
                             dry_run=dry_run,
                             verbose=verbose,
+                            cancel_event=cancel_event,
                         )
                 elif mode == "deploy":
                     from asc.commands.build import deploy_core
@@ -331,11 +358,22 @@ def _start_build_task(
                         destination=destination or "appstore",
                         dry_run=dry_run,
                         verbose=verbose,
+                        cancel_event=cancel_event,
                     )
 
             done_flag.set()
-            _task_store.set_status(task_id, _TaskStatus.DONE)
-            _task_store.set_result(task_id, {"success": True})
+            if cancel_event.is_set():
+                _task_store.append_log(task_id, "⏹ 用户已终止上传")
+                _task_store.set_status(task_id, _TaskStatus.CANCELED)
+                _task_store.set_result(task_id, {"success": False, "canceled": True})
+            else:
+                _task_store.set_status(task_id, _TaskStatus.DONE)
+                _task_store.set_result(task_id, {"success": True})
+        except ProcessCanceled:
+            done_flag.set()
+            _task_store.append_log(task_id, "⏹ 用户已终止上传")
+            _task_store.set_status(task_id, _TaskStatus.CANCELED)
+            _task_store.set_result(task_id, {"success": False, "canceled": True})
         except Exception as e:
             done_flag.set()
             _task_store.append_log(task_id, f"❌ 错误：{e}")
@@ -528,6 +566,9 @@ async def task_stream(task_id: str):
             if status == _TaskStatus.DONE:
                 yield _fmt_sse("done", "")
                 break
+            elif status == _TaskStatus.CANCELED:
+                yield _fmt_sse("canceled", "")
+                break
             elif status == _TaskStatus.ERROR:
                 yield _fmt_sse("error_event", "")
                 break
@@ -556,6 +597,19 @@ async def task_status(task_id: str):
         "result": task["result"],
         "log_count": len(task["logs"]),
     }
+
+
+@router.post("/task/{task_id}/cancel")
+async def task_cancel(task_id: str):
+    """Request cancellation for a running task."""
+    from fastapi import HTTPException
+
+    task = _task_store.get(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    _task_store.request_cancel(task_id)
+    _task_store.append_log(task_id, "⏹ 已请求终止，正在停止当前步骤...")
+    return {"task_id": task_id, "cancel_requested": True}
 
 
 import shutil as _shutil

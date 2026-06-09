@@ -248,9 +248,37 @@ def test_task_stream_done_task(client):
     assert "event: done" in body
 
 
+def test_task_stream_canceled_task(client):
+    from asc.web.tasks import task_store, TaskStatus
+    task_id = task_store.create("metadata")
+    task_store.append_log(task_id, "cancel requested")
+    task_store.set_status(task_id, TaskStatus.CANCELED)
+
+    resp = client.get(f"/api/task/{task_id}/stream")
+    assert resp.status_code == 200
+    body = resp.text
+    assert "cancel requested" in body
+    assert "event: canceled" in body
+
+
 def test_task_stream_not_found(client):
     resp = client.get("/api/task/nonexistent/stream")
     assert resp.status_code == 404
+
+
+def test_task_cancel_endpoint(client):
+    from asc.web.tasks import task_store, TaskStatus
+    task_id = task_store.create("build")
+    task_store.set_status(task_id, TaskStatus.RUNNING)
+
+    resp = client.post(f"/api/task/{task_id}/cancel")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["task_id"] == task_id
+    assert data["cancel_requested"] is True
+    task = task_store.get(task_id)
+    assert task["cancel_requested"] is True
+    assert any("已请求终止" in line for line in task["logs"])
 
 
 def test_task_status_endpoint(client):

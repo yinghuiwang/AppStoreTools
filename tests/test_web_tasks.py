@@ -32,6 +32,22 @@ def test_set_status():
     assert store.get(task_id)["status"] == TaskStatus.DONE
 
 
+def test_request_cancel_marks_task_and_sets_event():
+    store = TaskStore()
+    task_id = store.create("metadata")
+    store.set_status(task_id, TaskStatus.RUNNING)
+
+    assert store.request_cancel(task_id) is True
+    assert store.is_cancel_requested(task_id) is True
+    assert store.cancel_event(task_id).is_set()
+    assert store.get(task_id)["cancel_requested"] is True
+
+
+def test_request_cancel_returns_false_for_missing_task():
+    store = TaskStore()
+    assert store.request_cancel("missing") is False
+
+
 def test_set_result():
     store = TaskStore()
     task_id = store.create("metadata")

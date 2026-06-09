@@ -192,6 +192,7 @@ def run_xcodebuild_archive(
     archive_path: str,
     *,
     verbose: bool = False,
+    cancel_event=None,
 ) -> str:
     """Run xcodebuild archive. Return archive_path on success."""
     flag = "-workspace" if kind == "workspace" else "-project"
@@ -206,7 +207,10 @@ def run_xcodebuild_archive(
     ]
     log_path = Path(archive_path).parent / "build.log"
     sp = Spinner("构建 Archive", log_path=str(log_path), verbose=verbose)
-    result = sp.run(cmd)
+    if cancel_event is None:
+        result = sp.run(cmd)
+    else:
+        result = sp.run(cmd, cancel_event=cancel_event)
     if result.returncode != 0:
         raise RuntimeError(f"xcodebuild archive failed (see {log_path})")
     return archive_path
@@ -218,6 +222,7 @@ def run_xcodebuild_export(
     output_dir: str,
     *,
     verbose: bool = False,
+    cancel_event=None,
 ) -> str:
     """Run xcodebuild -exportArchive. Return path to .ipa file."""
     cmd = [
@@ -229,7 +234,10 @@ def run_xcodebuild_export(
     ]
     log_path = Path(output_dir).parent / "export.log"
     sp = Spinner("导出 IPA", log_path=str(log_path), verbose=verbose)
-    result = sp.run(cmd)
+    if cancel_event is None:
+        result = sp.run(cmd)
+    else:
+        result = sp.run(cmd, cancel_event=cancel_event)
     if result.returncode != 0:
         raise RuntimeError(f"xcodebuild exportArchive failed (see {log_path})")
 
@@ -248,6 +256,7 @@ def build_core(
     reuse_archive: Optional[bool] = None,
     interactive: bool = False,
     verbose: bool = False,
+    cancel_event=None,
 ) -> Optional[str]:
     """Core build logic. Returns .ipa path, or None if dry_run."""
     typer.echo(f"\n{'='*56}")
@@ -313,11 +322,18 @@ def build_core(
             resolved.project_path, resolved.project_kind, resolved.scheme,
             configuration, archive_path,
             verbose=verbose,
+            cancel_event=cancel_event,
         )
         typer.echo(f"  ✅ Archive: {archive_path}")
 
     typer.echo("  ── 步骤 3/3：导出 IPA ──")
-    ipa_path = run_xcodebuild_export(archive_path, export_options, export_dir, verbose=verbose)
+    ipa_path = run_xcodebuild_export(
+        archive_path,
+        export_options,
+        export_dir,
+        verbose=verbose,
+        cancel_event=cancel_event,
+    )
     typer.echo(f"  ✅ IPA: {ipa_path}")
     return ipa_path
 
@@ -410,6 +426,7 @@ def upload_ipa(
     *,
     verbose: bool = False,
     progress_reporter: Optional[UploadProgressReporter] = None,
+    cancel_event=None,
 ) -> None:
     """Upload .ipa using xcrun altool.
 
@@ -432,7 +449,14 @@ def upload_ipa(
         progress_reporter = UploadProgressReporter(Path(ipa_path).stat().st_size)
         progress_reporter.print_start()
     sp = Spinner("上传到 App Store Connect", log_path=str(log_path), verbose=verbose)
-    result = sp.run(cmd, output_callback=progress_reporter.handle_output_line)
+    if cancel_event is None:
+        result = sp.run(cmd, output_callback=progress_reporter.handle_output_line)
+    else:
+        result = sp.run(
+            cmd,
+            output_callback=progress_reporter.handle_output_line,
+            cancel_event=cancel_event,
+        )
     if result.returncode != 0:
         raise RuntimeError(f"Upload failed (see {log_path})")
 
@@ -446,6 +470,7 @@ def deploy_core(
     dry_run: bool,
     *,
     verbose: bool = False,
+    cancel_event=None,
 ) -> None:
     """Core deploy logic."""
     typer.echo(f"\n{'='*56}")
@@ -476,6 +501,7 @@ def deploy_core(
         destination,
         verbose=verbose,
         progress_reporter=progress_reporter,
+        cancel_event=cancel_event,
     )
     typer.echo("  ── 步骤 3/3：等待 altool 返回上传结果 ──")
     typer.echo("  ✅ 上传成功")

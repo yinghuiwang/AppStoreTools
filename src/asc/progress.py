@@ -1,3 +1,5 @@
+import os
+import signal
 import subprocess
 import sys
 import threading
@@ -8,6 +10,10 @@ from typing import Callable, Optional
 SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 SPINNER_INTERVAL = 0.08
 TAIL_LINES_ON_FAILURE = 20
+
+
+class ProcessCanceled(RuntimeError):
+    """Raised when a subprocess is canceled by the caller."""
 
 
 def format_elapsed(seconds: float) -> str:
@@ -98,6 +104,7 @@ class Spinner:
         self,
         cmd: list,
         output_callback: Optional[Callable[[str], None]] = None,
+        cancel_event: Optional[threading.Event] = None,
     ) -> subprocess.CompletedProcess:
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         log_file = open(self.log_path, "w", buffering=1)  # line-buffered
@@ -120,9 +127,32 @@ class Spinner:
             stderr=subprocess.STDOUT,
             bufsize=1,
             text=True,
+            start_new_session=True,
         )
+        cancel_thread = None
+
+        def _watch_cancel() -> None:
+            if cancel_event is None:
+                return
+            while proc.poll() is None and not cancel_event.wait(timeout=0.1):
+                pass
+            if cancel_event.is_set() and proc.poll() is None:
+                try:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                except (AttributeError, OSError):
+                    proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                    except (AttributeError, OSError):
+                        proc.kill()
 
         try:
+            if cancel_event is not None:
+                cancel_thread = threading.Thread(target=_watch_cancel, daemon=True)
+                cancel_thread.start()
             assert proc.stdout is not None
             for line in proc.stdout:
                 log_file.write(line)
@@ -136,10 +166,16 @@ class Spinner:
             self._stop.set()
             if spinner_thread is not None:
                 spinner_thread.join(timeout=1.0)
+            if cancel_thread is not None:
+                cancel_thread.join(timeout=0.2)
             self._clear_line()
             log_file.close()
 
         elapsed = format_elapsed(time.monotonic() - start)
+        if cancel_event is not None and cancel_event.is_set():
+            sys.stderr.write(f"⏹ {self.label} 已终止 ({elapsed})\n")
+            sys.stderr.flush()
+            raise ProcessCanceled(f"{self.label} canceled")
         if returncode == 0:
             sys.stderr.write(f"✅ {self.label} 完成 ({elapsed})\n")
         else:

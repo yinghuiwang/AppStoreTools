@@ -11,6 +11,7 @@ import typer
 from asc.config import Config
 from asc.error_handler import get_action_hint
 from asc.guard import Guard, GuardViolationError
+from asc.progress import ProcessCanceled
 from asc.utils import make_api_from_config, parse_csv, resolve_locale, resolve_app_profile
 from asc.i18n import t, HELP, ERRORS
 
@@ -22,6 +23,7 @@ def _upload_metadata_core(
     dry_run: bool = False,
     include_version_fields: Optional[set[str]] = None,
     app_profile: str = "",
+    cancel_event=None,
 ):
     """Core metadata upload logic"""
     print("\n" + "=" * 60)
@@ -62,6 +64,8 @@ def _upload_metadata_core(
 
     total_locales = len(metadata_list)
     for idx, meta in enumerate(metadata_list):
+        if cancel_event is not None and cancel_event.is_set():
+            raise ProcessCanceled("metadata upload canceled")
         csv_locale = meta["语言"]
         info_locale = resolve_locale(csv_locale, existing_info_locales)
         ver_locale = resolve_locale(csv_locale, existing_ver_locales)
