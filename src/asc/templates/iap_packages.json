@@ -1,4 +1,26 @@
 {
+  "items": [
+    {
+      "productId": "com.example.app.coins.100",
+      "name": "100 Coins",
+      "inAppPurchaseType": "CONSUMABLE",
+      "availableInAllTerritories": true,
+      "localizations": {
+        "zh-Hans": {
+          "name": "100 金币",
+          "description": "购买后立即获得 100 枚金币。"
+        },
+        "en-US": {
+          "name": "100 Coins",
+          "description": "Get 100 coins immediately after purchase."
+        }
+      },
+      "review": {
+        "screenshot": "./iap_review/premium_monthly.png",
+        "note": "Consumable one-time purchase. Test account: test@example.com / Test1234"
+      }
+    }
+  ],
   "subscriptionGroups": [
     {
       "referenceName": "Premium Membership",

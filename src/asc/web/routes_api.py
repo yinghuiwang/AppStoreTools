@@ -9,7 +9,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Query, Request
 from asc.utils import make_api_from_config
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 from asc.commands.iap import _upload_iap_core, _load_iap_config
 from asc.commands.subscriptions import _upload_subscriptions_core
@@ -23,6 +23,7 @@ _HOME = Path.home().resolve()
 _TMPDIR = Path(tempfile.gettempdir()).resolve()
 _ALLOWED_ROOTS = (_HOME, _TMPDIR)
 _DATA_DIR = Path(__file__).resolve().parents[3] / "data"
+_TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates"
 
 def _is_under_allowed_root(target: Path) -> bool:
     """Return True if target is at or under any allowed root."""
@@ -814,6 +815,20 @@ async def download_example_screenshots():
         buf.getvalue(),
         media_type="application/zip",
         headers={"Content-Disposition": "attachment; filename=screenshots_example.zip"},
+    )
+
+
+@router.get("/examples/iap")
+@router.get("/examples/iap.json")
+async def download_example_iap():
+    """Download the example IAP JSON file."""
+    iap_path = _TEMPLATES_DIR / "iap_packages.json"
+    if not iap_path.exists():
+        return Response("Example IAP JSON not found", status_code=404)
+    return FileResponse(
+        iap_path,
+        media_type="application/json",
+        filename="iap_packages_example.json",
     )
 
 

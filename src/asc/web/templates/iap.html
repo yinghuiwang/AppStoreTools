@@ -19,7 +19,8 @@
     progress: 0,
     progressMsg: '',
     checkResult: null,
-    submitting: false
+    submitting: false,
+    showIapHelp: false
   }">
 
     <!-- Step1: Config form -->
@@ -42,7 +43,76 @@
 
             <!-- IAP config file -->
             <div>
-              <label for="iap-file-input" class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">IAP 配置文件</label>
+              <div class="flex items-center gap-1.5 mb-2">
+                <label for="iap-file-input" class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">IAP 配置文件</label>
+                <button type="button" @click="showIapHelp = !showIapHelp"
+                        class="w-4 h-4 inline-flex items-center justify-center rounded-full border border-obsidian-600 text-obsidian-500 hover:text-amber-500 hover:border-amber-550 cursor-pointer transition-colors duration-150 focus-ring text-[9px]"
+                        title="IAP JSON 格式说明">?</button>
+              </div>
+              <div x-show="showIapHelp" x-transition class="mb-3 p-4 rounded-lg text-xs space-y-2" style="background: var(--accent-glow); border: 1px solid rgba(232,161,37,0.2);">
+                <p class="font-medium text-amber-500">IAP JSON 格式要求</p>
+                <p class="text-obsidian-200">顶层支持 <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">items</code> 和 <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">subscriptionGroups</code>，可只填写其中一种，也可同时上传。</p>
+                <p class="text-obsidian-200"><span class="font-medium text-obsidian-100">一次性消耗品：</span>放在 <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">items</code> 数组中，使用 <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">inAppPurchaseType: "CONSUMABLE"</code>。</p>
+                <pre class="bg-obsidian-800 rounded px-3 py-2 text-[11px] leading-relaxed font-mono text-obsidian-200 overflow-x-auto">{
+  "items": [
+    {
+      "productId": "com.example.app.coins.100",
+      "name": "100 Coins",
+      "inAppPurchaseType": "CONSUMABLE",
+      "localizations": {
+        "zh-Hans": { "name": "100 金币", "description": "购买后获得 100 枚金币。" },
+        "en-US": { "name": "100 Coins", "description": "Get 100 coins after purchase." }
+      },
+      "review": { "screenshot": "./iap_review/coins.png", "note": "Review note" }
+    }
+  ]
+}</pre>
+                <p class="text-obsidian-200"><span class="font-medium text-obsidian-100">订阅：</span>放在 <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">subscriptionGroups</code> 中，可配置订阅周期、价格、试用优惠和促销优惠。</p>
+                <pre class="bg-obsidian-800 rounded px-3 py-2 text-[11px] leading-relaxed font-mono text-obsidian-200 overflow-x-auto">{
+  "subscriptionGroups": [
+    {
+      "referenceName": "Premium Membership",
+      "localizations": {
+        "zh-Hans": { "name": "高级会员" },
+        "en-US": { "name": "Premium" }
+      },
+      "subscriptions": [
+        {
+          "productId": "com.example.app.premium.monthly",
+          "name": "Premium Monthly",
+          "subscriptionPeriod": "ONE_MONTH",
+          "groupLevel": 1,
+          "familySharable": false,
+          "availableInAllTerritories": true,
+          "localizations": {
+            "zh-Hans": { "name": "高级会员（月）", "description": "解锁全部高级功能。" },
+            "en-US": { "name": "Premium Monthly", "description": "Unlock premium features." }
+          },
+          "price": {
+            "baseTerritory": "USA",
+            "baseAmount": "9.99",
+            "applyEqualizedPrices": true
+          },
+          "introductoryOffer": {
+            "offerMode": "FREE_TRIAL",
+            "baseTerritory": "USA",
+            "duration": "ONE_WEEK",
+            "numberOfPeriods": 1
+          },
+          "promotionalOffers": [],
+          "review": { "screenshot": "./iap_review/premium_monthly.png", "note": "Review note" }
+        }
+      ]
+    }
+  ]
+}</pre>
+                <p class="text-obsidian-500">审核截图路径会相对当前 JSON 文件所在目录解析，例如 <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">./iap_review/coins.png</code>。</p>
+                <a href="/api/examples/iap.json" download="iap_packages_example.json"
+                   class="inline-flex items-center gap-1.5 text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium">
+                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
+                  下载示例 JSON
+                </a>
+              </div>
               <div class="flex gap-2">
                 <input type="text" name="iap_file" value="{{ profile_iap_file }}" id="iap-file-input" class="field-input flex-1">
                 <button type="button" class="btn-ghost whitespace-nowrap" onclick="openFileBrowser('iap-file-input', 'file', '.json')">浏览</button>
