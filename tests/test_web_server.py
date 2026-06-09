@@ -76,6 +76,11 @@ def test_settings_page_returns_200(client):
     assert resp.status_code == 200
 
 
+def test_guard_page_returns_200(client):
+    resp = client.get("/guard")
+    assert resp.status_code == 200
+
+
 def test_filebrowser_returns_html(client, tmp_path):
     resp = client.get(f"/api/browse?path={tmp_path}&mode=dir")
     assert resp.status_code == 200
@@ -508,8 +513,8 @@ def test_guard_note_api_persists_when_binding_app_id_is_numeric(client, tmp_path
     assert status_resp.json()["app_notes"]["123456789"] == "办公室 Mac"
 
 
-def test_settings_page_has_guard_note_editor(client):
-    resp = client.get("/settings")
+def test_guard_page_has_guard_note_editor(client):
+    resp = client.get("/guard")
     assert resp.status_code == 200
     assert "/api/guard/note" in resp.text
     assert "保存备注" in resp.text

@@ -81,6 +81,11 @@ def create_app() -> FastAPI:
         ctx = _get_profile_context(request)
         return _render(request, "settings.html", ctx)
 
+    @app.get("/guard", response_class=HTMLResponse)
+    async def guard_page(request: Request):
+        ctx = _get_profile_context(request)
+        return _render(request, "guard.html", ctx)
+
     @app.get("/whats-new", response_class=HTMLResponse)
     async def whats_new_page(request: Request):
         ctx = _get_profile_context(request)
