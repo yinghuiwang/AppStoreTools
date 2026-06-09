@@ -43,18 +43,19 @@
             </div>
             {% endif %}
             <div>
-              <span class="text-sm text-obsidian-100">{{ '元数据上传' if t.kind == 'metadata' else '构建上传' }}</span>
+              <span class="text-sm text-obsidian-100">{{ t.title }}</span>
               <span class="text-xs text-obsidian-500 font-mono ml-2">{{ t.profile or '' }}</span>
             </div>
           </div>
           <div class="flex items-center gap-3">
             <span class="text-[11px] text-obsidian-500 font-mono tabular-nums">{{ t.created_at[:16] }}</span>
+            <span class="text-[11px] text-obsidian-500 font-mono tabular-nums">用时 {{ t.duration_label }}</span>
             <button type="button" class="text-[11px] text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium"
                     onclick="this.parentElement.parentElement.nextElementSibling.classList.toggle('hidden')">
               LOGS
             </button>
-            {% if t.status == 'error' %}
-            <a href="/{{ t.kind }}" class="badge badge-error text-[10px] cursor-pointer hover:bg-red-500/20 transition-colors duration-150">重试</a>
+            {% if t.status == 'error' and t.retry_path %}
+            <a href="{{ t.retry_path }}" class="badge badge-error text-[10px] cursor-pointer hover:bg-red-500/20 transition-colors duration-150">重试</a>
             {% endif %}
           </div>
         </div>

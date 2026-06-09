@@ -1,9 +1,17 @@
 """Shared test fixtures."""
 from __future__ import annotations
 
+import os
+import tempfile
 import threading
+from pathlib import Path
 
 import pytest
+
+os.environ.setdefault(
+    "ASC_WEB_TASKS_PATH",
+    str(Path(tempfile.gettempdir()) / f"asc-web-tasks-pytest-{os.getpid()}.json"),
+)
 
 
 class FakeAPI:
