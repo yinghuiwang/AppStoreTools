@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.resources
+import re
 import shutil
 from pathlib import Path
 from typing import Optional
@@ -191,6 +192,14 @@ def cmd_app_edit(
     typer.echo(f"Editing app profile: {name}")
     typer.echo("Press Enter to keep the current value.\n")
 
+    new_name = typer.prompt("  Profile name", default=name)
+    if not _is_valid_profile_name(new_name):
+        typer.echo("❌ Invalid profile name. Use letters, numbers, underscores, or hyphens.", err=True)
+        raise typer.Exit(1)
+    if new_name != name and config.get_app_profile(new_name) is not None:
+        typer.echo(f"❌ Profile '{new_name}' already exists.", err=True)
+        raise typer.Exit(1)
+
     issuer_id = typer.prompt("  Issuer ID", default=profile["issuer_id"])
     key_id = typer.prompt("  Key ID", default=profile["key_id"])
     key_file_input = ""
@@ -223,8 +232,13 @@ def cmd_app_edit(
     else:
         final_key_file = profile["key_file"]
 
-    config.save_app_profile(name, issuer_id, key_id, final_key_file, app_id, csv_path, screenshots_path)
-    typer.echo(f"\n✅ App profile '{name}' updated.")
+    config.save_app_profile(new_name, issuer_id, key_id, final_key_file, app_id, csv_path, screenshots_path)
+    if new_name != name:
+        config.remove_app_profile(name)
+        _rename_local_default(Path.cwd() / ".asc", name, new_name)
+        typer.echo(f"\n✅ App profile '{name}' renamed to '{new_name}' and updated.")
+    else:
+        typer.echo(f"\n✅ App profile '{name}' updated.")
 
 
 def cmd_install():
@@ -357,6 +371,32 @@ def _write_local_default(local_dir: Path, profile_name: str) -> None:
     else:
         prefix = existing.rstrip() + "\n\n" if existing.strip() else ""
         config_file.write_text(prefix + f'[defaults]\ndefault_app = "{profile_name}"\n')
+
+
+def _is_valid_profile_name(name: str) -> bool:
+    """Return True when name is safe for a profile filename."""
+    return bool(re.fullmatch(r"[a-zA-Z0-9_-]+", name))
+
+
+def _rename_local_default(local_dir: Path, old_name: str, new_name: str) -> bool:
+    """Rename default_app in local config when it currently points at old_name."""
+    config_file = local_dir / "config.toml"
+    if not config_file.exists():
+        return False
+
+    existing = config_file.read_text()
+    old_value = re.escape(old_name)
+    safe_name = new_name.replace("\\", "\\\\").replace('"', '\\"')
+    updated = re.sub(
+        rf'(default_app\s*=\s*"){old_value}(")',
+        lambda m: f"{m.group(1)}{safe_name}{m.group(2)}",
+        existing,
+    )
+    if updated == existing:
+        return False
+
+    config_file.write_text(updated)
+    return True
 
 
 def _do_import_from_env(

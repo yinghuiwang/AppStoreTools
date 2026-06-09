@@ -623,7 +623,9 @@ async def create_profile(
 
 @router.put("/profiles/{name}")
 async def update_profile(
+    request: Request,
     name: str,
+    new_name: str = _Form(..., alias="name"),
     issuer_id: str = _Form(...),
     key_id: str = _Form(...),
     app_id: str = _Form(...),
@@ -638,12 +640,16 @@ async def update_profile(
     # Fix 2: Validate profile name
     if not re.match(r'^[a-zA-Z0-9_-]+$', name):
         raise HTTPException(status_code=400, detail="Invalid profile name")
+    if not re.match(r'^[a-zA-Z0-9_-]+$', new_name):
+        raise HTTPException(status_code=400, detail="Invalid profile name")
 
     from asc.config import Config
     config = Config()
     existing = config.get_app_profile(name)
     if existing is None:
         raise HTTPException(status_code=404, detail="Profile not found")
+    if new_name != name and config.get_app_profile(new_name) is not None:
+        raise HTTPException(status_code=409, detail="Profile name already exists")
 
     key_file_path = existing["key_file"]
     if key_file and key_file.filename:
@@ -661,8 +667,26 @@ async def update_profile(
         dest_key.chmod(0o600)
         key_file_path = str(dest_key)
 
-    config.save_app_profile(name, issuer_id, key_id, key_file_path, app_id, csv, screenshots)
-    return {"ok": True, "name": name}
+    config.save_app_profile(new_name, issuer_id, key_id, key_file_path, app_id, csv, screenshots)
+    if new_name != name:
+        config.remove_app_profile(name)
+
+        local_cfg = Path.cwd() / ".asc" / "config.toml"
+        if local_cfg.exists():
+            content = local_cfg.read_text()
+            old_value = re.escape(name)
+            safe_name = new_name.replace("\\", "\\\\").replace('"', '\\"')
+            content = re.sub(
+                rf'(default_app\s*=\s*"){old_value}(")',
+                lambda m: f"{m.group(1)}{safe_name}{m.group(2)}",
+                content,
+            )
+            local_cfg.write_text(content)
+
+    resp = JSONResponse({"ok": True, "name": new_name, "old_name": name})
+    if request.cookies.get("asc_profile") == name:
+        resp.set_cookie("asc_profile", new_name, httponly=True, samesite="lax")
+    return resp
 
 
 @router.delete("/profiles/{name}")

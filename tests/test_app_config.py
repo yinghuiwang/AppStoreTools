@@ -134,7 +134,7 @@ def test_cmd_app_edit_keeps_existing_values_on_enter(tmp_path):
         "screenshots": "data/screenshots",
     }
     # Simulate user pressing Enter for every field (keep defaults)
-    user_input = "\n\n\n\n\n\n"  # 6 fields: issuer_id, key_id, key_file, app_id, csv, screenshots
+    user_input = "\n\n\n\n\n\n\n"  # 7 fields: name, issuer_id, key_id, key_file, app_id, csv, screenshots
 
     with patch("asc.commands.app_config.Config") as MockConfig, \
          patch("asc.commands.app_config.shutil") as mock_shutil:
@@ -167,7 +167,7 @@ def test_cmd_app_edit_new_key_file_is_copied(tmp_path):
     new_key.write_text("fake key content")
 
     # Enter new key path, keep everything else
-    user_input = f"\n\n{new_key}\n\n\n\n"
+    user_input = f"\n\n\n{new_key}\n\n\n\n"
 
     with patch("asc.commands.app_config.Config") as MockConfig:
         mock_cfg = MagicMock()
@@ -200,7 +200,7 @@ def test_cmd_app_edit_new_key_file_not_found_reprompts(tmp_path):
     new_key.write_text("fake key content")
 
     # First enter invalid path, then valid key path, then rest of defaults
-    user_input = f"\n\n/nonexistent/key.p8\n{new_key}\n\n\n\n"
+    user_input = f"\n\n\n/nonexistent/key.p8\n{new_key}\n\n\n\n"
 
     with patch("asc.commands.app_config.Config") as MockConfig:
         mock_cfg = MagicMock()
@@ -214,3 +214,41 @@ def test_cmd_app_edit_new_key_file_not_found_reprompts(tmp_path):
     assert result.exit_code == 0
     # Verify re-prompt error message appeared
     assert "文件不存在" in result.output
+
+
+def test_cmd_app_edit_can_rename_profile(tmp_path, monkeypatch):
+    profile_data = {
+        "issuer_id": "ISS-1",
+        "key_id": "KID-1",
+        "key_file": "/keys/AuthKey.p8",
+        "app_id": "12345",
+        "csv": "data/appstore_info.csv",
+        "screenshots": "data/screenshots",
+    }
+    local_dir = tmp_path / ".asc"
+    local_dir.mkdir()
+    (local_dir / "config.toml").write_text('[defaults]\ndefault_app = "myapp"\n')
+    monkeypatch.chdir(tmp_path)
+
+    def get_profile(profile_name):
+        if profile_name == "myapp":
+            return profile_data
+        return None
+
+    user_input = "newapp\n\n\n\n\n\n\n"
+    with patch("asc.commands.app_config.Config") as MockConfig, \
+         patch("asc.commands.app_config.shutil") as mock_shutil:
+        mock_cfg = MagicMock()
+        mock_cfg.get_app_profile.side_effect = get_profile
+        MockConfig.return_value = mock_cfg
+
+        result = runner.invoke(app, ["app", "edit", "myapp"], input=user_input)
+
+    assert result.exit_code == 0
+    mock_cfg.save_app_profile.assert_called_once_with(
+        "newapp", "ISS-1", "KID-1", "/keys/AuthKey.p8", "12345",
+        "data/appstore_info.csv", "data/screenshots",
+    )
+    mock_cfg.remove_app_profile.assert_called_once_with("myapp")
+    mock_shutil.copy2.assert_not_called()
+    assert 'default_app = "newapp"' in (local_dir / "config.toml").read_text()

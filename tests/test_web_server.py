@@ -293,6 +293,50 @@ def test_profile_create_api(client, tmp_path):
         assert resp.json()["ok"] is True
         mock_save.assert_called_once()
 
+
+def test_profile_update_api_allows_rename(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+
+    profiles_dir = tmp_path / ".config" / "asc" / "profiles"
+    profiles_dir.mkdir(parents=True)
+    (profiles_dir / "oldapp.toml").write_text(
+        '[credentials]\n'
+        'issuer_id = "old-issuer"\n'
+        'key_id = "OLDKEY"\n'
+        'key_file = "/tmp/AuthKey_OLDKEY.p8"\n'
+        'app_id = "111"\n\n'
+        '[defaults]\n'
+        'csv = "data/old.csv"\n'
+        'screenshots = "data/old-screenshots"\n'
+    )
+    local_dir = tmp_path / ".asc"
+    local_dir.mkdir()
+    (local_dir / "config.toml").write_text('[defaults]\ndefault_app = "oldapp"\n')
+
+    resp = client.put(
+        "/api/profiles/oldapp",
+        cookies={"asc_profile": "oldapp"},
+        data={
+            "name": "newapp",
+            "issuer_id": "new-issuer",
+            "key_id": "NEWKEY",
+            "app_id": "222",
+            "csv": "data/new.csv",
+            "screenshots": "data/new-screenshots",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True, "name": "newapp", "old_name": "oldapp"}
+    assert not (profiles_dir / "oldapp.toml").exists()
+    new_profile = (profiles_dir / "newapp.toml").read_text()
+    assert 'issuer_id = "new-issuer"' in new_profile
+    assert 'app_id = "222"' in new_profile
+    assert 'default_app = "newapp"' in (local_dir / "config.toml").read_text()
+    assert resp.cookies.get("asc_profile") == "newapp"
+
+
 def test_profile_delete_api(client):
     from unittest.mock import patch
     with patch("asc.config.Config.remove_app_profile") as mock_remove:

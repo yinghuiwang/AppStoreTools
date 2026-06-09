@@ -86,7 +86,7 @@
        x-transition:leave-end="translate-x-full">
     <div class="p-6">
       <div class="flex items-center justify-between mb-6">
-        <h2 class="font-semibold text-obsidian-50" x-text="editingProfile ? '编辑 ' + editingProfile : '新增 App Profile'"></h2>
+        <h2 class="font-semibold text-obsidian-50" x-text="editingProfile ? '编辑 App Profile' : '新增 App Profile'"></h2>
         <button @click="drawerOpen = false" class="text-obsidian-500 hover:text-obsidian-300 cursor-pointer transition-colors duration-150 p-1 rounded focus-ring">
           <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
         </button>
@@ -94,10 +94,10 @@
 
       <form @submit.prevent="saveProfile" class="space-y-5">
         <!-- Profile name -->
-        <div x-show="!editingProfile">
+        <div>
           <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">Profile 名称</label>
           <input type="text" x-model="form.name"
-                 :required="!editingProfile"
+                 required
                  class="field-input w-full"
                  placeholder="myapp">
         </div>
