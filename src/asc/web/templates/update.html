@@ -12,7 +12,7 @@
     <p class="text-sm text-obsidian-400 mt-1">检查并安装 AppStoreTools 最新版本</p>
   </div>
 
-  <div x-data="{ checkResult: null, checking: false, step: 1, taskId: null, logs: [], status: 'idle', selectedTab: 'latest' }">
+  <div x-data="{ checkResult: null, checking: false, step: 1, taskId: null, logs: [], status: 'idle', selectedTab: 'latest', branchOptions: [], branchesLoading: false, branchError: '', selectedBranch: '' }">
 
     <!-- Check status card -->
     <div class="card mb-6">
@@ -58,6 +58,9 @@
           <template x-if="checkResult && checkResult.detail">
             <div class="text-xs text-obsidian-500">
               当前版本: <span class="font-mono text-obsidian-400" x-text="checkResult.detail.current"></span>
+              <template x-if="checkResult.detail.current_commit">
+                <span class="font-mono text-obsidian-400" x-text="`(commit ${checkResult.detail.current_commit})`"></span>
+              </template>
             </div>
           </template>
         </div>
@@ -70,7 +73,12 @@
         <div class="card-body space-y-4">
           <div class="flex items-center gap-2 text-amber-400">
             <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/></svg>
-            <span class="font-medium">发现新版本: <span x-text="checkResult.detail.latest"></span></span>
+            <span class="font-medium">
+              发现新版本: <span x-text="checkResult.detail.latest"></span>
+              <template x-if="checkResult.detail.latest_commit">
+                <span class="font-mono" x-text="`(commit ${checkResult.detail.latest_commit})`"></span>
+              </template>
+            </span>
           </div>
 
           <!-- Tabs -->
@@ -85,7 +93,7 @@
                     :class="selectedTab === 'specific' ? 'bg-amber-500 text-obsidian-900' : 'text-obsidian-300 hover:text-obsidian-100'">
               指定版本
             </button>
-            <button @click="selectedTab = 'branch'" type="button"
+            <button @click="selectedTab = 'branch'; loadBranches()" type="button"
                     class="flex-1 py-2 px-3 rounded-md text-sm font-medium transition-all duration-150"
                     :class="selectedTab === 'branch' ? 'bg-amber-500 text-obsidian-900' : 'text-obsidian-300 hover:text-obsidian-100'">
               指定分支
@@ -94,7 +102,12 @@
 
           <!-- Latest version form -->
           <form x-show="selectedTab === 'latest'" @submit.prevent="runUpdate('')">
-            <p class="text-sm text-obsidian-400 mb-3">安装最新稳定版本 <span class="text-amber-400 font-medium" x-text="checkResult.detail.latest"></span></p>
+            <p class="text-sm text-obsidian-400 mb-3">
+              安装最新稳定版本 <span class="text-amber-400 font-medium" x-text="checkResult.detail.latest"></span>
+              <template x-if="checkResult.detail.latest_commit">
+                <span class="text-amber-400 font-mono" x-text="`(commit ${checkResult.detail.latest_commit})`"></span>
+              </template>
+            </p>
             <button type="submit" class="btn-primary">
               立即更新
             </button>
@@ -112,13 +125,28 @@
           </form>
 
           <!-- Branch form -->
-          <form x-show="selectedTab === 'branch'" @submit.prevent="runUpdateBranch($el.querySelector('[name=branch]').value)">
-            <div class="flex gap-3 items-end">
-              <div class="flex-1">
-                <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">分支名</label>
-                <input type="text" name="branch" class="field-input w-full" placeholder="例如: main, develop">
+          <form x-show="selectedTab === 'branch'" @submit.prevent="runUpdateBranch(selectedBranch || $el.querySelector('[name=branch]')?.value || '')">
+            <div class="flex items-center justify-between mb-2">
+              <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium block">分支名</label>
+              <button type="button" class="text-xs text-amber-500 hover:text-amber-400" @click="loadBranches(true)" x-text="branchesLoading ? '加载中...' : '刷新分支'"></button>
+            </div>
+            <div class="flex gap-3 items-start">
+              <div class="flex-1 min-w-0">
+                <template x-if="branchOptions.length > 0">
+                  <select name="branch" class="field-input w-full" x-model="selectedBranch">
+                    <template x-for="branch in branchOptions" :key="branch">
+                      <option :value="branch" x-text="branch"></option>
+                    </template>
+                  </select>
+                </template>
+                <template x-if="branchOptions.length === 0">
+                  <input type="text" name="branch" class="field-input w-full" placeholder="例如: main, develop" x-model="selectedBranch">
+                </template>
+                <template x-if="branchError">
+                  <p class="text-xs text-amber-400 mt-2" x-text="branchError"></p>
+                </template>
               </div>
-              <button type="submit" class="btn-primary">从分支安装</button>
+              <button type="submit" class="btn-primary whitespace-nowrap">从分支安装</button>
             </div>
           </form>
         </div>
@@ -133,7 +161,13 @@
             <svg class="w-6 h-6 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>
           </div>
           <h3 class="text-lg font-medium text-obsidian-100 mb-1">已是最新版本</h3>
-          <p class="text-sm text-obsidian-400">当前版本 <span class="font-mono text-amber-400" x-text="checkResult.detail.current"></span> 已是最新</p>
+          <p class="text-sm text-obsidian-400">
+            当前版本 <span class="font-mono text-amber-400" x-text="checkResult.detail.current"></span>
+            <template x-if="checkResult.detail.current_commit">
+              <span class="font-mono text-amber-400" x-text="`(commit ${checkResult.detail.current_commit})`"></span>
+            </template>
+            已是最新
+          </p>
         </div>
       </div>
     </template>
@@ -197,6 +231,30 @@ function checkUpdate() {
     .catch(() => {
       d.checkResult = {ok: false, level: 'error', message: '检查更新失败'};
       d.checking = false;
+    });
+}
+
+function loadBranches(force = false) {
+  const root = document.querySelector('[x-data]');
+  const d = Alpine.$data(root);
+  if (d.branchesLoading || (!force && d.branchOptions.length > 0)) return;
+
+  d.branchesLoading = true;
+  d.branchError = '';
+  fetch('/api/update/branches')
+    .then(r => r.json())
+    .then(data => {
+      d.branchOptions = data.branches || [];
+      if (!d.branchOptions.includes(d.selectedBranch)) {
+        d.selectedBranch = d.branchOptions[0] || d.selectedBranch || '';
+      }
+      d.branchError = data.ok ? '' : (data.message || '无法获取分支列表，请手动输入分支名');
+      d.branchesLoading = false;
+    })
+    .catch(() => {
+      d.branchOptions = [];
+      d.branchError = '无法获取分支列表，请手动输入分支名';
+      d.branchesLoading = false;
     });
 }
 

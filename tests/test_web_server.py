@@ -35,6 +35,37 @@ def test_blocking_web_probes_run_in_threadpool():
     assert not inspect.iscoroutinefunction(routes_api.whats_new_check)
 
 
+def test_update_check_includes_current_commit(client):
+    from unittest.mock import patch
+
+    with patch("asc.commands.update_cmd._current_version", return_value="0.1.17"), \
+            patch("asc.commands.update_cmd._latest_version_from_github", return_value="0.1.18"), \
+            patch("asc.commands.update_cmd._resolve_git_ref_commit", return_value="abcdef1234567890"), \
+            patch("asc.cli._installed_commit_short", return_value="15e4b3a"):
+        resp = client.get("/api/update/check")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["detail"]["current"] == "0.1.17"
+    assert data["detail"]["current_commit"] == "15e4b3a"
+    assert data["detail"]["latest"] == "0.1.18"
+    assert data["detail"]["latest_commit"] == "abcdef1"
+    assert "commit 15e4b3a" in data["message"]
+    assert "最新版本: 0.1.18 (commit abcdef1)" in data["message"]
+
+
+def test_update_branches_returns_options(client):
+    from unittest.mock import patch
+
+    with patch("asc.commands.update_cmd._branches_from_github", return_value=["develop", "main"]):
+        resp = client.get("/api/update/branches")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["branches"] == ["develop", "main"]
+
+
 def test_profiles_page_returns_200(client):
     resp = client.get("/profiles")
     assert resp.status_code == 200

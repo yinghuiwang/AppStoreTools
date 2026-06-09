@@ -1389,27 +1389,59 @@ async def urls_set(
 @router.get("/update/check")
 async def update_check():
     """Check for updates."""
-    from asc.commands.update_cmd import _current_version, _latest_version_from_github, _parse_version
+    from asc.commands.update_cmd import (
+        _current_version,
+        _latest_version_from_github,
+        _parse_version,
+        _resolve_git_ref_commit,
+    )
+    from asc.cli import _installed_commit_short
 
     current = _current_version()
+    current_commit = _installed_commit_short() or "unknown"
     latest = _latest_version_from_github()
     if not latest:
         return {
             "ok": False,
             "level": "warning",
             "message": "无法连接到 GitHub",
-            "detail": {"current": current},
+            "detail": {"current": current, "current_commit": current_commit},
         }
+    latest_commit = (_resolve_git_ref_commit(f"v{latest}") or "unknown")[:7]
     is_latest = _parse_version(latest) <= _parse_version(current)
+    latest_label = f"{latest} (commit {latest_commit})"
     return {
         "ok": True,
         "level": "success" if is_latest else "info",
-        "message": f"当前版本: {current}" + (" (已是最新)" if is_latest else f" → 最新版本: {latest}"),
+        "message": f"当前版本: {current} (commit {current_commit})" + (" (已是最新)" if is_latest else f" → 最新版本: {latest_label}"),
         "detail": {
             "current": current,
+            "current_commit": current_commit,
             "latest": latest,
+            "latest_commit": latest_commit,
             "is_latest": is_latest,
         },
+    }
+
+
+@router.get("/update/branches")
+async def update_branches():
+    """List installable branches."""
+    from asc.commands.update_cmd import _branches_from_github
+
+    branches = _branches_from_github()
+    if branches is None:
+        return {
+            "ok": False,
+            "level": "warning",
+            "message": "无法获取分支列表",
+            "branches": [],
+        }
+    return {
+        "ok": True,
+        "level": "success",
+        "message": f"找到 {len(branches)} 个分支",
+        "branches": branches,
     }
 
 

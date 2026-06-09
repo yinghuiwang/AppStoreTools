@@ -70,6 +70,27 @@ def _all_versions_from_github() -> Optional[list[str]]:
         return None
 
 
+def _branches_from_github() -> Optional[list[str]]:
+    """Fetch branch names from the GitHub remote."""
+    try:
+        output = subprocess.check_output(
+            ["git", "ls-remote", "--heads", INSTALL_URL],
+            text=True,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+        )
+    except Exception:
+        return None
+
+    branches = []
+    prefix = "refs/heads/"
+    for line in output.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[1].startswith(prefix):
+            branches.append(parts[1][len(prefix):])
+    return sorted(set(branches))
+
+
 def _resolve_git_ref_commit(ref: str) -> Optional[str]:
     """Resolve a branch or tag ref to the commit hash that should be installed."""
     candidates = [

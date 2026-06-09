@@ -24,6 +24,18 @@ class TestSimilarVersions:
         assert "0.1.7" in result
 
 
+def test_branches_from_github_parses_remote_heads():
+    from asc.commands.update_cmd import _branches_from_github
+
+    output = (
+        "a" * 40 + "\trefs/heads/main\n"
+        + "b" * 40 + "\trefs/heads/develop\n"
+        + "c" * 40 + "\trefs/tags/v0.1.0\n"
+    )
+    with patch("asc.commands.update_cmd.subprocess.check_output", return_value=output):
+        assert _branches_from_github() == ["develop", "main"]
+
+
 class TestCmdUpdateValidation:
     """Tests for cmd_update parameter validation."""
 
