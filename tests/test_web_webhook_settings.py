@@ -29,6 +29,18 @@ def test_settings_webhooks_get_returns_defaults(client: TestClient):
     assert data["providers"]["feishu"]["secret"] == ""
 
 
+def test_settings_page_has_webhook_card(client: TestClient):
+    response = client.get("/settings")
+
+    assert response.status_code == 200
+    html = response.text
+    assert "群通知 / Webhook" in html
+    assert "/api/settings/webhooks" in html
+    assert "飞书/Lark" in html
+    assert "企业微信" in html
+    assert "钉钉" in html
+
+
 def test_settings_webhooks_post_saves_config(client: TestClient):
     response = client.post("/api/settings/webhooks", json={
         "enabled": True,

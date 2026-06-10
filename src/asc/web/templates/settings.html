@@ -180,6 +180,179 @@
   </div>
 </div>
 
+    <!-- Webhook Notifications -->
+    <div class="card"
+         x-data="{
+           config: null,
+           saving: false,
+           saved: false,
+           error: '',
+           testResults: [],
+           taskKinds: [
+             ['metadata', '元数据上传'],
+             ['build', '构建上传'],
+             ['whats-new', '更新说明上传'],
+             ['iap', '内购上传'],
+             ['urls', 'URL 更新'],
+             ['update', '工具更新']
+           ],
+           statuses: [
+             ['done', '成功'],
+             ['error', '失败'],
+             ['canceled', '已取消']
+           ],
+           providers: [
+             ['feishu', '飞书/Lark'],
+             ['wecom', '企业微信'],
+             ['dingtalk', '钉钉']
+           ],
+           load() {
+             fetch('/api/settings/webhooks')
+               .then(r => r.json())
+               .then(d => { this.config = d; })
+               .catch(() => { this.error = '加载失败'; });
+           },
+           toggleList(listName, value, checked) {
+             const items = this.config[listName] || [];
+             this.config[listName] = checked
+               ? Array.from(new Set([...items, value]))
+               : items.filter(item => item !== value);
+           },
+           save() {
+             this.saving = true;
+             this.error = '';
+             fetch('/api/settings/webhooks', {
+               method: 'POST',
+               headers: {'Content-Type': 'application/json'},
+               body: JSON.stringify(this.config)
+             })
+             .then(r => r.json().then(d => ({ok: r.ok, data: d})))
+             .then(({ok, data}) => {
+               if (!ok || data.error) throw new Error(data.error || '保存失败');
+               this.saved = true;
+               return fetch('/api/settings/webhooks');
+             })
+             .then(r => r.json())
+             .then(d => {
+               this.config = d;
+               setTimeout(() => { this.saved = false; }, 2000);
+             })
+             .catch(err => { this.error = err.message || '保存失败'; })
+             .finally(() => { this.saving = false; });
+           },
+           test(provider) {
+             this.testResults = [];
+             fetch('/api/settings/webhooks/test', {
+               method: 'POST',
+               headers: {'Content-Type': 'application/json'},
+               body: JSON.stringify({provider})
+             })
+             .then(r => r.json())
+             .then(d => { this.testResults = d.results || [{provider, ok: false, error: d.error || '测试失败'}]; })
+             .catch(() => { this.testResults = [{provider, ok: false, error: '测试失败'}]; });
+           }
+         }"
+         x-init="load()">
+      <div class="card-header flex items-center gap-2">
+        <h2 class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">群通知 / Webhook</h2>
+        <button @click="save()" :disabled="saving || !config" class="ml-auto btn-primary text-xs px-3 py-1.5">
+          <span x-show="!saving">保存</span>
+          <span x-show="saving">保存中...</span>
+        </button>
+      </div>
+      <div class="card-body space-y-4">
+        <div x-show="!config && !error" class="text-sm text-obsidian-500 py-2">加载中...</div>
+        <template x-if="error">
+          <div class="text-xs text-red-400" x-text="error"></div>
+        </template>
+        <template x-if="saved">
+          <div class="text-xs text-emerald-400">已保存</div>
+        </template>
+
+        <div class="space-y-4" x-show="config">
+          <label class="flex items-center gap-2 text-sm text-obsidian-300">
+            <input type="checkbox" x-model="config.enabled" class="rounded border-obsidian-600 bg-obsidian-800">
+            启用任务结果群通知
+          </label>
+
+          <div class="grid gap-4 md:grid-cols-2">
+            <div>
+              <div class="text-xs text-obsidian-500 mb-2">通知任务</div>
+              <div class="grid gap-2 sm:grid-cols-2">
+                <template x-for="kind in taskKinds" :key="kind[0]">
+                  <label class="flex items-center gap-2 text-xs text-obsidian-300">
+                    <input type="checkbox"
+                           :checked="(config.notify_kinds || []).includes(kind[0])"
+                           @change="toggleList('notify_kinds', kind[0], $event.target.checked)"
+                           class="rounded border-obsidian-600 bg-obsidian-800">
+                    <span x-text="kind[1]"></span>
+                  </label>
+                </template>
+              </div>
+            </div>
+
+            <div>
+              <div class="text-xs text-obsidian-500 mb-2">通知状态</div>
+              <div class="grid gap-2 sm:grid-cols-3">
+                <template x-for="status in statuses" :key="status[0]">
+                  <label class="flex items-center gap-2 text-xs text-obsidian-300">
+                    <input type="checkbox"
+                           :checked="(config.notify_statuses || []).includes(status[0])"
+                           @change="toggleList('notify_statuses', status[0], $event.target.checked)"
+                           class="rounded border-obsidian-600 bg-obsidian-800">
+                    <span x-text="status[1]"></span>
+                  </label>
+                </template>
+              </div>
+            </div>
+          </div>
+
+          <div class="space-y-3">
+            <template x-for="provider in providers" :key="provider[0]">
+              <div class="rounded-lg border border-obsidian-700 p-3 space-y-3">
+                <div class="flex items-center gap-3">
+                  <label class="flex items-center gap-2 text-sm text-obsidian-300">
+                    <input type="checkbox"
+                           x-model="config.providers[provider[0]].enabled"
+                           class="rounded border-obsidian-600 bg-obsidian-800">
+                    <span x-text="provider[1]"></span>
+                  </label>
+                  <button @click="test(provider[0])" type="button" class="ml-auto btn-secondary text-xs px-3 py-1.5">测试发送</button>
+                </div>
+                <div class="grid gap-3 md:grid-cols-2">
+                  <div>
+                    <label class="text-xs text-obsidian-500 mb-1 block">Webhook URL</label>
+                    <input type="url"
+                           x-model="config.providers[provider[0]].url"
+                           placeholder="https://..."
+                           class="field-input w-full text-xs">
+                  </div>
+                  <div>
+                    <label class="text-xs text-obsidian-500 mb-1 block">Secret / Signing Key</label>
+                    <input type="password"
+                           x-model="config.providers[provider[0]].secret"
+                           placeholder="留空则不使用签名"
+                           class="field-input w-full text-xs">
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+
+          <template x-if="testResults.length > 0">
+            <div class="space-y-1">
+              <template x-for="result in testResults" :key="result.provider">
+                <div class="text-xs" :class="result.ok ? 'text-emerald-400' : 'text-red-400'">
+                  <span x-text="providers.find(p => p[0] === result.provider)?.[1] || result.provider"></span>
+                  <span x-text="result.ok ? '测试发送成功' : (result.error || '测试失败')"></span>
+                </div>
+              </template>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+
     <!-- Language -->
     <div class="card">
       <div class="card-header">
