@@ -547,3 +547,25 @@ def test_notify_task_finished_logs_provider_failure(webhook_path: Path, monkeypa
     task = store.get(task_id)
     assert task["status"] == TaskStatus.ERROR
     assert any("群通知发送失败：feishu HTTP 400" in line for line in task["logs"])
+
+
+def test_notify_task_finished_warns_and_skips_invalid_toml(
+    webhook_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    webhook_path.write_text("[providers.feishu\nenabled = true\n", encoding="utf-8")
+
+    def fail_send_provider(provider: str, provider_config: dict, text: str):
+        raise AssertionError("send_provider should not be called")
+
+    monkeypatch.setattr(notifications.webhook_clients, "send_provider", fail_send_provider)
+    store = TaskStore()
+    task_id = store.create("build", profile="demoapp")
+    store.set_status(task_id, TaskStatus.DONE)
+    store.set_result(task_id, {"success": True})
+
+    result = notifications.notify_task_finished(task_id, task_store=store)
+
+    task = store.get(task_id)
+    assert result == []
+    assert any("群通知配置无效" in line and "已跳过通知" in line for line in task["logs"])

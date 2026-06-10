@@ -83,6 +83,29 @@ def test_settings_webhooks_post_invalid_json_returns_400(client: TestClient):
     assert "error" in response.json()
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        [],
+        {"enabled": "true"},
+        {"providers": {"unknown": {"enabled": False, "url": "", "secret": ""}}},
+        {"providers": {"feishu": {"enabled": "false", "url": "", "secret": ""}}},
+        {"providers": {"feishu": {"enabled": True, "url": "ftp://example.com/hook", "secret": ""}}},
+        {"notify_kinds": ["bogus"]},
+        {"notify_statuses": ["running"]},
+        {"notify_kinds": "build"},
+        {"notify_statuses": "done"},
+        {"providers": []},
+        {"providers": {"feishu": "enabled"}},
+    ],
+)
+def test_settings_webhooks_post_invalid_payload_returns_400(client: TestClient, payload):
+    response = client.post("/api/settings/webhooks", json=payload)
+
+    assert response.status_code == 400
+    assert "error" in response.json()
+
+
 def test_settings_webhooks_test_sends_provider(client: TestClient, monkeypatch: pytest.MonkeyPatch):
     from asc.web import routes_api
 

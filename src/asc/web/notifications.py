@@ -70,13 +70,19 @@ def default_webhook_config() -> dict[str, Any]:
     }
 
 
-def _read_toml(path: Path) -> dict[str, Any]:
+class WebhookConfigError(Exception):
+    """Raised when an existing webhook config cannot be read as valid TOML."""
+
+
+def _read_toml(path: Path, *, strict: bool = False) -> dict[str, Any]:
     if tomllib is None:
         return {}
     try:
         with path.open("rb") as f:
             data = tomllib.load(f)
-    except Exception:
+    except Exception as exc:
+        if strict:
+            raise WebhookConfigError("Invalid webhook config") from exc
         return {}
     return data if isinstance(data, dict) else {}
 
@@ -143,6 +149,13 @@ def load_webhook_config() -> dict[str, Any]:
     if not path.exists():
         return default_webhook_config()
     return normalize_webhook_config(_read_toml(path))
+
+
+def _load_webhook_config_for_notification() -> dict[str, Any]:
+    path = webhook_config_path()
+    if not path.exists():
+        return default_webhook_config()
+    return normalize_webhook_config(_read_toml(path, strict=True))
 
 
 def save_webhook_config(
@@ -239,7 +252,12 @@ def notify_task_finished(task_id: str, *, task_store: Any) -> list[dict[str, Any
     if task is None:
         return []
 
-    config = load_webhook_config()
+    try:
+        config = _load_webhook_config_for_notification()
+    except WebhookConfigError:
+        task_store.append_log(task_id, "群通知配置无效，已跳过通知：Invalid webhook config")
+        return []
+
     if not should_notify(task, config):
         return []
 

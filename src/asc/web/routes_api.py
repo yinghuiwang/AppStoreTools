@@ -26,6 +26,68 @@ _ALLOWED_ROOTS = (_HOME, _TMPDIR)
 _DATA_DIR = Path(__file__).resolve().parents[3] / "data"
 _TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates"
 
+
+def _validate_webhook_config_payload(data: object) -> str | None:
+    if not isinstance(data, dict):
+        return "JSON body must be an object"
+
+    enabled = data.get("enabled")
+    if enabled is not None and not isinstance(enabled, bool):
+        return "enabled must be a boolean"
+
+    notify_kinds = data.get("notify_kinds")
+    if notify_kinds is not None:
+        if not isinstance(notify_kinds, list):
+            return "notify_kinds must be a list"
+        invalid_kinds = [
+            item
+            for item in notify_kinds
+            if not isinstance(item, str) or item not in notifications.TASK_KINDS
+        ]
+        if invalid_kinds:
+            return "Invalid notify_kinds value"
+
+    notify_statuses = data.get("notify_statuses")
+    if notify_statuses is not None:
+        if not isinstance(notify_statuses, list):
+            return "notify_statuses must be a list"
+        invalid_statuses = [
+            item
+            for item in notify_statuses
+            if not isinstance(item, str) or item not in notifications.TERMINAL_STATUSES
+        ]
+        if invalid_statuses:
+            return "Invalid notify_statuses value"
+
+    providers = data.get("providers")
+    if providers is None:
+        return None
+    if not isinstance(providers, dict):
+        return "providers must be an object"
+
+    for provider, provider_config in providers.items():
+        if provider not in notifications.PROVIDERS:
+            return f"Unknown provider: {provider}"
+        if not isinstance(provider_config, dict):
+            return f"Provider {provider} must be an object"
+
+        provider_enabled = provider_config.get("enabled")
+        if provider_enabled is not None and not isinstance(provider_enabled, bool):
+            return f"Provider {provider} enabled must be a boolean"
+
+        url = provider_config.get("url")
+        if url is not None:
+            if not isinstance(url, str):
+                return f"Provider {provider} url must be a string"
+            stripped_url = url.strip()
+            if stripped_url and not (
+                stripped_url.startswith("http://") or stripped_url.startswith("https://")
+            ):
+                return f"Provider {provider} url must start with http:// or https://"
+
+    return None
+
+
 def _is_under_allowed_root(target: Path) -> bool:
     """Return True if target is at or under any allowed root."""
     for root in _ALLOWED_ROOTS:
@@ -1551,6 +1613,10 @@ async def save_webhook_config(request: Request):
         data = await request.json()
     except Exception:
         return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    validation_error = _validate_webhook_config_payload(data)
+    if validation_error:
+        return JSONResponse({"error": validation_error}, status_code=400)
 
     try:
         notifications.save_webhook_config(data, preserve_blank_secrets=True)
