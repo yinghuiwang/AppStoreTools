@@ -216,19 +216,20 @@
              ['wecom', '企业微信'],
              ['dingtalk', '钉钉']
            ],
+           applyConfig(data) {
+             this.config = {
+               ...this.config,
+               ...data,
+               providers: {
+                 ...this.config.providers,
+                 ...(data.providers || {})
+               }
+             };
+           },
            load() {
              fetch('/api/settings/webhooks')
                .then(r => r.json())
-               .then(d => {
-                 this.config = {
-                   ...this.config,
-                   ...d,
-                   providers: {
-                     ...this.config.providers,
-                     ...(d.providers || {})
-                   }
-                 };
-               })
+               .then(d => { this.applyConfig(d); })
                .catch(() => { this.error = '加载失败'; })
                .finally(() => { this.loading = false; });
            },
@@ -239,9 +240,12 @@
                : items.filter(item => item !== value);
            },
            save() {
+             return this.persist(true);
+           },
+           persist(showSaved) {
              this.saving = true;
              this.error = '';
-             fetch('/api/settings/webhooks', {
+             return fetch('/api/settings/webhooks', {
                method: 'POST',
                headers: {'Content-Type': 'application/json'},
                body: JSON.stringify(this.config)
@@ -249,27 +253,30 @@
              .then(r => r.json().then(d => ({ok: r.ok, data: d})))
              .then(({ok, data}) => {
                if (!ok || data.error) throw new Error(data.error || '保存失败');
-               this.saved = true;
+               if (showSaved) this.saved = true;
                return fetch('/api/settings/webhooks');
              })
              .then(r => r.json())
              .then(d => {
-               this.config = d;
-               setTimeout(() => { this.saved = false; }, 2000);
+               this.applyConfig(d);
+               if (showSaved) setTimeout(() => { this.saved = false; }, 2000);
              })
-             .catch(err => { this.error = err.message || '保存失败'; })
+             .catch(err => {
+               this.error = err.message || '保存失败';
+               throw err;
+             })
              .finally(() => { this.saving = false; });
            },
            test(provider) {
              this.testResults = [];
-             fetch('/api/settings/webhooks/test', {
+             this.persist(false).then(() => fetch('/api/settings/webhooks/test', {
                method: 'POST',
                headers: {'Content-Type': 'application/json'},
                body: JSON.stringify({provider})
-             })
+             }))
              .then(r => r.json())
              .then(d => { this.testResults = d.results || [{provider, ok: false, error: d.error || '测试失败'}]; })
-             .catch(() => { this.testResults = [{provider, ok: false, error: '测试失败'}]; });
+             .catch(err => { this.testResults = [{provider, ok: false, error: err.message || '测试失败'}]; });
            }
          }"
          x-init="load()">
@@ -337,7 +344,7 @@
                            class="rounded border-obsidian-600 bg-obsidian-800">
                     <span x-text="provider[1]"></span>
                   </label>
-                  <button @click="test(provider[0])" type="button" class="ml-auto btn-secondary text-xs px-3 py-1.5">测试发送</button>
+                  <button @click="test(provider[0])" type="button" :disabled="saving" class="ml-auto btn-secondary text-xs px-3 py-1.5">保存并测试</button>
                 </div>
                 <div class="grid gap-3 md:grid-cols-2">
                   <div>
@@ -351,8 +358,9 @@
                     <label class="text-xs text-obsidian-500 mb-1 block">Secret / Signing Key</label>
                     <input type="password"
                            x-model="config.providers[provider[0]].secret"
-                           placeholder="留空则不使用签名"
+                           :placeholder="config.providers[provider[0]].has_secret ? '已保存 Secret，留空将保留原值' : 'Secret / 签名密钥（可选）'"
                            class="field-input w-full text-xs">
+                    <div x-show="config.providers[provider[0]].has_secret" class="mt-1 text-[10px] text-obsidian-500">已保存 Secret，留空将保留原值</div>
                   </div>
                 </div>
               </div>
