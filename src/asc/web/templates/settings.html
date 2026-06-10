@@ -183,7 +183,17 @@
     <!-- Webhook Notifications -->
     <div class="card"
          x-data="{
-           config: null,
+           config: {
+             enabled: false,
+             notify_kinds: [],
+             notify_statuses: [],
+             providers: {
+               feishu: {enabled: false, url: '', secret: ''},
+               wecom: {enabled: false, url: '', secret: ''},
+               dingtalk: {enabled: false, url: '', secret: ''}
+             }
+           },
+           loading: true,
            saving: false,
            saved: false,
            error: '',
@@ -209,8 +219,18 @@
            load() {
              fetch('/api/settings/webhooks')
                .then(r => r.json())
-               .then(d => { this.config = d; })
-               .catch(() => { this.error = '加载失败'; });
+               .then(d => {
+                 this.config = {
+                   ...this.config,
+                   ...d,
+                   providers: {
+                     ...this.config.providers,
+                     ...(d.providers || {})
+                   }
+                 };
+               })
+               .catch(() => { this.error = '加载失败'; })
+               .finally(() => { this.loading = false; });
            },
            toggleList(listName, value, checked) {
              const items = this.config[listName] || [];
@@ -261,7 +281,7 @@
         </button>
       </div>
       <div class="card-body space-y-4">
-        <div x-show="!config && !error" class="text-sm text-obsidian-500 py-2">加载中...</div>
+        <div x-show="loading && !error" class="text-sm text-obsidian-500 py-2">加载中...</div>
         <template x-if="error">
           <div class="text-xs text-red-400" x-text="error"></div>
         </template>

@@ -39,6 +39,9 @@ def test_settings_page_has_webhook_card(client: TestClient):
     assert "飞书/Lark" in html
     assert "企业微信" in html
     assert "钉钉" in html
+    assert "config: null" not in html
+    assert "providers: {" in html
+    assert "feishu: {enabled: false, url: '', secret: ''}" in html
 
 
 def test_settings_webhooks_post_saves_config(client: TestClient):
