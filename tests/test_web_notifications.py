@@ -365,7 +365,8 @@ def test_build_task_message_for_failure():
     assert "12s" in text
     assert "ASC failed" in text
     assert "12345678" in text
-    assert "line2" not in text
+    assert "line1" not in text
+    assert "line2" in text
     assert "line6" in text
 
 

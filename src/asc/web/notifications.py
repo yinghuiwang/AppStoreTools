@@ -201,7 +201,7 @@ def build_task_message(task: dict[str, Any]) -> str:
 
     if status == "error":
         logs = task.get("logs") if isinstance(task.get("logs"), list) else []
-        excerpt = [str(line) for line in logs[-4:] if line is not None]
+        excerpt = [str(line) for line in logs[-5:] if line is not None]
         if excerpt:
             lines.append("最近日志：")
             lines.extend(f"> {line}" for line in excerpt)
