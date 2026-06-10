@@ -15,6 +15,7 @@ from asc.commands.iap import _upload_iap_core, _load_iap_config
 from asc.commands.subscriptions import _upload_subscriptions_core
 from asc.config import Config
 from asc.utils import make_api_from_config
+from asc.web import notifications
 
 router = APIRouter()
 
@@ -1542,6 +1543,41 @@ async def get_llm_config(request: Request):
         "configs": config.llm_configs,
         "default": config.llm_default,
     }
+
+
+@router.get("/settings/webhooks")
+async def get_webhook_config(request: Request):
+    """Return webhook notification config without exposing secrets."""
+    return notifications.load_public_webhook_config()
+
+
+@router.post("/settings/webhooks")
+async def save_webhook_config(request: Request):
+    """Save webhook notification config."""
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    try:
+        notifications.save_webhook_config(data, preserve_blank_secrets=True)
+        return {"ok": True}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.post("/settings/webhooks/test")
+async def test_webhook_config(request: Request):
+    """Send a test webhook notification."""
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    try:
+        return {"results": notifications.send_test_notification(provider=data.get("provider"))}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @router.post("/settings/llm")

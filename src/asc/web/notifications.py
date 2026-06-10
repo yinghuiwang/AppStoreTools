@@ -263,3 +263,26 @@ def notify_task_finished(task_id: str, *, task_store: Any) -> list[dict[str, Any
             task_store.append_log(task_id, f"群通知发送失败：{provider} {error}")
 
     return results
+
+
+def send_test_notification(provider: str | None = None) -> list[dict[str, Any]]:
+    """Send a test notification to one provider or all providers."""
+    config = load_webhook_config()
+    providers = config.get("providers", {})
+    provider_names = [provider] if provider else list(PROVIDERS)
+    text = "**ASC 群通知测试**\n- 状态：配置验证\n- 结果：Webhook 可以接收消息"
+
+    results = []
+    for name in provider_names:
+        if name not in PROVIDERS:
+            results.append({"provider": name, "ok": False, "error": "Unsupported provider"})
+            continue
+
+        provider_config = providers.get(name, {})
+        if not provider_config.get("enabled") or not provider_config.get("url"):
+            results.append({"provider": name, "ok": False, "error": "Provider is not configured"})
+            continue
+
+        results.append(webhook_clients.send_provider(name, provider_config, text))
+
+    return results
