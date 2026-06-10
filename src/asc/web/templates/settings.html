@@ -240,7 +240,7 @@
                : items.filter(item => item !== value);
            },
            save() {
-             return this.persist(true);
+             this.persist(true).catch(() => {});
            },
            persist(showSaved) {
              this.saving = true;
