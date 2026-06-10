@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 import toml
@@ -34,6 +36,10 @@ STATUS_TITLE_PREFIX = {
     "error": "ASC 任务失败",
     "canceled": "ASC 任务已取消",
 }
+SECRET_ASSIGNMENT_RE = re.compile(r"\b(access_token|key|token|secret)=([^\s&]+)", re.IGNORECASE)
+URL_RE = re.compile(r"https?://[^\s>)\]]+")
+_notified_task_ids: set[str] = set()
+_notified_task_ids_lock = Lock()
 
 
 def webhook_config_path() -> Path:
@@ -167,6 +173,12 @@ def _status_value(status: Any) -> str:
     return str(getattr(status, "value", status) or "")
 
 
+def _sanitize_message_text(value: Any) -> str:
+    text = str(value)
+    text = URL_RE.sub("[redacted-url]", text)
+    return SECRET_ASSIGNMENT_RE.sub(r"\1=[redacted]", text)
+
+
 def should_notify(task: dict[str, Any], config: dict[str, Any]) -> bool:
     """Return whether a terminal task matches the webhook notification filters."""
     if not config.get("enabled"):
@@ -195,7 +207,7 @@ def build_task_message(task: dict[str, Any]) -> str:
     result = task.get("result")
     result_error = result.get("error") if isinstance(result, dict) else None
     if status == "error" and result_error:
-        lines.append(f"错误：{result_error}")
+        lines.append(f"错误：{_sanitize_message_text(result_error)}")
     elif status == "canceled":
         lines.append("结果：用户取消")
 
@@ -204,7 +216,7 @@ def build_task_message(task: dict[str, Any]) -> str:
         excerpt = [str(line) for line in logs[-5:] if line is not None]
         if excerpt:
             lines.append("最近日志：")
-            lines.extend(f"> {line}" for line in excerpt)
+            lines.extend(f"> {_sanitize_message_text(line)}" for line in excerpt)
 
     return "\n".join(lines)
 
@@ -219,14 +231,23 @@ def notify_task_finished(task_id: str, *, task_store: Any) -> list[dict[str, Any
     if not should_notify(task, config):
         return []
 
+    providers = config.get("providers", {})
+    enabled_providers = [
+        (provider, providers.get(provider, {}))
+        for provider in PROVIDERS
+        if providers.get(provider, {}).get("enabled") and providers.get(provider, {}).get("url")
+    ]
+    if not enabled_providers:
+        return []
+
+    with _notified_task_ids_lock:
+        if task_id in _notified_task_ids:
+            return []
+        _notified_task_ids.add(task_id)
+
     text = build_task_message(task)
     results = []
-    providers = config.get("providers", {})
-    for provider in PROVIDERS:
-        provider_config = providers.get(provider, {})
-        if not provider_config.get("enabled") or not provider_config.get("url"):
-            continue
-
+    for provider, provider_config in enabled_providers:
         result = webhook_clients.send_provider(provider, provider_config, text)
         results.append(result)
         if result.get("ok"):

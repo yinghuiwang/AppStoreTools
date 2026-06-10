@@ -370,6 +370,74 @@ def test_build_task_message_for_failure():
     assert "line6" in text
 
 
+def test_build_task_message_sanitizes_failure_secrets():
+    task = {
+        "id": "12345678-abcd",
+        "kind": "metadata",
+        "title": "元数据上传",
+        "profile": "demoapp",
+        "status": "error",
+        "duration_label": "12s",
+        "completed_at": "2026-06-10T11:00:00",
+        "result": {
+            "success": False,
+            "error": "failed https://feishu.example/hook?access_token=secret-token",
+        },
+        "logs": [
+            "request key=secret-key",
+            "posted to https://wecom.example/hook?key=secret-key",
+        ],
+    }
+
+    text = notifications.build_task_message(task)
+
+    assert "secret-token" not in text
+    assert "secret-key" not in text
+    assert "https://feishu.example/hook?access_token=secret-token" not in text
+    assert "https://wecom.example/hook?key=secret-key" not in text
+    assert "[redacted]" in text
+
+
+def test_build_task_message_for_success_stays_short():
+    task = {
+        "id": "12345678-abcd",
+        "kind": "build",
+        "title": "构建上传",
+        "profile": "demoapp",
+        "status": "done",
+        "duration_label": "12s",
+        "completed_at": "2026-06-10T11:00:00",
+        "result": {"success": True},
+        "logs": ["line1", "line2"],
+    }
+
+    text = notifications.build_task_message(task)
+
+    assert "ASC 任务完成：构建上传" in text
+    assert "最近日志" not in text
+    assert "line1" not in text
+    assert "line2" not in text
+
+
+def test_build_task_message_for_canceled_includes_cancel_result():
+    task = {
+        "id": "12345678-abcd",
+        "kind": "metadata",
+        "title": "元数据上传",
+        "profile": "demoapp",
+        "status": "canceled",
+        "duration_label": "12s",
+        "completed_at": "2026-06-10T11:00:00",
+        "result": None,
+        "logs": [],
+    }
+
+    text = notifications.build_task_message(task)
+
+    assert "ASC 任务已取消：元数据上传" in text
+    assert "结果：用户取消" in text
+
+
 def test_notify_task_finished_sends_enabled_providers(webhook_path: Path, monkeypatch: pytest.MonkeyPatch):
     notifications.save_webhook_config({
         "enabled": True,
@@ -396,6 +464,36 @@ def test_notify_task_finished_sends_enabled_providers(webhook_path: Path, monkey
 
     assert [item[0] for item in sent] == ["feishu", "wecom"]
     assert results == [{"provider": "feishu", "ok": True}, {"provider": "wecom", "ok": True}]
+
+
+def test_notify_task_finished_only_sends_once_for_same_task(webhook_path: Path, monkeypatch: pytest.MonkeyPatch):
+    notifications.save_webhook_config({
+        "enabled": True,
+        "notify_statuses": ["done"],
+        "notify_kinds": ["build"],
+        "providers": {
+            "feishu": {"enabled": True, "url": "https://feishu.example/hook", "secret": ""},
+            "wecom": {"enabled": False, "url": "", "secret": ""},
+            "dingtalk": {"enabled": False, "url": "", "secret": ""},
+        },
+    })
+    sent = []
+    monkeypatch.setattr(
+        notifications.webhook_clients,
+        "send_provider",
+        lambda provider, provider_config, text: sent.append(provider) or {"provider": provider, "ok": True},
+    )
+    store = TaskStore()
+    task_id = store.create("build", profile="demoapp")
+    store.set_status(task_id, TaskStatus.DONE)
+    store.set_result(task_id, {"success": True})
+
+    first_results = notifications.notify_task_finished(task_id, task_store=store)
+    second_results = notifications.notify_task_finished(task_id, task_store=store)
+
+    assert sent == ["feishu"]
+    assert first_results == [{"provider": "feishu", "ok": True}]
+    assert second_results == []
 
 
 def test_notify_task_finished_logs_provider_failure(webhook_path: Path, monkeypatch: pytest.MonkeyPatch):
