@@ -18,8 +18,10 @@ except ImportError:  # pragma: no cover - Python 3.9/3.10 fallback
 
 
 PROVIDERS = ("feishu", "wecom", "dingtalk")
-TERMINAL_STATUSES = ("done", "error", "canceled")
-TASK_KINDS = ("metadata", "build", "whats-new", "iap", "urls")
+DEFAULT_NOTIFY_STATUSES = ["done", "error", "canceled"]
+DEFAULT_NOTIFY_KINDS = ["metadata", "build", "whats-new", "iap", "urls"]
+TERMINAL_STATUSES = tuple(DEFAULT_NOTIFY_STATUSES)
+TASK_KINDS = tuple(DEFAULT_NOTIFY_KINDS)
 
 
 def webhook_config_path() -> Path:
@@ -110,7 +112,7 @@ def save_webhook_config(
     config: dict[str, Any],
     *,
     preserve_blank_secrets: bool = False,
-) -> None:
+) -> dict[str, Any]:
     """Normalize and persist webhook config to TOML."""
     normalized = normalize_webhook_config(config)
 
@@ -125,6 +127,7 @@ def save_webhook_config(
     path = webhook_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(toml.dumps(normalized), encoding="utf-8")
+    return normalized
 
 
 def load_public_webhook_config() -> dict[str, Any]:

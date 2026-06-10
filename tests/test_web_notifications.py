@@ -7,6 +7,17 @@ import pytest
 from asc.web import notifications
 
 
+def test_default_notify_constants():
+    assert notifications.DEFAULT_NOTIFY_KINDS == [
+        "metadata",
+        "build",
+        "whats-new",
+        "iap",
+        "urls",
+    ]
+    assert notifications.DEFAULT_NOTIFY_STATUSES == ["done", "error", "canceled"]
+
+
 @pytest.fixture
 def webhook_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     path = tmp_path / "webhook.toml"
@@ -38,9 +49,10 @@ def test_save_and_load_webhook_config(webhook_path: Path):
         },
     }
 
-    notifications.save_webhook_config(payload)
+    saved = notifications.save_webhook_config(payload)
     loaded = notifications.load_webhook_config()
 
+    assert saved == loaded
     assert loaded["enabled"] is True
     assert loaded["notify_statuses"] == ["done", "error"]
     assert loaded["notify_kinds"] == ["build", "metadata"]
