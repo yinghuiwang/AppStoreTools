@@ -154,6 +154,12 @@ def test_save_webhook_config_preserves_existing_secret_when_blank(webhook_path: 
     assert loaded["providers"]["feishu"]["secret"] == "old-secret"
 
 
+def test_send_test_notification_empty_provider_is_unsupported(webhook_path: Path):
+    result = notifications.send_test_notification(provider="")
+
+    assert result == [{"provider": "", "ok": False, "error": "Unsupported provider"}]
+
+
 def test_feishu_signature_payload(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(webhook_clients.time, "time", lambda: 1700000000)
 
