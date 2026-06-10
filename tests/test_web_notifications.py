@@ -8,6 +8,7 @@ import pytest
 
 from asc.web import notifications
 from asc.web import webhook_clients
+from asc.web.tasks import TaskStatus, TaskStore
 
 
 def test_default_notify_constants():
@@ -331,3 +332,94 @@ def test_send_provider_dingtalk_posts_signed_url(monkeypatch: pytest.MonkeyPatch
         "msgtype": "markdown",
         "markdown": {"title": "ASC 任务通知", "text": "hello"},
     }
+
+
+def test_should_notify_matches_kind_and_status():
+    config = notifications.default_webhook_config()
+    config["enabled"] = True
+    config["notify_statuses"] = ["done"]
+    config["notify_kinds"] = ["build"]
+
+    assert notifications.should_notify({"kind": "build", "status": "done"}, config) is True
+    assert notifications.should_notify({"kind": "metadata", "status": "done"}, config) is False
+    assert notifications.should_notify({"kind": "build", "status": "error"}, config) is False
+
+
+def test_build_task_message_for_failure():
+    task = {
+        "id": "12345678-abcd",
+        "kind": "metadata",
+        "title": "元数据上传",
+        "profile": "demoapp",
+        "status": "error",
+        "duration_label": "12s",
+        "completed_at": "2026-06-10T11:00:00",
+        "result": {"success": False, "error": "ASC failed"},
+        "logs": ["line1", "line2", "line3", "line4", "line5", "line6"],
+    }
+
+    text = notifications.build_task_message(task)
+
+    assert "ASC 任务失败：元数据上传" in text
+    assert "demoapp" in text
+    assert "12s" in text
+    assert "ASC failed" in text
+    assert "12345678" in text
+    assert "line2" not in text
+    assert "line6" in text
+
+
+def test_notify_task_finished_sends_enabled_providers(webhook_path: Path, monkeypatch: pytest.MonkeyPatch):
+    notifications.save_webhook_config({
+        "enabled": True,
+        "notify_statuses": ["done"],
+        "notify_kinds": ["build"],
+        "providers": {
+            "feishu": {"enabled": True, "url": "https://feishu.example/hook", "secret": ""},
+            "wecom": {"enabled": True, "url": "https://wecom.example/hook", "secret": ""},
+            "dingtalk": {"enabled": False, "url": "https://ding.example/hook", "secret": ""},
+        },
+    })
+    sent = []
+    monkeypatch.setattr(
+        notifications.webhook_clients,
+        "send_provider",
+        lambda provider, provider_config, text: sent.append((provider, text)) or {"provider": provider, "ok": True},
+    )
+    store = TaskStore()
+    task_id = store.create("build", profile="demoapp")
+    store.set_status(task_id, TaskStatus.DONE)
+    store.set_result(task_id, {"success": True})
+
+    results = notifications.notify_task_finished(task_id, task_store=store)
+
+    assert [item[0] for item in sent] == ["feishu", "wecom"]
+    assert results == [{"provider": "feishu", "ok": True}, {"provider": "wecom", "ok": True}]
+
+
+def test_notify_task_finished_logs_provider_failure(webhook_path: Path, monkeypatch: pytest.MonkeyPatch):
+    notifications.save_webhook_config({
+        "enabled": True,
+        "notify_statuses": ["error"],
+        "notify_kinds": ["metadata"],
+        "providers": {
+            "feishu": {"enabled": True, "url": "https://feishu.example/hook", "secret": ""},
+            "wecom": {"enabled": False, "url": "", "secret": ""},
+            "dingtalk": {"enabled": False, "url": "", "secret": ""},
+        },
+    })
+    monkeypatch.setattr(
+        notifications.webhook_clients,
+        "send_provider",
+        lambda provider, provider_config, text: {"provider": provider, "ok": False, "error": "HTTP 400"},
+    )
+    store = TaskStore()
+    task_id = store.create("metadata", profile="demoapp")
+    store.set_status(task_id, TaskStatus.ERROR)
+    store.set_result(task_id, {"success": False, "error": "upload failed"})
+
+    notifications.notify_task_finished(task_id, task_store=store)
+
+    task = store.get(task_id)
+    assert task["status"] == TaskStatus.ERROR
+    assert any("群通知发送失败：feishu HTTP 400" in line for line in task["logs"])

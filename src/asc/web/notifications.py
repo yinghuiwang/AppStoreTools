@@ -8,6 +8,8 @@ from typing import Any
 
 import toml
 
+from asc.web import webhook_clients
+
 try:
     import tomllib
 except ImportError:  # pragma: no cover - Python 3.9/3.10 fallback
@@ -22,6 +24,16 @@ DEFAULT_NOTIFY_STATUSES = ["done", "error", "canceled"]
 DEFAULT_NOTIFY_KINDS = ["metadata", "build", "whats-new", "iap", "urls"]
 TERMINAL_STATUSES = tuple(DEFAULT_NOTIFY_STATUSES)
 TASK_KINDS = tuple(DEFAULT_NOTIFY_KINDS)
+STATUS_LABELS = {
+    "done": "完成",
+    "error": "失败",
+    "canceled": "已取消",
+}
+STATUS_TITLE_PREFIX = {
+    "done": "ASC 任务完成",
+    "error": "ASC 任务失败",
+    "canceled": "ASC 任务已取消",
+}
 
 
 def webhook_config_path() -> Path:
@@ -149,3 +161,78 @@ def load_public_webhook_config() -> dict[str, Any]:
         data["secret"] = ""
         data["has_secret"] = bool(secret)
     return public
+
+
+def _status_value(status: Any) -> str:
+    return str(getattr(status, "value", status) or "")
+
+
+def should_notify(task: dict[str, Any], config: dict[str, Any]) -> bool:
+    """Return whether a terminal task matches the webhook notification filters."""
+    if not config.get("enabled"):
+        return False
+
+    status = _status_value(task.get("status"))
+    kind = str(task.get("kind") or "")
+    return status in config.get("notify_statuses", []) and kind in config.get("notify_kinds", [])
+
+
+def build_task_message(task: dict[str, Any]) -> str:
+    """Build a concise Markdown message for a finished task."""
+    status = _status_value(task.get("status"))
+    title = str(task.get("title") or task.get("kind") or "未知任务")
+    prefix = STATUS_TITLE_PREFIX.get(status, "ASC 任务通知")
+
+    lines = [
+        f"**{prefix}：{title}**",
+        f"应用/Profile：{task.get('profile') or '-'}",
+        f"状态：{STATUS_LABELS.get(status, status or '-')}",
+        f"耗时：{task.get('duration_label') or '-'}",
+        f"完成时间：{task.get('completed_at') or '-'}",
+        f"任务 ID：{str(task.get('id') or '')[:8] or '-'}",
+    ]
+
+    result = task.get("result")
+    result_error = result.get("error") if isinstance(result, dict) else None
+    if status == "error" and result_error:
+        lines.append(f"错误：{result_error}")
+    elif status == "canceled":
+        lines.append("结果：用户取消")
+
+    if status == "error":
+        logs = task.get("logs") if isinstance(task.get("logs"), list) else []
+        excerpt = [str(line) for line in logs[-4:] if line is not None]
+        if excerpt:
+            lines.append("最近日志：")
+            lines.extend(f"> {line}" for line in excerpt)
+
+    return "\n".join(lines)
+
+
+def notify_task_finished(task_id: str, *, task_store: Any) -> list[dict[str, Any]]:
+    """Send configured webhook notifications for a finished task."""
+    task = task_store.get(task_id)
+    if task is None:
+        return []
+
+    config = load_webhook_config()
+    if not should_notify(task, config):
+        return []
+
+    text = build_task_message(task)
+    results = []
+    providers = config.get("providers", {})
+    for provider in PROVIDERS:
+        provider_config = providers.get(provider, {})
+        if not provider_config.get("enabled") or not provider_config.get("url"):
+            continue
+
+        result = webhook_clients.send_provider(provider, provider_config, text)
+        results.append(result)
+        if result.get("ok"):
+            task_store.append_log(task_id, f"群通知已发送：{provider}")
+        else:
+            error = result.get("error") or "Unknown error"
+            task_store.append_log(task_id, f"群通知发送失败：{provider} {error}")
+
+    return results
