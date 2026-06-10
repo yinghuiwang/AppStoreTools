@@ -37,6 +37,9 @@ STATUS_TITLE_PREFIX = {
     "canceled": "ASC 任务已取消",
 }
 SECRET_ASSIGNMENT_RE = re.compile(r"\b(access_token|key|token|secret)=([^\s&]+)", re.IGNORECASE)
+SECRET_COLON_RE = re.compile(r"\b(api_key|access_token|key|token|secret)\s*:\s*([^\s,\"'}]+)", re.IGNORECASE)
+SECRET_JSON_RE = re.compile(r'("(?:api_key|access_token|key|token|secret)"\s*:\s*")([^"]+)(")', re.IGNORECASE)
+BEARER_TOKEN_RE = re.compile(r"\b(Authorization\s*:\s*Bearer\s+)([^\s,;]+)", re.IGNORECASE)
 URL_RE = re.compile(r"https?://[^\s>)\]]+")
 _notified_task_ids: set[str] = set()
 _notified_task_ids_lock = Lock()
@@ -176,7 +179,10 @@ def _status_value(status: Any) -> str:
 def _sanitize_message_text(value: Any) -> str:
     text = str(value)
     text = URL_RE.sub("[redacted-url]", text)
-    return SECRET_ASSIGNMENT_RE.sub(r"\1=[redacted]", text)
+    text = BEARER_TOKEN_RE.sub(r"\1[redacted]", text)
+    text = SECRET_JSON_RE.sub(r'\1[redacted]\3', text)
+    text = SECRET_ASSIGNMENT_RE.sub(r"\1=[redacted]", text)
+    return SECRET_COLON_RE.sub(r"\1: [redacted]", text)
 
 
 def should_notify(task: dict[str, Any], config: dict[str, Any]) -> bool:

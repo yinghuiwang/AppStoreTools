@@ -381,11 +381,13 @@ def test_build_task_message_sanitizes_failure_secrets():
         "completed_at": "2026-06-10T11:00:00",
         "result": {
             "success": False,
-            "error": "failed https://feishu.example/hook?access_token=secret-token",
+            "error": "failed https://feishu.example/hook?access_token=secret-token Authorization: Bearer bearer-token",
         },
         "logs": [
             "request key=secret-key",
             "posted to https://wecom.example/hook?key=secret-key",
+            "api_key: api-secret-key",
+            '{"secret":"json-secret-value"}',
         ],
     }
 
@@ -393,6 +395,9 @@ def test_build_task_message_sanitizes_failure_secrets():
 
     assert "secret-token" not in text
     assert "secret-key" not in text
+    assert "bearer-token" not in text
+    assert "api-secret-key" not in text
+    assert "json-secret-value" not in text
     assert "https://feishu.example/hook?access_token=secret-token" not in text
     assert "https://wecom.example/hook?key=secret-key" not in text
     assert "[redacted]" in text
