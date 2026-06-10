@@ -56,7 +56,10 @@ def build_dingtalk_url(url: str, secret: str = "") -> str:
         digestmod=hashlib.sha256,
     ).digest()
     sign = quote(base64.b64encode(digest).decode("utf-8"), safe="")
-    separator = "&" if "?" in url else "?"
+    if url.endswith(("?", "&")):
+        separator = ""
+    else:
+        separator = "&" if "?" in url else "?"
     return f"{url}{separator}timestamp={timestamp}&sign={sign}"
 
 

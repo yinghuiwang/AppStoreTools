@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import parse_qs
+from urllib.parse import urlparse
 
 import pytest
 
@@ -172,9 +174,43 @@ def test_dingtalk_signature_url(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(webhook_clients.time, "time", lambda: 1700000000)
 
     url = webhook_clients.build_dingtalk_url("https://ding.example/hook?access_token=abc", "secret")
+    query = parse_qs(urlparse(url).query)
 
     assert "timestamp=1700000000000" in url
-    assert "sign=" in url
+    assert query["sign"] == ["OuzzJR5+xZ4/EYwqtNt6sMYZQMTa/HEGvc9miJe7XzY="]
+    assert "sign=OuzzJR5%2BxZ4%2FEYwqtNt6sMYZQMTa%2FHEGvc9miJe7XzY%3D" in url
+
+
+def test_dingtalk_url_without_secret_is_unchanged():
+    url = "https://ding.example/hook?access_token=abc"
+
+    assert webhook_clients.build_dingtalk_url(url, "") == url
+
+
+def test_dingtalk_signature_url_separators(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(webhook_clients.time, "time", lambda: 1700000000)
+
+    no_query_url = webhook_clients.build_dingtalk_url("https://ding.example/hook", "secret")
+    existing_query_url = webhook_clients.build_dingtalk_url(
+        "https://ding.example/hook?access_token=abc",
+        "secret",
+    )
+    trailing_question_url = webhook_clients.build_dingtalk_url("https://ding.example/hook?", "secret")
+    trailing_ampersand_url = webhook_clients.build_dingtalk_url(
+        "https://ding.example/hook?access_token=abc&",
+        "secret",
+    )
+
+    assert no_query_url.startswith("https://ding.example/hook?timestamp=1700000000000&sign=")
+    assert existing_query_url.startswith(
+        "https://ding.example/hook?access_token=abc&timestamp=1700000000000&sign="
+    )
+    assert trailing_question_url.startswith("https://ding.example/hook?timestamp=1700000000000&sign=")
+    assert trailing_ampersand_url.startswith(
+        "https://ding.example/hook?access_token=abc&timestamp=1700000000000&sign="
+    )
+    assert "?&" not in trailing_question_url
+    assert "&&" not in trailing_ampersand_url
 
 
 def test_send_provider_success(monkeypatch: pytest.MonkeyPatch):
@@ -218,3 +254,80 @@ def test_send_provider_failure_sanitizes_url(monkeypatch: pytest.MonkeyPatch):
     assert result["ok"] is False
     assert "secret-token" not in result["error"]
     assert "HTTP 400" in result["error"]
+
+
+def test_send_provider_exception_sanitizes_url_and_secret(monkeypatch: pytest.MonkeyPatch):
+    def fake_post(url, json, timeout):
+        raise RuntimeError("https://wecom.example/hook?key=secret-token secret-value")
+
+    monkeypatch.setattr(webhook_clients.requests, "post", fake_post)
+
+    result = webhook_clients.send_provider(
+        "wecom",
+        {
+            "enabled": True,
+            "url": "https://wecom.example/hook?key=secret-token",
+            "secret": "secret-value",
+        },
+        "hello",
+    )
+
+    assert result == {"provider": "wecom", "ok": False, "error": "RuntimeError"}
+
+
+def test_send_provider_unsupported_provider_is_sanitized_and_does_not_post(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    calls = []
+
+    def fake_post(url, json, timeout):
+        calls.append({"url": url, "json": json, "timeout": timeout})
+        raise AssertionError("requests.post should not be called")
+
+    monkeypatch.setattr(webhook_clients.requests, "post", fake_post)
+
+    result = webhook_clients.send_provider(
+        "unknown",
+        {
+            "enabled": True,
+            "url": "https://unknown.example/hook?token=secret-token",
+            "secret": "secret-value",
+        },
+        "hello",
+    )
+
+    assert result == {"provider": "unknown", "ok": False, "error": "Unsupported provider"}
+    assert calls == []
+    assert "secret-token" not in result["error"]
+    assert "secret-value" not in result["error"]
+
+
+def test_send_provider_dingtalk_posts_signed_url(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(webhook_clients.time, "time", lambda: 1700000000)
+    calls = []
+
+    class Response:
+        status_code = 200
+        text = "ok"
+
+    def fake_post(url, json, timeout):
+        calls.append({"url": url, "json": json, "timeout": timeout})
+        return Response()
+
+    monkeypatch.setattr(webhook_clients.requests, "post", fake_post)
+
+    result = webhook_clients.send_provider(
+        "dingtalk",
+        {"enabled": True, "url": "https://ding.example/hook?access_token=abc", "secret": "secret"},
+        "hello",
+    )
+
+    assert result == {"provider": "dingtalk", "ok": True}
+    assert calls[0]["url"].startswith(
+        "https://ding.example/hook?access_token=abc&timestamp=1700000000000&sign="
+    )
+    assert "sign=OuzzJR5%2BxZ4%2FEYwqtNt6sMYZQMTa%2FHEGvc9miJe7XzY%3D" in calls[0]["url"]
+    assert calls[0]["json"] == {
+        "msgtype": "markdown",
+        "markdown": {"title": "ASC 任务通知", "text": "hello"},
+    }
