@@ -70,3 +70,12 @@ def test_settings_webhooks_test_sends_provider(client: TestClient, monkeypatch: 
 
     assert response.status_code == 200
     assert response.json()["results"] == [{"provider": "feishu", "ok": True}]
+
+
+def test_settings_webhooks_test_empty_provider_is_unsupported(client: TestClient):
+    response = client.post("/api/settings/webhooks/test", json={"provider": ""})
+
+    assert response.status_code == 200
+    assert response.json()["results"] == [
+        {"provider": "", "ok": False, "error": "Unsupported provider"},
+    ]
