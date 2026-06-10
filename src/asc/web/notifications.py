@@ -25,7 +25,7 @@ PROVIDERS = ("feishu", "wecom", "dingtalk")
 DEFAULT_NOTIFY_STATUSES = ["done", "error", "canceled"]
 DEFAULT_NOTIFY_KINDS = ["metadata", "build", "whats-new", "iap", "urls"]
 TERMINAL_STATUSES = tuple(DEFAULT_NOTIFY_STATUSES)
-TASK_KINDS = tuple(DEFAULT_NOTIFY_KINDS)
+TASK_KINDS = (*DEFAULT_NOTIFY_KINDS, "update")
 STATUS_LABELS = {
     "done": "完成",
     "error": "失败",
@@ -58,7 +58,7 @@ def default_webhook_config() -> dict[str, Any]:
     return {
         "enabled": False,
         "notify_statuses": list(TERMINAL_STATUSES),
-        "notify_kinds": list(TASK_KINDS),
+        "notify_kinds": list(DEFAULT_NOTIFY_KINDS),
         "providers": {
             provider: {
                 "enabled": False,
@@ -81,12 +81,17 @@ def _read_toml(path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def _normalize_string_list(value: Any, allowed: tuple[str, ...]) -> list[str]:
+def _normalize_string_list(
+    value: Any,
+    allowed: tuple[str, ...],
+    default: tuple[str, ...] | None = None,
+) -> list[str]:
+    fallback = allowed if default is None else default
     if not isinstance(value, list):
-        return list(allowed)
+        return list(fallback)
 
     normalized = [item for item in value if isinstance(item, str) and item in allowed]
-    return normalized or list(allowed)
+    return normalized or list(fallback)
 
 
 def _normalize_bool(value: Any) -> bool:
@@ -123,6 +128,7 @@ def normalize_webhook_config(config: Any) -> dict[str, Any]:
         "notify_kinds": _normalize_string_list(
             data.get("notify_kinds"),
             TASK_KINDS,
+            tuple(DEFAULT_NOTIFY_KINDS),
         ),
         "providers": {
             provider: _normalize_provider(provider_data.get(provider))

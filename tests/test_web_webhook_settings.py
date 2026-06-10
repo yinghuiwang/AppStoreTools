@@ -219,9 +219,12 @@ def test_send_test_notification_configured_provider_uses_fixed_message(
 
 def test_finish_task_sets_result_then_notifies(monkeypatch: pytest.MonkeyPatch):
     from asc.web import routes_api
-    from asc.web.tasks import TaskStatus
+    from asc.web.tasks import TaskStatus, TaskStore
 
-    task_id = routes_api._task_store.create("build", profile="demoapp")
+    task_store = TaskStore()
+    monkeypatch.setattr(routes_api, "_task_store", task_store)
+
+    task_id = task_store.create("build", profile="demoapp")
     calls = []
     monkeypatch.setattr(
         routes_api.notifications,
@@ -237,3 +240,28 @@ def test_finish_task_sets_result_then_notifies(monkeypatch: pytest.MonkeyPatch):
     assert task["status"] == TaskStatus.DONE
     assert task["result"] == {"success": True}
     assert calls == [(task_id, {"success": True})]
+
+
+def test_finish_task_keeps_result_when_notification_raises(monkeypatch: pytest.MonkeyPatch):
+    from asc.web import routes_api
+    from asc.web.tasks import TaskStatus, TaskStore
+
+    task_store = TaskStore()
+    monkeypatch.setattr(routes_api, "_task_store", task_store)
+
+    def raise_notification_error(notified_task_id: str, task_store: TaskStore):
+        raise RuntimeError("notification failed")
+
+    task_id = task_store.create("build", profile="demoapp")
+    monkeypatch.setattr(
+        routes_api.notifications,
+        "notify_task_finished",
+        raise_notification_error,
+    )
+
+    routes_api._finish_task(task_id, TaskStatus.ERROR, {"success": False, "error": "build failed"})
+
+    task = task_store.get(task_id)
+    assert task["status"] == TaskStatus.ERROR
+    assert task["result"] == {"success": False, "error": "build failed"}
+    assert any("群通知处理失败：RuntimeError" in line for line in task["logs"])

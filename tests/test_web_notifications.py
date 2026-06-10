@@ -83,6 +83,16 @@ def test_normalize_webhook_config_rejects_malformed_provider_strings():
     assert config["providers"]["wecom"]["secret"] == "wc-secret"
 
 
+def test_normalize_webhook_config_keeps_selected_update_kind():
+    config = notifications.normalize_webhook_config({
+        "enabled": True,
+        "notify_statuses": ["done"],
+        "notify_kinds": ["update"],
+    })
+
+    assert config["notify_kinds"] == ["update"]
+
+
 def test_save_and_load_webhook_config(webhook_path: Path):
     payload = {
         "enabled": True,
@@ -343,6 +353,16 @@ def test_should_notify_matches_kind_and_status():
     assert notifications.should_notify({"kind": "build", "status": "done"}, config) is True
     assert notifications.should_notify({"kind": "metadata", "status": "done"}, config) is False
     assert notifications.should_notify({"kind": "build", "status": "error"}, config) is False
+
+
+def test_should_notify_matches_selected_update_kind():
+    config = notifications.default_webhook_config()
+    config["enabled"] = True
+    config["notify_statuses"] = ["done"]
+    config["notify_kinds"] = ["update"]
+
+    assert notifications.should_notify({"kind": "update", "status": "done"}, config) is True
+    assert notifications.should_notify({"kind": "build", "status": "done"}, config) is False
 
 
 def test_build_task_message_for_failure():
