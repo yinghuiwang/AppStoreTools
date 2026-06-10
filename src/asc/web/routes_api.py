@@ -90,6 +90,15 @@ from asc.web.tasks import task_store as _task_store, TaskStatus as _TaskStatus
 from asc.progress import ProcessCanceled
 
 
+def _finish_task(task_id: str, status: _TaskStatus, result: dict) -> None:
+    _task_store.set_status(task_id, status)
+    _task_store.set_result(task_id, result)
+    try:
+        notifications.notify_task_finished(task_id, task_store=_task_store)
+    except Exception as exc:
+        _task_store.append_log(task_id, f"群通知处理失败：{exc.__class__.__name__}")
+
+
 def _run_metadata_check(profile: str) -> dict:
     """Run connectivity check for the given profile and return structured result."""
     from asc.config import Config
@@ -209,21 +218,17 @@ def _start_metadata_task(
             done_flag.set()
             if cancel_event.is_set():
                 _task_store.append_log(task_id, "⏹ 用户已终止上传")
-                _task_store.set_status(task_id, _TaskStatus.CANCELED)
-                _task_store.set_result(task_id, {"success": False, "canceled": True})
+                _finish_task(task_id, _TaskStatus.CANCELED, {"success": False, "canceled": True})
             else:
-                _task_store.set_status(task_id, _TaskStatus.DONE)
-                _task_store.set_result(task_id, {"success": True})
+                _finish_task(task_id, _TaskStatus.DONE, {"success": True})
         except ProcessCanceled:
             done_flag.set()
             _task_store.append_log(task_id, "⏹ 用户已终止上传")
-            _task_store.set_status(task_id, _TaskStatus.CANCELED)
-            _task_store.set_result(task_id, {"success": False, "canceled": True})
+            _finish_task(task_id, _TaskStatus.CANCELED, {"success": False, "canceled": True})
         except Exception as e:
             done_flag.set()
             _task_store.append_log(task_id, f"❌ 错误：{e}")
-            _task_store.set_status(task_id, _TaskStatus.ERROR)
-            _task_store.set_result(task_id, {"success": False, "error": str(e)})
+            _finish_task(task_id, _TaskStatus.ERROR, {"success": False, "error": str(e)})
 
     _threading.Thread(target=_run, daemon=True).start()
     return task_id
@@ -365,21 +370,17 @@ def _start_build_task(
             done_flag.set()
             if cancel_event.is_set():
                 _task_store.append_log(task_id, "⏹ 用户已终止上传")
-                _task_store.set_status(task_id, _TaskStatus.CANCELED)
-                _task_store.set_result(task_id, {"success": False, "canceled": True})
+                _finish_task(task_id, _TaskStatus.CANCELED, {"success": False, "canceled": True})
             else:
-                _task_store.set_status(task_id, _TaskStatus.DONE)
-                _task_store.set_result(task_id, {"success": True})
+                _finish_task(task_id, _TaskStatus.DONE, {"success": True})
         except ProcessCanceled:
             done_flag.set()
             _task_store.append_log(task_id, "⏹ 用户已终止上传")
-            _task_store.set_status(task_id, _TaskStatus.CANCELED)
-            _task_store.set_result(task_id, {"success": False, "canceled": True})
+            _finish_task(task_id, _TaskStatus.CANCELED, {"success": False, "canceled": True})
         except Exception as e:
             done_flag.set()
             _task_store.append_log(task_id, f"❌ 错误：{e}")
-            _task_store.set_status(task_id, _TaskStatus.ERROR)
-            _task_store.set_result(task_id, {"success": False, "error": str(e)})
+            _finish_task(task_id, _TaskStatus.ERROR, {"success": False, "error": str(e)})
 
     _threading.Thread(target=_run, daemon=True).start()
     return task_id
@@ -1130,13 +1131,11 @@ def _start_whats_new_task(
                         _task_store.set_progress(task_id, int((i + 1) / len(target_locs) * 100), f"上传 {locale}")
 
             done_flag.set()
-            _task_store.set_status(task_id, _TaskStatus.DONE)
-            _task_store.set_result(task_id, {"success": True})
+            _finish_task(task_id, _TaskStatus.DONE, {"success": True})
         except Exception as e:
             done_flag.set()
             _task_store.append_log(task_id, f"❌ 错误：{e}")
-            _task_store.set_status(task_id, _TaskStatus.ERROR)
-            _task_store.set_result(task_id, {"success": False, "error": str(e)})
+            _finish_task(task_id, _TaskStatus.ERROR, {"success": False, "error": str(e)})
 
     _threading.Thread(target=_run, daemon=True).start()
     return task_id
@@ -1287,13 +1286,11 @@ def _start_iap_task(
                     )
 
             done_flag.set()
-            _task_store.set_status(task_id, _TaskStatus.DONE)
-            _task_store.set_result(task_id, {"success": True})
+            _finish_task(task_id, _TaskStatus.DONE, {"success": True})
         except Exception as e:
             done_flag.set()
             _task_store.append_log(task_id, f"❌ 错误：{e}")
-            _task_store.set_status(task_id, _TaskStatus.ERROR)
-            _task_store.set_result(task_id, {"success": False, "error": str(e)})
+            _finish_task(task_id, _TaskStatus.ERROR, {"success": False, "error": str(e)})
 
     _threading.Thread(target=_run, daemon=True).start()
     return task_id
@@ -1427,13 +1424,11 @@ async def urls_set(
                     )
 
             done_flag.set()
-            _task_store.set_status(task_id, _TaskStatus.DONE)
-            _task_store.set_result(task_id, {"success": True})
+            _finish_task(task_id, _TaskStatus.DONE, {"success": True})
         except Exception as e:
             done_flag.set()
             _task_store.append_log(task_id, f"❌ 错误：{e}")
-            _task_store.set_status(task_id, _TaskStatus.ERROR)
-            _task_store.set_result(task_id, {"success": False, "error": str(e)})
+            _finish_task(task_id, _TaskStatus.ERROR, {"success": False, "error": str(e)})
 
     _threading.Thread(target=_run, daemon=True).start()
     return {"task_id": task_id}
@@ -1524,12 +1519,10 @@ async def update_run(version: str = _Form(""), branch: str = _Form(""), dry_run:
             for line in output.splitlines():
                 _task_store.append_log(task_id, line)
 
-            _task_store.set_status(task_id, _TaskStatus.DONE)
-            _task_store.set_result(task_id, {"success": True})
+            _finish_task(task_id, _TaskStatus.DONE, {"success": True})
         except Exception as e:
             _task_store.append_log(task_id, f"❌ 错误：{e}")
-            _task_store.set_status(task_id, _TaskStatus.ERROR)
-            _task_store.set_result(task_id, {"success": False, "error": str(e)})
+            _finish_task(task_id, _TaskStatus.ERROR, {"success": False, "error": str(e)})
 
     _threading.Thread(target=_run, daemon=True).start()
     return {"task_id": task_id}

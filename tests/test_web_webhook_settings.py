@@ -215,3 +215,25 @@ def test_send_test_notification_configured_provider_uses_fixed_message(
             TEST_MESSAGE,
         ),
     ]
+
+
+def test_finish_task_sets_result_then_notifies(monkeypatch: pytest.MonkeyPatch):
+    from asc.web import routes_api
+    from asc.web.tasks import TaskStatus
+
+    task_id = routes_api._task_store.create("build", profile="demoapp")
+    calls = []
+    monkeypatch.setattr(
+        routes_api.notifications,
+        "notify_task_finished",
+        lambda notified_task_id, task_store: calls.append(
+            (notified_task_id, task_store.get(notified_task_id)["result"])
+        ),
+    )
+
+    routes_api._finish_task(task_id, TaskStatus.DONE, {"success": True})
+
+    task = routes_api._task_store.get(task_id)
+    assert task["status"] == TaskStatus.DONE
+    assert task["result"] == {"success": True}
+    assert calls == [(task_id, {"success": True})]
