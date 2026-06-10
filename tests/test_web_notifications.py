@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from asc.web import notifications
+from asc.web import webhook_clients
 
 
 def test_default_notify_constants():
@@ -148,3 +149,72 @@ def test_save_webhook_config_preserves_existing_secret_when_blank(webhook_path: 
     loaded = notifications.load_webhook_config()
     assert loaded["providers"]["feishu"]["url"] == "https://feishu.example/new"
     assert loaded["providers"]["feishu"]["secret"] == "old-secret"
+
+
+def test_feishu_signature_payload(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(webhook_clients.time, "time", lambda: 1700000000)
+
+    payload = webhook_clients.build_feishu_payload("hello", "secret")
+
+    assert payload["msg_type"] == "text"
+    assert payload["content"] == {"text": "hello"}
+    assert payload["timestamp"] == "1700000000"
+    assert payload["sign"] == "fiWS2+gh28DOydAv7hzONH/mDn9+b1Y4Y5ivXWXy8vA="
+
+
+def test_wecom_payload_uses_markdown():
+    payload = webhook_clients.build_wecom_payload("hello")
+
+    assert payload == {"msgtype": "markdown", "markdown": {"content": "hello"}}
+
+
+def test_dingtalk_signature_url(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(webhook_clients.time, "time", lambda: 1700000000)
+
+    url = webhook_clients.build_dingtalk_url("https://ding.example/hook?access_token=abc", "secret")
+
+    assert "timestamp=1700000000000" in url
+    assert "sign=" in url
+
+
+def test_send_provider_success(monkeypatch: pytest.MonkeyPatch):
+    calls = []
+
+    class Response:
+        status_code = 200
+        text = "ok"
+
+    def fake_post(url, json, timeout):
+        calls.append({"url": url, "json": json, "timeout": timeout})
+        return Response()
+
+    monkeypatch.setattr(webhook_clients.requests, "post", fake_post)
+
+    result = webhook_clients.send_provider(
+        "wecom",
+        {"enabled": True, "url": "https://wecom.example/hook", "secret": ""},
+        "hello",
+    )
+
+    assert result == {"provider": "wecom", "ok": True}
+    assert calls[0]["json"]["msgtype"] == "markdown"
+    assert calls[0]["timeout"] == 5
+
+
+def test_send_provider_failure_sanitizes_url(monkeypatch: pytest.MonkeyPatch):
+    class Response:
+        status_code = 400
+        text = "bad token"
+
+    monkeypatch.setattr(webhook_clients.requests, "post", lambda *args, **kwargs: Response())
+
+    result = webhook_clients.send_provider(
+        "dingtalk",
+        {"enabled": True, "url": "https://ding.example/hook?access_token=secret-token", "secret": ""},
+        "hello",
+    )
+
+    assert result["provider"] == "dingtalk"
+    assert result["ok"] is False
+    assert "secret-token" not in result["error"]
+    assert "HTTP 400" in result["error"]
