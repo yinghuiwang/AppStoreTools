@@ -68,12 +68,22 @@ def _normalize_string_list(value: Any, allowed: tuple[str, ...]) -> list[str]:
     return normalized or list(allowed)
 
 
+def _normalize_bool(value: Any) -> bool:
+    return value if isinstance(value, bool) else False
+
+
+def _normalize_string(value: Any, *, strip: bool = False) -> str:
+    if not isinstance(value, str):
+        return ""
+    return value.strip() if strip else value
+
+
 def _normalize_provider(value: Any) -> dict[str, Any]:
     data = value if isinstance(value, dict) else {}
     return {
-        "enabled": bool(data.get("enabled", False)),
-        "url": str(data.get("url") or ""),
-        "secret": str(data.get("secret") or ""),
+        "enabled": _normalize_bool(data.get("enabled", False)),
+        "url": _normalize_string(data.get("url", ""), strip=True),
+        "secret": _normalize_string(data.get("secret", "")),
     }
 
 
@@ -84,7 +94,7 @@ def normalize_webhook_config(config: Any) -> dict[str, Any]:
     provider_data = providers if isinstance(providers, dict) else {}
 
     return {
-        "enabled": bool(data.get("enabled", False)),
+        "enabled": _normalize_bool(data.get("enabled", False)),
         "notify_statuses": _normalize_string_list(
             data.get("notify_statuses"),
             TERMINAL_STATUSES,

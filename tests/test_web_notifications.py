@@ -37,6 +37,48 @@ def test_load_webhook_config_defaults_when_missing(webhook_path: Path):
     assert config["providers"]["feishu"]["secret"] == ""
 
 
+def test_load_webhook_config_defaults_for_malformed_toml(webhook_path: Path):
+    webhook_path.write_text("[providers.feishu\nenabled = true\n", encoding="utf-8")
+
+    config = notifications.load_webhook_config()
+
+    assert config == notifications.default_webhook_config()
+
+
+def test_normalize_webhook_config_rejects_malformed_bool_values():
+    config = notifications.normalize_webhook_config({
+        "enabled": "false",
+        "providers": {
+            "feishu": {
+                "enabled": "false",
+            },
+        },
+    })
+
+    assert config["enabled"] is False
+    assert config["providers"]["feishu"]["enabled"] is False
+
+
+def test_normalize_webhook_config_rejects_malformed_provider_strings():
+    config = notifications.normalize_webhook_config({
+        "providers": {
+            "feishu": {
+                "url": 123,
+                "secret": ["secret"],
+            },
+            "wecom": {
+                "url": "  https://wecom.example/hook  ",
+                "secret": "wc-secret",
+            },
+        },
+    })
+
+    assert config["providers"]["feishu"]["url"] == ""
+    assert config["providers"]["feishu"]["secret"] == ""
+    assert config["providers"]["wecom"]["url"] == "https://wecom.example/hook"
+    assert config["providers"]["wecom"]["secret"] == "wc-secret"
+
+
 def test_save_and_load_webhook_config(webhook_path: Path):
     payload = {
         "enabled": True,
