@@ -1573,6 +1573,8 @@ async def test_webhook_config(request: Request):
         data = await request.json()
     except Exception:
         return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+    if not isinstance(data, dict):
+        return JSONResponse({"error": "JSON body must be an object"}, status_code=400)
 
     try:
         return {"results": notifications.send_test_notification(provider=data.get("provider"))}
