@@ -112,11 +112,11 @@
           </template>
 
           <!-- Actions -->
-          <div class="flex gap-3 pt-3 border-t border-obsidian-700">
+          <div class="flex flex-wrap gap-3 pt-3 border-t border-obsidian-700">
             <!-- Preview translate (only when translateMode is true) -->
             <button type="button"
                     x-show="translateMode"
-                    class="btn-primary"
+                    class="btn-ghost"
                     :disabled="submitting || !text.trim()"
                     @click="
                       submitting = true;
@@ -142,6 +142,40 @@
                         });
                     ">
               <span x-show="!submitting">预览翻译</span>
+              <span x-show="submitting" class="flex items-center gap-1.5">
+                <svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                处理中...
+              </span>
+            </button>
+            <!-- Translate and upload in one step -->
+            <button type="button"
+                    x-show="translateMode"
+                    class="btn-primary"
+                    :disabled="submitting || !text.trim()"
+                    @click="
+                      submitting = true;
+                      translateError = '';
+                      fetch('/api/whats-new/run', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({text: text, source_locale: sourceLocale, translate: true, dry_run: 0})
+                      })
+                        .then(r => r.json().then(data => {
+                          if (!r.ok || data.error) throw new Error(data.error || '上传失败');
+                          return data;
+                        }))
+                        .then(data => {
+                          taskId = data.task_id;
+                          step = 3;
+                          submitting = false;
+                          startSSE(taskId);
+                        })
+                        .catch(err => {
+                          translateError = err.message || '上传失败';
+                          submitting = false;
+                        });
+                    ">
+              <span x-show="!submitting">翻译并上传</span>
               <span x-show="submitting" class="flex items-center gap-1.5">
                 <svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
                 处理中...
