@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 import json
 import os
 import hashlib
@@ -18,6 +19,46 @@ from asc.i18n import t, ERRORS, HELP
 
 REVIEW_SCREENSHOT_WARNING_BYTES = 5 * 1024 * 1024
 REVIEW_SCREENSHOT_EXTS = {".png", ".jpg", ".jpeg"}
+
+
+def _non_empty_str(value) -> bool:
+    return isinstance(value, str) and value.strip() != ""
+
+
+def _valid_territory_id(value) -> bool:
+    return isinstance(value, str) and len(value.strip()) == 3 and value.strip().isalpha()
+
+
+def _validate_iap_item_price(item: dict, label: str) -> None:
+    price = item.get("price")
+    if price is None:
+        return
+    if not isinstance(price, dict):
+        raise ValueError(f"{label}.price must be an object")
+
+    has_price_point = _non_empty_str(price.get("pricePointId"))
+    has_base_lookup = (
+        _non_empty_str(price.get("baseTerritory"))
+        and _non_empty_str(price.get("baseAmount"))
+    )
+    if not has_price_point and not has_base_lookup:
+        raise ValueError(
+            f"{label}.price requires either pricePointId or baseTerritory + baseAmount"
+        )
+    if has_price_point and not _non_empty_str(price.get("baseTerritory")):
+        raise ValueError(f"{label}.price.baseTerritory required when pricePointId is set")
+    if price.get("baseTerritory") is not None and not _valid_territory_id(
+        price.get("baseTerritory")
+    ):
+        raise ValueError(
+            f"{label}.price.baseTerritory must be a 3-letter territory id such as USA or CHN"
+        )
+    if price.get("territory") is not None and not _valid_territory_id(
+        price.get("territory")
+    ):
+        raise ValueError(
+            f"{label}.price.territory must be a 3-letter territory id such as USA or CHN"
+        )
 
 
 def _resolve_review_screenshot(obj: dict, config_dir: Path) -> None:
@@ -87,6 +128,7 @@ def _load_iap_config(file_path: str) -> tuple[list[dict], list[dict]]:
     for idx, item in enumerate(items):
         _resolve_review_screenshot(item, config_dir)
         _validate_review_screenshot(item, f"items[{idx}]")
+        _validate_iap_item_price(item, f"items[{idx}]")
     for group in subs:
         for sub in group.get("subscriptions", []):
             _resolve_review_screenshot(sub, config_dir)
@@ -128,16 +170,13 @@ def _upload_iap_core(api, app_id: str, iap_items: list[dict], dry_run: bool = Fa
         if not review_note:
             review_note = str(review.get("note", "")).strip()
         review_screenshot = review.get("screenshot")
-        available_all = item.get("availableInAllTerritories", True)
+        price = item.get("price") if isinstance(item.get("price"), dict) else {}
         localizations = item.get("localizations", {})
 
         print(f"\n  ── IAP: {product_id} ──")
         existing = existing_by_product_id.get(product_id)
 
-        attrs = {
-            "productId": product_id,
-            "availableInAllTerritories": bool(available_all),
-        }
+        attrs = {"productId": product_id}
         if name:
             attrs["name"] = name
         if iap_type:
@@ -165,6 +204,9 @@ def _upload_iap_core(api, app_id: str, iap_items: list[dict], dry_run: bool = Fa
                 print(f"    ✅ 已创建，ID: {iap_id}")
             else:
                 iap_id = "DRY_RUN_ID"
+
+        _sync_iap_availability(api, iap_id, item, update_existing, dry_run)
+        _sync_iap_price(api, iap_id, price, update_existing, dry_run)
 
         if review_screenshot:
             _sync_iap_review_screenshot(
@@ -217,6 +259,172 @@ def _upload_iap_core(api, app_id: str, iap_items: list[dict], dry_run: bool = Fa
         print(f"[PROGRESS:{pct}:IAP {idx + 1}/{total_items}]")
 
     print("\n✅ IAP 上传完成")
+
+
+def _sync_iap_availability(api, iap_id, item, update_existing, dry_run):
+    available_all = bool(item.get("availableInAllTerritories", True))
+    territory_ids = item.get("availableTerritories") or item.get("territories")
+
+    if territory_ids is not None:
+        if not isinstance(territory_ids, list):
+            print("    ⚠️  销售地区: availableTerritories/territories 必须是列表，跳过")
+            return
+        territory_ids = [str(t).strip() for t in territory_ids if str(t).strip()]
+    elif available_all:
+        if dry_run:
+            print("    [预览] 销售地区: 全部国家/地区")
+            return
+        territory_ids = [t["id"] for t in api.list_territories()]
+    else:
+        territory_ids = []
+
+    if not territory_ids:
+        print("    ⚠️  销售地区: 无可用地区配置，跳过")
+        return
+
+    if dry_run:
+        print(f"    [预览] 销售地区: {len(territory_ids)} 个地区")
+        return
+
+    try:
+        existing = api.get_in_app_purchase_availability(iap_id)
+    except Exception:
+        existing = None
+
+    if existing and not update_existing:
+        print("    销售地区: 已存在，跳过")
+        return
+    if existing and update_existing:
+        print("    销售地区: 已存在（Apple API 不支持直接替换），跳过")
+        return
+
+    try:
+        api.create_in_app_purchase_availability(
+            iap_id,
+            available_in_new_territories=available_all,
+            territory_ids=territory_ids,
+        )
+        print(f"    销售地区: 已设置 {len(territory_ids)} 个地区 ✅")
+    except Exception as e:
+        print(f"    ⚠️  销售地区设置跳过: {e}")
+
+
+def _sync_iap_price(api, iap_id, price_cfg, update_existing, dry_run):
+    if not price_cfg:
+        print("    ⚠️  无价格配置，跳过价格时间表")
+        return
+
+    territory = str(
+        price_cfg.get("territory") or price_cfg.get("baseTerritory") or ""
+    ).strip()
+    amount = price_cfg.get("baseAmount")
+    pp_id = str(price_cfg.get("pricePointId") or "").strip()
+    apply_equalized = bool(price_cfg.get("applyEqualizedPrices", True))
+
+    if not pp_id:
+        if not territory or amount is None:
+            print("    ⚠️  价格: 需要 pricePointId 或 baseTerritory + baseAmount，跳过")
+            return
+        pp_id = api.find_in_app_purchase_price_point(iap_id, territory, amount)
+    if not pp_id:
+        candidates = api.list_in_app_purchase_price_points(iap_id, territory)
+        nearest = _nearest_iap_price_points(candidates, amount, limit=3)
+        hint = ", ".join(f"{c}" for c in nearest) or "无候选"
+        raise Exception(
+            f"未找到 IAP Price Point: {territory} {amount}. "
+            f"territory 必须使用 Apple 三字母 ID（如 USA/CHN），最近候选: {hint}"
+        )
+
+    if dry_run:
+        if amount is not None:
+            print(f"    [预览] 价格: 基准 {territory} {amount} → Price Point {pp_id}")
+        else:
+            print(f"    [预览] 价格: Price Point {pp_id}")
+        return
+
+    try:
+        existing = api.get_in_app_purchase_price_schedule(iap_id)
+    except Exception:
+        existing = None
+
+    if _iap_price_schedule_has_prices(existing) and not update_existing:
+        print("    价格: 时间表已存在，跳过")
+        return
+    if _iap_price_schedule_has_prices(existing) and update_existing:
+        print("    价格: 时间表已存在（Apple API 不支持直接替换），跳过")
+        return
+
+    price_points = [(territory, pp_id)]
+    if apply_equalized:
+        try:
+            equalizations = api.list_in_app_purchase_price_point_equalizations(
+                pp_id, iap_id
+            )
+            price_points = _price_points_by_territory(equalizations)
+            if not any(price_territory == territory for price_territory, _ in price_points):
+                price_points.insert(0, (territory, pp_id))
+        except Exception as e:
+            print(f"    ⚠️  等价价格点查询失败，仅设置基准地区: {e}")
+
+    api.create_in_app_purchase_price_schedule(
+        iap_id,
+        territory,
+        price_points,
+        start_date=price_cfg.get("startDate"),
+        end_date=price_cfg.get("endDate"),
+    )
+    if amount is not None:
+        print(f"    价格: 基准 {territory} {amount} → 已设置 {len(price_points)} 个地区 ✅")
+    else:
+        print(f"    价格: Price Point {pp_id} → 已设置 {len(price_points)} 个地区 ✅")
+
+
+def _iap_price_schedule_has_prices(schedule) -> bool:
+    if not isinstance(schedule, dict):
+        return False
+    relationships = schedule.get("relationships")
+    if not isinstance(relationships, dict):
+        return False
+    for key in ("manualPrices", "automaticPrices"):
+        data = relationships.get(key, {}).get("data")
+        if isinstance(data, list) and data:
+            return True
+    return False
+
+
+def _price_points_by_territory(price_points: list) -> list[tuple[str, str]]:
+    result = []
+    seen = set()
+    for price_point in price_points:
+        territory_id = (
+            price_point.get("relationships", {})
+            .get("territory", {})
+            .get("data", {})
+            .get("id")
+        )
+        if not territory_id:
+            territory_id = price_point.get("territory")
+        pp_id = price_point.get("id")
+        if territory_id and pp_id and territory_id not in seen:
+            result.append((territory_id, pp_id))
+            seen.add(territory_id)
+    return result
+
+
+def _nearest_iap_price_points(candidates: list, target, limit: int) -> list[str]:
+    try:
+        target_decimal = Decimal(str(target))
+    except (InvalidOperation, TypeError, ValueError):
+        return []
+    scored = []
+    for candidate in candidates:
+        price_str = candidate.get("attributes", {}).get("customerPrice", "")
+        try:
+            scored.append((abs(Decimal(str(price_str)) - target_decimal), price_str))
+        except (InvalidOperation, TypeError, ValueError):
+            continue
+    scored.sort(key=lambda item: item[0])
+    return [price for _, price in scored[:limit]]
 
 
 def _sync_iap_review_screenshot(api, iap_id, shot_path, update_existing, dry_run):

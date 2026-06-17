@@ -149,6 +149,72 @@ def test_create_subscription_price_allows_official_optional_fields(api):
     assert relationships["territory"]["data"]["id"] == "USA"
 
 
+def test_create_in_app_purchase_availability_uses_official_resource(api):
+    with patch.object(api, "post", return_value={"data": {"id": "avail1"}}) as mock_post:
+        api.create_in_app_purchase_availability(
+            "iap1",
+            available_in_new_territories=True,
+            territory_ids=["USA", "CHN"],
+        )
+
+    path, payload = mock_post.call_args.args
+    assert path == "/v1/inAppPurchaseAvailabilities"
+    assert payload["data"]["type"] == "inAppPurchaseAvailabilities"
+    assert payload["data"]["attributes"] == {"availableInNewTerritories": True}
+    relationships = payload["data"]["relationships"]
+    assert relationships["inAppPurchase"]["data"] == {
+        "type": "inAppPurchases",
+        "id": "iap1",
+    }
+    assert relationships["availableTerritories"]["data"] == [
+        {"type": "territories", "id": "USA"},
+        {"type": "territories", "id": "CHN"},
+    ]
+
+
+def test_create_in_app_purchase_price_schedule_uses_official_resource(api):
+    with patch.object(api, "post", return_value={"data": {"id": "sched1"}}) as mock_post:
+        api.create_in_app_purchase_price_schedule(
+            "iap1",
+            "USA",
+            [("USA", "pp1")],
+            start_date="2026-07-01",
+        )
+
+    path, payload = mock_post.call_args.args
+    assert path == "/v1/inAppPurchasePriceSchedules"
+    assert payload["data"]["type"] == "inAppPurchasePriceSchedules"
+    assert payload["data"]["relationships"]["inAppPurchase"]["data"] == {
+        "type": "inAppPurchases",
+        "id": "iap1",
+    }
+    assert payload["data"]["relationships"]["baseTerritory"]["data"] == {
+        "type": "territories",
+        "id": "USA",
+    }
+    assert payload["data"]["relationships"]["manualPrices"]["data"] == [
+        {"type": "inAppPurchasePrices", "id": "${price-USA}"}
+    ]
+    assert payload["included"][0]["relationships"]["inAppPurchasePricePoint"]["data"] == {
+        "type": "inAppPurchasePricePoints",
+        "id": "pp1",
+    }
+    assert payload["included"][0]["attributes"] == {"startDate": "2026-07-01"}
+
+
+def test_list_in_app_purchase_price_point_equalizations_uses_official_endpoint(api):
+    with patch.object(api, "get", return_value={"data": []}) as mock_get:
+        result = api.list_in_app_purchase_price_point_equalizations("pp1", "iap1")
+
+    assert result == []
+    mock_get.assert_called_once_with(
+        "/v1/inAppPurchasePricePoints/pp1/equalizations",
+        limit=8000,
+        include="territory",
+        **{"filter[inAppPurchaseV2]": "iap1"},
+    )
+
+
 def test_list_subscription_price_point_equalizations_uses_official_endpoint(api):
     with patch.object(api, "get", return_value={"data": []}) as mock_get:
         result = api.list_subscription_price_point_equalizations("pp1", "sub1")

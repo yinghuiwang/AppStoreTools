@@ -87,6 +87,22 @@ def test_init_iap_json_defaults_subscriptions_to_all_territories(xcode_project):
     assert subscription["price"]["baseTerritory"] == "USA"
 
 
+def test_init_iap_json_includes_consumable_price_template(xcode_project):
+    """Generated one-time IAP template includes price schedule config."""
+    import json
+    runner.invoke(app, ["init", "--path", str(xcode_project)])
+    content = (xcode_project / "AppStore" / "data" / "iap_packages.json").read_text()
+    data = json.loads(content)
+    item = data["items"][0]
+    assert item["inAppPurchaseType"] == "CONSUMABLE"
+    assert item["availableInAllTerritories"] is True
+    assert item["price"] == {
+        "baseTerritory": "USA",
+        "baseAmount": "0.99",
+        "applyEqualizedPrices": True,
+    }
+
+
 def test_init_non_xcode_dir_exits_nonzero(non_xcode_dir):
     """init exits with code 1 and an error message if no Xcode project detected."""
     result = runner.invoke(app, ["init", "--path", str(non_xcode_dir)])

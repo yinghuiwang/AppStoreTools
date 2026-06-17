@@ -727,6 +727,14 @@ def test_examples_screenshots_download(client):
     assert "screenshots_example.zip" in resp.headers.get("content-disposition", "")
     assert len(resp.content) > 0
 
+
+def test_examples_iap_download(client):
+    resp = client.get("/api/examples/iap.json")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/json"
+    assert "iap_packages_example.json" in resp.headers.get("content-disposition", "")
+    assert len(resp.content) > 0
+
 # IAP endpoint tests
 def test_iap_check_api(client):
     from unittest.mock import patch, MagicMock

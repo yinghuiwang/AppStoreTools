@@ -17,6 +17,9 @@ class IapFakeAPI:
         }
         self._locs: dict[str, list] = {}
         self._review_shots: dict[str, list] = {}
+        self._availabilities: dict[str, dict] = {}
+        self._price_points: dict[str, list] = {}
+        self._price_schedules: dict[str, dict] = {}
 
     def _nid(self):
         self._next += 1
@@ -36,6 +39,116 @@ class IapFakeAPI:
 
     def update_in_app_purchase(self, iap_id, attrs):
         self.calls.append(("update_in_app_purchase", iap_id, attrs))
+
+    def list_territories(self):
+        self.calls.append(("list_territories",))
+        return [
+            {"id": "USA", "type": "territories"},
+            {"id": "CHN", "type": "territories"},
+        ]
+
+    def get_in_app_purchase_availability(self, iap_id):
+        self.calls.append(("get_in_app_purchase_availability", iap_id))
+        return self._availabilities.get(iap_id)
+
+    def create_in_app_purchase_availability(
+        self, iap_id, available_in_new_territories, territory_ids
+    ):
+        self.calls.append(
+            (
+                "create_in_app_purchase_availability",
+                iap_id,
+                available_in_new_territories,
+                territory_ids,
+            )
+        )
+        availability = {
+            "id": f"availability_{iap_id}",
+            "availableInNewTerritories": available_in_new_territories,
+            "territoryIds": list(territory_ids),
+        }
+        self._availabilities[iap_id] = availability
+        return {"data": {"id": availability["id"]}}
+
+    def find_in_app_purchase_price_point(self, iap_id, territory, amount):
+        self.calls.append(("find_in_app_purchase_price_point", iap_id, territory, amount))
+        for pp in self._price_points.get(iap_id, []):
+            if pp["territory"] == territory and pp["customerPrice"] == str(amount):
+                return pp["id"]
+        return None
+
+    def list_in_app_purchase_price_points(self, iap_id, territory):
+        self.calls.append(("list_in_app_purchase_price_points", iap_id, territory))
+        return [
+            {
+                "id": pp["id"],
+                "attributes": {"customerPrice": pp["customerPrice"]},
+                "relationships": {
+                    "territory": {
+                        "data": {"type": "territories", "id": pp["territory"]}
+                    }
+                },
+            }
+            for pp in self._price_points.get(iap_id, [])
+            if pp["territory"] == territory
+        ]
+
+    def list_in_app_purchase_price_point_equalizations(
+        self, price_point_id, iap_id=None, territory=None
+    ):
+        self.calls.append(
+            (
+                "list_in_app_purchase_price_point_equalizations",
+                price_point_id,
+                iap_id,
+                territory,
+            )
+        )
+        result = []
+        for pp in self._price_points.get(iap_id, []):
+            if pp["id"] != price_point_id and pp.get("equalizationOf") != price_point_id:
+                continue
+            if territory and pp["territory"] != territory:
+                continue
+            result.append(
+                {
+                    "id": pp["id"],
+                    "attributes": {"customerPrice": pp["customerPrice"]},
+                    "relationships": {
+                        "territory": {
+                            "data": {"type": "territories", "id": pp["territory"]}
+                        }
+                    },
+                }
+            )
+        return result
+
+    def get_in_app_purchase_price_schedule(self, iap_id):
+        self.calls.append(("get_in_app_purchase_price_schedule", iap_id))
+        return self._price_schedules.get(iap_id)
+
+    def create_in_app_purchase_price_schedule(
+        self, iap_id, base_territory, price_points, start_date=None, end_date=None
+    ):
+        self.calls.append(
+            (
+                "create_in_app_purchase_price_schedule",
+                iap_id,
+                base_territory,
+                price_points,
+                start_date,
+                end_date,
+            )
+        )
+        schedule = {
+            "id": f"price_schedule_{iap_id}",
+            "baseTerritory": base_territory,
+            "pricePoints": list(price_points),
+            "startDate": start_date,
+            "endDate": end_date,
+        }
+        self._price_schedules[iap_id] = schedule
+        return {"data": {"id": schedule["id"]}}
 
     def get_in_app_purchase_localizations(self, iap_id):
         self.calls.append(("get_in_app_purchase_localizations", iap_id))
@@ -101,6 +214,217 @@ def test_iap_creates_new_item():
     create_calls = [c for c in api.calls if c[0] == "create_in_app_purchase"]
     assert len(create_calls) == 1
     assert create_calls[0][2]["productId"] == "com.example.item1"
+    assert "availableInAllTerritories" not in create_calls[0][2]
+
+
+def test_iap_sets_default_availability_to_all_territories():
+    api = IapFakeAPI()
+    items = [{"productId": "com.example.item1", "name": "Item 1"}]
+
+    _upload_iap_core(api, "app1", items)
+
+    create_calls = [c for c in api.calls if c[0] == "create_in_app_purchase"]
+    iap_id = api._iaps[create_calls[0][2]["productId"]]["id"]
+    assert api._availabilities[iap_id]["availableInNewTerritories"] is True
+    assert api._availabilities[iap_id]["territoryIds"] == ["USA", "CHN"]
+
+
+def test_iap_sets_configured_availability_territories():
+    api = IapFakeAPI()
+    items = [{
+        "productId": "com.example.item1",
+        "availableInAllTerritories": False,
+        "availableTerritories": ["USA"],
+    }]
+
+    _upload_iap_core(api, "app1", items)
+
+    create_calls = [
+        c for c in api.calls if c[0] == "create_in_app_purchase_availability"
+    ]
+    assert create_calls == [
+        ("create_in_app_purchase_availability", "iap_2", False, ["USA"])
+    ]
+
+
+def test_iap_sets_price_schedule_from_base_amount():
+    api = IapFakeAPI()
+    api._price_points["iap_2"] = [
+        {"id": "pp_499", "territory": "USA", "customerPrice": "4.99"},
+    ]
+    items = [{
+        "productId": "com.example.item1",
+        "price": {"baseTerritory": "USA", "baseAmount": "4.99"},
+    }]
+
+    _upload_iap_core(api, "app1", items)
+
+    create_calls = [
+        c for c in api.calls if c[0] == "create_in_app_purchase_price_schedule"
+    ]
+    assert create_calls == [
+        (
+            "create_in_app_purchase_price_schedule",
+            "iap_2",
+            "USA",
+            [("USA", "pp_499")],
+            None,
+            None,
+        )
+    ]
+
+
+def test_iap_sets_price_schedule_from_explicit_price_point():
+    api = IapFakeAPI()
+    items = [{
+        "productId": "com.example.item1",
+        "price": {
+            "baseTerritory": "USA",
+            "pricePointId": "pp_explicit",
+            "startDate": "2026-07-01",
+        },
+    }]
+
+    _upload_iap_core(api, "app1", items)
+
+    find_calls = [c for c in api.calls if c[0] == "find_in_app_purchase_price_point"]
+    create_calls = [
+        c for c in api.calls if c[0] == "create_in_app_purchase_price_schedule"
+    ]
+    assert find_calls == []
+    assert create_calls == [
+        (
+            "create_in_app_purchase_price_schedule",
+            "iap_2",
+            "USA",
+            [("USA", "pp_explicit")],
+            "2026-07-01",
+            None,
+        )
+    ]
+
+
+def test_iap_creates_equalized_price_schedule_for_all_territories():
+    api = IapFakeAPI()
+    api._price_points["iap_2"] = [
+        {"id": "pp_usa_499", "territory": "USA", "customerPrice": "4.99"},
+        {
+            "id": "pp_chn_3000",
+            "territory": "CHN",
+            "customerPrice": "30.00",
+            "equalizationOf": "pp_usa_499",
+        },
+    ]
+    items = [{
+        "productId": "com.example.item1",
+        "price": {"baseTerritory": "USA", "baseAmount": "4.99"},
+    }]
+
+    _upload_iap_core(api, "app1", items)
+
+    create_calls = [
+        c for c in api.calls if c[0] == "create_in_app_purchase_price_schedule"
+    ]
+    assert create_calls[0][3] == [
+        ("USA", "pp_usa_499"),
+        ("CHN", "pp_chn_3000"),
+    ]
+
+
+def test_iap_can_disable_equalized_price_schedule():
+    api = IapFakeAPI()
+    api._price_points["iap_2"] = [
+        {"id": "pp_usa_499", "territory": "USA", "customerPrice": "4.99"},
+        {
+            "id": "pp_chn_3000",
+            "territory": "CHN",
+            "customerPrice": "30.00",
+            "equalizationOf": "pp_usa_499",
+        },
+    ]
+    items = [{
+        "productId": "com.example.item1",
+        "price": {
+            "baseTerritory": "USA",
+            "baseAmount": "4.99",
+            "applyEqualizedPrices": False,
+        },
+    }]
+
+    _upload_iap_core(api, "app1", items)
+
+    equalization_calls = [
+        c for c in api.calls
+        if c[0] == "list_in_app_purchase_price_point_equalizations"
+    ]
+    create_calls = [
+        c for c in api.calls if c[0] == "create_in_app_purchase_price_schedule"
+    ]
+    assert equalization_calls == []
+    assert create_calls[0][3] == [("USA", "pp_usa_499")]
+
+
+def test_iap_creates_price_when_schedule_exists_without_prices():
+    existing = [{"id": "iap_old", "attributes": {"productId": "com.example.item1"}}]
+    api = IapFakeAPI(existing_iaps=existing)
+    api._price_points["iap_old"] = [
+        {"id": "pp_499", "territory": "USA", "customerPrice": "4.99"},
+    ]
+    api._price_schedules["iap_old"] = {
+        "id": "schedule_empty",
+        "relationships": {
+            "manualPrices": {"data": []},
+            "automaticPrices": {"data": []},
+        },
+    }
+    items = [{
+        "productId": "com.example.item1",
+        "price": {"baseTerritory": "USA", "baseAmount": "4.99"},
+    }]
+
+    _upload_iap_core(api, "app1", items, update_existing=True)
+
+    create_calls = [
+        c for c in api.calls if c[0] == "create_in_app_purchase_price_schedule"
+    ]
+    assert create_calls == [
+        (
+            "create_in_app_purchase_price_schedule",
+            "iap_old",
+            "USA",
+            [("USA", "pp_499")],
+            None,
+            None,
+        )
+    ]
+
+
+def test_iap_skips_price_when_schedule_has_manual_prices():
+    existing = [{"id": "iap_old", "attributes": {"productId": "com.example.item1"}}]
+    api = IapFakeAPI(existing_iaps=existing)
+    api._price_points["iap_old"] = [
+        {"id": "pp_499", "territory": "USA", "customerPrice": "4.99"},
+    ]
+    api._price_schedules["iap_old"] = {
+        "id": "schedule_existing",
+        "relationships": {
+            "manualPrices": {
+                "data": [{"type": "inAppPurchasePrices", "id": "price_1"}]
+            },
+            "automaticPrices": {"data": []},
+        },
+    }
+    items = [{
+        "productId": "com.example.item1",
+        "price": {"baseTerritory": "USA", "baseAmount": "4.99"},
+    }]
+
+    _upload_iap_core(api, "app1", items, update_existing=True)
+
+    create_calls = [
+        c for c in api.calls if c[0] == "create_in_app_purchase_price_schedule"
+    ]
+    assert create_calls == []
 
 
 def test_iap_skips_existing_by_default():
@@ -314,6 +638,51 @@ def test_load_iap_config_validates_iap_review_screenshot(tmp_path):
     cfg_path.write_text(json.dumps(cfg), encoding="utf-8")
 
     with pytest.raises(ValueError, match="review.screenshot file not found"):
+        _load_iap_config(str(cfg_path))
+
+
+def test_load_iap_config_rejects_malformed_item_price(tmp_path):
+    import json
+    cfg = {
+        "items": [{
+            "productId": "com.test.item",
+            "price": {"baseTerritory": "USA"},
+        }],
+    }
+    cfg_path = tmp_path / "iap.json"
+    cfg_path.write_text(json.dumps(cfg), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="price requires"):
+        _load_iap_config(str(cfg_path))
+
+
+def test_load_iap_config_rejects_two_letter_item_price_territory(tmp_path):
+    import json
+    cfg = {
+        "items": [{
+            "productId": "com.test.item",
+            "price": {"baseTerritory": "US", "baseAmount": "4.99"},
+        }],
+    }
+    cfg_path = tmp_path / "iap.json"
+    cfg_path.write_text(json.dumps(cfg), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="3-letter territory"):
+        _load_iap_config(str(cfg_path))
+
+
+def test_load_iap_config_requires_base_territory_for_explicit_price_point(tmp_path):
+    import json
+    cfg = {
+        "items": [{
+            "productId": "com.test.item",
+            "price": {"pricePointId": "pp_123"},
+        }],
+    }
+    cfg_path = tmp_path / "iap.json"
+    cfg_path.write_text(json.dumps(cfg), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="baseTerritory required"):
         _load_iap_config(str(cfg_path))
 
 

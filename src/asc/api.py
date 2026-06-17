@@ -325,6 +325,156 @@ class AppStoreConnectAPI:
             },
         )
 
+    def get_in_app_purchase_availability(self, iap_id: str) -> Optional[dict]:
+        resp = self.get(
+            f"/v2/inAppPurchases/{iap_id}/inAppPurchaseAvailability",
+            include="availableTerritories",
+            **{"limit[availableTerritories]": 50},
+        )
+        return resp.get("data")
+
+    def create_in_app_purchase_availability(
+        self,
+        iap_id: str,
+        available_in_new_territories: bool,
+        territory_ids: list[str],
+    ) -> dict:
+        return self.post(
+            "/v1/inAppPurchaseAvailabilities",
+            {
+                "data": {
+                    "type": "inAppPurchaseAvailabilities",
+                    "attributes": {
+                        "availableInNewTerritories": available_in_new_territories,
+                    },
+                    "relationships": {
+                        "inAppPurchase": {
+                            "data": {"type": "inAppPurchases", "id": iap_id}
+                        },
+                        "availableTerritories": {
+                            "data": [
+                                {"type": "territories", "id": territory_id}
+                                for territory_id in territory_ids
+                            ]
+                        },
+                    },
+                }
+            },
+        )
+
+    def get_in_app_purchase_price_schedule(self, iap_id: str) -> Optional[dict]:
+        resp = self.get(
+            f"/v2/inAppPurchases/{iap_id}/iapPriceSchedule",
+            include="baseTerritory,manualPrices",
+            **{"limit[manualPrices]": 50},
+        )
+        return resp.get("data")
+
+    def create_in_app_purchase_price_schedule(
+        self,
+        iap_id: str,
+        base_territory: str,
+        price_points: list[tuple[str, str]],
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> dict:
+        manual_price_linkages = []
+        included = []
+        for idx, (territory_id, price_point_id) in enumerate(price_points):
+            inline_id = f"${{price-{territory_id or idx}}}"
+            manual_price_linkages.append(
+                {"type": "inAppPurchasePrices", "id": inline_id}
+            )
+            attrs = {
+                key: value
+                for key, value in {
+                    "startDate": start_date,
+                    "endDate": end_date,
+                }.items()
+                if value is not None
+            }
+            included.append(
+                {
+                    "type": "inAppPurchasePrices",
+                    "id": inline_id,
+                    **({"attributes": attrs} if attrs else {}),
+                    "relationships": {
+                        "inAppPurchaseV2": {
+                            "data": {"type": "inAppPurchases", "id": iap_id}
+                        },
+                        "inAppPurchasePricePoint": {
+                            "data": {
+                                "type": "inAppPurchasePricePoints",
+                                "id": price_point_id,
+                            }
+                        },
+                    },
+                }
+            )
+
+        return self.post(
+            "/v1/inAppPurchasePriceSchedules",
+            {
+                "data": {
+                    "type": "inAppPurchasePriceSchedules",
+                    "relationships": {
+                        "inAppPurchase": {
+                            "data": {"type": "inAppPurchases", "id": iap_id}
+                        },
+                        "baseTerritory": {
+                            "data": {"type": "territories", "id": base_territory}
+                        },
+                        "manualPrices": {
+                            "data": manual_price_linkages
+                        },
+                    },
+                },
+                "included": included,
+            },
+        )
+
+    def find_in_app_purchase_price_point(
+        self, iap_id: str, territory: str, amount: str
+    ) -> Optional[str]:
+        resp = self.get(
+            f"/v2/inAppPurchases/{iap_id}/pricePoints",
+            limit=8000,
+            **{"filter[territory]": territory},
+        )
+        target = str(amount).strip()
+        for pp in resp.get("data", []):
+            price = str(pp.get("attributes", {}).get("customerPrice", "")).strip()
+            if price == target:
+                return pp["id"]
+        return None
+
+    def list_in_app_purchase_price_points(
+        self, iap_id: str, territory: str
+    ) -> list:
+        resp = self.get(
+            f"/v2/inAppPurchases/{iap_id}/pricePoints",
+            limit=8000,
+            **{"filter[territory]": territory},
+        )
+        return resp.get("data", [])
+
+    def list_in_app_purchase_price_point_equalizations(
+        self,
+        price_point_id: str,
+        iap_id: Optional[str] = None,
+        territory: Optional[str] = None,
+    ) -> list:
+        params = {"limit": 8000, "include": "territory"}
+        if iap_id:
+            params["filter[inAppPurchaseV2]"] = iap_id
+        if territory:
+            params["filter[territory]"] = territory
+        resp = self.get(
+            f"/v1/inAppPurchasePricePoints/{price_point_id}/equalizations",
+            **params,
+        )
+        return resp.get("data", [])
+
     def get_in_app_purchase_localizations(self, iap_id: str) -> list:
         resp = self.get(f"/v2/inAppPurchases/{iap_id}/inAppPurchaseLocalizations")
         return resp.get("data", [])
