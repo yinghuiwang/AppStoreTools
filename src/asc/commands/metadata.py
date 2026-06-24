@@ -16,7 +16,7 @@ from asc.utils import make_api_from_config, parse_csv, resolve_locale, resolve_a
 from asc.i18n import t, HELP, ERRORS
 
 
-def _select_app_info_id(app_infos: list[dict], version_id: str) -> str:
+def _select_app_info_id(app_infos: list[dict], version_id: str, version_state: str) -> str:
     """Pick the App Info that belongs to the editable version when possible."""
     relation_keys = ("appStoreVersions", "versions")
     for app_info in app_infos:
@@ -28,6 +28,25 @@ def _select_app_info_id(app_infos: list[dict], version_id: str) -> str:
                     return app_info["id"]
             elif isinstance(rel, dict) and rel.get("id") == version_id:
                 return app_info["id"]
+
+    for app_info in app_infos:
+        attrs = app_info.get("attributes", {})
+        state = attrs.get("state") or attrs.get("appStoreState")
+        if state == version_state:
+            return app_info["id"]
+
+    editable_states = {
+        "PREPARE_FOR_SUBMISSION",
+        "DEVELOPER_REJECTED",
+        "REJECTED",
+        "METADATA_REJECTED",
+    }
+    for app_info in app_infos:
+        attrs = app_info.get("attributes", {})
+        state = attrs.get("state") or attrs.get("appStoreState")
+        if state in editable_states:
+            return app_info["id"]
+
     return app_infos[0]["id"]
 
 
@@ -63,7 +82,7 @@ def _upload_metadata_core(
     if not app_infos:
         print(f"❌ {t(ERRORS['no_app_info'])}")
         return
-    app_info_id = _select_app_info_id(app_infos, version_id)
+    app_info_id = _select_app_info_id(app_infos, version_id, version_state)
     print(f"  App Info ID: {app_info_id}")
 
     info_locs = api.get_app_info_localizations(app_info_id)

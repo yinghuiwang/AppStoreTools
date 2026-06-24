@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from asc.commands.metadata import _update_version_field_core, _upload_metadata_core
+from asc.commands.metadata import _select_app_info_id, _update_version_field_core, _upload_metadata_core
 
 
 class MetaFakeAPI:
@@ -14,8 +14,16 @@ class MetaFakeAPI:
         self.app_info_id = "appinfo_1"
         self.version_id = "ver_1"
         self.app_infos = [
-            {"id": "appinfo_old", "relationships": {"appStoreVersions": {"data": [{"id": "ver_old"}]}}},
-            {"id": self.app_info_id, "relationships": {"appStoreVersions": {"data": [{"id": self.version_id}]}}},
+            {
+                "id": "appinfo_old",
+                "attributes": {"state": "READY_FOR_SALE"},
+                "relationships": {"appStoreVersions": {"data": [{"id": "ver_old"}]}},
+            },
+            {
+                "id": self.app_info_id,
+                "attributes": {"state": "PREPARE_FOR_SUBMISSION"},
+                "relationships": {"appStoreVersions": {"data": [{"id": self.version_id}]}},
+            },
         ]
         self.info_locs = {
             "zh-Hans": {"id": "iloc_zh", "attributes": {"locale": "zh-Hans"}},
@@ -135,6 +143,14 @@ def test_metadata_uses_app_info_for_editable_version_and_updates_version(capsys)
     assert api.updated_info_locs["iloc_zh"]["name"] == "新名称"
     assert api.updated_ver_locs["vloc_zh"]["description"] == "新描述"
     assert api.updated_ver_locs["vloc_zh"]["keywords"] == "kw1,kw2"
+
+
+def test_metadata_selects_app_info_by_state_when_relationship_missing():
+    app_infos = [
+        {"id": "appinfo_old", "attributes": {"state": "READY_FOR_SALE"}},
+        {"id": "appinfo_new", "attributes": {"state": "PREPARE_FOR_SUBMISSION"}},
+    ]
+    assert _select_app_info_id(app_infos, "ver_1", "PREPARE_FOR_SUBMISSION") == "appinfo_new"
 
 
 # ── _update_version_field_core ──

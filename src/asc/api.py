@@ -101,7 +101,10 @@ class AppStoreConnectAPI:
         return self.get(f"/v1/apps/{app_id}")
 
     def get_app_infos(self, app_id: str) -> list:
-        resp = self.get(f"/v1/apps/{app_id}/appInfos")
+        resp = self.get(
+            f"/v1/apps/{app_id}/appInfos",
+            **{"fields[appInfos]": "state,appStoreState"},
+        )
         return resp.get("data", [])
 
     def get_app_info_localizations(self, app_info_id: str) -> list:
