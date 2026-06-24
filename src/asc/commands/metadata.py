@@ -16,6 +16,21 @@ from asc.utils import make_api_from_config, parse_csv, resolve_locale, resolve_a
 from asc.i18n import t, HELP, ERRORS
 
 
+def _select_app_info_id(app_infos: list[dict], version_id: str) -> str:
+    """Pick the App Info that belongs to the editable version when possible."""
+    relation_keys = ("appStoreVersions", "versions")
+    for app_info in app_infos:
+        relationships = app_info.get("relationships", {})
+        for key in relation_keys:
+            rel = relationships.get(key, {}).get("data")
+            if isinstance(rel, list):
+                if any(item.get("id") == version_id for item in rel if isinstance(item, dict)):
+                    return app_info["id"]
+            elif isinstance(rel, dict) and rel.get("id") == version_id:
+                return app_info["id"]
+    return app_infos[0]["id"]
+
+
 def _upload_metadata_core(
     api,
     app_id: str,
@@ -32,14 +47,6 @@ def _upload_metadata_core(
     if app_profile:
         print(f"  App Profile: {app_profile}")
 
-    app_infos = api.get_app_infos(app_id)
-    if not app_infos:
-        print(f"❌ {t(ERRORS['no_app_info'])}")
-        return
-    app_info = app_infos[0]
-    app_info_id = app_info["id"]
-    print(f"  App Info ID: {app_info_id}")
-
     version = api.get_editable_version(app_id)
     if not version:
         print(f"❌ {t(ERRORS['no_editable_version'])}")
@@ -51,6 +58,13 @@ def _upload_metadata_core(
     ].get("appVersionState", "?")
     print(f"  版本: {version_string} (状态: {version_state})")
     print(f"  版本 ID: {version_id}")
+
+    app_infos = api.get_app_infos(app_id)
+    if not app_infos:
+        print(f"❌ {t(ERRORS['no_app_info'])}")
+        return
+    app_info_id = _select_app_info_id(app_infos, version_id)
+    print(f"  App Info ID: {app_info_id}")
 
     info_locs = api.get_app_info_localizations(app_info_id)
     info_loc_map = {loc["attributes"]["locale"]: loc for loc in info_locs}

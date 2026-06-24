@@ -13,6 +13,10 @@ class MetaFakeAPI:
         self.calls = []
         self.app_info_id = "appinfo_1"
         self.version_id = "ver_1"
+        self.app_infos = [
+            {"id": "appinfo_old", "relationships": {"appStoreVersions": {"data": [{"id": "ver_old"}]}}},
+            {"id": self.app_info_id, "relationships": {"appStoreVersions": {"data": [{"id": self.version_id}]}}},
+        ]
         self.info_locs = {
             "zh-Hans": {"id": "iloc_zh", "attributes": {"locale": "zh-Hans"}},
         }
@@ -27,7 +31,7 @@ class MetaFakeAPI:
 
     def get_app_infos(self, app_id):
         self.calls.append(("get_app_infos", app_id))
-        return [{"id": self.app_info_id}]
+        return self.app_infos
 
     def get_editable_version(self, app_id):
         self.calls.append(("get_editable_version", app_id))
@@ -111,6 +115,26 @@ def test_metadata_include_version_fields_keywords_only():
     assert "vloc_zh" in api.updated_ver_locs
     assert "keywords" in api.updated_ver_locs["vloc_zh"]
     assert "description" not in api.updated_ver_locs["vloc_zh"]
+
+
+def test_metadata_uses_app_info_for_editable_version_and_updates_version(capsys):
+    api = MetaFakeAPI()
+    metadata = [
+        {
+            "语言": "zh-Hans",
+            "应用名称": "新名称",
+            "副标题": "新副标题",
+            "长描述": "新描述",
+            "关键词": "kw1,kw2",
+        }
+    ]
+    _upload_metadata_core(api, "app1", metadata)
+
+    output = capsys.readouterr().out
+    assert "App Info ID: appinfo_1" in output
+    assert api.updated_info_locs["iloc_zh"]["name"] == "新名称"
+    assert api.updated_ver_locs["vloc_zh"]["description"] == "新描述"
+    assert api.updated_ver_locs["vloc_zh"]["keywords"] == "kw1,kw2"
 
 
 # ── _update_version_field_core ──
