@@ -64,6 +64,7 @@ class TestCmdUpdateValidation:
         assert f"Install commit : {commit}" in result.output
         assert f"commit {commit}" in result.output
         install_args = check_call.call_args.args[0]
+        assert "--force-reinstall" in install_args
         assert install_args[-1].endswith(f"@{commit}")
 
     def test_version_install_prints_and_installs_resolved_commit(self):
@@ -82,6 +83,7 @@ class TestCmdUpdateValidation:
         assert f"Install commit : {commit}" in result.output
         assert f"Done. asc updated to v0.1.5 (commit {commit})." in result.output
         install_args = check_call.call_args.args[0]
+        assert "--force-reinstall" in install_args
         assert install_args[-1].endswith(f"@{commit}")
 
 

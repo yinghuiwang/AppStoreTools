@@ -124,7 +124,7 @@ def _resolve_git_ref_commit(ref: str) -> Optional[str]:
 def _install_git_ref(ref: str, commit: Optional[str] = None) -> None:
     install_ref = commit or ref
     subprocess.check_call([
-        sys.executable, "-m", "pip", "install", "--quiet",
+        sys.executable, "-m", "pip", "install", "--quiet", "--force-reinstall",
         f"git+{INSTALL_URL}@{install_ref}",
     ])
 
