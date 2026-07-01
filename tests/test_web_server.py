@@ -102,6 +102,21 @@ def test_filebrowser_lists_files(client, tmp_path):
     assert "test.csv" in resp.text
 
 
+def test_filebrowser_accepts_comma_separated_extensions_case_insensitive(client, tmp_path):
+    (tmp_path / "image.jpg").write_bytes(b"jpg")
+    (tmp_path / "image.jpeg").write_bytes(b"jpeg")
+    (tmp_path / "image.PNG").write_bytes(b"png")
+    (tmp_path / "notes.txt").write_text("text")
+
+    resp = client.get(f"/api/browse?path={tmp_path}&mode=file&ext=.png,.jpg,.jpeg")
+
+    assert resp.status_code == 200
+    assert "image.jpg" in resp.text
+    assert "image.jpeg" in resp.text
+    assert "image.PNG" in resp.text
+    assert "notes.txt" not in resp.text
+
+
 def test_filebrowser_directory_click_browses_into_directory(client, tmp_path):
     (tmp_path / "nested").mkdir()
     resp = client.get(f"/api/browse?path={tmp_path}&mode=dir")
@@ -383,6 +398,69 @@ def test_iap_review_screenshots_upload_rejects_empty_items(client):
 
     assert resp.status_code == 400
     assert resp.json()["detail"] == "items required"
+
+
+def test_iap_review_screenshots_task_rejects_stale_target_without_upload(tmp_path):
+    import time
+    from unittest.mock import MagicMock
+    from asc.commands.iap_review_screenshots import (
+        ReviewScreenshotScanResult,
+        ReviewScreenshotTarget,
+        ReviewScreenshotUploadItem,
+    )
+    from asc.web import routes_api
+    from asc.web.tasks import TaskStatus
+
+    screenshot = tmp_path / "review.png"
+    screenshot.write_bytes(b"png")
+    submitted = [
+        ReviewScreenshotUploadItem(
+            kind="iap",
+            id="crafted-iap-id",
+            product_id="coins_100",
+            path=str(screenshot),
+        )
+    ]
+    current_scan = ReviewScreenshotScanResult(
+        targets=[
+            ReviewScreenshotTarget(
+                kind="iap",
+                id="current-iap-id",
+                product_id="coins_100",
+                name="100 Coins",
+            )
+        ]
+    )
+
+    with patch("asc.web.routes_api.Config"), \
+         patch("asc.web.routes_api.make_api_from_config", return_value=(MagicMock(), "app-1")), \
+         patch("asc.web.routes_api.scan_missing_review_screenshots", return_value=current_scan), \
+         patch("asc.web.routes_api.upload_review_screenshots") as mock_upload:
+        task_id = routes_api._start_iap_review_screenshots_task(
+            profile="myapp",
+            items=submitted,
+            dry_run=False,
+        )
+
+        task = None
+        for _ in range(100):
+            task = routes_api._task_store.get(task_id)
+            if task and task["status"] in {
+                TaskStatus.DONE,
+                TaskStatus.ERROR,
+                TaskStatus.CANCELED,
+            }:
+                break
+            time.sleep(0.02)
+
+    assert task is not None
+    assert task["status"] == TaskStatus.ERROR
+    assert task["result"]["success"] is False
+    assert task["result"]["uploaded"] == 0
+    assert task["result"]["failed"] == 1
+    assert "no longer eligible" in task["result"]["failures"][0]["error"]
+    assert any("no longer eligible" in line for line in task["logs"])
+    mock_upload.assert_not_called()
 
 
 def test_build_options_api_returns_release_choices(client):

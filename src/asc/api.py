@@ -86,6 +86,18 @@ class AppStoreConnectAPI:
     def get(self, path: str, **params) -> dict:
         return self._request("GET", path, params=params)
 
+    def _get_paginated_data(self, path: str, **params) -> list:
+        resp = self.get(path, **params)
+        data = list(resp.get("data", []))
+
+        while True:
+            links = resp.get("links", {}) or {}
+            next_page = links.get("next") if isinstance(links, dict) else None
+            if not next_page:
+                return data
+            resp = self.get(next_page)
+            data.extend(resp.get("data", []))
+
     def post(self, path: str, data: dict) -> dict:
         return self._request("POST", path, json=data)
 
@@ -295,8 +307,7 @@ class AppStoreConnectAPI:
         last_error = None
         for endpoint in endpoints:
             try:
-                resp = self.get(endpoint, limit=200)
-                return resp.get("data", [])
+                return self._get_paginated_data(endpoint, limit=200)
             except Exception as e:
                 last_error = e
                 continue
@@ -577,8 +588,9 @@ class AppStoreConnectAPI:
     # ── 订阅组 ──
 
     def list_subscription_groups(self, app_id: str) -> list:
-        resp = self.get(f"/v1/apps/{app_id}/subscriptionGroups", limit=200)
-        return resp.get("data", [])
+        return self._get_paginated_data(
+            f"/v1/apps/{app_id}/subscriptionGroups", limit=200
+        )
 
     def create_subscription_group(self, app_id: str, reference_name: str) -> dict:
         return self.post(
@@ -649,10 +661,9 @@ class AppStoreConnectAPI:
     # ── 订阅商品 ──
 
     def list_subscriptions(self, group_id: str) -> list:
-        resp = self.get(
+        return self._get_paginated_data(
             f"/v1/subscriptionGroups/{group_id}/subscriptions", limit=200
         )
-        return resp.get("data", [])
 
     def create_subscription(self, group_id: str, attrs: dict) -> dict:
         return self.post(

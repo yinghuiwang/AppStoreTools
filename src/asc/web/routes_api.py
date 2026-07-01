@@ -105,6 +105,14 @@ def _is_under_allowed_root(target: Path) -> bool:
     return False
 
 
+def _extension_filter(ext: str) -> set[str]:
+    return {
+        part.strip().lower()
+        for part in ext.split(",")
+        if part.strip()
+    }
+
+
 @router.get("/switch-profile")
 async def switch_profile(profile: str):
     """Switch active app profile (stores in session cookie)."""
@@ -136,11 +144,12 @@ async def browse(request: Request, path: str = ".", mode: str = "dir", ext: str 
     except (PermissionError, NotADirectoryError, OSError):
         items = []
 
+    allowed_exts = _extension_filter(ext)
     for item in items:
         if item.name.startswith("."):
             continue
         if mode == "file" and not item.is_dir():
-            if ext and item.suffix != ext:
+            if allowed_exts and item.suffix.lower() not in allowed_exts:
                 continue
         entries.append({"name": item.name, "path": str(item), "is_dir": item.is_dir()})
 
@@ -1324,6 +1333,23 @@ def _scan_iap_review_screenshot_targets(
     }
 
 
+def _review_screenshot_target_key(item) -> tuple[str, str, str]:
+    return (item.kind, item.id, item.product_id)
+
+
+def _ineligible_iap_review_screenshot_items(
+    api, app_id: str, items: list[ReviewScreenshotUploadItem]
+) -> tuple[list[ReviewScreenshotUploadItem], list[str]]:
+    scan = scan_missing_review_screenshots(api, app_id)
+    eligible = {_review_screenshot_target_key(target) for target in scan.targets}
+    invalid = [
+        item
+        for item in items
+        if _review_screenshot_target_key(item) not in eligible
+    ]
+    return invalid, list(scan.errors)
+
+
 def _start_iap_review_screenshots_task(
     profile: str,
     items: list[ReviewScreenshotUploadItem],
@@ -1362,7 +1388,43 @@ def _start_iap_review_screenshots_task(
 
         try:
             config = Config(app_name=profile)
-            api, _app_id = make_api_from_config(config)
+            api, app_id = make_api_from_config(config)
+
+            invalid_items, scan_errors = _ineligible_iap_review_screenshot_items(
+                api, app_id, items
+            )
+            for error in scan_errors:
+                _task_store.append_log(task_id, f"⚠️ {error}")
+            if invalid_items:
+                done_flag.set()
+                message = (
+                    "review screenshot target no longer eligible for current "
+                    "app/profile or already has a screenshot"
+                )
+                labels = ", ".join(
+                    f"{item.kind}:{item.product_id} ({item.id})"
+                    for item in invalid_items
+                )
+                _task_store.append_log(task_id, f"❌ {message}: {labels}")
+                _finish_task(
+                    task_id,
+                    _TaskStatus.ERROR,
+                    {
+                        "success": False,
+                        "uploaded": 0,
+                        "skipped": 0,
+                        "failed": len(invalid_items),
+                        "failures": [
+                            {
+                                "productId": item.product_id,
+                                "error": f"{message}: {item.kind}:{item.id}",
+                            }
+                            for item in invalid_items
+                        ],
+                        "error": f"{message}: {labels}",
+                    },
+                )
+                return
 
             with capture_stdout_to_queue(q):
                 result = upload_review_screenshots(api, items, dry_run=dry_run)
