@@ -28,6 +28,14 @@ def test_build_page_returns_200(client):
     assert resp.status_code == 200
 
 
+def test_iap_page_contains_review_screenshot_tools(client):
+    resp = client.get("/iap")
+    assert resp.status_code == 200
+    assert "补审核截图" in resp.text
+    assert "/api/iap/review-screenshots/scan" in resp.text
+    assert "/api/iap/review-screenshots/upload" in resp.text
+
+
 def test_blocking_web_probes_run_in_threadpool():
     from asc.web import routes_api
 
