@@ -75,6 +75,19 @@ def test_update_branches_returns_options(client):
     assert data["branches"] == ["develop", "main"]
 
 
+def test_update_page_contains_always_available_advanced_install(client):
+    resp = client.get("/update")
+
+    assert resp.status_code == 200
+    assert "高级安装" in resp.text
+    assert "指定版本" in resp.text
+    assert "指定分支" in resp.text
+    assert "runUpdate($el.querySelector('[name=version]').value)" in resp.text
+    assert "runUpdateBranch(selectedBranch || $el.querySelector('[name=branch]')?.value || '')" in resp.text
+    assert "/api/update/run" in resp.text
+    assert "/api/update/branches" in resp.text
+
+
 def test_profiles_page_returns_200(client):
     resp = client.get("/profiles")
     assert resp.status_code == 200
