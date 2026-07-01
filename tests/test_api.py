@@ -60,6 +60,22 @@ def test_token_refreshed_after_expiry(api):
     assert isinstance(t2, str)
 
 
+def test_token_signing_passes_private_key_bytes_to_pyjwt(tmp_path):
+    key_file = tmp_path / "AuthKey_TEST.p8"
+    key_file.write_bytes(b"fake-private-key")
+
+    api = AppStoreConnectAPI(
+        issuer_id="test-issuer",
+        key_id="TESTKEYID",
+        key_file=str(key_file),
+    )
+
+    with patch("asc.api.jwt.encode", return_value="signed-token") as mock_encode:
+        assert api.token == "signed-token"
+
+    assert mock_encode.call_args.args[1] == b"fake-private-key"
+
+
 # ── _request: 429 重试 ──
 
 def test_request_retries_on_429(api):

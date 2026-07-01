@@ -9,7 +9,6 @@ from pathlib import Path
 
 import jwt
 import requests
-from cryptography.hazmat.primitives.serialization import load_pem_private_key
 
 from asc.constants import BASE_URL
 
@@ -22,7 +21,6 @@ class AppStoreConnectAPI:
         self.key_id = key_id
         with open(key_file, "rb") as f:
             self._private_key_bytes = f.read()
-        self._private_key = load_pem_private_key(self._private_key_bytes, password=None)
         self._token = None
         self._token_expiry = None
 
@@ -40,7 +38,10 @@ class AppStoreConnectAPI:
             "aud": "appstoreconnect-v1",
         }
         self._token = jwt.encode(
-            payload, self._private_key, algorithm="ES256", headers={"kid": self.key_id}
+            payload,
+            self._private_key_bytes,
+            algorithm="ES256",
+            headers={"kid": self.key_id},
         )
         self._token_expiry = expiry - timedelta(minutes=1)
         return self._token

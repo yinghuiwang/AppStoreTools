@@ -18,6 +18,15 @@ def test_web_ui_template_dependency_is_packaged():
     assert any(dep.lower().startswith("jinja2") for dep in dependencies)
 
 
+def test_cryptography_is_not_a_hard_install_dependency():
+    pyproject_path = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    pyproject = tomllib.loads(pyproject_path.read_text())
+
+    dependencies = pyproject["project"]["dependencies"]
+
+    assert not any(dep.lower().startswith("cryptography") for dep in dependencies)
+
+
 def test_package_version_matches_cli_version():
     from asc import __version__
 

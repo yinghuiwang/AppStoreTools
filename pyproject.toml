@@ -1,6 +1,6 @@
 [project]
 name = "asc-appstore-tools"
-version = "0.1.22"
+version = "0.1.23"
 description = "CLI tool for bulk-uploading App Store Connect metadata"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -20,7 +20,6 @@ classifiers = [
 dependencies = [
     "typer>=0.12.0",
     "PyJWT>=2.8.0",
-    "cryptography>=41.0.0",
     "requests>=2.31.0",
     "Pillow>=10.0.0",
     "python-dotenv>=1.0.0",
@@ -37,6 +36,7 @@ dev = [
     "build>=1.0.0",
     "twine>=4.0.0",
     "pytest>=7.4.0",
+    "cryptography>=41.0.0",
 ]
 
 [project.scripts]
