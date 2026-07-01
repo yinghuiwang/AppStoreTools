@@ -80,7 +80,7 @@
               </template>
             </span>
           </div>
-          <form @submit.prevent="runUpdate('')">
+          <form @submit.prevent="runUpdate('', 'latest')">
             <p class="text-sm text-obsidian-400 mb-3">
               安装最新稳定版本 <span class="text-amber-400 font-medium" x-text="checkResult.detail.latest"></span>
               <template x-if="checkResult.detail.latest_commit">
@@ -135,7 +135,7 @@
             </button>
           </div>
 
-          <form x-show="selectedTab === 'specific'" @submit.prevent="runUpdate($el.querySelector('[name=version]').value)">
+          <form x-show="selectedTab === 'specific'" @submit.prevent="runUpdate($el.querySelector('[name=version]').value, 'specific')">
             <div class="flex gap-3 items-end">
               <div class="flex-1">
                 <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">版本号</label>
@@ -259,11 +259,11 @@ function loadBranches(force = false) {
     });
 }
 
-function runUpdate(version) {
+function runUpdate(version, mode = 'specific') {
   const root = document.querySelector('[x-data]');
   const d = Alpine.$data(root);
   const selectedVersion = (version || '').trim();
-  if (d.selectedTab === 'specific' && !selectedVersion) {
+  if (mode === 'specific' && !selectedVersion) {
     d.checkResult = {
       ...(d.checkResult || {}),
       level: 'warning',

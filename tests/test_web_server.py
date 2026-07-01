@@ -82,7 +82,8 @@ def test_update_page_contains_always_available_advanced_install(client):
     assert "高级安装" in resp.text
     assert "指定版本" in resp.text
     assert "指定分支" in resp.text
-    assert "runUpdate($el.querySelector('[name=version]').value)" in resp.text
+    assert "runUpdate('', 'latest')" in resp.text
+    assert "runUpdate($el.querySelector('[name=version]').value, 'specific')" in resp.text
     assert "runUpdateBranch(selectedBranch || $el.querySelector('[name=branch]')?.value || '')" in resp.text
     assert "/api/update/run" in resp.text
     assert "/api/update/branches" in resp.text
