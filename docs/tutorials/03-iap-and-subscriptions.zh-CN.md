@@ -148,7 +148,7 @@ asc --app myapp iap-screenshots --dry-run
 asc --app myapp iap-screenshots --iap-file data/iap_packages.json --no-prompt --yes
 ```
 
-在 Web UI 中，打开 **IAP Management**，使用 **Scan Missing Screenshots**，为需要截图的产品选择 PNG、JPG 或 JPEG 文件，然后上传所选审核截图。Web UI 中选择的路径只会作为本次上传请求的临时载荷发送，不会写回 `data/iap_packages.json`。
+在 Web UI 中，打开 **IAP 管理**，进入 **补审核截图**，点击 **扫描缺失**，为需要截图的产品选择 PNG、JPG 或 JPEG 文件，然后点击 **上传截图**。Web UI 中选择的路径只会作为本次上传请求的临时载荷发送，不会写回 `data/iap_packages.json`。
 
 ---
 

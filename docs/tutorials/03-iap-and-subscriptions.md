@@ -145,7 +145,7 @@ Run non-interactively with paths from your IAP JSON file:
 asc --app myapp iap-screenshots --iap-file data/iap_packages.json --no-prompt --yes
 ```
 
-In the Web UI, open **IAP Management**, use **Scan Missing Screenshots**, choose PNG, JPG, or JPEG files for the products that need screenshots, then upload the selected screenshots. Paths selected in the Web UI are sent only with that upload request and are not written back to `data/iap_packages.json`.
+In the Web UI, open **IAP 管理 / IAP Management**, go to **补审核截图**, click **扫描缺失**, choose PNG, JPG, or JPEG files for the products that need screenshots, then click **上传截图**. Paths selected in the Web UI are sent only with that upload request and are not written back to `data/iap_packages.json`.
 
 ---
 
