@@ -5,7 +5,15 @@ from dataclasses import dataclass, field
 import hashlib
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
+
+import typer
+
+from asc.config import Config
+from asc.error_handler import get_action_hint
+from asc.guard import Guard, GuardViolationError
+from asc.i18n import HELP, t
+from asc.utils import make_api_from_config, resolve_app_profile
 
 
 REVIEW_SCREENSHOT_EXTS = {".png", ".jpg", ".jpeg"}
@@ -288,3 +296,151 @@ def upload_review_screenshots(
             print(f"[PROGRESS:{pct}:IAP 审核截图 {idx}/{total}]")
 
     return result
+
+
+def _default_iap_file(config: Config, explicit_iap_file: Optional[str]) -> str:
+    if explicit_iap_file:
+        return explicit_iap_file
+    return config.iap_path or "data/iap_packages.json"
+
+
+def _print_missing_targets(targets: list[ReviewScreenshotTarget]) -> None:
+    iap_targets = [target for target in targets if target.kind == "iap"]
+    subscription_targets = [
+        target for target in targets if target.kind == "subscription"
+    ]
+
+    if iap_targets:
+        typer.echo("\nIAP 缺少审核截图:")
+        for target in iap_targets:
+            label = target.name or target.product_id
+            typer.echo(f"  - {target.product_id} ({label})")
+
+    if subscription_targets:
+        typer.echo("\n订阅缺少审核截图:")
+        for target in subscription_targets:
+            label = target.name or target.product_id
+            group = f" / {target.group_name}" if target.group_name else ""
+            typer.echo(f"  - {target.product_id} ({label}{group})")
+
+
+def _collect_upload_items(
+    targets: list[ReviewScreenshotTarget], no_prompt: bool
+) -> list[ReviewScreenshotUploadItem]:
+    items: list[ReviewScreenshotUploadItem] = []
+
+    for target in targets:
+        path_value = target.default_path
+        if not path_value and not no_prompt:
+            prompt_text = f"{target.product_id} 审核截图路径 (留空跳过)"
+            path_value = typer.prompt(prompt_text, default="", show_default=False)
+
+        if not path_value:
+            continue
+
+        validation = validate_review_screenshot_path(path_value)
+        if not validation.ok:
+            typer.echo(f"  ❌ {target.product_id}: {validation.error}", err=True)
+            continue
+        if validation.warning:
+            typer.echo(f"  ⚠️  {target.product_id}: {validation.warning}")
+
+        items.append(
+            ReviewScreenshotUploadItem(
+                kind=target.kind,
+                id=target.id,
+                product_id=target.product_id,
+                path=str(validation.path),
+            )
+        )
+
+    return items
+
+
+def cmd_iap_screenshots(
+    iap_file: Optional[str] = typer.Option(
+        None,
+        "--iap-file",
+        "-f",
+        help="IAP 配置文件路径，用于读取 review.screenshot 默认路径",
+    ),
+    app: Optional[str] = typer.Option(
+        None, "--app", "-a", help=t(HELP["app_profile_name"])
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", "-d", help="预览将上传的审核截图，不实际上传"
+    ),
+    no_prompt: bool = typer.Option(
+        False, "--no-prompt", help="不交互提示，仅上传配置中已有默认路径的截图"
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="跳过上传确认"),
+):
+    """Upload missing IAP and subscription review screenshots."""
+    config = Config(app)
+    resolved_app = resolve_app_profile(app, config)
+    if resolved_app == "__import__":
+        from asc.commands.app_config import _do_import_from_env
+        import os
+
+        env_path = os.environ.pop("_ASC_IMPORT_LOCAL_CONFIG", "")
+        resolved_app = _do_import_from_env(env_path)
+    elif resolved_app == "__local__":
+        import os
+
+        os.environ.pop("_ASC_APP", None)
+    app = resolved_app
+    config = Config(app)
+    guard = Guard()
+    if guard.is_enabled():
+        try:
+            guard.check_and_enforce(
+                app_id=config.app_id or "",
+                app_name=config.app_name or app or "",
+                key_id=config.key_id or "",
+                issuer_id=config.issuer_id or "",
+            )
+        except GuardViolationError as e:
+            typer.echo(f"❌ {e}", err=True)
+            hint = get_action_hint(e)
+            if hint:
+                typer.echo(f"💡 {hint}", err=True)
+            raise typer.Exit(1)
+    api, app_id = make_api_from_config(config)
+
+    scan = scan_missing_review_screenshots(api, app_id)
+    for warning in scan.errors:
+        typer.echo(f"⚠️  {warning}", err=True)
+
+    if not scan.targets:
+        typer.echo("没有缺少审核截图的 IAP/订阅。")
+        return
+
+    paths_by_product_id = extract_review_screenshot_paths(
+        _default_iap_file(config, iap_file)
+    )
+    attach_default_paths(scan.targets, paths_by_product_id)
+    _print_missing_targets(scan.targets)
+
+    upload_items = _collect_upload_items(scan.targets, no_prompt)
+    if not upload_items:
+        typer.echo("没有选择审核截图。No screenshots selected.")
+        return
+
+    typer.echo(f"\n准备上传审核截图: {len(upload_items)} 个")
+    if not dry_run and not yes:
+        confirmed = typer.confirm("确认上传这些审核截图?", default=False)
+        if not confirmed:
+            typer.echo("已取消。")
+            raise typer.Exit(1)
+
+    result = upload_review_screenshots(api, upload_items, dry_run=dry_run)
+    typer.echo(
+        f"\n完成: uploaded={result.uploaded}, skipped={result.skipped}, "
+        f"failed={result.failed}"
+    )
+    if result.failures:
+        for product_id, error in result.failures:
+            typer.echo(f"  ❌ {product_id}: {error}", err=True)
+
+    if result.failed:
+        raise typer.Exit(1)
