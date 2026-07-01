@@ -1512,10 +1512,16 @@ async def iap_check(request: Request):
 
 @router.post("/iap/review-screenshots/scan")
 async def iap_review_screenshots_scan(request: Request):
+    from fastapi import HTTPException
+
     profile = request.cookies.get("asc_profile", "")
-    try:
-        payload = await request.json()
-    except Exception:
+    body = await request.body()
+    if body.strip():
+        try:
+            payload = json.loads(body)
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="invalid JSON")
+    else:
         payload = {}
     iap_file = payload.get("iapFile") if isinstance(payload, dict) else None
     try:
@@ -1535,28 +1541,35 @@ async def iap_review_screenshots_scan(request: Request):
 
 @router.post("/iap/review-screenshots/upload")
 async def iap_review_screenshots_upload(request: Request):
+    from fastapi import HTTPException
+
     profile = request.cookies.get("asc_profile", "")
-    try:
-        payload = await request.json()
-    except Exception:
+    body = await request.body()
+    if body.strip():
+        try:
+            payload = json.loads(body)
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="invalid JSON")
+    else:
         payload = {}
 
     items_payload = payload.get("items") if isinstance(payload, dict) else None
     if not isinstance(items_payload, list) or not items_payload:
-        from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="items required")
 
     items: list[ReviewScreenshotUploadItem] = []
     for item in items_payload:
         if not isinstance(item, dict):
-            continue
+            raise HTTPException(status_code=400, detail="invalid item")
         kind = item.get("kind")
         item_id = item.get("id")
         product_id = item.get("productId")
         path = item.get("path")
         values = (kind, item_id, product_id, path)
         if not all(isinstance(value, str) and value.strip() for value in values):
-            continue
+            raise HTTPException(status_code=400, detail="invalid item")
+        if kind not in {"iap", "subscription"}:
+            raise HTTPException(status_code=400, detail="invalid item")
         items.append(
             ReviewScreenshotUploadItem(
                 kind=kind,
@@ -1567,7 +1580,6 @@ async def iap_review_screenshots_upload(request: Request):
         )
 
     if not items:
-        from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="items required")
 
     dry_run = bool(payload.get("dryRun")) if isinstance(payload, dict) else False

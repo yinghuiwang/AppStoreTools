@@ -212,6 +212,21 @@ def test_iap_review_screenshots_scan_returns_targets_with_default_path(client, t
     assert data["targets"][0]["defaultPath"] == str(screenshot_path)
 
 
+def test_iap_review_screenshots_scan_rejects_malformed_json(client):
+    with patch("asc.web.routes_api._scan_iap_review_screenshot_targets") as mock_scan, \
+         patch("asc.web.routes_api.scan_missing_review_screenshots") as mock_scan_helper:
+        resp = client.post(
+            "/api/iap/review-screenshots/scan",
+            cookies={"asc_profile": "myapp"},
+            content=b"{",
+            headers={"content-type": "application/json"},
+        )
+
+    assert resp.status_code == 400
+    mock_scan.assert_not_called()
+    mock_scan_helper.assert_not_called()
+
+
 def test_iap_review_screenshots_upload_starts_task_with_items(client):
     with patch("asc.web.routes_api._start_iap_review_screenshots_task") as mock_start:
         mock_start.return_value = "fake-review-task-id"
@@ -240,6 +255,55 @@ def test_iap_review_screenshots_upload_starts_task_with_items(client):
     assert len(kwargs["items"]) == 1
     assert kwargs["items"][0].product_id == "coins_100"
     assert kwargs["items"][0].path == "/tmp/review.png"
+
+
+def test_iap_review_screenshots_upload_rejects_mixed_invalid_items(client):
+    with patch("asc.web.routes_api._start_iap_review_screenshots_task") as mock_start:
+        resp = client.post(
+            "/api/iap/review-screenshots/upload",
+            cookies={"asc_profile": "myapp"},
+            json={
+                "items": [
+                    {
+                        "kind": "iap",
+                        "id": "iap-1",
+                        "productId": "coins_100",
+                        "path": "/tmp/review.png",
+                    },
+                    {
+                        "kind": "subscription",
+                        "id": "sub-1",
+                        "path": "/tmp/sub-review.png",
+                    },
+                ],
+            },
+        )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "invalid item"
+    mock_start.assert_not_called()
+
+
+def test_iap_review_screenshots_upload_rejects_unsupported_kind(client):
+    with patch("asc.web.routes_api._start_iap_review_screenshots_task") as mock_start:
+        resp = client.post(
+            "/api/iap/review-screenshots/upload",
+            cookies={"asc_profile": "myapp"},
+            json={
+                "items": [
+                    {
+                        "kind": "consumable",
+                        "id": "iap-1",
+                        "productId": "coins_100",
+                        "path": "/tmp/review.png",
+                    }
+                ],
+            },
+        )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "invalid item"
+    mock_start.assert_not_called()
 
 
 def test_iap_review_screenshots_upload_rejects_empty_items(client):
