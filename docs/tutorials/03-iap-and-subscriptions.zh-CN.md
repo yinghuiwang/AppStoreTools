@@ -126,6 +126,32 @@ asc --app myapp iap --iap-file data/iap_packages.json --update-existing
 
 ---
 
+## 上传 App Store 审核截图
+
+使用 `iap-screenshots` 查找仍缺少 App Store 审核截图的 IAP 产品，并上传缺失文件：
+
+```bash
+asc --app myapp iap-screenshots
+```
+
+该命令会在线查询 App Store Connect 状态，扫描所有缺少 App Store 审核截图的一次性内购和订阅。可选的 `data/iap_packages.json` 只按 `productId` 预填 `review.screenshot` 路径；是否缺少截图由 App Store Connect 在线状态决定。
+
+只预览扫描和上传计划，不修改 App Store Connect：
+
+```bash
+asc --app myapp iap-screenshots --dry-run
+```
+
+使用 IAP JSON 中的路径并以非交互方式执行：
+
+```bash
+asc --app myapp iap-screenshots --iap-file data/iap_packages.json --no-prompt --yes
+```
+
+在 Web UI 中，打开 **IAP Management**，使用 **Scan Missing Screenshots**，为需要截图的产品选择 PNG、JPG 或 JPEG 文件，然后上传所选审核截图。Web UI 中选择的路径只会作为本次上传请求的临时载荷发送，不会写回 `data/iap_packages.json`。
+
+---
+
 ## 定价说明
 
 设置 `baseTerritory` 为 Apple 三字母地区 ID（如 `"USA"` 或 `"CHN"`）和 `baseAmount`（如 `"0.99"`），工具会自动解析为 Apple 价格点，读取该价格点的 equalizations，并默认为等价地区创建价格（`"applyEqualizedPrices": true`）。价格创建默认使用 Apple 的 inline subscription update 请求（`"creationMode": "inlinePatch"`，`"inlineBatchSize": 50`），如果 inline 创建被拒绝，会自动回退到并发 `subscriptionPrices` POST。如果你已经从 Apple 查询结果或错误信息中拿到了价格点 ID，也可以直接配置 `pricePointId`。
