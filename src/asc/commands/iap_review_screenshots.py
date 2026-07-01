@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -43,6 +44,30 @@ class ReviewScreenshotScanResult:
             "targets": [target.to_dict() for target in self.targets],
             "errors": self.errors,
         }
+
+
+@dataclass
+class PathValidationResult:
+    ok: bool
+    path: Path | None = None
+    error: str = ""
+    warning: str = ""
+
+
+@dataclass
+class ReviewScreenshotUploadItem:
+    kind: str
+    id: str
+    product_id: str
+    path: str
+
+
+@dataclass
+class ReviewScreenshotUploadResult:
+    uploaded: int = 0
+    skipped: int = 0
+    failed: int = 0
+    failures: list[tuple[str, str]] = field(default_factory=list)
 
 
 def scan_missing_review_screenshots(api, app_id: str) -> ReviewScreenshotScanResult:
@@ -152,3 +177,114 @@ def attach_default_paths(
         default_path = paths_by_product_id.get(target.product_id)
         if default_path:
             target.default_path = default_path
+
+
+def validate_review_screenshot_path(path_value) -> PathValidationResult:
+    if not isinstance(path_value, str) or not path_value.strip():
+        return PathValidationResult(False, error="review screenshot path required")
+
+    path = Path(path_value)
+    if not path.exists() or not path.is_file():
+        return PathValidationResult(False, error=f"file not found: {path_value}")
+    if path.suffix.lower() not in REVIEW_SCREENSHOT_EXTS:
+        return PathValidationResult(
+            False,
+            error=f"review screenshot must be .png/.jpg/.jpeg, got {path.suffix}",
+        )
+
+    warning = ""
+    size = path.stat().st_size
+    if size > REVIEW_SCREENSHOT_WARNING_BYTES:
+        warning = (
+            f"review screenshot exceeds 5MB ({size} bytes); continuing and "
+            "leaving final validation to App Store Connect"
+        )
+    return PathValidationResult(True, path=path, warning=warning)
+
+
+def _upload_iap_review_screenshot_file(api, iap_id: str, path: Path) -> None:
+    file_bytes = path.read_bytes()
+    reservation = api.create_in_app_purchase_review_screenshot_reservation(
+        iap_id, path.name, len(file_bytes)
+    )
+    screenshot_id = reservation["data"]["id"]
+    upload_operations = reservation["data"].get("attributes", {}).get(
+        "uploadOperations", []
+    )
+    api.upload_in_app_purchase_review_screenshot(upload_operations, file_bytes)
+    md5 = hashlib.md5(file_bytes).hexdigest()
+    api.commit_in_app_purchase_review_screenshot(screenshot_id, md5)
+
+
+def _upload_subscription_review_screenshot_file(api, sub_id: str, path: Path) -> None:
+    file_bytes = path.read_bytes()
+    reservation = api.create_subscription_review_screenshot_reservation(
+        sub_id, path.name, len(file_bytes)
+    )
+    screenshot_id = reservation["data"]["id"]
+    upload_operations = reservation["data"].get("attributes", {}).get(
+        "uploadOperations", []
+    )
+    api.upload_subscription_review_screenshot(upload_operations, file_bytes)
+    md5 = hashlib.md5(file_bytes).hexdigest()
+    api.commit_subscription_review_screenshot(screenshot_id, md5)
+
+
+def _has_existing_review_screenshot(api, item: ReviewScreenshotUploadItem) -> bool:
+    if item.kind == "iap":
+        return bool(api.list_in_app_purchase_review_screenshots(item.id))
+    if item.kind == "subscription":
+        return bool(api.list_subscription_review_screenshots(item.id))
+    raise ValueError(f"unsupported review screenshot kind: {item.kind}")
+
+
+def upload_review_screenshots(
+    api, items: list[ReviewScreenshotUploadItem], dry_run: bool = False
+) -> ReviewScreenshotUploadResult:
+    result = ReviewScreenshotUploadResult()
+    total = len(items)
+
+    for idx, item in enumerate(items, start=1):
+        try:
+            validation = validate_review_screenshot_path(item.path)
+            if not validation.ok:
+                result.failed += 1
+                result.failures.append((item.product_id, validation.error))
+                print(f"  ❌ {item.product_id}: {validation.error}")
+                continue
+
+            if validation.warning:
+                print(f"  ⚠️  {item.product_id}: {validation.warning}")
+
+            if _has_existing_review_screenshot(api, item):
+                result.skipped += 1
+                print(f"  {item.product_id}: 审核截图已存在，跳过")
+                continue
+
+            path = validation.path
+            if path is None:
+                raise ValueError("validated screenshot path missing")
+
+            if dry_run:
+                result.skipped += 1
+                print(f"  [预览] {item.product_id}: 将上传审核截图 {path.name}")
+                continue
+
+            if item.kind == "iap":
+                _upload_iap_review_screenshot_file(api, item.id, path)
+            elif item.kind == "subscription":
+                _upload_subscription_review_screenshot_file(api, item.id, path)
+            else:
+                raise ValueError(f"unsupported review screenshot kind: {item.kind}")
+
+            result.uploaded += 1
+            print(f"  {item.product_id}: 审核截图 {path.name} 上传 ✅")
+        except Exception as exc:
+            result.failed += 1
+            result.failures.append((item.product_id, str(exc)))
+            print(f"  ❌ {item.product_id}: {exc}")
+        finally:
+            pct = int(idx / total * 100) if total else 100
+            print(f"[PROGRESS:{pct}:IAP 审核截图 {idx}/{total}]")
+
+    return result
