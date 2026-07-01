@@ -25,6 +25,7 @@ TASK_KIND_LABELS = {
     "build": "构建上传",
     "whats-new": "更新说明上传",
     "iap": "内购上传",
+    "iap-review-screenshots": "IAP 审核截图上传",
     "urls": "URL 更新",
     "update": "工具更新",
 }
@@ -35,6 +36,7 @@ TASK_KIND_RETRY_PATHS = {
     "build": "/build",
     "whats-new": "/whats-new",
     "iap": "/iap",
+    "iap-review-screenshots": "/iap",
     "urls": "/urls",
     "update": "/update",
 }

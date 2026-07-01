@@ -8,10 +8,16 @@ import tempfile
 from pathlib import Path
 
 from fastapi import APIRouter, Query, Request
-from asc.utils import make_api_from_config
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 from asc.commands.iap import _upload_iap_core, _load_iap_config
+from asc.commands.iap_review_screenshots import (
+    ReviewScreenshotUploadItem,
+    attach_default_paths,
+    extract_review_screenshot_paths,
+    scan_missing_review_screenshots,
+    upload_review_screenshots,
+)
 from asc.commands.subscriptions import _upload_subscriptions_core
 from asc.config import Config
 from asc.utils import make_api_from_config
@@ -1291,6 +1297,110 @@ async def whats_new_run(
 
 # ---------- IAP helpers & endpoints ----------
 
+
+def _default_iap_review_screenshot_file(
+    config: Config, explicit_iap_file: str | None
+) -> str:
+    if explicit_iap_file:
+        return explicit_iap_file
+    return config.iap_path or "data/iap_packages.json"
+
+
+def _scan_iap_review_screenshot_targets(
+    profile: str, iap_file: str | None = None
+) -> dict:
+    config = Config(app_name=profile)
+    api, app_id = make_api_from_config(config)
+    scan = scan_missing_review_screenshots(api, app_id)
+    paths_by_product_id = extract_review_screenshot_paths(
+        _default_iap_review_screenshot_file(config, iap_file)
+    )
+    attach_default_paths(scan.targets, paths_by_product_id)
+    return {
+        "ok": True,
+        "count": len(scan.targets),
+        "targets": [target.to_dict() for target in scan.targets],
+        "errors": list(scan.errors),
+    }
+
+
+def _start_iap_review_screenshots_task(
+    profile: str,
+    items: list[ReviewScreenshotUploadItem],
+    dry_run: bool,
+) -> str:
+    task_id = _task_store.create("iap-review-screenshots", profile=profile)
+
+    def _run():
+        import queue
+        from asc.web.sse import capture_stdout_to_queue
+
+        _task_store.set_status(task_id, _TaskStatus.RUNNING)
+        q: "queue.Queue" = queue.Queue()
+        done_flag = _threading.Event()
+        _PROGRESS_RE = re.compile(r"\[PROGRESS:(\d+):(.+)\]")
+
+        def _drain_loop():
+            while not done_flag.is_set():
+                while not q.empty():
+                    line = q.get_nowait()
+                    m = _PROGRESS_RE.match(line)
+                    if m:
+                        _task_store.set_progress(task_id, int(m.group(1)), m.group(2))
+                    else:
+                        _task_store.append_log(task_id, line)
+                done_flag.wait(timeout=0.05)
+            while not q.empty():
+                line = q.get_nowait()
+                m = _PROGRESS_RE.match(line)
+                if m:
+                    _task_store.set_progress(task_id, int(m.group(1)), m.group(2))
+                else:
+                    _task_store.append_log(task_id, line)
+
+        _threading.Thread(target=_drain_loop, daemon=True).start()
+
+        try:
+            config = Config(app_name=profile)
+            api, _app_id = make_api_from_config(config)
+
+            with capture_stdout_to_queue(q):
+                result = upload_review_screenshots(api, items, dry_run=dry_run)
+
+            done_flag.set()
+            payload = {
+                "success": result.failed == 0,
+                "uploaded": result.uploaded,
+                "skipped": result.skipped,
+                "failed": result.failed,
+                "failures": [
+                    {"productId": product_id, "error": error}
+                    for product_id, error in result.failures
+                ],
+            }
+            if result.failed == 0:
+                _finish_task(task_id, _TaskStatus.DONE, payload)
+            else:
+                _finish_task(task_id, _TaskStatus.ERROR, payload)
+        except Exception as e:
+            done_flag.set()
+            _task_store.append_log(task_id, f"❌ 错误：{e}")
+            _finish_task(
+                task_id,
+                _TaskStatus.ERROR,
+                {
+                    "success": False,
+                    "uploaded": 0,
+                    "skipped": 0,
+                    "failed": len(items) or 1,
+                    "failures": [{"productId": "", "error": str(e)}],
+                    "error": str(e),
+                },
+            )
+
+    _threading.Thread(target=_run, daemon=True).start()
+    return task_id
+
 def _start_iap_task(
         profile: str,
         iap_file: str,
@@ -1398,6 +1508,75 @@ async def iap_check(request: Request):
         }
     except Exception as e:
         return {"ok": False, "level": "error", "message": str(e), "detail": {}}
+
+
+@router.post("/iap/review-screenshots/scan")
+async def iap_review_screenshots_scan(request: Request):
+    profile = request.cookies.get("asc_profile", "")
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    iap_file = payload.get("iapFile") if isinstance(payload, dict) else None
+    try:
+        return _scan_iap_review_screenshot_targets(profile, iap_file=iap_file)
+    except Exception as exc:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": str(exc),
+                "count": 0,
+                "targets": [],
+                "errors": [str(exc)],
+            },
+            status_code=500,
+        )
+
+
+@router.post("/iap/review-screenshots/upload")
+async def iap_review_screenshots_upload(request: Request):
+    profile = request.cookies.get("asc_profile", "")
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    items_payload = payload.get("items") if isinstance(payload, dict) else None
+    if not isinstance(items_payload, list) or not items_payload:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="items required")
+
+    items: list[ReviewScreenshotUploadItem] = []
+    for item in items_payload:
+        if not isinstance(item, dict):
+            continue
+        kind = item.get("kind")
+        item_id = item.get("id")
+        product_id = item.get("productId")
+        path = item.get("path")
+        values = (kind, item_id, product_id, path)
+        if not all(isinstance(value, str) and value.strip() for value in values):
+            continue
+        items.append(
+            ReviewScreenshotUploadItem(
+                kind=kind,
+                id=item_id,
+                product_id=product_id,
+                path=path,
+            )
+        )
+
+    if not items:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="items required")
+
+    dry_run = bool(payload.get("dryRun")) if isinstance(payload, dict) else False
+    task_id = _start_iap_review_screenshots_task(
+        profile=profile,
+        items=items,
+        dry_run=dry_run,
+    )
+    return {"task_id": task_id}
 
 
 # ---------- URL Settings API ----------

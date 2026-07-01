@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 import pytest
 from fastapi.testclient import TestClient
+from unittest.mock import patch
 from asc.web.server import create_app
 
 
@@ -145,7 +146,6 @@ def test_build_run_api_starts_task(client):
 
 
 def test_build_run_api_passes_interactive_release_options(client):
-    from unittest.mock import patch
     with patch("asc.web.routes_api._start_build_task") as mock_start:
         mock_start.return_value = "fake-build-task-id"
         resp = client.post("/api/build/run", cookies={"asc_profile": "myapp"}, data={
@@ -169,6 +169,88 @@ def test_build_run_api_passes_interactive_release_options(client):
         assert kwargs["provisioning_profile"] == "/tmp/acme.mobileprovision"
         assert kwargs["reuse_archive"] == "reuse"
         assert kwargs["dry_run"] is True
+
+
+def test_iap_review_screenshots_scan_returns_targets_with_default_path(client, tmp_path):
+    from unittest.mock import MagicMock
+    from asc.commands.iap_review_screenshots import ReviewScreenshotTarget
+
+    iap_file = tmp_path / "iap_packages.json"
+    screenshot_path = tmp_path / "review.png"
+    iap_file.write_text(
+        '{"items":[{"productId":"coins_100","review":{"screenshot":"review.png"}}]}',
+        encoding="utf-8",
+    )
+
+    scan_result = MagicMock()
+    scan_result.targets = [
+        ReviewScreenshotTarget(
+            kind="iap",
+            id="iap-1",
+            product_id="coins_100",
+            name="100 Coins",
+        )
+    ]
+    scan_result.errors = []
+
+    with patch("asc.web.routes_api.Config") as mock_config_cls, \
+         patch("asc.web.routes_api.make_api_from_config", return_value=(MagicMock(), "app-1")), \
+         patch("asc.web.routes_api.scan_missing_review_screenshots", return_value=scan_result):
+        mock_config_cls.return_value.iap_path = ""
+        resp = client.post(
+            "/api/iap/review-screenshots/scan",
+            cookies={"asc_profile": "myapp"},
+            json={"iapFile": str(iap_file)},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["count"] == 1
+    assert data["errors"] == []
+    assert data["targets"][0]["productId"] == "coins_100"
+    assert data["targets"][0]["defaultPath"] == str(screenshot_path)
+
+
+def test_iap_review_screenshots_upload_starts_task_with_items(client):
+    with patch("asc.web.routes_api._start_iap_review_screenshots_task") as mock_start:
+        mock_start.return_value = "fake-review-task-id"
+        resp = client.post(
+            "/api/iap/review-screenshots/upload",
+            cookies={"asc_profile": "myapp"},
+            json={
+                "dryRun": True,
+                "items": [
+                    {
+                        "kind": "iap",
+                        "id": "iap-1",
+                        "productId": "coins_100",
+                        "path": "/tmp/review.png",
+                    }
+                ],
+            },
+        )
+
+    assert resp.status_code == 200
+    assert resp.json() == {"task_id": "fake-review-task-id"}
+    mock_start.assert_called_once()
+    kwargs = mock_start.call_args.kwargs
+    assert kwargs["profile"] == "myapp"
+    assert kwargs["dry_run"] is True
+    assert len(kwargs["items"]) == 1
+    assert kwargs["items"][0].product_id == "coins_100"
+    assert kwargs["items"][0].path == "/tmp/review.png"
+
+
+def test_iap_review_screenshots_upload_rejects_empty_items(client):
+    resp = client.post(
+        "/api/iap/review-screenshots/upload",
+        cookies={"asc_profile": "myapp"},
+        json={"items": []},
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "items required"
 
 
 def test_build_options_api_returns_release_choices(client):
