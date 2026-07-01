@@ -1524,6 +1524,8 @@ async def iap_review_screenshots_scan(request: Request):
     else:
         payload = {}
     iap_file = payload.get("iapFile") if isinstance(payload, dict) else None
+    if iap_file is not None and not isinstance(iap_file, str):
+        raise HTTPException(status_code=400, detail="iapFile must be a string")
     try:
         return _scan_iap_review_screenshot_targets(profile, iap_file=iap_file)
     except Exception as exc:
@@ -1557,6 +1559,10 @@ async def iap_review_screenshots_upload(request: Request):
     if not isinstance(items_payload, list) or not items_payload:
         raise HTTPException(status_code=400, detail="items required")
 
+    dry_run = payload.get("dryRun", False) if isinstance(payload, dict) else False
+    if not isinstance(dry_run, bool):
+        raise HTTPException(status_code=400, detail="dryRun must be a boolean")
+
     items: list[ReviewScreenshotUploadItem] = []
     for item in items_payload:
         if not isinstance(item, dict):
@@ -1582,7 +1588,6 @@ async def iap_review_screenshots_upload(request: Request):
     if not items:
         raise HTTPException(status_code=400, detail="items required")
 
-    dry_run = bool(payload.get("dryRun")) if isinstance(payload, dict) else False
     task_id = _start_iap_review_screenshots_task(
         profile=profile,
         items=items,
