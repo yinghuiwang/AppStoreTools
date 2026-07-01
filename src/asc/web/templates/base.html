@@ -475,6 +475,35 @@
   </main>
 
   <script>
+    (function () {
+      const openTaskLogs = new Set();
+
+      function restoreTaskLogPanels(root) {
+        const scope = root || document;
+        scope.querySelectorAll('[data-task-log-panel]').forEach((panel) => {
+          const taskId = panel.dataset.taskLogPanel;
+          panel.classList.toggle('hidden', !openTaskLogs.has(taskId));
+        });
+      }
+
+      window.toggleTaskLogs = function (taskId) {
+        if (openTaskLogs.has(taskId)) {
+          openTaskLogs.delete(taskId);
+        } else {
+          openTaskLogs.add(taskId);
+        }
+        restoreTaskLogPanels(document);
+      };
+
+      document.addEventListener('htmx:afterSwap', (event) => {
+        restoreTaskLogPanels(event.target);
+      });
+
+      document.addEventListener('DOMContentLoaded', () => {
+        restoreTaskLogPanels(document);
+      });
+    })();
+
     document.addEventListener('click', (event) => {
       const button = event.target.closest('#filebrowser-content [data-fb-action]');
       if (!button) return;

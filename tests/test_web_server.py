@@ -18,6 +18,13 @@ def test_homepage_returns_200(client):
     assert "AppStore Tools" in resp.text
 
 
+def test_homepage_includes_task_log_restore_script(client):
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert "const openTaskLogs = new Set();" in resp.text
+    assert "htmx:afterSwap" in resp.text
+
+
 def test_metadata_page_returns_200(client):
     resp = client.get("/metadata")
     assert resp.status_code == 200
@@ -890,6 +897,24 @@ def test_task_store_list_recent_includes_profile():
 def test_tasks_recent_endpoint(client):
     resp = client.get("/api/tasks/recent")
     assert resp.status_code == 200
+
+
+def test_tasks_recent_markup_preserves_log_toggle_state(client, monkeypatch):
+    from asc.web import routes_api
+    from asc.web.tasks import TaskStatus, TaskStore
+
+    store = TaskStore()
+    task_id = store.create("build", profile="staging")
+    store.set_status(task_id, TaskStatus.RUNNING)
+    store.append_log(task_id, "build line")
+    monkeypatch.setattr(routes_api, "_task_store", store)
+
+    resp = client.get("/api/tasks/recent")
+
+    assert resp.status_code == 200
+    assert f'data-task-id="{task_id}"' in resp.text
+    assert f"toggleTaskLogs('{task_id}')" in resp.text
+    assert f'data-task-log-panel="{task_id}"' in resp.text
 
 
 def test_task_store_set_progress():

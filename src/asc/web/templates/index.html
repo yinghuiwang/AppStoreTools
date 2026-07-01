@@ -22,7 +22,7 @@
          hx-trigger="load"
          hx-swap="innerHTML">
       {% for t in recent_tasks %}
-      <div class="px-5 py-3.5 border-b border-obsidian-700 last:border-0 hover:bg-obsidian-800/50 transition-colors duration-150">
+      <div class="px-5 py-3.5 border-b border-obsidian-700 last:border-0 hover:bg-obsidian-800/50 transition-colors duration-150" data-task-id="{{ t.id }}">
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-3">
             {% if t.status == 'done' %}
@@ -51,7 +51,7 @@
             <span class="text-[11px] text-obsidian-500 font-mono tabular-nums">{{ t.created_at[:16] }}</span>
             <span class="text-[11px] text-obsidian-500 font-mono tabular-nums">用时 {{ t.duration_label }}</span>
             <button type="button" class="text-[11px] text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium"
-                    onclick="this.parentElement.parentElement.nextElementSibling.classList.toggle('hidden')">
+                    onclick="toggleTaskLogs('{{ t.id }}')">
               LOGS
             </button>
             {% if t.status == 'error' and t.retry_path %}
@@ -59,7 +59,7 @@
             {% endif %}
           </div>
         </div>
-        <div class="hidden mt-3 log-panel max-h-48">
+        <div class="hidden mt-3 log-panel max-h-48" data-task-log-panel="{{ t.id }}">
           {% for line in t.logs %}
           <div class="leading-relaxed">{{ line }}</div>
           {% endfor %}
