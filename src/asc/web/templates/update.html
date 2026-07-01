@@ -12,7 +12,7 @@
     <p class="text-sm text-obsidian-400 mt-1">检查并安装 AppStoreTools 最新版本</p>
   </div>
 
-  <div x-data="{ checkResult: null, checking: false, step: 1, taskId: null, logs: [], status: 'idle', selectedTab: 'latest', branchOptions: [], branchesLoading: false, branchError: '', selectedBranch: '' }">
+  <div x-data="{ checkResult: null, checking: false, step: 1, taskId: null, logs: [], status: 'idle', selectedTab: 'specific', branchOptions: [], branchesLoading: false, branchError: '', selectedBranch: '' }">
 
     <!-- Check status card -->
     <div class="card mb-6">
@@ -67,9 +67,9 @@
       </div>
     </div>
 
-    <!-- Install options -->
+    <!-- Latest version install -->
     <template x-if="checkResult && checkResult.detail && !checkResult.detail.is_latest">
-      <div class="card">
+      <div class="card mb-6">
         <div class="card-body space-y-4">
           <div class="flex items-center gap-2 text-amber-400">
             <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/></svg>
@@ -80,14 +80,49 @@
               </template>
             </span>
           </div>
-
-          <!-- Tabs -->
-          <div class="flex gap-1 p-1 rounded-lg" style="background: var(--accent-glow);">
-            <button @click="selectedTab = 'latest'" type="button"
-                    class="flex-1 py-2 px-3 rounded-md text-sm font-medium transition-all duration-150"
-                    :class="selectedTab === 'latest' ? 'bg-amber-500 text-obsidian-900' : 'text-obsidian-300 hover:text-obsidian-100'">
-              最新版本
+          <form @submit.prevent="runUpdate('', 'latest')">
+            <p class="text-sm text-obsidian-400 mb-3">
+              安装最新稳定版本 <span class="text-amber-400 font-medium" x-text="checkResult.detail.latest"></span>
+              <template x-if="checkResult.detail.latest_commit">
+                <span class="text-amber-400 font-mono" x-text="`(commit ${checkResult.detail.latest_commit})`"></span>
+              </template>
+            </p>
+            <button type="submit" class="btn-primary">
+              立即更新
             </button>
+          </form>
+        </div>
+      </div>
+    </template>
+
+    <!-- Already up to date -->
+    <template x-if="checkResult && checkResult.detail && checkResult.detail.is_latest">
+      <div class="card mb-6">
+        <div class="card-body text-center py-8">
+          <div class="w-12 h-12 rounded-full bg-emerald-500/15 flex items-center justify-center mx-auto mb-4">
+            <svg class="w-6 h-6 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>
+          </div>
+          <h3 class="text-lg font-medium text-obsidian-100 mb-1">已是最新版本</h3>
+          <p class="text-sm text-obsidian-400">
+            当前版本 <span class="font-mono text-amber-400" x-text="checkResult.detail.current"></span>
+            <template x-if="checkResult.detail.current_commit">
+              <span class="font-mono text-amber-400" x-text="`(commit ${checkResult.detail.current_commit})`"></span>
+            </template>
+            已是最新
+          </p>
+        </div>
+      </div>
+    </template>
+
+    <!-- Advanced install -->
+    <template x-if="checkResult && checkResult.detail">
+      <div class="card">
+        <div class="card-body space-y-4">
+          <div>
+            <h2 class="font-semibold text-obsidian-100">高级安装</h2>
+          </div>
+
+          <div class="flex gap-1 p-1 rounded-lg" style="background: var(--accent-glow);">
             <button @click="selectedTab = 'specific'" type="button"
                     class="flex-1 py-2 px-3 rounded-md text-sm font-medium transition-all duration-150"
                     :class="selectedTab === 'specific' ? 'bg-amber-500 text-obsidian-900' : 'text-obsidian-300 hover:text-obsidian-100'">
@@ -100,21 +135,7 @@
             </button>
           </div>
 
-          <!-- Latest version form -->
-          <form x-show="selectedTab === 'latest'" @submit.prevent="runUpdate('')">
-            <p class="text-sm text-obsidian-400 mb-3">
-              安装最新稳定版本 <span class="text-amber-400 font-medium" x-text="checkResult.detail.latest"></span>
-              <template x-if="checkResult.detail.latest_commit">
-                <span class="text-amber-400 font-mono" x-text="`(commit ${checkResult.detail.latest_commit})`"></span>
-              </template>
-            </p>
-            <button type="submit" class="btn-primary">
-              立即更新
-            </button>
-          </form>
-
-          <!-- Specific version form -->
-          <form x-show="selectedTab === 'specific'" @submit.prevent="runUpdate($el.querySelector('[name=version]').value)">
+          <form x-show="selectedTab === 'specific'" @submit.prevent="runUpdate($el.querySelector('[name=version]').value, 'specific')">
             <div class="flex gap-3 items-end">
               <div class="flex-1">
                 <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">版本号</label>
@@ -124,7 +145,6 @@
             </div>
           </form>
 
-          <!-- Branch form -->
           <form x-show="selectedTab === 'branch'" @submit.prevent="runUpdateBranch(selectedBranch || $el.querySelector('[name=branch]')?.value || '')">
             <div class="flex items-center justify-between mb-2">
               <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium block">分支名</label>
@@ -149,25 +169,6 @@
               <button type="submit" class="btn-primary whitespace-nowrap">从分支安装</button>
             </div>
           </form>
-        </div>
-      </div>
-    </template>
-
-    <!-- Already up to date -->
-    <template x-if="checkResult && checkResult.detail && checkResult.detail.is_latest">
-      <div class="card">
-        <div class="card-body text-center py-8">
-          <div class="w-12 h-12 rounded-full bg-emerald-500/15 flex items-center justify-center mx-auto mb-4">
-            <svg class="w-6 h-6 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>
-          </div>
-          <h3 class="text-lg font-medium text-obsidian-100 mb-1">已是最新版本</h3>
-          <p class="text-sm text-obsidian-400">
-            当前版本 <span class="font-mono text-amber-400" x-text="checkResult.detail.current"></span>
-            <template x-if="checkResult.detail.current_commit">
-              <span class="font-mono text-amber-400" x-text="`(commit ${checkResult.detail.current_commit})`"></span>
-            </template>
-            已是最新
-          </p>
         </div>
       </div>
     </template>
@@ -258,12 +259,22 @@ function loadBranches(force = false) {
     });
 }
 
-function runUpdate(version) {
+function runUpdate(version, mode = 'specific') {
   const root = document.querySelector('[x-data]');
   const d = Alpine.$data(root);
+  const selectedVersion = (version || '').trim();
+  if (mode === 'specific' && !selectedVersion) {
+    d.checkResult = {
+      ...(d.checkResult || {}),
+      level: 'warning',
+      message: '请输入版本号',
+      detail: d.checkResult ? d.checkResult.detail : null
+    };
+    return;
+  }
   fetch('/api/update/run', {
     method: 'POST',
-    body: new URLSearchParams({version: version || ''}),
+    body: new URLSearchParams({version: selectedVersion}),
     headers: {'Content-Type': 'application/x-www-form-urlencoded'}
   })
   .then(r => r.json())
@@ -279,9 +290,14 @@ function runUpdate(version) {
 function runUpdateBranch(branch) {
   const root = document.querySelector('[x-data]');
   const d = Alpine.$data(root);
+  const selectedBranch = (branch || '').trim();
+  if (!selectedBranch) {
+    d.branchError = '请输入分支名';
+    return;
+  }
   fetch('/api/update/run', {
     method: 'POST',
-    body: new URLSearchParams({branch: branch || ''}),
+    body: new URLSearchParams({branch: selectedBranch}),
     headers: {'Content-Type': 'application/x-www-form-urlencoded'}
   })
   .then(r => r.json())

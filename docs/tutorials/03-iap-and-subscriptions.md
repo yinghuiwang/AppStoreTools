@@ -123,6 +123,32 @@ Use this when you need to update prices, localizations, or descriptions on alrea
 
 ---
 
+## Upload App Store review screenshots
+
+Use `iap-screenshots` to find IAP products that still need App Store review screenshots and upload the missing files:
+
+```bash
+asc --app myapp iap-screenshots
+```
+
+The command queries App Store Connect online state for all one-time IAP and subscriptions that are missing App Store review screenshots. The optional `data/iap_packages.json` file only prefills `review.screenshot` paths by `productId`; the online App Store Connect state decides which screenshots are missing.
+
+Preview the scan and upload plan without changing App Store Connect:
+
+```bash
+asc --app myapp iap-screenshots --dry-run
+```
+
+Run non-interactively with paths from your IAP JSON file:
+
+```bash
+asc --app myapp iap-screenshots --iap-file data/iap_packages.json --no-prompt --yes
+```
+
+In the Web UI, open **IAP 管理 / IAP Management**, go to **补审核截图**, click **扫描缺失**, choose PNG, JPG, or JPEG files for the products that need screenshots, then click **上传截图**. Paths selected in the Web UI are sent only with that upload request and are not written back to `data/iap_packages.json`.
+
+---
+
 ## How pricing works
 
 Set `baseTerritory` to Apple’s three-letter territory ID (for example `"USA"` or `"CHN"`) and `baseAmount` (for example `"0.99"`). The tool resolves this to Apple's price point, reads that price point’s equalizations, and creates prices for the equalized territories by default (`"applyEqualizedPrices": true`). Price creation uses Apple’s inline subscription update request by default (`"creationMode": "inlinePatch"`, `"inlineBatchSize": 50`) and falls back to concurrent `subscriptionPrices` POST requests if inline creation is rejected. If Apple returns a price point ID from a previous lookup or error message, you can configure it directly with `pricePointId`.

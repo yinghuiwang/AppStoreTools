@@ -8,10 +8,16 @@ import tempfile
 from pathlib import Path
 
 from fastapi import APIRouter, Query, Request
-from asc.utils import make_api_from_config
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 from asc.commands.iap import _upload_iap_core, _load_iap_config
+from asc.commands.iap_review_screenshots import (
+    ReviewScreenshotUploadItem,
+    attach_default_paths,
+    extract_review_screenshot_paths,
+    scan_missing_review_screenshots,
+    upload_review_screenshots,
+)
 from asc.commands.subscriptions import _upload_subscriptions_core
 from asc.config import Config
 from asc.utils import make_api_from_config
@@ -99,6 +105,14 @@ def _is_under_allowed_root(target: Path) -> bool:
     return False
 
 
+def _extension_filter(ext: str) -> set[str]:
+    return {
+        part.strip().lower()
+        for part in ext.split(",")
+        if part.strip()
+    }
+
+
 @router.get("/switch-profile")
 async def switch_profile(profile: str):
     """Switch active app profile (stores in session cookie)."""
@@ -130,11 +144,12 @@ async def browse(request: Request, path: str = ".", mode: str = "dir", ext: str 
     except (PermissionError, NotADirectoryError, OSError):
         items = []
 
+    allowed_exts = _extension_filter(ext)
     for item in items:
         if item.name.startswith("."):
             continue
         if mode == "file" and not item.is_dir():
-            if ext and item.suffix != ext:
+            if allowed_exts and item.suffix.lower() not in allowed_exts:
                 continue
         entries.append({"name": item.name, "path": str(item), "is_dir": item.is_dir()})
 
@@ -1291,6 +1306,163 @@ async def whats_new_run(
 
 # ---------- IAP helpers & endpoints ----------
 
+
+def _default_iap_review_screenshot_file(
+    config: Config, explicit_iap_file: str | None
+) -> str:
+    if explicit_iap_file:
+        return explicit_iap_file
+    return config.iap_path or "data/iap_packages.json"
+
+
+def _scan_iap_review_screenshot_targets(
+    profile: str, iap_file: str | None = None
+) -> dict:
+    config = Config(app_name=profile)
+    api, app_id = make_api_from_config(config)
+    scan = scan_missing_review_screenshots(api, app_id)
+    paths_by_product_id = extract_review_screenshot_paths(
+        _default_iap_review_screenshot_file(config, iap_file)
+    )
+    attach_default_paths(scan.targets, paths_by_product_id)
+    return {
+        "ok": True,
+        "count": len(scan.targets),
+        "targets": [target.to_dict() for target in scan.targets],
+        "errors": list(scan.errors),
+    }
+
+
+def _review_screenshot_target_key(item) -> tuple[str, str, str]:
+    return (item.kind, item.id, item.product_id)
+
+
+def _ineligible_iap_review_screenshot_items(
+    api, app_id: str, items: list[ReviewScreenshotUploadItem]
+) -> tuple[list[ReviewScreenshotUploadItem], list[str]]:
+    scan = scan_missing_review_screenshots(api, app_id)
+    eligible = {_review_screenshot_target_key(target) for target in scan.targets}
+    invalid = [
+        item
+        for item in items
+        if _review_screenshot_target_key(item) not in eligible
+    ]
+    return invalid, list(scan.errors)
+
+
+def _start_iap_review_screenshots_task(
+    profile: str,
+    items: list[ReviewScreenshotUploadItem],
+    dry_run: bool,
+) -> str:
+    task_id = _task_store.create("iap-review-screenshots", profile=profile)
+
+    def _run():
+        import queue
+        from asc.web.sse import capture_stdout_to_queue
+
+        _task_store.set_status(task_id, _TaskStatus.RUNNING)
+        q: "queue.Queue" = queue.Queue()
+        done_flag = _threading.Event()
+        _PROGRESS_RE = re.compile(r"\[PROGRESS:(\d+):(.+)\]")
+
+        def _drain_loop():
+            while not done_flag.is_set():
+                while not q.empty():
+                    line = q.get_nowait()
+                    m = _PROGRESS_RE.match(line)
+                    if m:
+                        _task_store.set_progress(task_id, int(m.group(1)), m.group(2))
+                    else:
+                        _task_store.append_log(task_id, line)
+                done_flag.wait(timeout=0.05)
+            while not q.empty():
+                line = q.get_nowait()
+                m = _PROGRESS_RE.match(line)
+                if m:
+                    _task_store.set_progress(task_id, int(m.group(1)), m.group(2))
+                else:
+                    _task_store.append_log(task_id, line)
+
+        _threading.Thread(target=_drain_loop, daemon=True).start()
+
+        try:
+            config = Config(app_name=profile)
+            api, app_id = make_api_from_config(config)
+
+            invalid_items, scan_errors = _ineligible_iap_review_screenshot_items(
+                api, app_id, items
+            )
+            for error in scan_errors:
+                _task_store.append_log(task_id, f"⚠️ {error}")
+            if invalid_items:
+                done_flag.set()
+                message = (
+                    "review screenshot target no longer eligible for current "
+                    "app/profile or already has a screenshot"
+                )
+                labels = ", ".join(
+                    f"{item.kind}:{item.product_id} ({item.id})"
+                    for item in invalid_items
+                )
+                _task_store.append_log(task_id, f"❌ {message}: {labels}")
+                _finish_task(
+                    task_id,
+                    _TaskStatus.ERROR,
+                    {
+                        "success": False,
+                        "uploaded": 0,
+                        "skipped": 0,
+                        "failed": len(invalid_items),
+                        "failures": [
+                            {
+                                "productId": item.product_id,
+                                "error": f"{message}: {item.kind}:{item.id}",
+                            }
+                            for item in invalid_items
+                        ],
+                        "error": f"{message}: {labels}",
+                    },
+                )
+                return
+
+            with capture_stdout_to_queue(q):
+                result = upload_review_screenshots(api, items, dry_run=dry_run)
+
+            done_flag.set()
+            payload = {
+                "success": result.failed == 0,
+                "uploaded": result.uploaded,
+                "skipped": result.skipped,
+                "failed": result.failed,
+                "failures": [
+                    {"productId": product_id, "error": error}
+                    for product_id, error in result.failures
+                ],
+            }
+            if result.failed == 0:
+                _finish_task(task_id, _TaskStatus.DONE, payload)
+            else:
+                _finish_task(task_id, _TaskStatus.ERROR, payload)
+        except Exception as e:
+            done_flag.set()
+            _task_store.append_log(task_id, f"❌ 错误：{e}")
+            _finish_task(
+                task_id,
+                _TaskStatus.ERROR,
+                {
+                    "success": False,
+                    "uploaded": 0,
+                    "skipped": 0,
+                    "failed": len(items) or 1,
+                    "failures": [{"productId": "", "error": str(e)}],
+                    "error": str(e),
+                },
+            )
+
+    _threading.Thread(target=_run, daemon=True).start()
+    return task_id
+
 def _start_iap_task(
         profile: str,
         iap_file: str,
@@ -1398,6 +1570,92 @@ async def iap_check(request: Request):
         }
     except Exception as e:
         return {"ok": False, "level": "error", "message": str(e), "detail": {}}
+
+
+@router.post("/iap/review-screenshots/scan")
+async def iap_review_screenshots_scan(request: Request):
+    from fastapi import HTTPException
+
+    profile = request.cookies.get("asc_profile", "")
+    body = await request.body()
+    if body.strip():
+        try:
+            payload = json.loads(body)
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="invalid JSON")
+    else:
+        payload = {}
+    iap_file = payload.get("iapFile") if isinstance(payload, dict) else None
+    if iap_file is not None and not isinstance(iap_file, str):
+        raise HTTPException(status_code=400, detail="iapFile must be a string")
+    try:
+        return _scan_iap_review_screenshot_targets(profile, iap_file=iap_file)
+    except Exception as exc:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": str(exc),
+                "count": 0,
+                "targets": [],
+                "errors": [str(exc)],
+            },
+            status_code=500,
+        )
+
+
+@router.post("/iap/review-screenshots/upload")
+async def iap_review_screenshots_upload(request: Request):
+    from fastapi import HTTPException
+
+    profile = request.cookies.get("asc_profile", "")
+    body = await request.body()
+    if body.strip():
+        try:
+            payload = json.loads(body)
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="invalid JSON")
+    else:
+        payload = {}
+
+    items_payload = payload.get("items") if isinstance(payload, dict) else None
+    if not isinstance(items_payload, list) or not items_payload:
+        raise HTTPException(status_code=400, detail="items required")
+
+    dry_run = payload.get("dryRun", False) if isinstance(payload, dict) else False
+    if not isinstance(dry_run, bool):
+        raise HTTPException(status_code=400, detail="dryRun must be a boolean")
+
+    items: list[ReviewScreenshotUploadItem] = []
+    for item in items_payload:
+        if not isinstance(item, dict):
+            raise HTTPException(status_code=400, detail="invalid item")
+        kind = item.get("kind")
+        item_id = item.get("id")
+        product_id = item.get("productId")
+        path = item.get("path")
+        values = (kind, item_id, product_id, path)
+        if not all(isinstance(value, str) and value.strip() for value in values):
+            raise HTTPException(status_code=400, detail="invalid item")
+        if kind not in {"iap", "subscription"}:
+            raise HTTPException(status_code=400, detail="invalid item")
+        items.append(
+            ReviewScreenshotUploadItem(
+                kind=kind,
+                id=item_id,
+                product_id=product_id,
+                path=path,
+            )
+        )
+
+    if not items:
+        raise HTTPException(status_code=400, detail="items required")
+
+    task_id = _start_iap_review_screenshots_task(
+        profile=profile,
+        items=items,
+        dry_run=dry_run,
+    )
+    return {"task_id": task_id}
 
 
 # ---------- URL Settings API ----------

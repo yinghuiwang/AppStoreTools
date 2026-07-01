@@ -190,6 +190,7 @@ from asc.commands.metadata import (
 )
 from asc.commands.screenshots import cmd_screenshots
 from asc.commands.iap import cmd_iap
+from asc.commands.iap_review_screenshots import cmd_iap_screenshots
 from asc.commands.whats_new import cmd_whats_new
 from asc.commands.app_config import cmd_app_add, cmd_app_list, cmd_app_remove, cmd_app_default, cmd_install, cmd_app_show, cmd_app_edit, cmd_app_import, cmd_init
 from asc.commands.build import cmd_build, cmd_deploy, cmd_release
@@ -208,6 +209,7 @@ app.command("set-marketing-url",   help=t(HELP['cmd_set_marketing_url']))(cmd_se
 app.command("set-privacy-policy-url", help=t(HELP['cmd_set_privacy_policy_url']))(cmd_set_privacy_policy_url)
 app.command("screenshots",         help=t(HELP['cmd_screenshots']))(cmd_screenshots)
 app.command("iap",                 help=t(HELP['cmd_iap']))(cmd_iap)
+app.command("iap-screenshots",     help="补上传 IAP/订阅审核截图")(cmd_iap_screenshots)
 app.command("whats-new",           help=t(HELP['cmd_whats_new']))(cmd_whats_new)
 app.command("check",               help=t(HELP['cmd_check']))(cmd_check)
 app_cmd.command("add",             help=t(HELP['cmd_app_add']))(cmd_app_add)

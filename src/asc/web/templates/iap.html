@@ -20,7 +20,13 @@
     progressMsg: '',
     checkResult: null,
     submitting: false,
-    showIapHelp: false
+    showIapHelp: false,
+    reviewScanLoading: false,
+    reviewUploadSubmitting: false,
+    reviewDryRun: false,
+    reviewTargets: [],
+    reviewErrors: [],
+    reviewMessage: ''
   }">
 
     <!-- Step1: Config form -->
@@ -194,6 +200,86 @@
           </div>
         </div>
       </form>
+
+      <div class="card max-w-5xl mt-6">
+        <div class="card-body space-y-4">
+          <div class="flex items-center justify-between gap-3">
+            <h2 class="font-semibold text-obsidian-100">补审核截图</h2>
+            <button type="button"
+                    class="btn-ghost"
+                    :disabled="reviewScanLoading"
+                    @click="scanReviewScreenshots()">
+              <span x-show="!reviewScanLoading">扫描缺失</span>
+              <span x-show="reviewScanLoading" class="flex items-center gap-1.5">
+                <svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 0 1 8-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                扫描中...
+              </span>
+            </button>
+          </div>
+
+          <template x-if="reviewMessage">
+            <div class="rounded-lg p-3 text-sm bg-obsidian-800 text-obsidian-200 border border-obsidian-700" x-text="reviewMessage"></div>
+          </template>
+
+          <template x-if="reviewErrors.length">
+            <div class="rounded-lg p-3 text-sm bg-red-500/10 text-red-400 border border-red-500/20">
+              <template x-for="(err, idx) in reviewErrors" :key="idx">
+                <p x-text="err"></p>
+              </template>
+            </div>
+          </template>
+
+          <div x-show="reviewTargets.length" class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="text-left text-xs uppercase tracking-widest text-obsidian-500 border-b border-obsidian-700">
+                  <th class="py-2 pr-3 font-medium">类型</th>
+                  <th class="py-2 pr-3 font-medium">Product ID</th>
+                  <th class="py-2 pr-3 font-medium">名称</th>
+                  <th class="py-2 font-medium">路径</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-obsidian-700">
+                <template x-for="(target, idx) in reviewTargets" :key="target.kind + '-' + target.id + '-' + idx">
+                  <tr>
+                    <td class="py-3 pr-3 text-obsidian-300 whitespace-nowrap" x-text="target.kind === 'subscription' ? '订阅' : 'IAP'"></td>
+                    <td class="py-3 pr-3 text-obsidian-200 font-mono text-xs" x-text="target.productId"></td>
+                    <td class="py-3 pr-3 text-obsidian-300" x-text="target.name || target.groupName || '-'"></td>
+                    <td class="py-3">
+                      <div class="flex gap-2 min-w-[280px]">
+                        <input type="text"
+                               :id="'review-shot-path-' + idx"
+                               x-model="target.path"
+                               class="field-input flex-1">
+                        <button type="button"
+                                class="btn-ghost whitespace-nowrap"
+                                @click="openFileBrowser('review-shot-path-' + idx, 'file', '.png,.jpg,.jpeg')">浏览</button>
+                      </div>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+
+          <div x-show="reviewTargets.length" class="flex items-center gap-3 pt-3 border-t border-obsidian-700">
+            <label class="flex items-center gap-2.5 text-sm text-obsidian-300 cursor-pointer">
+              <input type="checkbox" x-model="reviewDryRun" class="w-4 h-4">
+              预览模式
+            </label>
+            <button type="button"
+                    class="btn-primary"
+                    :disabled="reviewUploadSubmitting"
+                    @click="uploadReviewScreenshots()">
+              <span x-show="!reviewUploadSubmitting">上传截图</span>
+              <span x-show="reviewUploadSubmitting" class="flex items-center gap-1.5">
+                <svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 0 1 8-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                提交中...
+              </span>
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Step2: Execution panel -->
@@ -341,6 +427,86 @@ function selectFile(path) {
     el.dispatchEvent(new Event('input', { bubbles: true }));
   }
   closeFileBrowser();
+}
+
+function scanReviewScreenshots() {
+  const root = document.querySelector('[x-data]');
+  const d = Alpine.$data(root);
+  const iapFile = document.getElementById('iap-file-input')?.value || '';
+  d.reviewScanLoading = true;
+  d.reviewMessage = '';
+  d.reviewErrors = [];
+  fetch('/api/iap/review-screenshots/scan', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({iapFile})
+  })
+    .then(async r => {
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.detail || '扫描失败');
+      return data;
+    })
+    .then(data => {
+      d.reviewTargets = (data.targets || []).map(target => ({
+        ...target,
+        path: target.path || target.defaultPath || ''
+      }));
+      d.reviewErrors = data.errors || [];
+      d.reviewMessage = data.count ? `发现 ${data.count} 个缺失审核截图` : '没有缺失审核截图';
+    })
+    .catch(e => {
+      d.reviewTargets = [];
+      d.reviewErrors = [e.message || '扫描失败'];
+      d.reviewMessage = '';
+    })
+    .finally(() => {
+      d.reviewScanLoading = false;
+    });
+}
+
+function uploadReviewScreenshots() {
+  const root = document.querySelector('[x-data]');
+  const d = Alpine.$data(root);
+  const items = d.reviewTargets
+    .filter(target => (target.path || '').trim())
+    .map(target => ({
+      kind: target.kind,
+      id: target.id,
+      productId: target.productId,
+      path: target.path.trim()
+    }));
+  if (!items.length) {
+    d.reviewMessage = '请选择截图路径';
+    return;
+  }
+  d.reviewUploadSubmitting = true;
+  d.reviewMessage = '';
+  d.reviewErrors = [];
+  fetch('/api/iap/review-screenshots/upload', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({items, dryRun: d.reviewDryRun})
+  })
+    .then(async r => {
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.detail || '提交失败');
+      return data;
+    })
+    .then(data => {
+      d.taskId = data.task_id;
+      d.step = 2;
+      d.logs = [];
+      d.status = 'idle';
+      d.progress = 0;
+      d.progressMsg = '';
+      startIapSSE(data.task_id);
+    })
+    .catch(e => {
+      d.reviewErrors = [e.message || '提交失败'];
+    })
+    .finally(() => {
+      d.reviewUploadSubmitting = false;
+    });
 }
 
 function startIapSSE(taskId) {

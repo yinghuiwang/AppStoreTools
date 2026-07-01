@@ -23,7 +23,14 @@ except ImportError:  # pragma: no cover - Python 3.9/3.10 fallback
 
 PROVIDERS = ("feishu", "wecom", "dingtalk")
 DEFAULT_NOTIFY_STATUSES = ["done", "error", "canceled"]
-DEFAULT_NOTIFY_KINDS = ["metadata", "build", "whats-new", "iap", "urls"]
+DEFAULT_NOTIFY_KINDS = [
+    "metadata",
+    "build",
+    "whats-new",
+    "iap",
+    "iap-review-screenshots",
+    "urls",
+]
 TERMINAL_STATUSES = tuple(DEFAULT_NOTIFY_STATUSES)
 TASK_KINDS = (*DEFAULT_NOTIFY_KINDS, "update")
 STATUS_LABELS = {

@@ -228,6 +228,69 @@ def test_list_subscription_price_point_equalizations_uses_official_endpoint(api)
     )
 
 
+def test_list_in_app_purchases_follows_pagination(api):
+    with patch.object(
+        api,
+        "get",
+        side_effect=[
+            {
+                "data": [{"id": "iap1"}],
+                "links": {"next": "https://api.appstoreconnect.apple.com/v1/page2"},
+            },
+            {"data": [{"id": "iap2"}], "links": {}},
+        ],
+    ) as mock_get:
+        result = api.list_in_app_purchases("app123")
+
+    assert [item["id"] for item in result] == ["iap1", "iap2"]
+    assert mock_get.call_args_list == [
+        call("/v1/apps/app123/inAppPurchasesV2", limit=200),
+        call("https://api.appstoreconnect.apple.com/v1/page2"),
+    ]
+
+
+def test_list_subscription_groups_follows_pagination(api):
+    with patch.object(
+        api,
+        "get",
+        side_effect=[
+            {
+                "data": [{"id": "group1"}],
+                "links": {"next": "https://api.appstoreconnect.apple.com/v1/groups2"},
+            },
+            {"data": [{"id": "group2"}], "links": {}},
+        ],
+    ) as mock_get:
+        result = api.list_subscription_groups("app123")
+
+    assert [item["id"] for item in result] == ["group1", "group2"]
+    assert mock_get.call_args_list == [
+        call("/v1/apps/app123/subscriptionGroups", limit=200),
+        call("https://api.appstoreconnect.apple.com/v1/groups2"),
+    ]
+
+
+def test_list_subscriptions_follows_pagination(api):
+    with patch.object(
+        api,
+        "get",
+        side_effect=[
+            {
+                "data": [{"id": "sub1"}],
+                "links": {"next": "https://api.appstoreconnect.apple.com/v1/subs2"},
+            },
+            {"data": [{"id": "sub2"}], "links": {}},
+        ],
+    ) as mock_get:
+        result = api.list_subscriptions("group123")
+
+    assert [item["id"] for item in result] == ["sub1", "sub2"]
+    assert mock_get.call_args_list == [
+        call("/v1/subscriptionGroups/group123/subscriptions", limit=200),
+        call("https://api.appstoreconnect.apple.com/v1/subs2"),
+    ]
+
+
 def test_update_subscription_prices_inline_builds_compound_request(api):
     with patch.object(api, "patch", return_value={"data": {"id": "sub1"}}) as mock_patch:
         api.update_subscription_prices_inline(

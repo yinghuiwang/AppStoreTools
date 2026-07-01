@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 import pytest
 from fastapi.testclient import TestClient
+from unittest.mock import patch
 from asc.web.server import create_app
 
 
@@ -25,6 +26,14 @@ def test_metadata_page_returns_200(client):
 def test_build_page_returns_200(client):
     resp = client.get("/build")
     assert resp.status_code == 200
+
+
+def test_iap_page_contains_review_screenshot_tools(client):
+    resp = client.get("/iap")
+    assert resp.status_code == 200
+    assert "补审核截图" in resp.text
+    assert "/api/iap/review-screenshots/scan" in resp.text
+    assert "/api/iap/review-screenshots/upload" in resp.text
 
 
 def test_blocking_web_probes_run_in_threadpool():
@@ -66,6 +75,20 @@ def test_update_branches_returns_options(client):
     assert data["branches"] == ["develop", "main"]
 
 
+def test_update_page_contains_always_available_advanced_install(client):
+    resp = client.get("/update")
+
+    assert resp.status_code == 200
+    assert "高级安装" in resp.text
+    assert "指定版本" in resp.text
+    assert "指定分支" in resp.text
+    assert "runUpdate('', 'latest')" in resp.text
+    assert "runUpdate($el.querySelector('[name=version]').value, 'specific')" in resp.text
+    assert "runUpdateBranch(selectedBranch || $el.querySelector('[name=branch]')?.value || '')" in resp.text
+    assert "/api/update/run" in resp.text
+    assert "/api/update/branches" in resp.text
+
+
 def test_profiles_page_returns_200(client):
     resp = client.get("/profiles")
     assert resp.status_code == 200
@@ -91,6 +114,21 @@ def test_filebrowser_lists_files(client, tmp_path):
     resp = client.get(f"/api/browse?path={tmp_path}&mode=file&ext=.csv")
     assert resp.status_code == 200
     assert "test.csv" in resp.text
+
+
+def test_filebrowser_accepts_comma_separated_extensions_case_insensitive(client, tmp_path):
+    (tmp_path / "image.jpg").write_bytes(b"jpg")
+    (tmp_path / "image.jpeg").write_bytes(b"jpeg")
+    (tmp_path / "image.PNG").write_bytes(b"png")
+    (tmp_path / "notes.txt").write_text("text")
+
+    resp = client.get(f"/api/browse?path={tmp_path}&mode=file&ext=.png,.jpg,.jpeg")
+
+    assert resp.status_code == 200
+    assert "image.jpg" in resp.text
+    assert "image.jpeg" in resp.text
+    assert "image.PNG" in resp.text
+    assert "notes.txt" not in resp.text
 
 
 def test_filebrowser_directory_click_browses_into_directory(client, tmp_path):
@@ -145,7 +183,6 @@ def test_build_run_api_starts_task(client):
 
 
 def test_build_run_api_passes_interactive_release_options(client):
-    from unittest.mock import patch
     with patch("asc.web.routes_api._start_build_task") as mock_start:
         mock_start.return_value = "fake-build-task-id"
         resp = client.post("/api/build/run", cookies={"asc_profile": "myapp"}, data={
@@ -169,6 +206,275 @@ def test_build_run_api_passes_interactive_release_options(client):
         assert kwargs["provisioning_profile"] == "/tmp/acme.mobileprovision"
         assert kwargs["reuse_archive"] == "reuse"
         assert kwargs["dry_run"] is True
+
+
+def test_iap_review_screenshots_scan_returns_targets_with_default_path(client, tmp_path):
+    from unittest.mock import MagicMock
+    from asc.commands.iap_review_screenshots import ReviewScreenshotTarget
+
+    iap_file = tmp_path / "iap_packages.json"
+    screenshot_path = tmp_path / "review.png"
+    iap_file.write_text(
+        '{"items":[{"productId":"coins_100","review":{"screenshot":"review.png"}}]}',
+        encoding="utf-8",
+    )
+
+    scan_result = MagicMock()
+    scan_result.targets = [
+        ReviewScreenshotTarget(
+            kind="iap",
+            id="iap-1",
+            product_id="coins_100",
+            name="100 Coins",
+        )
+    ]
+    scan_result.errors = []
+
+    with patch("asc.web.routes_api.Config") as mock_config_cls, \
+         patch("asc.web.routes_api.make_api_from_config", return_value=(MagicMock(), "app-1")), \
+         patch("asc.web.routes_api.scan_missing_review_screenshots", return_value=scan_result):
+        mock_config_cls.return_value.iap_path = ""
+        resp = client.post(
+            "/api/iap/review-screenshots/scan",
+            cookies={"asc_profile": "myapp"},
+            json={"iapFile": str(iap_file)},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["count"] == 1
+    assert data["errors"] == []
+    assert data["targets"][0]["productId"] == "coins_100"
+    assert data["targets"][0]["defaultPath"] == str(screenshot_path)
+
+
+def test_iap_review_screenshots_scan_rejects_malformed_json(client):
+    with patch("asc.web.routes_api._scan_iap_review_screenshot_targets") as mock_scan, \
+         patch("asc.web.routes_api.scan_missing_review_screenshots") as mock_scan_helper:
+        resp = client.post(
+            "/api/iap/review-screenshots/scan",
+            cookies={"asc_profile": "myapp"},
+            content=b"{",
+            headers={"content-type": "application/json"},
+        )
+
+    assert resp.status_code == 400
+    mock_scan.assert_not_called()
+    mock_scan_helper.assert_not_called()
+
+
+def test_iap_review_screenshots_scan_rejects_non_string_iap_file(client):
+    with patch("asc.web.routes_api._scan_iap_review_screenshot_targets") as mock_scan:
+        resp = client.post(
+            "/api/iap/review-screenshots/scan",
+            cookies={"asc_profile": "myapp"},
+            json={"iapFile": 123},
+        )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "iapFile must be a string"
+    mock_scan.assert_not_called()
+
+
+def test_iap_review_screenshots_upload_starts_task_with_items(client):
+    with patch("asc.web.routes_api._start_iap_review_screenshots_task") as mock_start:
+        mock_start.return_value = "fake-review-task-id"
+        resp = client.post(
+            "/api/iap/review-screenshots/upload",
+            cookies={"asc_profile": "myapp"},
+            json={
+                "dryRun": True,
+                "items": [
+                    {
+                        "kind": "iap",
+                        "id": "iap-1",
+                        "productId": "coins_100",
+                        "path": "/tmp/review.png",
+                    }
+                ],
+            },
+        )
+
+    assert resp.status_code == 200
+    assert resp.json() == {"task_id": "fake-review-task-id"}
+    mock_start.assert_called_once()
+    kwargs = mock_start.call_args.kwargs
+    assert kwargs["profile"] == "myapp"
+    assert kwargs["dry_run"] is True
+    assert len(kwargs["items"]) == 1
+    assert kwargs["items"][0].product_id == "coins_100"
+    assert kwargs["items"][0].path == "/tmp/review.png"
+
+
+def test_iap_review_screenshots_upload_accepts_false_dry_run(client):
+    with patch("asc.web.routes_api._start_iap_review_screenshots_task") as mock_start:
+        mock_start.return_value = "fake-review-task-id"
+        resp = client.post(
+            "/api/iap/review-screenshots/upload",
+            cookies={"asc_profile": "myapp"},
+            json={
+                "dryRun": False,
+                "items": [
+                    {
+                        "kind": "subscription",
+                        "id": "sub-1",
+                        "productId": "pro_monthly",
+                        "path": "/tmp/review.png",
+                    }
+                ],
+            },
+        )
+
+    assert resp.status_code == 200
+    assert resp.json() == {"task_id": "fake-review-task-id"}
+    assert mock_start.call_args.kwargs["dry_run"] is False
+
+
+def test_iap_review_screenshots_upload_rejects_non_boolean_dry_run(client):
+    with patch("asc.web.routes_api._start_iap_review_screenshots_task") as mock_start:
+        resp = client.post(
+            "/api/iap/review-screenshots/upload",
+            cookies={"asc_profile": "myapp"},
+            json={
+                "dryRun": "false",
+                "items": [
+                    {
+                        "kind": "iap",
+                        "id": "iap-1",
+                        "productId": "coins_100",
+                        "path": "/tmp/review.png",
+                    }
+                ],
+            },
+        )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "dryRun must be a boolean"
+    mock_start.assert_not_called()
+
+
+def test_iap_review_screenshots_upload_rejects_mixed_invalid_items(client):
+    with patch("asc.web.routes_api._start_iap_review_screenshots_task") as mock_start:
+        resp = client.post(
+            "/api/iap/review-screenshots/upload",
+            cookies={"asc_profile": "myapp"},
+            json={
+                "items": [
+                    {
+                        "kind": "iap",
+                        "id": "iap-1",
+                        "productId": "coins_100",
+                        "path": "/tmp/review.png",
+                    },
+                    {
+                        "kind": "subscription",
+                        "id": "sub-1",
+                        "path": "/tmp/sub-review.png",
+                    },
+                ],
+            },
+        )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "invalid item"
+    mock_start.assert_not_called()
+
+
+def test_iap_review_screenshots_upload_rejects_unsupported_kind(client):
+    with patch("asc.web.routes_api._start_iap_review_screenshots_task") as mock_start:
+        resp = client.post(
+            "/api/iap/review-screenshots/upload",
+            cookies={"asc_profile": "myapp"},
+            json={
+                "items": [
+                    {
+                        "kind": "consumable",
+                        "id": "iap-1",
+                        "productId": "coins_100",
+                        "path": "/tmp/review.png",
+                    }
+                ],
+            },
+        )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "invalid item"
+    mock_start.assert_not_called()
+
+
+def test_iap_review_screenshots_upload_rejects_empty_items(client):
+    resp = client.post(
+        "/api/iap/review-screenshots/upload",
+        cookies={"asc_profile": "myapp"},
+        json={"items": []},
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "items required"
+
+
+def test_iap_review_screenshots_task_rejects_stale_target_without_upload(tmp_path):
+    import time
+    from unittest.mock import MagicMock
+    from asc.commands.iap_review_screenshots import (
+        ReviewScreenshotScanResult,
+        ReviewScreenshotTarget,
+        ReviewScreenshotUploadItem,
+    )
+    from asc.web import routes_api
+    from asc.web.tasks import TaskStatus
+
+    screenshot = tmp_path / "review.png"
+    screenshot.write_bytes(b"png")
+    submitted = [
+        ReviewScreenshotUploadItem(
+            kind="iap",
+            id="crafted-iap-id",
+            product_id="coins_100",
+            path=str(screenshot),
+        )
+    ]
+    current_scan = ReviewScreenshotScanResult(
+        targets=[
+            ReviewScreenshotTarget(
+                kind="iap",
+                id="current-iap-id",
+                product_id="coins_100",
+                name="100 Coins",
+            )
+        ]
+    )
+
+    with patch("asc.web.routes_api.Config"), \
+         patch("asc.web.routes_api.make_api_from_config", return_value=(MagicMock(), "app-1")), \
+         patch("asc.web.routes_api.scan_missing_review_screenshots", return_value=current_scan), \
+         patch("asc.web.routes_api.upload_review_screenshots") as mock_upload:
+        task_id = routes_api._start_iap_review_screenshots_task(
+            profile="myapp",
+            items=submitted,
+            dry_run=False,
+        )
+
+        task = None
+        for _ in range(100):
+            task = routes_api._task_store.get(task_id)
+            if task and task["status"] in {
+                TaskStatus.DONE,
+                TaskStatus.ERROR,
+                TaskStatus.CANCELED,
+            }:
+                break
+            time.sleep(0.02)
+
+    assert task is not None
+    assert task["status"] == TaskStatus.ERROR
+    assert task["result"]["success"] is False
+    assert task["result"]["uploaded"] == 0
+    assert task["result"]["failed"] == 1
+    assert "no longer eligible" in task["result"]["failures"][0]["error"]
+    assert any("no longer eligible" in line for line in task["logs"])
+    mock_upload.assert_not_called()
 
 
 def test_build_options_api_returns_release_choices(client):
