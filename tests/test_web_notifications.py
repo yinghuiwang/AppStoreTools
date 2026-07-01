@@ -17,6 +17,7 @@ def test_default_notify_constants():
         "build",
         "whats-new",
         "iap",
+        "iap-review-screenshots",
         "urls",
     ]
     assert notifications.DEFAULT_NOTIFY_STATUSES == ["done", "error", "canceled"]
@@ -34,7 +35,14 @@ def test_load_webhook_config_defaults_when_missing(webhook_path: Path):
 
     assert config["enabled"] is False
     assert config["notify_statuses"] == ["done", "error", "canceled"]
-    assert config["notify_kinds"] == ["metadata", "build", "whats-new", "iap", "urls"]
+    assert config["notify_kinds"] == [
+        "metadata",
+        "build",
+        "whats-new",
+        "iap",
+        "iap-review-screenshots",
+        "urls",
+    ]
     assert sorted(config["providers"]) == ["dingtalk", "feishu", "wecom"]
     assert config["providers"]["feishu"]["enabled"] is False
     assert config["providers"]["feishu"]["url"] == ""
