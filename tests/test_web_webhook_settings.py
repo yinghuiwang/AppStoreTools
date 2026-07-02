@@ -44,6 +44,8 @@ def test_settings_page_has_webhook_card(client: TestClient):
     assert "已保存 Secret，留空将保留原值" in html
     assert "Secret / 签名密钥（可选）" in html
     assert "保存并测试" in html
+    assert "IAP 审核截图上传" in html
+    assert "['iap-review-screenshots', 'IAP 审核截图上传']" in html
     assert "save() {\n             this.persist(true).catch(() => {});" in html
     assert "config: null" not in html
     assert "providers: {" in html

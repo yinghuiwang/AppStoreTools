@@ -101,6 +101,23 @@ def test_normalize_webhook_config_keeps_selected_update_kind():
     assert config["notify_kinds"] == ["update"]
 
 
+def test_normalize_webhook_config_migrates_legacy_default_kinds():
+    config = notifications.normalize_webhook_config({
+        "enabled": True,
+        "notify_statuses": ["done"],
+        "notify_kinds": ["metadata", "build", "whats-new", "iap", "urls"],
+    })
+
+    assert config["notify_kinds"] == [
+        "metadata",
+        "build",
+        "whats-new",
+        "iap",
+        "iap-review-screenshots",
+        "urls",
+    ]
+
+
 def test_save_and_load_webhook_config(webhook_path: Path):
     payload = {
         "enabled": True,

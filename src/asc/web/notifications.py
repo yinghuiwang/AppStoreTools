@@ -31,6 +31,7 @@ DEFAULT_NOTIFY_KINDS = [
     "iap-review-screenshots",
     "urls",
 ]
+LEGACY_DEFAULT_NOTIFY_KINDS = ["metadata", "build", "whats-new", "iap", "urls"]
 TERMINAL_STATUSES = tuple(DEFAULT_NOTIFY_STATUSES)
 TASK_KINDS = (*DEFAULT_NOTIFY_KINDS, "update")
 STATUS_LABELS = {
@@ -131,6 +132,17 @@ def normalize_webhook_config(config: Any) -> dict[str, Any]:
     data = config if isinstance(config, dict) else {}
     providers = data.get("providers")
     provider_data = providers if isinstance(providers, dict) else {}
+    notify_kinds = _normalize_string_list(
+        data.get("notify_kinds"),
+        TASK_KINDS,
+        tuple(DEFAULT_NOTIFY_KINDS),
+    )
+    if (
+        "iap-review-screenshots" not in notify_kinds
+        and set(LEGACY_DEFAULT_NOTIFY_KINDS).issubset(set(notify_kinds))
+    ):
+        iap_index = notify_kinds.index("iap")
+        notify_kinds.insert(iap_index + 1, "iap-review-screenshots")
 
     return {
         "enabled": _normalize_bool(data.get("enabled", False)),
@@ -138,11 +150,7 @@ def normalize_webhook_config(config: Any) -> dict[str, Any]:
             data.get("notify_statuses"),
             TERMINAL_STATUSES,
         ),
-        "notify_kinds": _normalize_string_list(
-            data.get("notify_kinds"),
-            TASK_KINDS,
-            tuple(DEFAULT_NOTIFY_KINDS),
-        ),
+        "notify_kinds": notify_kinds,
         "providers": {
             provider: _normalize_provider(provider_data.get(provider))
             for provider in PROVIDERS
