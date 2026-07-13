@@ -215,6 +215,66 @@ def test_same_issuer_adds_new_ip_for_existing_machine(tmp_path):
         assert data["bindings"]["ip"]["2.2.2.2"]["issuer_id"] == "ISS-SAME"
 
 
+def test_profile_bound_to_other_machine_conflicts(tmp_path):
+    from asc.guard import Guard
+    guard_file = tmp_path / "guard.json"
+    with patch("asc.guard.GUARD_FILE", guard_file), \
+         patch.object(Guard, "_get_machine_fingerprint", return_value="old-machine"), \
+         patch.object(Guard, "_get_public_ip", return_value="1.1.1.1"):
+        guard = Guard()
+        guard.bind("com.ex.app", "profile-one", "K1", "ISS-SAME")
+
+    conflicts = guard._collect_conflicts(
+        app_id="com.ex.app",
+        key_id="K1",
+        issuer_id="ISS-SAME",
+        fp="new-machine",
+        ip="2.2.2.2",
+    )
+
+    assert [conflict["type"] for conflict in conflicts] == ["profile_machine"]
+
+
+def test_current_profile_machine_cleans_legacy_fingerprint(tmp_path):
+    from asc.guard import Guard
+    guard_file = tmp_path / "guard.json"
+    with patch("asc.guard.GUARD_FILE", guard_file), \
+         patch.object(Guard, "_get_machine_fingerprint", return_value="legacy-hash"), \
+         patch.object(Guard, "_get_public_ip", return_value="1.1.1.1"):
+        guard = Guard()
+        guard.bind("com.ex.app", "profile-one", "K1", "ISS-SAME")
+
+    with patch.object(guard, "_get_machine_fingerprint", return_value="serial-number"), \
+         patch.object(guard, "_get_public_ip", return_value="1.1.1.1"):
+        guard._data["bindings"]["machine"]["serial-number"] = dict(
+            guard._data["bindings"]["machine"]["legacy-hash"]
+        )
+        guard._save()
+        guard.check_and_enforce("com.ex.app", "profile-one", "K1", "ISS-SAME")
+
+    data = json.loads(guard_file.read_text())
+    assert set(data["bindings"]["machine"]) == {"serial-number"}
+
+
+def test_confirmed_machine_change_replaces_old_binding(tmp_path):
+    from asc.guard import Guard
+    guard_file = tmp_path / "guard.json"
+    with patch("asc.guard.GUARD_FILE", guard_file), \
+         patch.object(Guard, "_get_machine_fingerprint", return_value="old-machine"), \
+         patch.object(Guard, "_get_public_ip", return_value="1.1.1.1"):
+        guard = Guard()
+        guard.bind("com.ex.app", "profile-one", "K1", "ISS-SAME")
+
+    with patch.object(guard, "_get_machine_fingerprint", return_value="new-machine"), \
+         patch.object(guard, "_get_public_ip", return_value="2.2.2.2"), \
+         patch("sys.stdin.isatty", return_value=True), \
+         patch("typer.prompt", return_value="yes"):
+        guard.check_and_enforce("com.ex.app", "profile-one", "K1", "ISS-SAME")
+
+    data = json.loads(guard_file.read_text())
+    assert set(data["bindings"]["machine"]) == {"new-machine"}
+
+
 def test_different_issuer_conflicts_on_ip_overlap(tmp_path):
     from asc.guard import Guard
     guard_file = tmp_path / "guard.json"

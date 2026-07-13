@@ -176,6 +176,37 @@ def test_metadata_run_api_starts_task(client):
         assert "task_id" in resp.json()
 
 
+def test_metadata_task_stops_when_guard_rejects(monkeypatch):
+    import time
+    from asc.guard import GuardViolationError
+    from asc.web import routes_api
+    from asc.web.tasks import TaskStatus, TaskStore
+
+    store = TaskStore()
+    monkeypatch.setattr(routes_api, "_task_store", store)
+    monkeypatch.setattr(
+        routes_api,
+        "enforce_config_guard",
+        lambda config: (_ for _ in ()).throw(GuardViolationError("machine mismatch")),
+    )
+
+    task_id = routes_api._start_metadata_task(
+        profile="myapp",
+        csv_path="unused.csv",
+        screenshots_dir="unused",
+        include_metadata=True,
+        include_screenshots=False,
+        dry_run=False,
+    )
+    deadline = time.time() + 2
+    while store.get(task_id)["status"] not in {TaskStatus.ERROR, TaskStatus.DONE} and time.time() < deadline:
+        time.sleep(0.01)
+
+    task = store.get(task_id)
+    assert task["status"] == TaskStatus.ERROR
+    assert task["result"]["error"] == "machine mismatch"
+
+
 def test_build_run_api_starts_task(client):
     from unittest.mock import patch
     with patch("asc.web.routes_api._start_build_task") as mock_start:

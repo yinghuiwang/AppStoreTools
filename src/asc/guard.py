@@ -207,6 +207,30 @@ class Guard:
                     "label": label,
                     "entry": entry,
                 })
+
+        current_machine = b.get("machine", {}).get(fp)
+        current_machine_matches = current_machine and self._same_account(
+            current_machine, app_id, issuer_id
+        ) and str(current_machine.get("app_id")) == str(app_id)
+        credential = b.get("credential", {}).get(key_id)
+        credential_matches = credential and self._same_account(
+            credential, app_id, issuer_id
+        ) and str(credential.get("app_id")) == str(app_id)
+        if credential_matches and not current_machine_matches:
+            for machine_fp, entry in b.get("machine", {}).items():
+                if machine_fp == fp:
+                    continue
+                if (
+                    str(entry.get("app_id")) == str(app_id)
+                    and self._same_account(entry, app_id, issuer_id)
+                ):
+                    conflicts.append({
+                        "type": "profile_machine",
+                        "key": machine_fp,
+                        "label": f"App Profile 已绑定机器 ({machine_fp})",
+                        "entry": entry,
+                    })
+                    break
         return conflicts
 
     def _update_last_checked(self, app_id: str, key_id: str, fp: str, ip: str) -> None:
@@ -216,6 +240,20 @@ class Guard:
             if bkey != "unknown" and bkey in b.get(btype, {}):
                 b[btype][bkey]["last_checked"] = now
         self._save()
+
+    def _remove_other_profile_machines(
+        self, app_id: str, issuer_id: str, current_fp: str
+    ) -> None:
+        machines = self._data["bindings"].get("machine", {})
+        stale = [
+            machine_fp
+            for machine_fp, entry in machines.items()
+            if machine_fp != current_fp
+            and str(entry.get("app_id")) == str(app_id)
+            and self._same_account(entry, app_id, issuer_id)
+        ]
+        for machine_fp in stale:
+            machines.pop(machine_fp, None)
 
     def check_and_enforce(self, app_id: str, app_name: str, key_id: str, issuer_id: str) -> None:
         if not app_id or not key_id:
@@ -235,6 +273,9 @@ class Guard:
                 or (ip != "unknown" and ip not in b.get("ip", {}))
                 or key_id not in b.get("credential", {})
             )
+            current_machine = b.get("machine", {}).get(fp)
+            if current_machine and str(current_machine.get("app_id")) == str(app_id):
+                self._remove_other_profile_machines(app_id, issuer_id, fp)
             self._upsert_bindings(app_id, app_name, key_id, issuer_id, fp, ip)
             if has_new_binding:
                 typer.echo(f"ℹ️  已绑定当前环境到 App: {app_name}", err=True)
@@ -263,4 +304,22 @@ class Guard:
         if answer.strip().lower() != "yes":
             raise GuardViolationError("用户拒绝继续操作")
 
-        self.bind(app_id, app_name, key_id, issuer_id)
+        self._remove_other_profile_machines(app_id, issuer_id, fp)
+        self._upsert_bindings(app_id, app_name, key_id, issuer_id, fp, ip)
+
+
+def enforce_config_guard(config) -> None:
+    """Apply Guard consistently for any operation using an app Config."""
+    guard = Guard()
+    if not guard.is_enabled():
+        return
+
+    def string_value(value) -> str:
+        return value if isinstance(value, str) else ""
+
+    guard.check_and_enforce(
+        app_id=string_value(config.app_id),
+        app_name=string_value(config.app_name),
+        key_id=string_value(config.key_id),
+        issuer_id=string_value(config.issuer_id),
+    )

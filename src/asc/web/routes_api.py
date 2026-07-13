@@ -20,6 +20,7 @@ from asc.commands.iap_review_screenshots import (
 )
 from asc.commands.subscriptions import _upload_subscriptions_core
 from asc.config import Config
+from asc.guard import enforce_config_guard
 from asc.utils import make_api_from_config
 from asc.web import notifications
 
@@ -269,6 +270,7 @@ def _start_metadata_task(
 
         try:
             config = Config(app_name=profile)
+            enforce_config_guard(config)
             api, app_id = make_api_from_config(config)
 
             with capture_stdout_to_queue(q):
@@ -389,6 +391,7 @@ def _start_build_task(
 
         try:
             config = Config(app_name=profile)
+            enforce_config_guard(config)
 
             with capture_stdout_to_queue(q):
                 if mode in ("full", "build"):
@@ -1153,6 +1156,7 @@ def _start_whats_new_task(
 
         try:
             config = Config(app_name=profile)
+            enforce_config_guard(config)
             api, app_id = make_api_from_config(config)
             version = api.get_editable_version(app_id)
             if not version:
@@ -1388,6 +1392,7 @@ def _start_iap_review_screenshots_task(
 
         try:
             config = Config(app_name=profile)
+            enforce_config_guard(config)
             api, app_id = make_api_from_config(config)
 
             invalid_items, scan_errors = _ineligible_iap_review_screenshot_items(
@@ -1505,6 +1510,7 @@ def _start_iap_task(
 
         try:
             config = Config(app_name=profile)
+            enforce_config_guard(config)
             api, app_id = make_api_from_config(config)
 
             items, groups = _load_iap_config(iap_file)
@@ -1728,6 +1734,7 @@ async def urls_set(
 
         try:
             config = Config(app_name=profile)
+            enforce_config_guard(config)
             api, app_id = make_api_from_config(config)
             locale_list = [l.strip() for l in locales.split(",")] if locales else None
 
