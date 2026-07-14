@@ -672,6 +672,8 @@ def test_profiles_list_api_includes_profile_details(client):
         "app_id": "123456789",
         "csv": "data/appstore_info.csv",
         "screenshots": "data/screenshots",
+        "machine_access": {"current": False, "elsewhere": False, "enabled": True},
+        "bundle_ids": [],
     }
 
 
@@ -688,7 +690,8 @@ def test_profile_create_api(client, tmp_path):
     """POST /api/profiles 创建新 profile"""
     p8_content = b"-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----\n"
     from unittest.mock import patch
-    with patch("asc.config.Config.save_app_profile") as mock_save:
+    with patch("asc.config.Config.save_app_profile") as mock_save, \
+         patch("asc.guard.Guard.profile_access", return_value={"matched_profile": "", "options": {}}):
         resp = client.post("/api/profiles", data={
             "name": "newapp",
             "issuer_id": "abc-123",
@@ -700,6 +703,56 @@ def test_profile_create_api(client, tmp_path):
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
         mock_save.assert_called_once()
+
+
+def test_switch_profile_rejects_profile_bound_to_other_machine(client):
+    from unittest.mock import MagicMock, patch
+
+    config = MagicMock()
+    config.list_apps.return_value = ["other-app"]
+    config.get_app_profile.return_value = {"app_id": "app-2", "issuer_id": "ISS-2"}
+    access = {
+        "matched_profile": "current-app",
+        "options": {"other-app": {"enabled": False}},
+    }
+    with patch("asc.config.Config", return_value=config), \
+         patch("asc.guard.Guard.profile_access", return_value=access):
+        response = client.get("/api/switch-profile?profile=other-app")
+
+    assert response.status_code == 403
+
+
+def test_sidebar_disables_other_machine_profile(client):
+    from unittest.mock import MagicMock, patch
+
+    config = MagicMock()
+    config.list_apps.return_value = ["current-app", "other-app"]
+    config.app_name = "other-app"
+    config.csv_path = "data/appstore_info.csv"
+    config.screenshots_path = "data/screenshots"
+    config.iap_path = None
+    config.get_app_profile.side_effect = lambda name: {
+        "app_id": "app-1" if name == "current-app" else "app-2",
+        "issuer_id": "ISS-1" if name == "current-app" else "ISS-2",
+    }
+    access = {
+        "matched_profile": "current-app",
+        "options": {
+            "current-app": {"enabled": True, "current": True, "elsewhere": False},
+            "other-app": {"enabled": False, "current": False, "elsewhere": True},
+        },
+    }
+    with patch("asc.config.Config", return_value=config), \
+         patch("asc.guard.Guard.profile_access", return_value=access):
+        response = client.get("/", cookies={"asc_profile": "other-app"})
+
+    assert response.status_code == 200
+    assert 'value="current-app"' in response.text
+    assert "当前 App：" in response.text
+    assert "current-app" in response.text
+    assert 'value="other-app"' in response.text
+    assert "disabled" in response.text
+    assert response.cookies.get("asc_profile") == "current-app"
 
 
 def test_profile_update_api_allows_rename(client, tmp_path, monkeypatch):

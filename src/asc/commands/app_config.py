@@ -112,6 +112,8 @@ def cmd_app_remove(
             raise typer.Abort()
     config = Config()
     config.remove_app_profile(name)
+    from asc.guard import Guard
+    Guard().remove_profile(name)
     typer.echo(f"✅ App profile '{name}' removed.")
 
 
@@ -234,6 +236,8 @@ def cmd_app_edit(
 
     config.save_app_profile(new_name, issuer_id, key_id, final_key_file, app_id, csv_path, screenshots_path)
     if new_name != name:
+        from asc.guard import Guard
+        Guard().rename_profile(name, new_name)
         config.remove_app_profile(name)
         _rename_local_default(Path.cwd() / ".asc", name, new_name)
         typer.echo(f"\n✅ App profile '{name}' renamed to '{new_name}' and updated.")

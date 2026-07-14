@@ -10,6 +10,8 @@
       App 管理
     </h1>
     <button @click="openDrawer(null)"
+            :disabled="!canCreate"
+            :title="canCreate ? '新增 App Profile' : '当前机器已有匹配的 App Profile'"
             class="btn-primary flex items-center gap-1.5">
       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
       新增
@@ -19,7 +21,8 @@
   <!-- Profile list -->
   <div class="card">
     <template x-for="p in profiles" :key="p">
-      <div class="px-5 py-4 border-b border-obsidian-700 last:border-0 hover:bg-obsidian-800/50 transition-colors duration-150 group">
+      <div class="px-5 py-4 border-b border-obsidian-700 last:border-0 hover:bg-obsidian-800/50 transition-colors duration-150 group"
+           :class="detailFor(p).machine_access && !detailFor(p).machine_access.enabled ? 'opacity-40 grayscale' : ''">
         <div class="flex items-start justify-between gap-4">
           <div class="min-w-0 flex-1">
             <div class="flex items-center gap-3">
@@ -29,6 +32,8 @@
               </button>
               <span class="text-sm font-medium text-obsidian-100 font-mono truncate" x-text="p"></span>
               <span x-show="p === defaultProfile" class="badge badge-info text-[10px]">DEFAULT</span>
+              <span x-show="detailFor(p).machine_access && detailFor(p).machine_access.current" class="badge badge-success text-[10px]">当前机器</span>
+              <span x-show="detailFor(p).machine_access && !detailFor(p).machine_access.enabled" class="badge badge-error text-[10px]">其他机器</span>
             </div>
             <div class="mt-3 ml-7 grid grid-cols-2 xl:grid-cols-3 gap-x-6 gap-y-2">
               <div>
@@ -54,6 +59,10 @@
               <div>
                 <span class="text-[10px] uppercase tracking-widest text-obsidian-500 block mb-0.5">截图目录</span>
                 <span class="text-xs text-obsidian-300 font-mono break-all" x-text="detailFor(p).screenshots || '-'"></span>
+              </div>
+              <div class="col-span-2 xl:col-span-3">
+                <span class="text-[10px] uppercase tracking-widest text-obsidian-500 block mb-0.5">Bundle IDs</span>
+                <span class="text-xs text-obsidian-300 font-mono break-all" x-text="(detailFor(p).bundle_ids || []).join(', ') || '-'"></span>
               </div>
             </div>
           </div>
@@ -287,6 +296,7 @@ function profilesApp() {
     profiles: [],
     profileDetails: {},
     defaultProfile: '',
+    canCreate: true,
     drawerOpen: false,
     editingProfile: null,
     showIssuer: false,
@@ -302,6 +312,7 @@ function profilesApp() {
       this.profiles = d.profiles;
       this.profileDetails = d.profile_details || {};
       this.defaultProfile = d.default;
+      this.canCreate = d.can_create !== false;
     },
 
     detailFor(name) {
@@ -309,6 +320,7 @@ function profilesApp() {
     },
 
     openDrawer(name) {
+      if (!name && !this.canCreate) return;
       this.editingProfile = name;
       this.formError = '';
       this.showIssuer = false;

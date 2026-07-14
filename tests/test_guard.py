@@ -17,7 +17,12 @@ def test_guard_loads_empty_config(tmp_path):
     with patch("asc.guard.GUARD_FILE", tmp_path / "guard.json"):
         g = Guard()
         assert g.is_enabled() is True
-        assert g._data == {"enabled": True, "bindings": {"machine": {}, "ip": {}, "credential": {}}, "app_notes": {}}
+        assert g._data == {
+            "enabled": True,
+            "bindings": {"machine": {}, "ip": {}, "credential": {}},
+            "app_notes": {},
+            "bundle_bindings": {},
+        }
 
 
 def test_guard_loads_existing_config(tmp_path):
@@ -273,6 +278,87 @@ def test_confirmed_machine_change_replaces_old_binding(tmp_path):
 
     data = json.loads(guard_file.read_text())
     assert set(data["bindings"]["machine"]) == {"new-machine"}
+
+
+def test_profile_access_prefers_current_machine_and_disables_others(tmp_path):
+    from asc.guard import Guard
+    guard_file = tmp_path / "guard.json"
+    with patch("asc.guard.GUARD_FILE", guard_file), \
+         patch.object(Guard, "_get_machine_fingerprint", return_value="current-machine"), \
+         patch.object(Guard, "_get_public_ip", return_value="1.1.1.1"):
+        guard = Guard()
+        guard.bind("app-1", "profile-one", "K1", "ISS-1")
+        guard._data["bindings"]["machine"]["other-machine"] = {
+            "app_id": "app-2", "app_name": "profile-two", "issuer_id": "ISS-2"
+        }
+        access = guard.profile_access({
+            "profile-one": {"app_id": "app-1", "issuer_id": "ISS-1"},
+            "profile-two": {"app_id": "app-2", "issuer_id": "ISS-2"},
+        })
+
+    assert access["matched_profile"] == "profile-one"
+    assert access["options"]["profile-one"]["enabled"] is True
+    assert access["options"]["profile-two"]["enabled"] is False
+
+
+def test_profile_access_allows_unbound_profile_when_no_current_match(tmp_path):
+    from asc.guard import Guard
+    guard_file = tmp_path / "guard.json"
+    with patch("asc.guard.GUARD_FILE", guard_file), \
+         patch.object(Guard, "_get_machine_fingerprint", return_value="current-machine"):
+        guard = Guard()
+        guard._data["bindings"]["machine"]["other-machine"] = {
+            "app_id": "app-1", "app_name": "profile-one", "issuer_id": "ISS-1"
+        }
+        access = guard.profile_access({
+            "profile-one": {"app_id": "app-1", "issuer_id": "ISS-1"},
+            "new-profile": {"app_id": "app-2", "issuer_id": "ISS-2"},
+        })
+
+    assert access["matched_profile"] == ""
+    assert access["options"]["profile-one"]["enabled"] is False
+    assert access["options"]["new-profile"]["enabled"] is True
+
+
+def test_bundle_id_is_unique_to_profile_but_profile_accepts_multiple(tmp_path):
+    from asc.guard import Guard, GuardViolationError
+    guard_file = tmp_path / "guard.json"
+    with patch("asc.guard.GUARD_FILE", guard_file):
+        guard = Guard()
+        guard.check_bundle_binding("profile-one", "com.example.one")
+        guard.check_bundle_binding("profile-one", "com.example.two")
+        assert guard.profile_bundle_ids("profile-one") == [
+            "com.example.one", "com.example.two"
+        ]
+        with pytest.raises(GuardViolationError):
+            guard.check_bundle_binding("profile-two", "com.example.one")
+
+
+def test_bundle_bindings_follow_profile_rename_and_delete(tmp_path):
+    from asc.guard import Guard
+    guard_file = tmp_path / "guard.json"
+    with patch("asc.guard.GUARD_FILE", guard_file):
+        guard = Guard()
+        guard.check_bundle_binding("old-profile", "com.example.app")
+        guard.rename_profile("old-profile", "new-profile")
+        assert guard.profile_bundle_ids("new-profile") == ["com.example.app"]
+        guard.remove_profile("new-profile")
+        assert guard.profile_bundle_ids("new-profile") == []
+
+
+def test_read_ipa_bundle_id(tmp_path):
+    import plistlib
+    import zipfile
+    from asc.guard import read_ipa_bundle_id
+
+    ipa = tmp_path / "Example.ipa"
+    with zipfile.ZipFile(ipa, "w") as archive:
+        archive.writestr(
+            "Payload/Example.app/Info.plist",
+            plistlib.dumps({"CFBundleIdentifier": "com.example.app"}),
+        )
+
+    assert read_ipa_bundle_id(str(ipa)) == "com.example.app"
 
 
 def test_different_issuer_conflicts_on_ip_overlap(tmp_path):

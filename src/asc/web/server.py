@@ -22,13 +22,27 @@ def create_app() -> FastAPI:
         profile_from_cookie = request.cookies.get("asc_profile")
         config = Config(app_name=profile_from_cookie)
         profiles = config.list_apps()
-        current = profile_from_cookie or config.app_name or (profiles[0] if profiles else "")
+        profile_data = {
+            name: config.get_app_profile(name) or {}
+            for name in profiles
+        }
+        from asc.guard import Guard
+        access = Guard().profile_access(profile_data)
+        options = access["options"]
+        selectable = [name for name in profiles if options[name]["enabled"]]
+        requested = profile_from_cookie or config.app_name or ""
+        current = requested if requested in selectable else ""
+        if not current:
+            current = access["matched_profile"] or (selectable[0] if selectable else "")
+        current_config = Config(app_name=current) if current else config
         return {
             "profiles": profiles,
+            "profile_access": options,
+            "has_machine_profile": bool(access["matched_profile"]),
             "current_profile": current,
-            "profile_csv": config.csv_path,
-            "profile_screenshots": config.screenshots_path,
-            "profile_iap_file": config.iap_path or "data/iap_packages.json",
+            "profile_csv": current_config.csv_path,
+            "profile_screenshots": current_config.screenshots_path,
+            "profile_iap_file": current_config.iap_path or "data/iap_packages.json",
         }
 
     def _render(request: Request, template: str, ctx: dict):
@@ -41,7 +55,7 @@ def create_app() -> FastAPI:
         and the backend in sync.
         """
         resp = templates.TemplateResponse(request, template, ctx)
-        if not request.cookies.get("asc_profile") and ctx.get("current_profile"):
+        if request.cookies.get("asc_profile") != ctx.get("current_profile") and ctx.get("current_profile"):
             resp.set_cookie(
                 "asc_profile",
                 ctx["current_profile"],

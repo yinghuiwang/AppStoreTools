@@ -12,7 +12,13 @@ from pathlib import Path
 import typer
 
 from asc.config import Config
-from asc.guard import Guard, GuardViolationError
+from asc.guard import (
+    Guard,
+    GuardError,
+    GuardViolationError,
+    enforce_bundle_guard,
+    read_ipa_bundle_id,
+)
 from asc.i18n import t, HELP, ERRORS
 from asc.progress import Spinner
 from asc.utils import resolve_app_profile
@@ -558,6 +564,7 @@ def cmd_deploy(
         raise typer.Exit(1)
 
     try:
+        enforce_bundle_guard(config, read_ipa_bundle_id(ipa))
         deploy_core(
             ipa_path=ipa,
             issuer_id=issuer_id,
@@ -567,7 +574,7 @@ def cmd_deploy(
             dry_run=dry_run,
             verbose=verbose,
         )
-    except RuntimeError as e:
+    except (RuntimeError, GuardError) as e:
         typer.echo(f"❌ {e}", err=True)
         hint = get_action_hint(e)
         if hint:
@@ -653,6 +660,7 @@ def cmd_release(
         raise typer.Exit(1)
 
     try:
+        enforce_bundle_guard(config, resolved.bundle_id)
         ipa_path = build_core(
             resolved,
             output=output or config.build_output,
@@ -672,7 +680,7 @@ def cmd_release(
                 dry_run=dry_run,
                 verbose=verbose,
             )
-    except RuntimeError as e:
+    except (RuntimeError, GuardError) as e:
         typer.echo(f"❌ {e}", err=True)
         hint = get_action_hint(e)
         if hint:

@@ -20,7 +20,7 @@ from asc.commands.iap_review_screenshots import (
 )
 from asc.commands.subscriptions import _upload_subscriptions_core
 from asc.config import Config
-from asc.guard import enforce_config_guard
+from asc.guard import enforce_bundle_guard, enforce_config_guard, read_ipa_bundle_id
 from asc.utils import make_api_from_config
 from asc.web import notifications
 
@@ -117,6 +117,20 @@ def _extension_filter(ext: str) -> set[str]:
 @router.get("/switch-profile")
 async def switch_profile(profile: str):
     """Switch active app profile (stores in session cookie)."""
+    from fastapi import HTTPException
+    from asc.config import Config
+    from asc.guard import Guard
+
+    config = Config()
+    profiles = {
+        name: config.get_app_profile(name) or {}
+        for name in config.list_apps()
+    }
+    if profile not in profiles:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    access = Guard().profile_access(profiles)["options"].get(profile, {})
+    if not access.get("enabled", False):
+        raise HTTPException(status_code=403, detail="Profile is bound to another machine")
     resp = JSONResponse({"ok": True, "profile": profile})
     resp.set_cookie("asc_profile", profile, httponly=True, samesite="lax")
     return resp
@@ -408,6 +422,7 @@ def _start_build_task(
                         profile=provisioning_profile or None,
                     )
                     resolved = prepare_build_inputs(cli, config, interactive=False)
+                    enforce_bundle_guard(config, resolved.bundle_id)
                     reuse_value = None
                     if reuse_archive == "reuse":
                         reuse_value = True
@@ -436,6 +451,7 @@ def _start_build_task(
                         )
                 elif mode == "deploy":
                     from asc.commands.build import deploy_core
+                    enforce_bundle_guard(config, read_ipa_bundle_id(ipa_path))
                     deploy_core(
                         ipa_path=ipa_path,
                         issuer_id=config.issuer_id,
@@ -716,7 +732,22 @@ async def list_profiles_api():
             "csv": data.get("csv", ""),
             "screenshots": data.get("screenshots", ""),
         }
-    return {"profiles": apps, "default": default, "profile_details": profile_details}
+    from asc.guard import Guard
+    guard = Guard()
+    access = guard.profile_access({
+        app: config.get_app_profile(app) or {}
+        for app in apps
+    })
+    for app in apps:
+        profile_details[app]["machine_access"] = access["options"].get(app, {})
+        profile_details[app]["bundle_ids"] = guard.profile_bundle_ids(app)
+    return {
+        "profiles": apps,
+        "default": default,
+        "profile_details": profile_details,
+        "matched_profile": access["matched_profile"],
+        "can_create": not bool(access["matched_profile"]),
+    }
 
 
 @router.post("/profiles")
@@ -737,6 +768,19 @@ async def create_profile(
     if not re.match(r'^[a-zA-Z0-9_-]+$', name):
         raise HTTPException(status_code=400, detail="Invalid profile name")
 
+    from asc.config import Config
+    config = Config()
+    from asc.guard import Guard
+    existing_profiles = {
+        profile: config.get_app_profile(profile) or {}
+        for profile in config.list_apps()
+    }
+    if Guard().profile_access(existing_profiles)["matched_profile"]:
+        raise HTTPException(
+            status_code=409,
+            detail="Current machine already has a bound App Profile",
+        )
+
     # Fix 1: Sanitize key filename (path traversal protection)
     safe_filename = os.path.basename(key_file.filename)
     if not safe_filename or safe_filename.startswith("."):
@@ -751,8 +795,6 @@ async def create_profile(
     # Fix 3: Set key file permissions
     dest_key.chmod(0o600)
 
-    from asc.config import Config
-    config = Config()
     config.save_app_profile(name, issuer_id, key_id, str(dest_key), app_id, csv, screenshots)
     return {"ok": True, "name": name}
 
@@ -805,6 +847,8 @@ async def update_profile(
 
     config.save_app_profile(new_name, issuer_id, key_id, key_file_path, app_id, csv, screenshots)
     if new_name != name:
+        from asc.guard import Guard
+        Guard().rename_profile(name, new_name)
         config.remove_app_profile(name)
 
         local_cfg = Path.cwd() / ".asc" / "config.toml"
@@ -836,6 +880,8 @@ async def delete_profile(name: str):
 
     from asc.config import Config
     config = Config()
+    from asc.guard import Guard
+    Guard().remove_profile(name)
     config.remove_app_profile(name)
     return {"ok": True}
 

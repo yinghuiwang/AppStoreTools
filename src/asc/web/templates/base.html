@@ -380,9 +380,17 @@
               "
               name="profile">
         {% for p in profiles %}
-        <option value="{{ p }}" {% if p == current_profile %}selected{% endif %}>{{ p }}</option>
+        {% set access = profile_access.get(p, {}) %}
+        <option value="{{ p }}"
+                {% if p == current_profile %}selected{% endif %}
+                {% if not access.get('enabled', True) %}disabled{% endif %}>
+          {{ p }}{% if not access.get('enabled', True) %}（其他机器）{% endif %}
+        </option>
         {% endfor %}
       </select>
+      {% if not has_machine_profile %}
+      <a href="/profiles" class="block mt-2 text-[11px] text-amber-550 hover:text-amber-500">+ 新建 App Profile</a>
+      {% endif %}
     </div>
 
     <nav class="flex-1 px-2.5 py-4 space-y-0.5">

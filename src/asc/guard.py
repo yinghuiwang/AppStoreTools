@@ -18,7 +18,12 @@ from asc.i18n import t, ERRORS
 
 GUARD_FILE = Path.home() / ".config" / "asc" / "guard.json"
 
-_EMPTY = {"enabled": True, "bindings": {"machine": {}, "ip": {}, "credential": {}}, "app_notes": {}}
+_EMPTY = {
+    "enabled": True,
+    "bindings": {"machine": {}, "ip": {}, "credential": {}},
+    "app_notes": {},
+    "bundle_bindings": {},
+}
 
 
 def _get_machine_fingerprint_macos() -> str:
@@ -64,7 +69,9 @@ class Guard:
 
     def _load(self) -> dict:
         if os.getenv("ASC_GUARD_DISABLE", "").strip() == "1":
-            return {"enabled": False, "bindings": {"machine": {}, "ip": {}, "credential": {}}, "app_notes": {}}
+            data = copy.deepcopy(_EMPTY)
+            data["enabled"] = False
+            return data
         if not self._file.exists():
             return copy.deepcopy(_EMPTY)
         try:
@@ -77,6 +84,7 @@ class Guard:
                     if "app_id" in entry:
                         entry["app_id"] = str(entry["app_id"])
             data.setdefault("app_notes", {})
+            data.setdefault("bundle_bindings", {})
             return data
         except Exception:
             backup = self._file.with_suffix(".json.backup")
@@ -113,6 +121,109 @@ class Guard:
 
     def get_status(self) -> dict:
         return self._data
+
+    def profile_machine_status(
+        self, app_id: str, issuer_id: str, *, fingerprint: str | None = None
+    ) -> dict[str, bool]:
+        """Return whether an App Profile is bound to this or another machine."""
+        fp = fingerprint or self._get_machine_fingerprint()
+        current = self._data.get("bindings", {}).get("machine", {}).get(fp)
+        current_match = bool(
+            current
+            and str(current.get("app_id")) == str(app_id)
+            and self._same_account(current, app_id, issuer_id)
+        )
+        elsewhere = any(
+            machine_fp != fp
+            and str(entry.get("app_id")) == str(app_id)
+            and self._same_account(entry, app_id, issuer_id)
+            for machine_fp, entry in self._data.get("bindings", {}).get("machine", {}).items()
+        )
+        return {"current": current_match, "elsewhere": elsewhere}
+
+    def check_bundle_binding(self, profile_name: str, bundle_id: str) -> None:
+        """Enforce the one-Bundle-ID-to-one-profile mapping and bind new IDs."""
+        bundle_id = str(bundle_id or "").strip()
+        profile_name = str(profile_name or "").strip()
+        if not bundle_id or not profile_name:
+            return
+        bindings = self._data.setdefault("bundle_bindings", {})
+        existing = bindings.get(bundle_id)
+        if existing and existing.get("profile_name") != profile_name:
+            raise GuardViolationError(
+                f"Bundle ID {bundle_id} 已绑定到 App Profile "
+                f"{existing.get('profile_name', '')}，不能由 {profile_name} 上传"
+            )
+        now = self._now()
+        if existing:
+            existing["last_checked"] = now
+        else:
+            bindings[bundle_id] = {
+                "profile_name": profile_name,
+                "bound_at": now,
+                "last_checked": now,
+            }
+        self._save()
+
+    def profile_bundle_ids(self, profile_name: str) -> list[str]:
+        return sorted(
+            bundle_id
+            for bundle_id, entry in self._data.get("bundle_bindings", {}).items()
+            if entry.get("profile_name") == profile_name
+        )
+
+    def rename_profile(self, old_name: str, new_name: str) -> None:
+        changed = False
+        for entry in self._data.get("bundle_bindings", {}).values():
+            if entry.get("profile_name") == old_name:
+                entry["profile_name"] = new_name
+                changed = True
+        for category in ("machine", "ip", "credential"):
+            for entry in self._data.get("bindings", {}).get(category, {}).values():
+                if entry.get("app_name") == old_name:
+                    entry["app_name"] = new_name
+                    changed = True
+        if changed:
+            self._save()
+
+    def remove_profile(self, profile_name: str) -> None:
+        bindings = self._data.get("bundle_bindings", {})
+        removed = [
+            bundle_id for bundle_id, entry in bindings.items()
+            if entry.get("profile_name") == profile_name
+        ]
+        for bundle_id in removed:
+            bindings.pop(bundle_id, None)
+        if removed:
+            self._save()
+
+    def profile_access(self, profiles: dict[str, dict]) -> dict:
+        """Resolve Web profile availability for the current machine."""
+        if not self.is_enabled():
+            return {
+                "matched_profile": "",
+                "options": {
+                    name: {"enabled": True, "current": False, "elsewhere": False}
+                    for name in profiles
+                },
+            }
+        fp = self._get_machine_fingerprint()
+        options = {}
+        matched_profile = ""
+        for name, data in profiles.items():
+            status = self.profile_machine_status(
+                str(data.get("app_id", "")),
+                str(data.get("issuer_id", "")),
+                fingerprint=fp,
+            )
+            if status["current"] and not matched_profile:
+                matched_profile = name
+            options[name] = status
+        for status in options.values():
+            status["enabled"] = bool(status["current"] or (
+                not matched_profile and not status["elsewhere"]
+            ))
+        return {"matched_profile": matched_profile, "options": options}
 
     def _now(self) -> str:
         return datetime.now(timezone.utc).isoformat()
@@ -323,3 +434,32 @@ def enforce_config_guard(config) -> None:
         key_id=string_value(config.key_id),
         issuer_id=string_value(config.issuer_id),
     )
+
+
+def enforce_bundle_guard(config, bundle_id: str) -> None:
+    """Check/bind a Bundle ID after the profile machine guard succeeds."""
+    guard = Guard()
+    if not guard.is_enabled():
+        return
+    profile_name = config.app_name if isinstance(config.app_name, str) else ""
+    guard.check_bundle_binding(profile_name, bundle_id)
+
+
+def read_ipa_bundle_id(ipa_path: str) -> str:
+    """Read CFBundleIdentifier from the first application in an IPA."""
+    import plistlib
+    import zipfile
+
+    with zipfile.ZipFile(ipa_path) as archive:
+        candidates = [
+            name for name in archive.namelist()
+            if name.startswith("Payload/") and name.endswith(".app/Info.plist")
+        ]
+        if not candidates:
+            raise GuardConfigError(f"IPA 中未找到应用 Info.plist: {ipa_path}")
+        with archive.open(candidates[0]) as stream:
+            data = plistlib.load(stream)
+    bundle_id = data.get("CFBundleIdentifier")
+    if not isinstance(bundle_id, str) or not bundle_id.strip():
+        raise GuardConfigError(f"IPA 中缺少 CFBundleIdentifier: {ipa_path}")
+    return bundle_id.strip()
