@@ -16,6 +16,15 @@ from asc.commands.build_inputs import ResolvedInputs
 runner = CliRunner()
 
 
+@pytest.fixture(autouse=True)
+def isolated_build_guards(monkeypatch):
+    guard = MagicMock()
+    guard.is_enabled.return_value = False
+    monkeypatch.setattr("asc.commands.build.Guard", MagicMock(return_value=guard))
+    monkeypatch.setattr("asc.commands.build.enforce_config_guard", MagicMock())
+    monkeypatch.setattr("asc.commands.build.enforce_bundle_guard", MagicMock())
+
+
 class _FakeSpinner:
     """Fake Spinner for tests. Configure via class attrs before use."""
     returncode: int = 0
@@ -589,6 +598,74 @@ def test_cmd_build_calls_prepare_build_inputs(monkeypatch, tmp_path):
     result = runner.invoke(app, ["build", "--no-interactive", "--dry-run", "--app", "test-app"])
     assert result.exit_code == 0, result.output
     assert captured["interactive"] is False
+
+
+def test_cmd_build_config_guard_conflict_stops_before_build(monkeypatch, tmp_path):
+    from asc.commands import build as build_module
+    from asc.guard import GuardViolationError
+
+    monkeypatch.setattr(build_module, "_require_macos", lambda: None)
+    monkeypatch.setattr(
+        build_module, "resolve_app_profile", lambda app, config: "test-app"
+    )
+    monkeypatch.setattr(
+        build_module,
+        "enforce_config_guard",
+        MagicMock(side_effect=GuardViolationError("issuer conflict")),
+        raising=False,
+    )
+    build_core = MagicMock()
+    monkeypatch.setattr(build_module, "build_core", build_core)
+
+    result = runner.invoke(
+        app, ["build", "--no-interactive", "--dry-run", "--app", "test-app"]
+    )
+
+    assert result.exit_code == 1
+    assert "issuer conflict" in result.output
+    build_core.assert_not_called()
+
+
+def test_cmd_build_bundle_guard_conflict_stops_before_build(monkeypatch, tmp_path):
+    from asc.commands import build as build_module
+    from asc.guard import GuardViolationError
+
+    monkeypatch.setattr(build_module, "_require_macos", lambda: None)
+    monkeypatch.setattr(
+        build_module, "resolve_app_profile", lambda app, config: "test-app"
+    )
+    monkeypatch.setattr(
+        build_module, "enforce_config_guard", MagicMock(), raising=False
+    )
+    monkeypatch.setattr(
+        build_module,
+        "prepare_build_inputs",
+        lambda cli, config, *, interactive: ResolvedInputs(
+            project_path=str(tmp_path / "x.xcodeproj"),
+            project_kind="project",
+            scheme="X",
+            bundle_id="com.example.conflict",
+            signing="auto",
+            certificate=None,
+            profile=None,
+            destination="appstore",
+        ),
+    )
+    monkeypatch.setattr(
+        build_module,
+        "enforce_bundle_guard",
+        MagicMock(side_effect=GuardViolationError("bundle conflict")),
+    )
+    build_core = MagicMock()
+    monkeypatch.setattr(build_module, "build_core", build_core)
+
+    result = runner.invoke(
+        app, ["build", "--no-interactive", "--dry-run", "--app", "test-app"]
+    )
+
+    assert result.exit_code == 1
+    assert "bundle conflict" in result.output
+    build_core.assert_not_called()
 
 
 def test_cmd_build_passes_cli_signing_and_profile(monkeypatch, tmp_path):

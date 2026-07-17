@@ -366,9 +366,17 @@ class Guard:
         for machine_fp in stale:
             machines.pop(machine_fp, None)
 
-    def check_and_enforce(self, app_id: str, app_name: str, key_id: str, issuer_id: str) -> None:
-        if not app_id or not key_id:
-            typer.echo("⚠️  缺少 App ID 或凭证信息，跳过守卫检查", err=True)
+    def check_and_enforce(
+        self,
+        app_id: str,
+        app_name: str,
+        key_id: str,
+        issuer_id: str,
+        *,
+        interactive: bool | None = None,
+    ) -> None:
+        if not issuer_id or not key_id:
+            typer.echo("⚠️  缺少 Issuer ID 或 Key ID，跳过守卫检查", err=True)
             return
 
         # 只调用一次，避免重复网络请求
@@ -402,7 +410,8 @@ class Guard:
         typer.echo("此限制旨在防止意外使用同一环境发布多个 App。", err=True)
         typer.echo("如需继续，请输入 'yes' 确认，或使用 'asc guard unbind' 解除绑定。\n", err=True)
 
-        if not sys.stdin.isatty():
+        is_interactive = sys.stdin.isatty() if interactive is None else interactive
+        if not is_interactive:
             typer.echo("\n❌ 检测到绑定冲突且当前为非交互式环境，操作终止", err=True)
             raise GuardViolationError("非交互式环境中检测到绑定冲突")
 
@@ -419,7 +428,7 @@ class Guard:
         self._upsert_bindings(app_id, app_name, key_id, issuer_id, fp, ip)
 
 
-def enforce_config_guard(config) -> None:
+def enforce_config_guard(config, *, interactive: bool | None = None) -> None:
     """Apply Guard consistently for any operation using an app Config."""
     guard = Guard()
     if not guard.is_enabled():
@@ -433,6 +442,7 @@ def enforce_config_guard(config) -> None:
         app_name=string_value(config.app_name),
         key_id=string_value(config.key_id),
         issuer_id=string_value(config.issuer_id),
+        interactive=interactive,
     )
 
 

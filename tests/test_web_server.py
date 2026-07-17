@@ -12,6 +12,16 @@ def client():
     return TestClient(create_app())
 
 
+@pytest.fixture(autouse=True)
+def isolated_web_task_guard(monkeypatch):
+    from unittest.mock import MagicMock
+
+    monkeypatch.setattr(
+        "asc.web.routes_api.enforce_config_guard",
+        MagicMock(),
+    )
+
+
 def test_homepage_returns_200(client):
     resp = client.get("/")
     assert resp.status_code == 200
@@ -178,17 +188,15 @@ def test_metadata_run_api_starts_task(client):
 
 def test_metadata_task_stops_when_guard_rejects(monkeypatch):
     import time
+    from unittest.mock import MagicMock
     from asc.guard import GuardViolationError
     from asc.web import routes_api
     from asc.web.tasks import TaskStatus, TaskStore
 
     store = TaskStore()
     monkeypatch.setattr(routes_api, "_task_store", store)
-    monkeypatch.setattr(
-        routes_api,
-        "enforce_config_guard",
-        lambda config: (_ for _ in ()).throw(GuardViolationError("machine mismatch")),
-    )
+    enforce_guard = MagicMock(side_effect=GuardViolationError("machine mismatch"))
+    monkeypatch.setattr(routes_api, "enforce_config_guard", enforce_guard)
 
     task_id = routes_api._start_metadata_task(
         profile="myapp",
@@ -205,6 +213,7 @@ def test_metadata_task_stops_when_guard_rejects(monkeypatch):
     task = store.get(task_id)
     assert task["status"] == TaskStatus.ERROR
     assert task["result"]["error"] == "machine mismatch"
+    assert enforce_guard.call_args.kwargs == {"interactive": False}
 
 
 def test_build_run_api_starts_task(client):
@@ -686,12 +695,15 @@ def test_profiles_page_shows_profile_detail_fields(client):
     assert "CSV" in resp.text
     assert "截图" in resp.text
 
-def test_profile_create_api(client, tmp_path):
+def test_profile_create_api(client, tmp_path, monkeypatch):
     """POST /api/profiles 创建新 profile"""
     p8_content = b"-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----\n"
-    from unittest.mock import patch
+    from unittest.mock import MagicMock, patch
+    monkeypatch.setenv("HOME", str(tmp_path))
+    guard = MagicMock()
+    guard.is_enabled.return_value = False
     with patch("asc.config.Config.save_app_profile") as mock_save, \
-         patch("asc.guard.Guard.profile_access", return_value={"matched_profile": "", "options": {}}):
+         patch("asc.guard.Guard", return_value=guard):
         resp = client.post("/api/profiles", data={
             "name": "newapp",
             "issuer_id": "abc-123",
@@ -703,6 +715,86 @@ def test_profile_create_api(client, tmp_path):
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
         mock_save.assert_called_once()
+
+
+def test_profile_create_guard_conflict_has_no_file_side_effects(
+    client, tmp_path, monkeypatch
+):
+    from unittest.mock import MagicMock, patch
+    from asc.guard import GuardViolationError
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    guard = MagicMock()
+    guard.is_enabled.return_value = True
+    guard.check_and_enforce.side_effect = GuardViolationError("issuer conflict")
+
+    with patch("asc.guard.Guard", return_value=guard), \
+         patch("asc.config.Config.save_app_profile") as save_profile:
+        response = client.post(
+            "/api/profiles",
+            data={
+                "name": "newapp",
+                "issuer_id": "ISS-NEW",
+                "key_id": "KEY-NEW",
+                "app_id": "123",
+            },
+            files={"key_file": ("AuthKey_NEW.p8", b"key", "application/octet-stream")},
+        )
+
+    assert response.status_code == 409
+    guard.check_and_enforce.assert_called_once_with(
+        app_id="123",
+        app_name="newapp",
+        key_id="KEY-NEW",
+        issuer_id="ISS-NEW",
+        interactive=False,
+    )
+    save_profile.assert_not_called()
+    assert not (tmp_path / ".config" / "asc" / "keys" / "AuthKey_NEW.p8").exists()
+
+
+def test_profile_update_guard_conflict_does_not_overwrite_profile(
+    client, tmp_path, monkeypatch
+):
+    from unittest.mock import MagicMock, patch
+    from asc.guard import GuardViolationError
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    profiles_dir = tmp_path / ".config" / "asc" / "profiles"
+    profiles_dir.mkdir(parents=True)
+    profile_path = profiles_dir / "myapp.toml"
+    original = (
+        '[credentials]\nissuer_id = "ISS-OLD"\nkey_id = "KEY-OLD"\n'
+        'key_file = "/tmp/AuthKey_OLD.p8"\napp_id = "111"\n\n'
+        '[defaults]\ncsv = "data/old.csv"\nscreenshots = "data/old"\n'
+    )
+    profile_path.write_text(original)
+    guard = MagicMock()
+    guard.is_enabled.return_value = True
+    guard.check_and_enforce.side_effect = GuardViolationError("issuer conflict")
+
+    with patch("asc.guard.Guard", return_value=guard):
+        response = client.put(
+            "/api/profiles/myapp",
+            data={
+                "name": "myapp",
+                "issuer_id": "ISS-NEW",
+                "key_id": "KEY-NEW",
+                "app_id": "222",
+                "csv": "data/new.csv",
+                "screenshots": "data/new",
+            },
+        )
+
+    assert response.status_code == 409
+    guard.check_and_enforce.assert_called_once_with(
+        app_id="222",
+        app_name="myapp",
+        key_id="KEY-NEW",
+        issuer_id="ISS-NEW",
+        interactive=False,
+    )
+    assert profile_path.read_text() == original
 
 
 def test_switch_profile_rejects_profile_bound_to_other_machine(client):
@@ -775,18 +867,22 @@ def test_profile_update_api_allows_rename(client, tmp_path, monkeypatch):
     local_dir.mkdir()
     (local_dir / "config.toml").write_text('[defaults]\ndefault_app = "oldapp"\n')
 
-    resp = client.put(
-        "/api/profiles/oldapp",
-        cookies={"asc_profile": "oldapp"},
-        data={
-            "name": "newapp",
-            "issuer_id": "new-issuer",
-            "key_id": "NEWKEY",
-            "app_id": "222",
-            "csv": "data/new.csv",
-            "screenshots": "data/new-screenshots",
-        },
-    )
+    from unittest.mock import MagicMock, patch
+    guard = MagicMock()
+    guard.is_enabled.return_value = False
+    with patch("asc.guard.Guard", return_value=guard):
+        resp = client.put(
+            "/api/profiles/oldapp",
+            cookies={"asc_profile": "oldapp"},
+            data={
+                "name": "newapp",
+                "issuer_id": "new-issuer",
+                "key_id": "NEWKEY",
+                "app_id": "222",
+                "csv": "data/new.csv",
+                "screenshots": "data/new-screenshots",
+            },
+        )
 
     assert resp.status_code == 200
     assert resp.json() == {"ok": True, "name": "newapp", "old_name": "oldapp"}

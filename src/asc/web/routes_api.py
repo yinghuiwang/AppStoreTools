@@ -191,6 +191,30 @@ def _finish_task(task_id: str, status: _TaskStatus, result: dict) -> None:
         _task_store.append_log(task_id, f"群通知处理失败：{exc.__class__.__name__}")
 
 
+def _enforce_web_profile_guard(
+    app_id: str,
+    app_name: str,
+    key_id: str,
+    issuer_id: str,
+) -> None:
+    from fastapi import HTTPException
+    from asc.guard import Guard, GuardViolationError
+
+    guard = Guard()
+    if not guard.is_enabled():
+        return
+    try:
+        guard.check_and_enforce(
+            app_id=app_id,
+            app_name=app_name,
+            key_id=key_id,
+            issuer_id=issuer_id,
+            interactive=False,
+        )
+    except GuardViolationError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+
+
 def _run_metadata_check(profile: str) -> dict:
     """Run connectivity check for the given profile and return structured result."""
     from asc.config import Config
@@ -248,6 +272,7 @@ def _start_metadata_task(
     dry_run: bool,
 ) -> str:
     task_id = _task_store.create("metadata", profile=profile)
+    guard_enforcer = enforce_config_guard
 
     def _run():
         import queue
@@ -284,7 +309,7 @@ def _start_metadata_task(
 
         try:
             config = Config(app_name=profile)
-            enforce_config_guard(config)
+            guard_enforcer(config, interactive=False)
             api, app_id = make_api_from_config(config)
 
             with capture_stdout_to_queue(q):
@@ -370,6 +395,7 @@ def _start_build_task(
     reuse_archive: str = "",
 ) -> str:
     task_id = _task_store.create("build", profile=profile)
+    guard_enforcer = enforce_config_guard
 
     def _run():
         import queue
@@ -405,7 +431,7 @@ def _start_build_task(
 
         try:
             config = Config(app_name=profile)
-            enforce_config_guard(config)
+            guard_enforcer(config, interactive=False)
 
             with capture_stdout_to_queue(q):
                 if mode in ("full", "build"):
@@ -770,16 +796,7 @@ async def create_profile(
 
     from asc.config import Config
     config = Config()
-    from asc.guard import Guard
-    existing_profiles = {
-        profile: config.get_app_profile(profile) or {}
-        for profile in config.list_apps()
-    }
-    if Guard().profile_access(existing_profiles)["matched_profile"]:
-        raise HTTPException(
-            status_code=409,
-            detail="Current machine already has a bound App Profile",
-        )
+    _enforce_web_profile_guard(app_id, name, key_id, issuer_id)
 
     # Fix 1: Sanitize key filename (path traversal protection)
     safe_filename = os.path.basename(key_file.filename)
@@ -828,6 +845,8 @@ async def update_profile(
         raise HTTPException(status_code=404, detail="Profile not found")
     if new_name != name and config.get_app_profile(new_name) is not None:
         raise HTTPException(status_code=409, detail="Profile name already exists")
+
+    _enforce_web_profile_guard(app_id, new_name, key_id, issuer_id)
 
     key_file_path = existing["key_file"]
     if key_file and key_file.filename:
@@ -1168,6 +1187,7 @@ def _start_whats_new_task(
     locales: list[str] | None = None,
 ) -> str:
     task_id = _task_store.create("whats-new", profile=profile)
+    guard_enforcer = enforce_config_guard
 
     def _run():
         import queue
@@ -1202,7 +1222,7 @@ def _start_whats_new_task(
 
         try:
             config = Config(app_name=profile)
-            enforce_config_guard(config)
+            guard_enforcer(config, interactive=False)
             api, app_id = make_api_from_config(config)
             version = api.get_editable_version(app_id)
             if not version:
@@ -1406,6 +1426,7 @@ def _start_iap_review_screenshots_task(
     dry_run: bool,
 ) -> str:
     task_id = _task_store.create("iap-review-screenshots", profile=profile)
+    guard_enforcer = enforce_config_guard
 
     def _run():
         import queue
@@ -1438,7 +1459,7 @@ def _start_iap_review_screenshots_task(
 
         try:
             config = Config(app_name=profile)
-            enforce_config_guard(config)
+            guard_enforcer(config, interactive=False)
             api, app_id = make_api_from_config(config)
 
             invalid_items, scan_errors = _ineligible_iap_review_screenshot_items(
@@ -1519,8 +1540,9 @@ def _start_iap_task(
         iap_file: str,
         dry_run: bool,
         update_existing: bool,
-    ) -> str:
+) -> str:
     task_id = _task_store.create("iap", profile=profile)
+    guard_enforcer = enforce_config_guard
 
     def _run():
         import queue
@@ -1556,7 +1578,7 @@ def _start_iap_task(
 
         try:
             config = Config(app_name=profile)
-            enforce_config_guard(config)
+            guard_enforcer(config, interactive=False)
             api, app_id = make_api_from_config(config)
 
             items, groups = _load_iap_config(iap_file)
@@ -1759,6 +1781,7 @@ async def urls_set(
     """Set a URL field directly."""
     profile = request.cookies.get("asc_profile", "")
     task_id = _task_store.create("urls", profile=profile)
+    guard_enforcer = enforce_config_guard
 
     def _run():
         import queue
@@ -1780,7 +1803,7 @@ async def urls_set(
 
         try:
             config = Config(app_name=profile)
-            enforce_config_guard(config)
+            guard_enforcer(config, interactive=False)
             api, app_id = make_api_from_config(config)
             locale_list = [l.strip() for l in locales.split(",")] if locales else None
 

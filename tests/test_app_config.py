@@ -9,8 +9,16 @@ from typer.testing import CliRunner
 
 from asc.cli import app
 from asc.config import Config
+from asc.guard import GuardViolationError
 
 runner = CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def profile_guard():
+    with patch("asc.guard.Guard") as guard_cls:
+        guard_cls.return_value.is_enabled.return_value = False
+        yield guard_cls.return_value
 
 
 def _write_profile(profiles_dir: Path, name: str) -> None:
@@ -252,3 +260,59 @@ def test_cmd_app_edit_can_rename_profile(tmp_path, monkeypatch):
     mock_cfg.remove_app_profile.assert_called_once_with("myapp")
     mock_shutil.copy2.assert_not_called()
     assert 'default_app = "newapp"' in (local_dir / "config.toml").read_text()
+
+
+def test_cmd_app_add_guard_violation_stops_before_copy_or_save(
+    tmp_path, profile_guard
+):
+    key_file = tmp_path / "AuthKey_TEST.p8"
+    key_file.write_text("key")
+    profile_guard.is_enabled.return_value = True
+    profile_guard.check_and_enforce.side_effect = GuardViolationError("绑定冲突")
+    user_input = f"ISS-NEW\nKEY-NEW\n{key_file}\n12345\n\n\n"
+
+    with patch("asc.commands.app_config.Config") as config_cls, \
+         patch("asc.commands.app_config.shutil.copy2") as copy_key:
+        result = runner.invoke(app, ["app", "add", "newapp"], input=user_input)
+
+    assert result.exit_code == 1
+    assert "绑定冲突" in result.output
+    profile_guard.check_and_enforce.assert_called_once_with(
+        app_id="12345",
+        app_name="newapp",
+        key_id="KEY-NEW",
+        issuer_id="ISS-NEW",
+    )
+    copy_key.assert_not_called()
+    config_cls.return_value.save_app_profile.assert_not_called()
+
+
+def test_cmd_app_edit_guard_violation_stops_before_save(profile_guard):
+    profile_data = {
+        "issuer_id": "ISS-OLD",
+        "key_id": "KEY-OLD",
+        "key_file": "/keys/AuthKey.p8",
+        "app_id": "12345",
+        "csv": "data/appstore_info.csv",
+        "screenshots": "data/screenshots",
+    }
+    profile_guard.is_enabled.return_value = True
+    profile_guard.check_and_enforce.side_effect = GuardViolationError("绑定冲突")
+
+    with patch("asc.commands.app_config.Config") as config_cls:
+        config_cls.return_value.get_app_profile.return_value = profile_data
+        result = runner.invoke(
+            app,
+            ["app", "edit", "myapp"],
+            input="\nISS-NEW\nKEY-NEW\n\n67890\n\n\n",
+        )
+
+    assert result.exit_code == 1
+    assert "绑定冲突" in result.output
+    profile_guard.check_and_enforce.assert_called_once_with(
+        app_id="67890",
+        app_name="myapp",
+        key_id="KEY-NEW",
+        issuer_id="ISS-NEW",
+    )
+    config_cls.return_value.save_app_profile.assert_not_called()

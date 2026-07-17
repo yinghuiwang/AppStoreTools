@@ -444,6 +444,48 @@ def test_conflict_non_interactive(tmp_path):
             g.check_and_enforce(app_id="com.ex.app", app_name="myapp", key_id="K1", issuer_id="I2")
 
 
+def test_missing_app_id_still_enforces_issuer_conflict(tmp_path):
+    from asc.guard import Guard, GuardViolationError
+    guard_file = tmp_path / "guard.json"
+    with patch("asc.guard.GUARD_FILE", guard_file), \
+         patch.object(Guard, "_get_machine_fingerprint", return_value="fp1"), \
+         patch.object(Guard, "_get_public_ip", return_value="1.1.1.1"):
+        guard = Guard()
+        guard.bind("app-one", "first", "K1", "ISS-ONE")
+
+        with pytest.raises(GuardViolationError):
+            guard.check_and_enforce(
+                app_id="",
+                app_name="profile-without-app-id",
+                key_id="K2",
+                issuer_id="ISS-TWO",
+                interactive=False,
+            )
+
+
+def test_explicit_non_interactive_guard_never_prompts(tmp_path):
+    from asc.guard import Guard, GuardViolationError
+    guard_file = tmp_path / "guard.json"
+    with patch("asc.guard.GUARD_FILE", guard_file), \
+         patch.object(Guard, "_get_machine_fingerprint", return_value="fp1"), \
+         patch.object(Guard, "_get_public_ip", return_value="1.1.1.1"), \
+         patch("sys.stdin.isatty", return_value=True), \
+         patch("typer.prompt") as prompt:
+        guard = Guard()
+        guard.bind("app-one", "first", "K1", "ISS-ONE")
+
+        with pytest.raises(GuardViolationError):
+            guard.check_and_enforce(
+                app_id="app-two",
+                app_name="second",
+                key_id="K2",
+                issuer_id="ISS-TWO",
+                interactive=False,
+            )
+
+    prompt.assert_not_called()
+
+
 def test_conflict_keyboard_interrupt(tmp_path):
     """Ctrl+C 时视为拒绝，抛出 GuardViolationError"""
     from asc.guard import Guard, GuardViolationError

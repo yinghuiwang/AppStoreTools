@@ -10,6 +10,16 @@ from fastapi.testclient import TestClient
 from asc.web.server import create_app
 
 
+@pytest.fixture(autouse=True)
+def isolated_web_task_guard(monkeypatch):
+    from unittest.mock import MagicMock
+
+    monkeypatch.setattr(
+        "asc.web.routes_api.enforce_config_guard",
+        MagicMock(),
+    )
+
+
 @pytest.fixture
 def client():
     app = create_app()

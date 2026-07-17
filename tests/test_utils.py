@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -157,10 +157,11 @@ def test_config_loads_from_local_env_path(tmp_path, monkeypatch):
     monkeypatch.delenv("ISSUER_ID", raising=False)
 
     from asc.config import Config
-    cfg = Config(app_name="__local__")
-    assert cfg.issuer_id == "env-issuer"
-    assert cfg.key_id == "env-key"
-    assert cfg.app_id == "123456"
+    with patch.dict("os.environ", {}, clear=False):
+        cfg = Config(app_name="__local__")
+        assert cfg.issuer_id == "env-issuer"
+        assert cfg.key_id == "env-key"
+        assert cfg.app_id == "123456"
 
 
 # ── detect_local_app_config ──

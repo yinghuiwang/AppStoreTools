@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from typer.testing import CliRunner
 
 from asc.cli import app
+from asc.guard import GuardViolationError
 
 
 @pytest.fixture()
@@ -43,6 +45,14 @@ def isolated_global_dir(tmp_path, monkeypatch):
     # Also patch Path.home() for code that calls it directly
     monkeypatch.setattr(Path, "home", staticmethod(lambda: fake_home))
     return fake_home
+
+
+@pytest.fixture(autouse=True)
+def import_guard():
+    """Disable Guard by default; Guard-specific tests opt in explicitly."""
+    with patch("asc.guard.Guard") as guard_cls:
+        guard_cls.return_value.is_enabled.return_value = False
+        yield guard_cls.return_value
 
 
 runner = CliRunner()
@@ -204,3 +214,76 @@ def test_import_strips_quoted_values(tmp_path, isolated_global_dir):
     assert 'key_id = "QUOTEDKEY"' in content
     assert '""1111111111""' not in content
     assert 'app_id = "1111111111"' in content
+
+
+def test_import_enforces_guard_before_writing_profile(
+    project_root, isolated_global_dir, import_guard
+):
+    import_guard.is_enabled.return_value = True
+
+    result = runner.invoke(
+        app,
+        ["app", "import", "--path", str(project_root), "--name", "testapp"],
+        input="n\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    import_guard.check_and_enforce.assert_called_once_with(
+        app_id="9876543210",
+        app_name="testapp",
+        key_id="TESTKEY123",
+        issuer_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    )
+
+
+def test_import_guard_violation_has_no_file_side_effects(
+    project_root, isolated_global_dir, import_guard
+):
+    import_guard.is_enabled.return_value = True
+    import_guard.check_and_enforce.side_effect = GuardViolationError("绑定冲突")
+
+    result = runner.invoke(
+        app,
+        ["app", "import", "--path", str(project_root), "--name", "testapp"],
+    )
+
+    assert result.exit_code == 1
+    assert "绑定冲突" in result.output
+    assert not (
+        isolated_global_dir / ".config" / "asc" / "keys" / "AuthKey_TESTKEY123.p8"
+    ).exists()
+    assert not (
+        isolated_global_dir / ".config" / "asc" / "profiles" / "testapp.toml"
+    ).exists()
+
+
+def test_import_guard_violation_does_not_overwrite_existing_profile(
+    project_root, isolated_global_dir, import_guard
+):
+    profiles_dir = isolated_global_dir / ".config" / "asc" / "profiles"
+    profiles_dir.mkdir(parents=True)
+    profile_path = profiles_dir / "testapp.toml"
+    profile_path.write_text("existing-profile")
+    import_guard.is_enabled.return_value = True
+    import_guard.check_and_enforce.side_effect = GuardViolationError("绑定冲突")
+
+    result = runner.invoke(
+        app,
+        ["app", "import", "--path", str(project_root), "--name", "testapp"],
+    )
+
+    assert result.exit_code == 1
+    assert profile_path.read_text() == "existing-profile"
+
+
+def test_import_skips_enforcement_when_guard_disabled(
+    project_root, isolated_global_dir, import_guard
+):
+    result = runner.invoke(
+        app,
+        ["app", "import", "--path", str(project_root), "--name", "testapp"],
+        input="n\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    import_guard.check_and_enforce.assert_not_called()

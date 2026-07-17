@@ -11,7 +11,35 @@ from typing import Optional
 import typer
 
 from asc.config import Config
+from asc.error_handler import get_action_hint
+from asc.guard import GuardViolationError
 from asc.i18n import t, ERRORS
+
+
+def _enforce_profile_guard_cli(
+    app_id: str,
+    app_name: str,
+    key_id: str,
+    issuer_id: str,
+) -> None:
+    from asc.guard import Guard
+
+    guard = Guard()
+    if not guard.is_enabled():
+        return
+    try:
+        guard.check_and_enforce(
+            app_id=app_id,
+            app_name=app_name,
+            key_id=key_id,
+            issuer_id=issuer_id,
+        )
+    except GuardViolationError as e:
+        typer.echo(f"❌ {e}", err=True)
+        hint = get_action_hint(e)
+        if hint:
+            typer.echo(f"💡 {hint}", err=True)
+        raise typer.Exit(1)
 
 
 def cmd_app_add(
@@ -55,6 +83,8 @@ def cmd_app_add(
     screenshots_path = typer.prompt(
         "  Screenshots directory", default="data/screenshots"
     )
+
+    _enforce_profile_guard_cli(app_id, name, key_id, issuer_id)
 
     global_keys_dir = Path.home() / ".config" / "asc" / "keys"
     global_keys_dir.mkdir(parents=True, exist_ok=True)
@@ -216,6 +246,8 @@ def cmd_app_edit(
     app_id = typer.prompt("  App ID (numeric)", default=profile["app_id"])
     csv_path = typer.prompt("  CSV metadata file path", default=profile["csv"])
     screenshots_path = typer.prompt("  Screenshots directory", default=profile["screenshots"])
+
+    _enforce_profile_guard_cli(app_id, new_name, key_id, issuer_id)
 
     # Only copy key file if user provided a new path
     if key_file_input != profile["key_file"]:
@@ -453,6 +485,7 @@ def _do_import_from_env(
     key_id = env_vars["KEY_ID"]
     key_file_val = env_vars["KEY_FILE"]
     app_id = env_vars["APP_ID"]
+    profile_name = name or project_root.name
 
     # 处理 KEY_FILE：纯文件名则在 AppStore/Config/ 下查找
     key_path = Path(key_file_val).expanduser()
@@ -461,6 +494,16 @@ def _do_import_from_env(
         key_path = env_file.parent / key_file_val
     if not key_path.exists():
         raise FileNotFoundError(f"❌ 找不到 .p8 密钥文件：{key_path}")
+
+    from asc.guard import Guard
+    guard = Guard()
+    if guard.is_enabled():
+        guard.check_and_enforce(
+            app_id=app_id,
+            app_name=profile_name,
+            key_id=key_id,
+            issuer_id=issuer_id,
+        )
 
     global_keys_dir = Path.home() / ".config" / "asc" / "keys"
     global_keys_dir.mkdir(parents=True, exist_ok=True)
@@ -482,9 +525,6 @@ def _do_import_from_env(
         screenshots_candidate = data_dir / "screenshots"
         if screenshots_candidate.exists():
             screenshots_path = str(screenshots_candidate)
-
-    # Profile 名称：--name 优先，否则用目录名
-    profile_name = name or project_root.name
 
     config = Config()
     existing_apps = config.list_apps()
@@ -559,8 +599,12 @@ def cmd_app_import(
 
     try:
         profile_name = _do_import_from_env(str(env_file), project_root, name)
-    except (ValueError, FileNotFoundError) as e:
+    except (ValueError, FileNotFoundError, GuardViolationError) as e:
         typer.echo(f"❌ {e}", err=True)
+        if isinstance(e, GuardViolationError):
+            hint = get_action_hint(e)
+            if hint:
+                typer.echo(f"💡 {hint}", err=True)
         raise typer.Exit(1)
 
     # 询问是否设为默认

@@ -17,6 +17,7 @@ from asc.guard import (
     GuardError,
     GuardViolationError,
     enforce_bundle_guard,
+    enforce_config_guard,
     read_ipa_bundle_id,
 )
 from asc.i18n import t, HELP, ERRORS
@@ -387,6 +388,15 @@ def cmd_build(
         os.environ.pop("_ASC_APP", None)  # Clear so Config uses __local__ sentinel
     app = resolved_app
     config = Config(app)
+    try:
+        enforce_config_guard(config)
+    except GuardError as e:
+        typer.echo(f"❌ {e}", err=True)
+        hint = get_action_hint(e)
+        if hint:
+            typer.echo(f"💡 {hint}", err=True)
+        raise typer.Exit(1)
+
     cli = BuildInputsCLI(
         project=project, scheme=scheme, signing=signing,
         profile=profile, certificate=certificate, destination=destination,
@@ -403,6 +413,7 @@ def cmd_build(
         raise typer.Exit(1)
 
     try:
+        enforce_bundle_guard(config, resolved.bundle_id)
         ipa = build_core(
             resolved,
             output=output or config.build_output,
@@ -412,7 +423,7 @@ def cmd_build(
             interactive=resolve_interactive(interactive),
             verbose=verbose,
         )
-    except RuntimeError as e:
+    except (RuntimeError, GuardError) as e:
         typer.echo(f"❌ {e}", err=True)
         hint = get_action_hint(e)
         if hint:
