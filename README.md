@@ -177,6 +177,8 @@ python -m build
 
 Source code lives in `src/asc/`; tests mirror the feature areas under `tests/`. Publishing is handled by `.github/workflows/publish.yml` when a `v*.*.*` tag is pushed.
 
+After changing Tailwind utility classes in Web templates, rebuild local CSS with `./scripts/build_web_assets.sh` (requires Node/`npx`). Fonts and vendor JS are already committed under `src/asc/web/static/`.
+
 ## Security
 
 - Never commit `.p8` keys, `.env` files, local profiles, or generated credentials.

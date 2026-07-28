@@ -177,6 +177,8 @@ python -m build
 
 源码位于 `src/asc/`，测试按功能对应放在 `tests/`。推送 `v*.*.*` Tag 后，`.github/workflows/publish.yml` 会负责发布。
 
+若修改了 Web 模板中的 Tailwind 工具类，请运行 `./scripts/build_web_assets.sh` 重建本地 CSS（需要 Node/`npx`）。字体与 vendor JS 已提交在 `src/asc/web/static/`。
+
 ## 安全建议
 
 - 不要提交 `.p8` 私钥、`.env` 文件、本地 Profile 或生成的凭证。

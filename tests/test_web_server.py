@@ -1773,3 +1773,38 @@ def test_base_layout_includes_task_log_drawer_assets(client):
     assert "task-log-drawer.js?v=" in resp.text
     assert 'id="task-log-drawer"' in resp.text
     assert "data-task-log-close" in resp.text
+
+
+def test_base_layout_has_no_cdn_asset_urls(client):
+    import re
+
+    resp = client.get("/")
+    assert resp.status_code == 200
+    body = resp.text
+    for needle in (
+        "cdn.tailwindcss.com",
+        "fonts.googleapis.com",
+        "fonts.gstatic.com",
+        "unpkg.com",
+    ):
+        assert needle not in body
+    assert "/static/fonts.css?v=" in body
+    assert "/static/tailwind.css?v=" in body
+    assert "/static/vendor/htmx-1.9.12.min.js" in body
+    assert re.search(r"/static/vendor/alpine-[^\"']+\.min\.js", body)
+
+
+def test_vendored_web_assets_are_served(client):
+    import re
+
+    for path in (
+        "/static/fonts.css",
+        "/static/tailwind.css",
+        "/static/vendor/htmx-1.9.12.min.js",
+    ):
+        resp = client.get(path)
+        assert resp.status_code == 200, path
+    home = client.get("/").text
+    match = re.search(r"/static/vendor/(alpine-[^\"']+\.min\.js)", home)
+    assert match, "alpine vendor script not linked"
+    assert client.get(f"/static/vendor/{match.group(1)}").status_code == 200

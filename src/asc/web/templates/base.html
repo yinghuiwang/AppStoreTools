@@ -4,47 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AppStore Tools</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Fira+Code:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          fontFamily: {
-            sans: ['DM Sans', 'system-ui', 'sans-serif'],
-            mono: ['Fira Code', 'monospace'],
-            display: ['Instrument Serif', 'serif'],
-          },
-          colors: {
-            obsidian: {
-              950: '#0a0a0c',
-              900: '#111115',
-              850: '#16161b',
-              800: '#1c1c23',
-              700: '#27272f',
-              600: '#35353f',
-              500: '#4a4a56',
-              400: '#6b6b78',
-              300: '#91919e',
-              200: '#b8b8c3',
-              100: '#dddde3',
-              50:  '#f0f0f4',
-            },
-            amber: {
-              650: '#d4880a',
-              600: '#e09413',
-              550: '#e8a125',
-              500: '#f0b03a',
-            }
-          }
-        }
-      }
-    }
-  </script>
-  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
-  <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+  <link rel="stylesheet" href="/static/fonts.css?v={{ asset_version }}">
+  <link rel="stylesheet" href="/static/tailwind.css?v={{ asset_version }}">
+  <script src="/static/vendor/htmx-1.9.12.min.js?v={{ asset_version }}"></script>
+  <script src="/static/vendor/alpine-3.14.8.min.js?v={{ asset_version }}" defer></script>
   <style>
     :root {
       --bg-base: #0a0a0c;
