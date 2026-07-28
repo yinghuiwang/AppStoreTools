@@ -620,3 +620,17 @@ AppStoreTools/
 - [README.md](README.md) - 用户使用指南
 - [CLAUDE.md](CLAUDE.md) - 项目开发指南
 - [App Store Connect API 文档](https://developer.apple.com/documentation/appstoreconnectapi)
+
+## Web task state and event delivery
+
+Web and CLI task execution uses a local SQLite store at `~/.config/asc/tasks.db` (or
+`ASC_WEB_TASKS_PATH`). The store contains task lifecycle fields in `task_runs`,
+sequenced log records in `task_logs`, and creation order in `task_order`. Existing
+`web_tasks.json` files are imported automatically on first startup and running tasks
+are marked interrupted after a service restart.
+
+The browser continues to use HTTP for commands and SSE for one-way task updates:
+`POST /api/.../run` creates a task, `GET /api/task/{id}/stream` replays logs after
+the `after` query parameter or `Last-Event-ID` header, and `POST /api/task/{id}/cancel`
+requests cancellation. WebSocket is intentionally not required for this single-host,
+task-oriented workflow.

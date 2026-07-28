@@ -6,7 +6,7 @@
 
 ## What is Guard?
 
-Guard binds your API credentials to specific machines and IP addresses. When the same credential is used from an unexpected machine or IP, Guard warns you or blocks the operation. This prevents accidental credential sharing or misuse.
+Guard records the App, Issuer ID, API key, machine, and public IP used for state-changing operations. An interactive conflict can be explicitly confirmed; the same conflict is blocked in a non-interactive process. This helps prevent accidentally using one environment for the wrong App Store Connect account or app.
 
 Guard is **enabled by default**. It stores binding data in `~/.config/asc/guard.json`.
 
@@ -102,10 +102,10 @@ Or set it in your CI environment variables. See [08 CI/CD Automation](08-ci-cd.m
 ## FAQ
 
 **Guard is blocking a legitimate run from a new machine**
-Run `asc guard unbind --current` on the old machine, or `asc guard reset` to clear all bindings, then re-run from the new machine to create fresh bindings.
+Run `asc guard unbind --current` on the old machine, or `asc guard reset` to clear all bindings, then re-run from the new machine to create fresh bindings. In an interactive terminal you can also review the conflict details and enter `yes` to move the profile binding to the current machine.
 
 **I'm getting a conflict warning but want to proceed**
-The warning means the credential was previously bound to a different machine/IP. If this is intentional (e.g. you moved to a new machine), unbind the old entry and re-run.
+Review the App ID, profile, Issuer ID, machine, and IP shown in the warning. If the move is intentional, enter `yes` in an interactive terminal or unbind the old entry and re-run. Non-interactive runs stop on conflicts unless Guard is explicitly disabled.
 
 **Guard file location**
 `~/.config/asc/guard.json` — do not commit this file to git.

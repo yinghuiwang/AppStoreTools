@@ -38,12 +38,12 @@ signing = "auto"
 **首次运行（交互式，自动检测项目/scheme/签名）：**
 
 ```bash
-asc build
+asc --app myapp build
 ```
 
-> **注意：** 与元数据/IAP 命令不同，`asc build` **不需要** `--app` 标志，因为它操作的是本地 Xcode 项目，而不是 App Store Connect 凭证。但如果需要使用特定 App Profile 的构建配置，仍可传入 `--app myapp`。
+> **注意：** `asc build` 仍会解析 App Profile，因为 Guard 和缓存的构建设置与 Profile 相关。只有先运行 `asc app default myapp` 设置项目默认值后，才能省略 `--app myapp`。
 
-**后续运行（使用缓存配置）：**
+**设置项目默认 Profile 后的后续运行（使用缓存配置）：**
 
 ```bash
 asc build
@@ -99,14 +99,16 @@ asc --app myapp deploy --ipa build/export/MyApp.ipa
 **指定目标（TestFlight 或 App Store）：**
 
 ```bash
-asc deploy --ipa build/export/MyApp.ipa --destination testflight
-asc deploy --ipa build/export/MyApp.ipa --destination appstore
+asc --app myapp deploy --ipa build/export/MyApp.ipa --destination testflight
+asc --app myapp deploy --ipa build/export/MyApp.ipa --destination appstore
 ```
+
+当前两个 destination 都使用相同的 `app-store-connect` 导出方式和 App Store Connect 上传路径。该选项用于记录发布意图；最终进入 TestFlight 测试还是提交 App Store，需要在 App Store Connect 中选择。
 
 **实时流式输出上传日志：**
 
 ```bash
-asc deploy --ipa build/export/MyApp.ipa --verbose
+asc --app myapp deploy --ipa build/export/MyApp.ipa --verbose
 ```
 
 ---
@@ -119,18 +121,20 @@ asc --app myapp release --scheme MyApp --destination testflight
 
 这会自动执行 `build` 然后 `deploy`。
 
+与单独运行 `deploy` 一样，`release --destination` 不会自动提交 App Review，而是先把构建上传到 App Store Connect，供后续 TestFlight 或 App Store 流程使用。
+
 > **重要：** 需要 `--app myapp` 标志，因为 `asc release` 的 deploy 步骤需要 App Store Connect 凭证。
 
 **带详细日志输出：**
 
 ```bash
-asc release --scheme MyApp --destination testflight --verbose
+asc --app myapp release --scheme MyApp --destination testflight --verbose
 ```
 
 **预览模式（验证但不上传）：**
 
 ```bash
-asc release --scheme MyApp --dry-run
+asc --app myapp release --scheme MyApp --dry-run
 ```
 
 ---
@@ -141,7 +145,7 @@ asc release --scheme MyApp --dry-run
 
 - `build/build.log` — xcodebuild archive 输出
 - `build/export.log` — xcodebuild export 输出
-- `build/upload.log` — 上传输出
+- `build/export/upload.log` — 上传输出
 
 失败时会自动打印最后 20 行日志。使用 `--verbose` 可实时流式输出完整日志。
 
@@ -152,8 +156,8 @@ asc release --scheme MyApp --dry-run
 **Q: `❌ 此命令仅支持 macOS`**
 Build/deploy 命令仅在 macOS 上可用，元数据上传在 Linux/Windows 也可用。
 
-**Q: `❌ No matching archive found`**
-工具在 `output` 目录中查找 `.xcarchive` 文件，确保构建步骤成功完成。
+**Q: 已有 archive 没有被复用**
+只有输出目录中的 archive 与当前 Bundle ID、Marketing Version 和 Build Number 都匹配时才会复用，否则 `asc` 会重新构建。可用 `--reuse-archive` 或 `--rebuild` 明确指定行为。
 
 **Q: 签名证书未找到**
 检查证书是否已安装在 Keychain 中，预配文件是否有效。使用 `--interactive` 手动选择。

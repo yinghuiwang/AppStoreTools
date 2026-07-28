@@ -65,24 +65,20 @@ def _handle_typer_exception(exc: Exception) -> None:
     if not isinstance(exc, click.exceptions.UsageError):
         return
 
+    # no_args_is_help: Typer already printed Rich help; not a real error.
+    if isinstance(exc, click.exceptions.NoArgsIsHelpError):
+        return
+
     if is_debug():
         return  # In debug mode, let the exception propagate normally
 
-    # Non-debug: show clean error message
-    error_msg = str(exc).strip()
-    if not error_msg:
-        error_msg = "Unknown command error"
-
-    # Non-debug: show clean error message
-    error_msg = str(exc).strip()
-    if not error_msg:
-        error_msg = "Unknown command error"
-
-    # Extract command name from UsageError if possible
-    if hasattr(exc, 'format_message'):
-        msg = exc.format_message()
+    # Extract message from UsageError if possible
+    if hasattr(exc, "format_message"):
+        msg = (exc.format_message() or "").strip()
     else:
-        msg = str(exc)
+        msg = str(exc).strip()
+    if not msg:
+        msg = "Unknown command error"
 
     # Use stderr for errors
     import sys as _sys
@@ -245,6 +241,10 @@ def run_app() -> int:
     from asc.error_handler import is_debug
     try:
         return app(standalone_mode=False)
+    except click.exceptions.NoArgsIsHelpError:
+        # Help already shown via Typer rich_format_help during exception init.
+        # Treat as success (same UX as --help), not a usage failure.
+        return 0
     except click.exceptions.UsageError as exc:
         if is_debug():
             raise

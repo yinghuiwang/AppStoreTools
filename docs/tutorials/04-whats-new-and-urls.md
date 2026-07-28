@@ -16,18 +16,20 @@
 **Single locale, inline text:**
 
 ```bash
-asc --app myapp whats-new --text "Bug fixes and performance improvements."
+asc --app myapp whats-new --text "Bug fixes and performance improvements." --locales en-US
 ```
 
-**Multiple locales, inline text:**
+**Apply the same text to multiple locales:**
 
 ```bash
-asc --app myapp whats-new --text "Bug fixes." --locales en-US zh-Hans
+asc --app myapp whats-new --text "Bug fixes." --locales en-US,zh-Hans
 ```
+
+If `--locales` is omitted, the text is applied to all available version locales.
 
 **Multi-locale from file:**
 
-Create `data/whats_new.txt`:
+Create `AppStore/data/whats_new.txt`:
 
 ```
 en-US:
@@ -42,7 +44,7 @@ zh-Hans:
 Then run:
 
 ```bash
-asc --app myapp whats-new --file data/whats_new.txt
+asc --app myapp whats-new --file AppStore/data/whats_new.txt
 ```
 
 ---
@@ -58,7 +60,7 @@ asc --app myapp set-support-url --text "https://example.com/support"
 **Marketing URL (with locales):**
 
 ```bash
-asc --app myapp set-marketing-url --text "https://example.com" --locales en-US zh-Hans
+asc --app myapp set-marketing-url --text "https://example.com" --locales en-US,zh-Hans
 ```
 
 **Privacy Policy URL:**
@@ -85,7 +87,7 @@ asc --app myapp privacy-policy-url
 Ensure each locale section ends with `---` (three dashes on its own line). Locale codes must match App Store Connect locales.
 
 **URL not updating**
-URLs are app-level settings, not version-specific. Changes apply immediately.
+Support and marketing URLs are version-localized fields and therefore require an editable App Store version. The privacy policy URL is an App Info localization field. Use `--dry-run` to confirm the target locales before updating.
 
 ---
 

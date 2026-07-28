@@ -229,6 +229,7 @@ def _update_app_info_field_core(
     field_value: str,
     locales: Optional[list[str]] = None,
     dry_run: bool = False,
+    cancel_event=None,
 ):
     """Core implementation for set-*-url commands that target appInfoLocalizations"""
     print("\n" + "=" * 60)
@@ -265,6 +266,8 @@ def _update_app_info_field_core(
         return
 
     for loc in target_locs:
+        if cancel_event is not None and cancel_event.is_set():
+            raise ProcessCanceled(f"{field_label} update canceled")
         locale = loc["attributes"]["locale"]
         loc_id = loc["id"]
         api.update_app_info_localization(loc_id, {field_key: field_value})
@@ -281,6 +284,7 @@ def _update_version_field_core(
     field_value: str,
     locales: Optional[list[str]] = None,
     dry_run: bool = False,
+    cancel_event=None,
 ):
     """Core implementation for set-*-url commands"""
     print("\n" + "=" * 60)
@@ -322,6 +326,8 @@ def _update_version_field_core(
         return
 
     for loc in target_locs:
+        if cancel_event is not None and cancel_event.is_set():
+            raise ProcessCanceled(f"{field_label} update canceled")
         locale = loc["attributes"]["locale"]
         loc_id = loc["id"]
         api.update_version_localization(loc_id, {field_key: field_value})

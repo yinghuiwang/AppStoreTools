@@ -8,9 +8,10 @@ from contextlib import contextmanager
 from typing import Generator
 
 
-def format_sse_event(event: str, data: str) -> str:
+def format_sse_event(event: str, data: str, event_id: int | str | None = None) -> str:
     """Format a single SSE message frame."""
-    return f"event: {event}\ndata: {data}\n\n"
+    prefix = f"id: {event_id}\n" if event_id is not None else ""
+    return f"{prefix}event: {event}\ndata: {data}\n\n"
 
 
 class _QueueWriter(io.TextIOBase):

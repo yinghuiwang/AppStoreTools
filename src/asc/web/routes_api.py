@@ -6,8 +6,9 @@ import json
 import re
 import tempfile
 from pathlib import Path
+from typing import Optional
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 from asc.commands.iap import _upload_iap_core, _load_iap_config
@@ -23,6 +24,7 @@ from asc.config import Config
 from asc.guard import enforce_bundle_guard, enforce_config_guard, read_ipa_bundle_id
 from asc.utils import make_api_from_config
 from asc.web import notifications
+from asc.web.dashboard import MANUAL_BASELINE_MINUTES, build_dashboard_summary
 
 router = APIRouter()
 
@@ -183,6 +185,12 @@ from asc.progress import ProcessCanceled
 
 
 def _finish_task(task_id: str, status: _TaskStatus, result: dict) -> None:
+    current = _task_store.get_state(task_id) or _task_store.get(task_id)
+    if current is not None:
+        current_status = current.get("status")
+        current_value = getattr(current_status, "value", current_status)
+        if current_value in {"done", "error", "canceled"}:
+            return
     _task_store.set_status(task_id, status)
     _task_store.set_result(task_id, result)
     try:
@@ -660,27 +668,36 @@ from asc.web.sse import format_sse_event as _fmt_sse
 
 
 @router.get("/task/{task_id}/stream")
-async def task_stream(task_id: str):
-    """SSE stream: replay existing logs then push new ones until task completes."""
-    task = _task_store.get(task_id)
+async def task_stream(
+    task_id: str,
+    after: int = Query(0, ge=0),
+    last_event_id: str | None = Header(None, alias="Last-Event-ID"),
+):
+    """SSE stream: replay sequenced logs after a cursor until task completes."""
+    task = _task_store.get_state(task_id)
     if task is None:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Task not found")
 
     async def _generate():
-        sent = 0
+        sent = after
+        if last_event_id is not None:
+            try:
+                sent = max(sent, int(last_event_id))
+            except ValueError:
+                pass
         last_progress = None
         max_polls = 1500  # 300 seconds at 0.2s intervals
         polls = 0
         while polls < max_polls:
-            current = _task_store.get(task_id)
+            current = _task_store.get_state(task_id)
             if current is None:
                 yield _fmt_sse("error_event", "task not found")
                 break
-            logs = current["logs"]
-            while sent < len(logs):
-                yield _fmt_sse("log", logs[sent])
-                sent += 1
+            logs = _task_store.get_logs_after(task_id, sent)
+            for log in logs:
+                yield _fmt_sse("log", log["message"], event_id=log["seq"])
+                sent = log["seq"]
             # Emit progress event if changed
             progress = current.get("progress")
             if progress and progress != last_progress:
@@ -696,6 +713,8 @@ async def task_stream(task_id: str):
             elif status == _TaskStatus.ERROR:
                 yield _fmt_sse("error_event", "")
                 break
+            elif polls % 15 == 0:
+                yield ": heartbeat\n\n"
             polls += 1
             await _asyncio.sleep(0.2)
         else:
@@ -709,7 +728,7 @@ async def task_stream(task_id: str):
 
 
 @router.get("/task/{task_id}/status")
-async def task_status(task_id: str):
+def task_status(task_id: str):
     """Return current task status and result as JSON."""
     task = _task_store.get(task_id)
     if task is None:
@@ -725,15 +744,27 @@ async def task_status(task_id: str):
 
 @router.post("/task/{task_id}/cancel")
 async def task_cancel(task_id: str):
-    """Request cancellation for a running task."""
+    """Request cancellation for a running task and mark it canceled immediately."""
     from fastapi import HTTPException
 
     task = _task_store.get(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
+    status_value = getattr(task.get("status"), "value", task.get("status"))
+    if status_value in {"done", "error", "canceled"}:
+        return {
+            "task_id": task_id,
+            "cancel_requested": True,
+            "status": status_value,
+        }
+
     _task_store.request_cancel(task_id)
     _task_store.append_log(task_id, "⏹ 已请求终止，正在停止当前步骤...")
-    return {"task_id": task_id, "cancel_requested": True}
+    # Force-finish so dashboard/zombie tasks clear even when a worker is hung
+    # inside a network call and cannot observe cancel_event promptly.
+    _task_store.append_log(task_id, "⏹ 任务已终止")
+    _finish_task(task_id, _TaskStatus.CANCELED, {"success": False, "canceled": True})
+    return {"task_id": task_id, "cancel_requested": True, "status": "canceled"}
 
 
 import shutil as _shutil
@@ -995,6 +1026,36 @@ async def tasks_recent_html(request: Request):
     return _templates.TemplateResponse(request, "task_list.html", {"tasks": tasks})
 
 
+@router.get("/dashboard/summary")
+def dashboard_summary(
+    request: Request,
+    range_: str = Query("30d", alias="range"),
+    profile: Optional[str] = Query(None),
+    kind: str = "",
+    status: str = "",
+):
+    ranges = {"7d": 7, "30d": 30, "90d": 90}
+    statuses = {"", "pending", "running", "done", "error", "canceled"}
+    if range_ not in ranges:
+        raise HTTPException(status_code=400, detail="range must be one of: 7d, 30d, 90d")
+    if kind and kind not in MANUAL_BASELINE_MINUTES:
+        raise HTTPException(status_code=400, detail="kind must be a supported task kind or empty")
+    if status not in statuses:
+        raise HTTPException(
+            status_code=400,
+            detail="status must be one of: pending, running, done, error, canceled, or empty",
+        )
+
+    selected_profile = request.cookies.get("asc_profile", "") if profile is None else profile
+    return build_dashboard_summary(
+        _task_store.list_recent_states(limit=500),
+        days=ranges[range_],
+        profile=selected_profile,
+        kind=kind,
+        status=status,
+    )
+
+
 @router.post("/settings/lang")
 async def set_lang(lang: str = _Form("zh")):
     import os
@@ -1195,6 +1256,7 @@ def _start_whats_new_task(
         from asc.utils import make_api_from_config
 
         _task_store.set_status(task_id, _TaskStatus.RUNNING)
+        cancel_event = _task_store.cancel_event(task_id)
         q: "queue.Queue" = queue.Queue()
         done_flag = _threading.Event()
 
@@ -1251,6 +1313,8 @@ def _start_whats_new_task(
                 # Translation flow: use pre-translated dict
                 total = len(translations)
                 for i, (locale, content) in enumerate(translations.items()):
+                    if cancel_event.is_set():
+                        raise ProcessCanceled("whats-new upload canceled")
                     if locale not in ver_loc_map:
                         _task_store.append_log(task_id, f"⚠️  {locale}: 不存在，跳过")
                         continue
@@ -1272,13 +1336,23 @@ def _start_whats_new_task(
                     _task_store.append_log(task_id, f"[DRYRUN] 预览模式，目标语言: {[l['attributes']['locale'] for l in target_locs]}")
                 else:
                     for i, loc in enumerate(target_locs):
+                        if cancel_event.is_set():
+                            raise ProcessCanceled("whats-new upload canceled")
                         locale = loc["attributes"]["locale"]
                         api.update_version_localization(loc["id"], {"whatsNew": text or ""})
                         _task_store.append_log(task_id, f"✅ {locale}: 已更新")
                         _task_store.set_progress(task_id, int((i + 1) / len(target_locs) * 100), f"上传 {locale}")
 
             done_flag.set()
-            _finish_task(task_id, _TaskStatus.DONE, {"success": True})
+            if cancel_event.is_set():
+                _task_store.append_log(task_id, "⏹ 用户已终止上传")
+                _finish_task(task_id, _TaskStatus.CANCELED, {"success": False, "canceled": True})
+            else:
+                _finish_task(task_id, _TaskStatus.DONE, {"success": True})
+        except ProcessCanceled:
+            done_flag.set()
+            _task_store.append_log(task_id, "⏹ 用户已终止上传")
+            _finish_task(task_id, _TaskStatus.CANCELED, {"success": False, "canceled": True})
         except Exception as e:
             done_flag.set()
             _task_store.append_log(task_id, f"❌ 错误：{e}")
@@ -1788,6 +1862,7 @@ async def urls_set(
         from asc.web.sse import capture_stdout_to_queue
 
         _task_store.set_status(task_id, _TaskStatus.RUNNING)
+        cancel_event = _task_store.cancel_event(task_id)
         q: "queue.Queue" = queue.Queue()
         done_flag = _threading.Event()
 
@@ -1811,16 +1886,26 @@ async def urls_set(
                 if field == "privacyPolicyUrl":
                     from asc.commands.metadata import _update_app_info_field_core
                     _update_app_info_field_core(
-                        api, app_id, field, field, url, locale_list, bool(dry_run)
+                        api, app_id, field, field, url, locale_list, bool(dry_run),
+                        cancel_event=cancel_event,
                     )
                 else:
                     from asc.commands.metadata import _update_version_field_core
                     _update_version_field_core(
-                        api, app_id, field, field, url, locale_list, bool(dry_run)
+                        api, app_id, field, field, url, locale_list, bool(dry_run),
+                        cancel_event=cancel_event,
                     )
 
             done_flag.set()
-            _finish_task(task_id, _TaskStatus.DONE, {"success": True})
+            if cancel_event.is_set():
+                _task_store.append_log(task_id, "⏹ 用户已终止上传")
+                _finish_task(task_id, _TaskStatus.CANCELED, {"success": False, "canceled": True})
+            else:
+                _finish_task(task_id, _TaskStatus.DONE, {"success": True})
+        except ProcessCanceled:
+            done_flag.set()
+            _task_store.append_log(task_id, "⏹ 用户已终止上传")
+            _finish_task(task_id, _TaskStatus.CANCELED, {"success": False, "canceled": True})
         except Exception as e:
             done_flag.set()
             _task_store.append_log(task_id, f"❌ 错误：{e}")

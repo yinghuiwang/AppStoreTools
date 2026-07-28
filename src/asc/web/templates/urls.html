@@ -15,8 +15,8 @@
   <div x-data="{
     step: 1,
     taskId: null,
-    logs: [],
     status: 'idle',
+    canceling: false,
     checkResult: null,
     selectedField: 'supportUrl',
     availableLocales: [],
@@ -38,7 +38,9 @@
         this.taskId = data.task_id;
         this.step = 2;
         this.submitting = false;
-        startSSE(data.task_id);
+        this.status = 'running';
+        this.canceling = false;
+        TaskLogDrawer.open(this.taskId, urlsLogOptions());
       })
       .catch(e => { 
         this.submitting = false;
@@ -177,13 +179,20 @@
       <div class="card">
         <div class="card-body">
           <div class="flex items-center justify-between mb-5">
-            <h2 class="font-semibold text-obsidian-100" x-text="status === 'done' ? '设置完成' : status === 'error' ? '设置失败' : '设置中...'"></h2>
-            <button type="button" class="text-xs text-amber-500 hover:text-amber-400 cursor-pointer transition-colors duration-150 font-medium" @click="step=1; logs=[]; status='idle'; checkResult=null;">重新运行</button>
-          </div>
-          <div class="log-panel max-h-64" id="log-panel">
-            <template x-for="(line, idx) in logs" :key="idx">
-              <div x-text="line"></div>
-            </template>
+            <h2 class="font-semibold text-obsidian-100" x-text="status === 'done' ? '设置完成' : status === 'error' ? '设置失败' : status === 'canceled' ? '已终止' : '设置中...'"></h2>
+            <div class="flex items-center gap-3">
+              <button type="button"
+                      data-task-log-open
+                      class="text-xs text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium"
+                      @click="TaskLogDrawer.open(taskId, urlsLogOptions())">日志</button>
+              <button type="button"
+                      x-show="status === 'running'"
+                      class="text-xs text-red-400 hover:text-red-300 cursor-pointer transition-colors duration-150 font-medium"
+                      :disabled="canceling"
+                      @click="cancelTask(taskId, () => { canceling = true; })"
+                      x-text="canceling ? '终止中...' : '终止上传'"></button>
+              <button type="button" class="text-xs text-amber-500 hover:text-amber-400 cursor-pointer transition-colors duration-150 font-medium" @click="step=1; status='idle'; checkResult=null;">重新运行</button>
+            </div>
           </div>
         </div>
       </div>
@@ -192,17 +201,27 @@
 </div>
 
 <script>
-function startSSE(taskId) {
+function cancelTask(taskId, beforeCancel) {
+  if (!taskId) return;
+  if (!confirm('确定要终止当前任务吗？已完成的 App Store Connect 操作不会自动回滚。')) return;
+  if (beforeCancel) beforeCancel();
+  fetch(`/api/task/${taskId}/cancel`, {method: 'POST'})
+    .catch(() => {
+      const root = document.querySelector('[x-data]');
+      const d = Alpine.$data(root);
+      d.canceling = false;
+    });
+}
+
+function urlsLogOptions() {
   const root = document.querySelector('[x-data]');
   const d = Alpine.$data(root);
-  const es = new EventSource(`/api/task/${taskId}/stream`);
-  es.addEventListener('log', e => {
-    d.logs.push(e.data);
-    const panel = document.getElementById('log-panel');
-    if (panel) requestAnimationFrame(() => { panel.scrollTop = panel.scrollHeight; });
-  });
-  es.addEventListener('done', () => { d.status = 'done'; es.close(); });
-  es.addEventListener('error_event', () => { d.status = 'error'; es.close(); });
+  return {
+    title: 'URL 更新日志',
+    onDone: () => { d.status = 'done'; },
+    onError: () => { d.status = 'error'; },
+    onCanceled: () => { d.status = 'canceled'; d.canceling = false; }
+  };
 }
 </script>
 {% endblock %}

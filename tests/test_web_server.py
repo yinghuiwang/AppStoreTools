@@ -1,5 +1,6 @@
 # tests/test_web_server.py
 from __future__ import annotations
+from datetime import datetime
 import inspect
 import pytest
 from fastapi.testclient import TestClient
@@ -28,11 +29,345 @@ def test_homepage_returns_200(client):
     assert "AppStore Tools" in resp.text
 
 
-def test_homepage_includes_task_log_restore_script(client):
+def test_homepage_loads_dashboard_script_once_in_document_head(client):
     resp = client.get("/")
+
     assert resp.status_code == 200
-    assert "const openTaskLogs = new Set();" in resp.text
-    assert "htmx:afterSwap" in resp.text
+    assert resp.text.count('src="/static/dashboard.js') == 1
+    assert resp.text.index('src="/static/dashboard.js') < resp.text.index("</head>")
+    assert "dashboard.js?v=" in resp.text
+    assert "dashboard.css?v=" in resp.text
+
+
+def test_dashboard_javascript_is_served_with_refresh_and_cancel_contract(client):
+    resp = client.get("/static/dashboard.js")
+
+    assert resp.status_code == 200
+    assert "AbortController" in resp.text
+    assert "/api/dashboard/summary" in resp.text
+    assert "Number(state.metrics && state.metrics.active_count) > 0" in resp.text
+    assert 'retryPaths.indexOf(task.retry_path) !== -1' in resp.text
+    assert "data-dashboard-cancel-task" in resp.text
+    assert 'function cancelRunningTask(taskId, button)' in resp.text
+    assert '"/cancel"' in resp.text
+    assert "确定要终止该任务吗？" in resp.text
+    # Log streaming/rendering now lives entirely in the shared TaskLogDrawer.
+    assert "EventSource" not in resp.text
+    assert "logPreflightController" not in resp.text
+
+
+def test_dashboard_running_tasks_expose_cancel_control(client, monkeypatch):
+    from asc.web import server
+
+    created_at = datetime.now().isoformat()
+    monkeypatch.setattr(
+        server.task_store,
+        "list_recent_states",
+        lambda limit=500: [
+            {
+                "id": "running-1",
+                "kind": "urls",
+                "title": "URL 更新",
+                "profile": "test",
+                "status": "running",
+                "created_at": created_at,
+                "updated_at": created_at,
+                "completed_at": None,
+                "progress": {"pct": 40, "msg": "更新中"},
+            }
+        ],
+    )
+
+    resp = client.get("/")
+
+    assert resp.status_code == 200
+    assert 'data-dashboard-cancel-task="running-1"' in resp.text
+    assert 'aria-label="终止URL 更新"' in resp.text
+    assert ">终止</button>" in resp.text
+    assert 'class="dashboard-running-task__actions"' in resp.text
+
+
+def test_dashboard_javascript_wires_progress_callback_through_task_log_drawer(client):
+    script = client.get("/static/dashboard.js")
+    page = client.get("/")
+
+    assert script.status_code == 200
+    assert page.status_code == 200
+    assert "function updateTaskProgress(taskId, progress)" in script.text
+    assert "onProgress: function (pct, msg)" in script.text
+    assert "updateTaskProgress(taskId, { pct: pct, msg: msg })" in script.text
+    # Error filter/copy tooling now lives in the shared drawer markup, not dashboard.js.
+    assert "renderLogEntries" not in script.text
+    assert 'data-task-log-errors aria-pressed="false"' in page.text
+    assert ">仅错误</button>" in page.text
+
+
+def test_task_log_drawer_javascript_pauses_follow_without_moving_viewport(client):
+    resp = client.get("/static/task-log-drawer.js")
+
+    assert resp.status_code == 200
+    assert "function pauseAtCurrentViewport()" in resp.text
+    assert "var scrollTop = output.scrollTop;" in resp.text
+    assert "setFollow(false);" in resp.text
+    assert "output.scrollTop = scrollTop;" in resp.text
+    assert "copyControl.addEventListener" in resp.text
+    assert "errorsControl.addEventListener" in resp.text
+
+
+def test_dashboard_javascript_preserves_keyboard_focus_across_re_renders(client):
+    resp = client.get("/static/dashboard.js")
+
+    assert resp.status_code == 200
+    assert "captureTaskFocus" in resp.text
+    assert "restoreTaskFocus" in resp.text
+    assert 'section.querySelectorAll("[data-task-id]")' in resp.text
+    assert 'action = "retry"' in resp.text
+    assert 'action = "log"' in resp.text
+    assert 'action = "cancel"' in resp.text
+    assert 'snapshot.action === "cancel"' in resp.text
+    # Drawer overlay/focus-trap concerns now live in the shared TaskLogDrawer.
+    assert "trapDrawerFocus" not in resp.text
+
+
+def test_task_log_drawer_javascript_traps_focus_in_overlay_mode(client):
+    resp = client.get("/static/task-log-drawer.js")
+
+    assert resp.status_code == 200
+    assert 'window.matchMedia("(max-width: 1360px)")' in resp.text
+    assert 'drawer.setAttribute("aria-modal", modal ? "true" : "false")' in resp.text
+    assert 'element.setAttribute("inert", "")' in resp.text
+    assert 'element.removeAttribute("inert")' in resp.text
+    assert 'document.querySelector("body > aside")' in resp.text
+    assert 'element.setAttribute("aria-hidden", "true")' in resp.text
+    assert 'event.key !== "Tab"' in resp.text
+    assert "previouslyFocused" in resp.text
+
+
+def test_dashboard_api_filters_tasks_and_returns_savings(client, monkeypatch):
+    from asc.web import routes_api
+
+    created_at = datetime.now().isoformat()
+    tasks = [
+        {
+            "id": "matching-task",
+            "kind": "metadata",
+            "profile": "myapp",
+            "status": "done",
+            "created_at": created_at,
+            "duration_seconds": 60,
+        },
+        {
+            "id": "other-profile",
+            "kind": "metadata",
+            "profile": "another-app",
+            "status": "done",
+            "created_at": created_at,
+            "duration_seconds": 60,
+        },
+    ]
+    monkeypatch.setattr(routes_api._task_store, "list_recent_states", lambda limit: tasks)
+
+    resp = client.get(
+        "/api/dashboard/summary",
+        params={"range": "7d", "profile": "myapp", "kind": "metadata", "status": "done"},
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert [task["id"] for task in data["tasks"]] == ["matching-task"]
+    assert data["metrics"]["saved_seconds"] == 29 * 60
+    assert data["range_days"] == 7
+
+
+def test_dashboard_api_defaults_to_profile_cookie_and_allows_explicit_empty(client, monkeypatch):
+    from asc.web import routes_api
+
+    created_at = datetime.now().isoformat()
+    tasks = [
+        {"id": "a", "kind": "metadata", "profile": "cookie-app", "status": "done", "created_at": created_at},
+        {"id": "b", "kind": "metadata", "profile": "other", "status": "done", "created_at": created_at},
+    ]
+    monkeypatch.setattr(routes_api._task_store, "list_recent_states", lambda limit: tasks)
+    client.cookies.set("asc_profile", "cookie-app")
+
+    assert [task["id"] for task in client.get("/api/dashboard/summary").json()["tasks"]] == ["a"]
+    assert {task["id"] for task in client.get("/api/dashboard/summary?profile=").json()["tasks"]} == {"a", "b"}
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("range", "14d"),
+        ("status", "unknown"),
+        ("kind", "unknown"),
+    ],
+)
+def test_dashboard_api_rejects_invalid_filters(client, name, value):
+    resp = client.get("/api/dashboard/summary", params={name: value})
+
+    assert resp.status_code == 400
+    assert name in resp.json()["detail"]
+
+
+def test_homepage_exposes_dashboard_root_and_current_profile(client, monkeypatch):
+    monkeypatch.setattr("asc.config.Config.list_apps", lambda self: ["myapp"])
+    monkeypatch.setattr(
+        "asc.config.Config.get_app_profile",
+        lambda self, name: {"app_id": "123"},
+    )
+    monkeypatch.setattr(
+        "asc.guard.Guard.profile_access",
+        lambda self, profiles: {
+            "options": {"myapp": {"enabled": True}},
+            "matched_profile": "myapp",
+        },
+    )
+
+    resp = client.get("/")
+
+    assert resp.status_code == 200
+    assert 'id="dashboard-root"' in resp.text
+    assert 'data-current-profile="myapp"' in resp.text
+
+
+def test_homepage_contains_command_workspace_landmarks(client):
+    resp = client.get("/")
+
+    assert resp.status_code == 200
+    assert 'id="dashboard-summary"' in resp.text
+    assert 'id="dashboard-task-list"' in resp.text
+    assert 'id="task-log-dock"' in resp.text
+    assert 'id="task-log-drawer"' in resp.text
+    assert 'id="task-log-output"' in resp.text
+    assert 'data-dashboard-filter="range"' in resp.text
+    assert 'href="/metadata?action=check"' in resp.text
+    assert 'href="/metadata?action=all"' in resp.text
+    assert 'href="/metadata?action=metadata"' in resp.text
+    assert 'href="/metadata?action=screenshots"' in resp.text
+    assert 'href="/build?action=build-upload"' in resp.text
+    assert "发布版本" not in resp.text
+    assert 'class="dashboard-filters" role="group" aria-label="任务筛选"' in resp.text
+    assert 'role="dialog"' in resp.text
+    assert 'aria-modal="false"' in resp.text
+    assert 'data-dashboard-filter="kind"' in resp.text
+    assert '<option value="pending">等待中</option>' in resp.text
+    assert "检查环境" in resp.text
+    assert "预计节省时间如何计算" in resp.text
+
+
+def test_homepage_dashboard_modules_follow_priority_order(client):
+    resp = client.get("/")
+    css = client.get("/static/dashboard.css")
+
+    assert resp.status_code == 200
+    assert css.status_code == 200
+    # DOM source order encodes functional priority for a11y / narrow-screen stack:
+    # running → history → quick → metrics.
+    running_at = resp.text.index('class="dashboard-running"')
+    history_at = resp.text.index('class="dashboard-history"')
+    workspace_at = resp.text.index('class="dashboard-workspace"')
+    summary_at = resp.text.index('id="dashboard-summary"')
+    assert running_at < history_at < workspace_at < summary_at
+    assert 'class="dashboard-metrics-rail"' in resp.text
+    assert resp.text.index('class="dashboard-workspace"') < resp.text.index('class="dashboard-metrics-rail"')
+    # Desktop board: left stack (running/quick/metrics), history alone on the right.
+    assert 'grid-template-areas:' in css.text
+    assert '"running history"' in css.text
+    assert '"quick history"' in css.text
+    assert '"metrics history"' in css.text
+    assert "grid-area: running" in css.text
+    assert "grid-area: history" in css.text
+    assert "grid-area: quick" in css.text
+    assert "grid-area: metrics" in css.text
+
+
+def test_homepage_does_not_render_untrusted_retry_path(client, monkeypatch):
+    from asc.web import server
+
+    task = {"id": "bad", "kind": "metadata", "profile": "test", "status": "error", "created_at": datetime.now().isoformat(), "retry_path": "//evil.example"}
+    monkeypatch.setattr(server.task_store, "list_recent_states", lambda limit: [task])
+
+    resp = client.get("/")
+    assert 'href="//evil.example"' not in resp.text
+
+
+def test_homepage_loads_dashboard_stylesheet_in_document_head(client):
+    resp = client.get("/")
+
+    assert resp.status_code == 200
+    assert resp.text.count('href="/static/dashboard.css') == 1
+    assert resp.text.index('href="/static/dashboard.css') < resp.text.index("</head>")
+
+
+def test_homepage_summary_uses_range_neutral_accessible_name(client):
+    resp = client.get("/")
+
+    assert resp.status_code == 200
+    assert 'id="dashboard-summary" class="dashboard-summary" aria-label="任务概览"' in resp.text
+    assert 'aria-label="30 天任务概览"' not in resp.text
+
+
+def test_dashboard_stylesheet_is_served_with_workspace_and_dock_layout(client):
+    resp = client.get("/static/dashboard.css")
+
+    assert resp.status_code == 200
+    assert ".dashboard-shell" in resp.text
+    assert ".task-log-dock" in resp.text
+    assert ".dashboard-metrics-rail" in resp.text
+    assert "height: calc(100vh - 4rem)" in resp.text
+    assert "body > aside { display: none" not in resp.text
+    assert "body > aside { width: 56px !important; }" in resp.text
+    assert "@media (max-width: 980px)" in resp.text
+    assert "overflow-y: auto;" in resp.text
+    assert "flex: 0 0 40px;" in resp.text
+    assert ".dashboard-running-task__actions" in resp.text
+    assert ".dashboard-running-task__actions .dashboard-cancel-button:hover" in resp.text
+    assert "rgba(248, 113, 113, .14)" in resp.text
+    assert "#f87171" in resp.text
+    assert ".dashboard-cancel-button { border-color: rgba(248, 113, 113, .25)" not in resp.text
+    # Drawer chrome now lives solely in task-log-drawer.css.
+    assert ".dashboard-log-drawer" not in resp.text
+
+
+def test_task_log_drawer_stylesheet_defines_drawer_and_dock_modes(client):
+    resp = client.get("/static/task-log-drawer.css")
+
+    assert resp.status_code == 200
+    assert ".task-log-drawer" in resp.text
+    assert ".task-log-drawer.is-overlay" in resp.text
+    assert ".task-log-drawer.is-docked" in resp.text
+    assert "@media (max-width: 1360px)" in resp.text
+
+
+def test_mobile_sidebar_navigation_links_have_accessible_tooltips(client):
+    resp = client.get("/")
+
+    assert resp.status_code == 200
+    assert 'aria-label="仪表盘" title="仪表盘"' in resp.text
+    assert 'aria-label="元数据上传" title="元数据上传"' in resp.text
+    assert 'aria-label="构建上传" title="构建上传"' in resp.text
+
+
+def test_homepage_dashboard_context_avoids_loading_task_logs(client, monkeypatch):
+    from asc.web import server
+
+    monkeypatch.setattr(
+        server.task_store,
+        "list_recent",
+        lambda **kwargs: pytest.fail("homepage must not load task logs"),
+    )
+    calls = []
+
+    def list_recent_states(*, limit):
+        calls.append(limit)
+        return []
+
+    monkeypatch.setattr(server.task_store, "list_recent_states", list_recent_states)
+
+    resp = client.get("/")
+
+    assert resp.status_code == 200
+    assert calls == [500]
 
 
 def test_metadata_page_returns_200(client):
@@ -40,9 +375,71 @@ def test_metadata_page_returns_200(client):
     assert resp.status_code == 200
 
 
+def test_metadata_page_uses_shared_task_log_drawer(client):
+    resp = client.get("/metadata")
+    assert resp.status_code == 200
+    assert "TaskLogDrawer.open" in resp.text
+    assert "data-task-log-open" in resp.text
+    assert "new EventSource(`/api/task/${taskId}/stream`)" not in resp.text
+    assert 'id="log-panel"' not in resp.text
+
+
+@pytest.mark.parametrize("path", ["/urls", "/whats-new", "/iap", "/update"])
+def test_feature_page_uses_shared_task_log_drawer(client, path):
+    resp = client.get(path)
+    assert resp.status_code == 200
+    assert "TaskLogDrawer.open" in resp.text
+    assert "data-task-log-open" in resp.text
+    assert "new EventSource(" not in resp.text or "TaskLogDrawer" in resp.text
+    assert "function startSSE" not in resp.text
+    assert "function startIapSSE" not in resp.text
+    assert 'id="log-panel"' not in resp.text
+    assert 'id="iap-log-panel"' not in resp.text
+
+
+@pytest.mark.parametrize(
+    ("action", "expected"),
+    [
+        ("check", 'data-workflow-action="check"'),
+        ("all", 'data-workflow-action="all"'),
+        ("metadata", 'data-workflow-action="metadata"'),
+        ("screenshots", 'data-workflow-action="screenshots"'),
+    ],
+)
+def test_metadata_quick_actions_select_a_valid_workflow(client, action, expected):
+    resp = client.get("/metadata", params={"action": action})
+
+    assert resp.status_code == 200
+    assert expected in resp.text
+
+
+def test_metadata_quick_action_rejects_unknown_workflow(client):
+    resp = client.get("/metadata", params={"action": "unknown"})
+
+    assert resp.status_code == 200
+    assert 'data-workflow-action=""' in resp.text
+
+
 def test_build_page_returns_200(client):
     resp = client.get("/build")
     assert resp.status_code == 200
+
+
+def test_build_quick_action_selects_build_upload_workflow(client):
+    resp = client.get("/build", params={"action": "build-upload"})
+
+    assert resp.status_code == 200
+    assert 'data-workflow-action="build-upload"' in resp.text
+
+
+def test_build_page_uses_shared_task_log_drawer_and_keeps_scan_panel(client):
+    resp = client.get("/build")
+    assert resp.status_code == 200
+    assert "TaskLogDrawer.open" in resp.text
+    assert "data-task-log-open" in resp.text
+    assert "自动检测结果" in resp.text
+    assert "startBuildSSE" not in resp.text
+    assert 'id="build-log-panel"' not in resp.text
 
 
 def test_iap_page_contains_review_screenshot_tools(client):
@@ -56,9 +453,17 @@ def test_iap_page_contains_review_screenshot_tools(client):
 def test_blocking_web_probes_run_in_threadpool():
     from asc.web import routes_api
 
+    assert not inspect.iscoroutinefunction(routes_api.dashboard_summary)
     assert not inspect.iscoroutinefunction(routes_api.build_schemes)
     assert not inspect.iscoroutinefunction(routes_api.build_options)
     assert not inspect.iscoroutinefunction(routes_api.whats_new_check)
+
+
+def test_homepage_dashboard_storage_query_runs_in_threadpool():
+    app = create_app()
+    homepage = next(route.endpoint for route in app.routes if route.path == "/")
+
+    assert not inspect.iscoroutinefunction(homepage)
 
 
 def test_update_check_includes_current_commit(client):
@@ -629,9 +1034,29 @@ def test_task_cancel_endpoint(client):
     data = resp.json()
     assert data["task_id"] == task_id
     assert data["cancel_requested"] is True
+    assert data["status"] == "canceled"
     task = task_store.get(task_id)
     assert task["cancel_requested"] is True
+    assert task["status"] == TaskStatus.CANCELED
     assert any("已请求终止" in line for line in task["logs"])
+    assert any("任务已终止" in line for line in task["logs"])
+
+
+def test_task_cancel_endpoint_force_finishes_stuck_urls_task(client):
+    from asc.web.tasks import task_store, TaskStatus
+
+    task_id = task_store.create("urls", profile="test")
+    task_store.set_status(task_id, TaskStatus.RUNNING)
+    task_store.set_progress(task_id, 40, "更新 marketingUrl")
+
+    resp = client.post(f"/api/task/{task_id}/cancel")
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "canceled"
+    task = task_store.get(task_id)
+    assert task["status"] == TaskStatus.CANCELED
+    assert task["result"] == {"success": False, "canceled": True}
+    assert task_store.cancel_event(task_id).is_set()
 
 
 def test_task_status_endpoint(client):
@@ -840,7 +1265,7 @@ def test_sidebar_disables_other_machine_profile(client):
 
     assert response.status_code == 200
     assert 'value="current-app"' in response.text
-    assert "当前 App：" in response.text
+    assert 'data-current-profile="current-app"' in response.text
     assert "current-app" in response.text
     assert 'value="other-app"' in response.text
     assert "disabled" in response.text
@@ -1289,3 +1714,62 @@ def test_iap_check_missing_file(client):
         assert data['ok'] is False
         assert data['level'] == 'error'
         print('test_iap_check_missing_file: PASS')
+
+def test_task_log_drawer_javascript_closes_on_outside_click_in_overlay_mode(client):
+    resp = client.get("/static/task-log-drawer.js")
+
+    assert resp.status_code == 200
+    assert 'document.addEventListener("click", function (event)' in resp.text
+    assert 'if (!isDrawerOpen() || drawer.contains(event.target)) return;' in resp.text
+    assert 'if (!isOverlayMode()) return;' in resp.text
+    assert "close();" in resp.text
+
+
+def test_task_log_drawer_slide_animation(client):
+    css = client.get("/static/task-log-drawer.css")
+    js = client.get("/static/task-log-drawer.js")
+
+    assert css.status_code == 200
+    assert js.status_code == 200
+    assert "translateX(100%)" in css.text
+    assert "translateX(0)" in css.text
+    assert ".is-open" in css.text
+    assert "transition:" in css.text
+    assert "function openDrawerPanel()" in js.text
+    assert "function beginCloseDrawerPanel()" in js.text
+    assert 'void drawer.offsetWidth;' in js.text
+    assert 'event.propertyName !== "transform"' in js.text
+    assert "drawer.hidden = true;" in js.text
+    assert 'drawer.classList.add("is-open")' in js.text
+    assert 'drawer.classList.remove("is-open")' in js.text
+
+
+def test_dashboard_javascript_delegates_logs_to_task_log_drawer(client):
+    resp = client.get("/static/dashboard.js")
+    assert resp.status_code == 200
+    assert "TaskLogDrawer.open" in resp.text
+    assert "TaskLogDrawer.attachDock" in resp.text
+
+
+def test_task_log_drawer_javascript_exposes_public_api(client):
+    resp = client.get("/static/task-log-drawer.js")
+    assert resp.status_code == 200
+    body = resp.text
+    assert "window.TaskLogDrawer" in body
+    assert "function open(" in body or "open: function" in body or "open(" in body
+    assert "attachDock" in body
+    assert "/api/task/" in body
+    assert '"/status"' in body or "/status" in body
+    assert "stream?after=0" in body
+    assert "data-task-log-errors" in body
+    assert "data-task-log-follow" in body
+    assert "任务不存在或已被清理" in body
+
+
+def test_base_layout_includes_task_log_drawer_assets(client):
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert "task-log-drawer.css?v=" in resp.text
+    assert "task-log-drawer.js?v=" in resp.text
+    assert 'id="task-log-drawer"' in resp.text
+    assert "data-task-log-close" in resp.text

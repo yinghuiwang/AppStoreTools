@@ -1,0 +1,155 @@
+/* --- Shared task log drawer --- */
+
+.task-log-kicker {
+  margin: 0 0 5px;
+  color: var(--text-muted);
+  font: 500 10px/1.2 "Fira Code", monospace;
+  letter-spacing: .12em;
+}
+
+.task-log-drawer {
+  width: 390px;
+  flex: 0 0 390px;
+  min-width: 0;
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  border-left: 1px solid var(--border-default);
+  background: #0c0c10;
+  box-shadow: -14px 0 30px rgba(0, 0, 0, .22);
+  transform: translateX(100%);
+  transition: transform .25s cubic-bezier(.4, 0, .2, 1);
+  pointer-events: none;
+}
+
+.task-log-drawer.is-open {
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+.task-log-drawer[hidden] { display: none; }
+
+/* Dock/overlay modes: docked drawers sit inline (flex sibling); overlay drawers
+   float above the page (fixed) regardless of viewport width. */
+.task-log-drawer.is-overlay {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+}
+.task-log-drawer.is-docked {
+  position: relative;
+  flex: 0 0 390px;
+  width: 390px;
+}
+
+.task-log-drawer__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 72px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+}
+.task-log-drawer__header .task-log-kicker { margin-bottom: 4px; }
+
+.task-log-icon-button {
+  width: 30px;
+  height: 30px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font: 500 16px/1 "Fira Code", monospace;
+}
+.task-log-icon-button:hover { background: var(--bg-overlay); color: var(--text-primary); }
+
+.task-log-tools,
+.task-log-follow {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font: 10px/1.3 "Fira Code", monospace;
+}
+.task-log-tools > div { display: flex; gap: 5px; }
+.task-log-tools .task-log-icon-button { width: 27px; height: 27px; font-size: 12px; }
+.task-log-filter {
+  height: 27px;
+  padding: 0 8px;
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font: 10px/1 "Fira Code", monospace;
+}
+.task-log-filter[aria-pressed="true"] {
+  border-color: rgba(248, 113, 113, .45);
+  background: rgba(248, 113, 113, .1);
+  color: var(--error);
+}
+
+.task-log-output {
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 15px;
+  overflow: auto;
+  background: #0a0a0c;
+  color: #b8c7bb;
+  font: 11px/1.7 "Fira Code", monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.task-log-output:focus-visible { outline: 1px solid var(--accent); outline-offset: -2px; }
+
+.task-log-follow {
+  border-top: 1px solid var(--border-subtle);
+  border-bottom: 0;
+  background: var(--bg-surface);
+}
+.task-log-follow label { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; }
+
+.task-log-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font: 500 11px/1.2 "Fira Code", monospace;
+  text-decoration: none;
+}
+.task-log-button:hover { border-color: var(--accent-dim); color: var(--accent); }
+
+/* --- Breakpoints --- */
+
+@media (max-width: 1360px) {
+  .task-log-drawer {
+    position: fixed;
+    z-index: 10000;
+    inset: 0 0 0 auto;
+    width: min(100vw, 420px);
+    max-width: 420px;
+    flex-basis: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .task-log-drawer { transition: none; }
+}

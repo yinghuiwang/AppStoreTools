@@ -70,7 +70,7 @@ To see which app is currently default:
 asc app list
 ```
 
-The default is marked with a `*`.
+The default is marked with `(default)`.
 
 ---
 

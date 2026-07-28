@@ -6,7 +6,7 @@
 
 ## Guard 是什么？
 
-Guard 将你的 API 凭证绑定到特定的机器和 IP 地址。当同一凭证从未知机器或 IP 使用时，Guard 会发出警告或阻止操作，防止凭证被意外共享或滥用。
+Guard 会记录变更操作所使用的 App、Issuer ID、API Key、机器和公网 IP。交互式终端中的冲突可以明确确认继续；相同冲突在非交互进程中会被阻止，以降低误用 App Store Connect 账号或 App 的风险。
 
 Guard **默认启用**，绑定数据存储在 `~/.config/asc/guard.json`。
 
@@ -102,10 +102,10 @@ asc --app myapp upload
 ## 常见问题
 
 **Q: Guard 阻止了从新机器的合法操作**
-在旧机器上执行 `asc guard unbind --current`，或执行 `asc guard reset` 清除所有绑定，然后从新机器重新运行以创建新的绑定记录。
+在旧机器上执行 `asc guard unbind --current`，或执行 `asc guard reset` 清除所有绑定，然后从新机器重新运行以创建新的绑定记录。在交互式终端中，也可以核对冲突详情后输入 `yes`，将 Profile 绑定迁移到当前机器。
 
 **Q: 收到冲突警告但想继续操作**
-警告表示该凭证之前绑定到了不同的机器/IP。如果这是有意为之（例如换了新机器），解除旧绑定后重新运行即可。
+请核对警告中的 App ID、Profile、Issuer ID、机器和 IP。如果这是有意迁移，可在交互式终端输入 `yes`，或解除旧绑定后重新运行。非交互任务遇到冲突会停止，除非显式关闭 Guard。
 
 **Q: Guard 文件在哪里？**
 `~/.config/asc/guard.json` — 不要将此文件提交到 git。

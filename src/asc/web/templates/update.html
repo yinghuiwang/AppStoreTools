@@ -12,7 +12,7 @@
     <p class="text-sm text-obsidian-400 mt-1">检查并安装 AppStoreTools 最新版本</p>
   </div>
 
-  <div x-data="{ checkResult: null, checking: false, step: 1, taskId: null, logs: [], status: 'idle', selectedTab: 'specific', branchOptions: [], branchesLoading: false, branchError: '', selectedBranch: '' }">
+  <div x-data="{ checkResult: null, checking: false, step: 1, taskId: null, status: 'idle', canceling: false, selectedTab: 'specific', branchOptions: [], branchesLoading: false, branchError: '', selectedBranch: '' }">
 
     <!-- Check status card -->
     <div class="card mb-6">
@@ -177,23 +177,23 @@
     <div x-show="step === 2" class="card mt-6">
       <div class="card-body">
         <div class="flex items-center justify-between mb-5">
-          <h2 class="font-semibold text-obsidian-100" x-text="status === 'done' ? '更新完成' : status === 'error' ? '更新失败' : '更新中...'"></h2>
-          <template x-if="status === 'done'">
-            <div class="w-7 h-7 rounded-full flex items-center justify-center bg-emerald-500/15">
-              <svg class="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>
-            </div>
-          </template>
-          <template x-if="status === 'error'">
-            <div class="w-7 h-7 rounded-full flex items-center justify-center bg-red-500/15">
-              <svg class="w-4 h-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"/></svg>
-            </div>
-          </template>
-        </div>
-
-        <div class="log-panel max-h-64" id="log-panel">
-          <template x-for="(line, idx) in logs" :key="idx">
-            <div x-text="line"></div>
-          </template>
+          <h2 class="font-semibold text-obsidian-100" x-text="status === 'done' ? '更新完成' : status === 'error' ? '更新失败' : status === 'canceled' ? '已终止' : '更新中...'"></h2>
+          <div class="flex items-center gap-3">
+            <template x-if="status === 'done'">
+              <div class="w-7 h-7 rounded-full flex items-center justify-center bg-emerald-500/15">
+                <svg class="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>
+              </div>
+            </template>
+            <template x-if="status === 'error'">
+              <div class="w-7 h-7 rounded-full flex items-center justify-center bg-red-500/15">
+                <svg class="w-4 h-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"/></svg>
+              </div>
+            </template>
+            <button type="button"
+                    data-task-log-open
+                    class="text-xs text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium"
+                    @click="TaskLogDrawer.open(taskId, updateLogOptions())">日志</button>
+          </div>
         </div>
       </div>
     </div>
@@ -206,17 +206,23 @@
 </div>
 
 <script>
-function startSSE(taskId) {
+function updateLogOptions() {
   const root = document.querySelector('[x-data]');
   const d = Alpine.$data(root);
-  const es = new EventSource(`/api/task/${taskId}/stream`);
-  es.addEventListener('log', e => {
-    d.logs.push(e.data);
-    const panel = document.getElementById('log-panel');
-    if (panel) requestAnimationFrame(() => { panel.scrollTop = panel.scrollHeight; });
-  });
-  es.addEventListener('done', () => { d.status = 'done'; es.close(); checkUpdate(); });
-  es.addEventListener('error_event', () => { d.status = 'error'; es.close(); });
+  return {
+    title: '工具更新日志',
+    onDone: () => { d.status = 'done'; checkUpdate(); },
+    onError: () => { d.status = 'error'; },
+    onCanceled: () => { d.status = 'canceled'; d.canceling = false; }
+  };
+}
+
+function startUpdateTask(taskId) {
+  const root = document.querySelector('[x-data]');
+  const d = Alpine.$data(root);
+  d.status = 'running';
+  d.canceling = false;
+  TaskLogDrawer.open(taskId, updateLogOptions());
 }
 
 function checkUpdate() {
@@ -281,9 +287,7 @@ function runUpdate(version, mode = 'specific') {
   .then(data => {
     d.taskId = data.task_id;
     d.step = 2;
-    d.logs = [];
-    d.status = 'running';
-    startSSE(data.task_id);
+    startUpdateTask(data.task_id);
   });
 }
 
@@ -304,9 +308,7 @@ function runUpdateBranch(branch) {
   .then(data => {
     d.taskId = data.task_id;
     d.step = 2;
-    d.logs = [];
-    d.status = 'running';
-    startSSE(data.task_id);
+    startUpdateTask(data.task_id);
   });
 }
 

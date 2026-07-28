@@ -13,7 +13,9 @@
 
 ## Step 1: Fill in the metadata CSV
 
-Edit `data/appstore_info.csv`. Required columns:
+If you followed tutorial 01, edit `AppStore/data/appstore_info.csv`. The imported profile stores this absolute path, so upload commands can find it from any working directory.
+
+The only structurally required column is `语言`. Add the other columns for the fields you want to update:
 
 | Column header | Meaning |
 |---|---|
@@ -21,12 +23,7 @@ Edit `data/appstore_info.csv`. Required columns:
 | `应用名称` | App name (max 30 chars) |
 | `副标题` | Subtitle (max 30 chars) |
 | `长描述` | Full description (max 4000 chars) |
-| `关键子` | Keywords, comma-separated (max 100 chars total) |
-
-Optional columns:
-
-| Column header | Meaning |
-|---|---|
+| `关键子` or `关键词` | Keywords, comma-separated (max 100 chars total) |
 | `技术支持链接` | Support URL |
 | `营销网站` | Marketing URL |
 | `隐私政策网址` | Privacy policy URL |
@@ -35,15 +32,15 @@ Example row:
 
 ```
 语言,应用名称,副标题,长描述,关键子
-English(en-US),My App,The best app,A full description here.,productivity,tools
-简体中文(zh-Hans),我的应用,最好的应用,完整描述。,效率,工具
+English(en-US),My App,The best app,A full description here.,"productivity,tools"
+简体中文(zh-Hans),我的应用,最好的应用,完整描述。,"效率,工具"
 ```
 
 ---
 
 ## Step 2: Prepare screenshots
 
-Place screenshots under `data/screenshots/<locale-folder>/`:
+Place screenshots under `AppStore/data/screenshots/<locale-folder>/`:
 
 | Folder name | Locale |
 |---|---|
@@ -61,13 +58,19 @@ Device type is **auto-detected from image dimensions**:
 | `APP_IPHONE_61` | 1179×2556 or 1170×2532 |
 | `APP_IPHONE_58` | 1125×2436 |
 | `APP_IPHONE_55` | 1242×2208 |
+| `APP_IPHONE_47` | 750×1334 |
 | `APP_IPAD_PRO_3GEN_129` | 2048×2732 |
 | `APP_IPAD_PRO_3GEN_11` | 1668×2388 |
+| `APP_IPAD_PRO_129` | 2064×2752 |
+
+The matching landscape dimensions are also recognized.
+
+Screenshot upload iterates every locale already present on the editable version. If a locale has no matching folder and an `en-US` folder exists, `asc` uses the `en-US` images as a fallback; without an `en-US` folder, that locale is skipped. Because upload replaces the target screenshot set, create explicit locale folders when you do not want English fallback images to overwrite localized screenshots.
 
 Name files with a leading number to control upload order:
 
 ```
-data/screenshots/en-US/
+AppStore/data/screenshots/en-US/
 ├── 01_home.png
 ├── 02_detail.png
 └── 03_settings.png
@@ -144,7 +147,7 @@ asc --app myapp screenshots --screenshots /path/to/custom/screenshots
 1. Reads the CSV and resolves locale codes
 2. Finds the editable app version via the ASC API
 3. Creates or updates each locale's metadata fields
-4. For screenshots: deletes existing screenshots for the target device type, then uploads new ones in filename order
+4. For screenshots: resolves the locale folder (or `en-US` fallback), deletes existing screenshots for the target device type, then uploads new ones in filename order
 
 > **Note:** Screenshot upload **replaces** all existing screenshots for the same device type. Back up existing screenshots if needed before running.
 
@@ -156,7 +159,7 @@ asc --app myapp screenshots --screenshots /path/to/custom/screenshots
 The app version must already exist in App Store Connect with an editable state. Create one manually first.
 
 **Some locales are skipped**
-The locale code in the `语言` column must match a locale already added to your app in App Store Connect. Add missing locales there first.
+Use a valid App Store Connect locale code in the `语言` column. Metadata upload creates missing App Info or version localizations when the API allows it; if Apple rejects the locale, confirm that the locale is available for the app and version in App Store Connect.
 
 **Screenshot dimensions not recognized**
 Check the image size matches one of the supported resolutions in the table above. Export at exactly 1x (no scaling).

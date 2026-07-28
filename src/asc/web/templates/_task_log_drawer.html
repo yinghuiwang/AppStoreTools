@@ -1,0 +1,28 @@
+<aside id="task-log-drawer"
+       class="task-log-drawer"
+       role="dialog"
+       aria-modal="false"
+       aria-labelledby="task-log-title"
+       hidden>
+  <header class="task-log-drawer__header">
+    <div>
+      <p class="task-log-kicker">TASK OUTPUT</p>
+      <h2 id="task-log-title">任务日志</h2>
+    </div>
+    <button type="button" class="task-log-icon-button" data-task-log-close aria-label="关闭日志面板" title="关闭日志面板">&#215;</button>
+  </header>
+  <div class="task-log-tools" role="toolbar" aria-label="日志工具">
+    <span data-task-log-status>等待选择任务</span>
+    <div>
+      <button type="button" class="task-log-filter" data-task-log-errors aria-pressed="false">仅错误</button>
+      <button type="button" class="task-log-icon-button" data-task-log-copy aria-label="复制日志" title="复制日志">&#9633;</button>
+      <button type="button" class="task-log-icon-button" data-task-log-clear aria-label="清空显示" title="清空显示">&#8856;</button>
+    </div>
+  </div>
+  <pre id="task-log-output" class="task-log-output" tabindex="0" aria-live="polite"><code>从任务列表中选择“日志”以查看实时输出。</code></pre>
+  <footer class="task-log-follow">
+    <label><input type="checkbox" data-task-log-follow checked> 自动跟随最新输出</label>
+    <button type="button" class="task-log-button" data-task-log-latest hidden>回到最新</button>
+    <span data-task-log-position>-- / --</span>
+  </footer>
+</aside>

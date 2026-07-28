@@ -23,7 +23,8 @@ curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/inst
 安装指定分支用于测试：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh | bash -s -- --branch feat/web-build-interactive-release-options
+asc_install_ref=your-branch-or-tag
+curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh | bash -s -- --ref "$asc_install_ref"
 ```
 
 **方式 B — 克隆仓库安装**
@@ -87,16 +88,23 @@ asc init
 ```
 AppStore/
 ├── Config/
-│   └── .env          ← 填写凭证
+│   ├── .env.example  ← 复制为 .env 后填写凭证
+│   └── .gitignore    ← 防止 .env 被提交
 └── data/
     ├── appstore_info.csv
     ├── screenshots/
-    │   ├── cn/
-    │   └── en-US/
-    └── iap_packages.example.json
+    ├── iap_packages.json
+    └── iap_review/
+        └── premium_monthly.png
 ```
 
-编辑 `AppStore/Config/.env`，填入你的凭证：
+先创建本地凭证文件：
+
+```bash
+cp AppStore/Config/.env.example AppStore/Config/.env
+```
+
+然后编辑 `AppStore/Config/.env`，填入你的凭证：
 
 ```dotenv
 ISSUER_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
@@ -112,10 +120,10 @@ APP_ID=1234567890
 **方式 A — 从 .env 自动导入（推荐，配合 asc init 使用）**
 
 ```bash
-asc app import
+asc app import --name myapp
 ```
 
-工具会读取当前目录的 `AppStore/Config/.env` 并自动创建 profile。
+工具会读取当前目录的 `AppStore/Config/.env` 并自动创建 `myapp` Profile。省略 `--name` 时，会使用项目目录名。
 
 **方式 B — 指定路径导入**
 
@@ -150,8 +158,8 @@ asc --app myapp check
 ```
 ✅ 凭证有效
 ✅ 找到可编辑版本: 1.2.0 (PREPARE_FOR_SUBMISSION)
-✅ CSV 文件存在: data/appstore_info.csv
-✅ 截图目录存在: data/screenshots
+✅ CSV 文件存在: /path/to/MyXcodeProject/AppStore/data/appstore_info.csv
+✅ 截图目录存在: /path/to/MyXcodeProject/AppStore/data/screenshots
 ```
 
 ---

@@ -5,15 +5,19 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from asc.web.dashboard import build_dashboard_summary
 from asc.web.tasks import task_store
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
+_STATIC_DIR = Path(__file__).parent / "static"
 
 
 def create_app() -> FastAPI:
     app = FastAPI(title="asc Web UI", docs_url=None, redoc_url=None)
+    app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
     templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
     def _get_profile_context(request: Request) -> dict:
@@ -35,6 +39,7 @@ def create_app() -> FastAPI:
         if not current:
             current = access["matched_profile"] or (selectable[0] if selectable else "")
         current_config = Config(app_name=current) if current else config
+        from asc import __version__ as asset_version
         return {
             "profiles": profiles,
             "profile_access": options,
@@ -43,6 +48,7 @@ def create_app() -> FastAPI:
             "profile_csv": current_config.csv_path,
             "profile_screenshots": current_config.screenshots_path,
             "profile_iap_file": current_config.iap_path or "data/iap_packages.json",
+            "asset_version": asset_version,
         }
 
     def _render(request: Request, template: str, ctx: dict):
@@ -65,19 +71,29 @@ def create_app() -> FastAPI:
         return resp
 
     @app.get("/", response_class=HTMLResponse)
-    async def index(request: Request):
+    def index(request: Request):
         ctx = _get_profile_context(request)
-        ctx["recent_tasks"] = task_store.list_recent(limit=20)
+        recent_states = task_store.list_recent_states(limit=500)
+        ctx["dashboard"] = build_dashboard_summary(
+            recent_states,
+            days=30,
+            profile=ctx["current_profile"],
+        )
+        ctx["recent_tasks"] = ctx["dashboard"]["tasks"]
         return _render(request, "index.html", ctx)
 
     @app.get("/metadata", response_class=HTMLResponse)
     async def metadata_page(request: Request):
         ctx = _get_profile_context(request)
+        action = request.query_params.get("action", "")
+        ctx["workflow_action"] = action if action in {"check", "all", "metadata", "screenshots"} else ""
         return _render(request, "metadata.html", ctx)
 
     @app.get("/build", response_class=HTMLResponse)
     async def build_page(request: Request):
         ctx = _get_profile_context(request)
+        action = request.query_params.get("action", "")
+        ctx["workflow_action"] = action if action == "build-upload" else ""
         return _render(request, "build.html", ctx)
 
     @app.get("/profiles", response_class=HTMLResponse)

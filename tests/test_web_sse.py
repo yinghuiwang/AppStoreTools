@@ -21,6 +21,11 @@ def test_format_sse_event_done():
     assert result == "event: done\ndata: \n\n"
 
 
+def test_format_sse_event_includes_optional_id():
+    result = format_sse_event("log", "hello", event_id=3)
+    assert result == "id: 3\nevent: log\ndata: hello\n\n"
+
+
 def test_capture_stdout_to_queue():
     import queue
     q = queue.Queue()

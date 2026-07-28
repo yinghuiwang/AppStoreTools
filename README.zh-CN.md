@@ -2,37 +2,33 @@
 
 [English](README.md) | [使用教程](docs/tutorials/README.zh-CN.md)
 
-`asc` 是一个用于 App Store Connect 发布工作的 Python CLI。它可以上传多语言元数据和截图，创建或更新 IAP 与自动续期订阅，维护 What’s New 与商店 URL，构建 Xcode 项目，上传 `.ipa`，并提供本地 Web UI 处理常用流程。
+`asc` 是一个面向日常 App Store Connect 发布工作的 Python 3.9+ CLI。你可以通过终端或本地 Web UI 管理多个 App 的多语言商店内容、IAP、Xcode 构建与发布流程。
 
-## 功能概览
+## 主要能力
 
-- 从 `data/appstore_info.csv` 上传 App 元数据
-- 按语言和设备尺寸上传截图，并自动识别 display type
-- 从 JSON 同步 IAP 和自动续期订阅
-- 更新版本说明、技术支持 URL、营销 URL、隐私政策 URL
-- 构建 Xcode Archive、导出 IPA、上传到 App Store Connect
-- 支持多 App Profile 和本地默认 App
-- Guard 在高风险操作前检查机器、IP、凭证绑定
-- 通过 `asc web` 启动本地 Web UI
+- 上传多语言元数据、关键词、商店 URL 和截图
+- 从 JSON 创建或更新 IAP 与自动续期订阅
+- 补传缺失的 IAP 和订阅审核截图
+- 更新 What's New，并可使用 LLM 自动翻译
+- 构建 Xcode 项目、导出 `.ipa`，并上传到 App Store Connect 供 TestFlight 或 App Store 分发
+- 使用项目默认配置管理多个 App Profile
+- 通过本地 Web UI 执行常用流程，保留任务历史并发送 Webhook 通知
+- 在修改远端状态前，通过机器、网络和凭证绑定执行 Guard 检查
 
-## 使用教程
+## 使用要求
 
-每个主要工作流的分步指南：
+- Python 3.9 或更高版本
+- 具有 **App Manager** 或更高权限的 App Store Connect API Key
+- API Key 的 Issuer ID、Key ID、`.p8` 私钥，以及 App 的数字 Apple ID
+- 执行 `build`、`deploy` 和 `release` 时，需要安装 macOS 与 Xcode 命令行工具
 
-| # | 教程 | 主题 |
-|---|------|------|
-| 01 | [安装与项目初始化](docs/tutorials/01-install-and-init.zh-CN.md) | 安装 `asc`、创建 API Key、初始化项目、添加 App Profile |
-| 02 | [元数据与截图上传](docs/tutorials/02-metadata-and-screenshots.zh-CN.md) | 填写 CSV、命名截图文件夹、运行 `upload` / `metadata` / `screenshots` |
-| 03 | [IAP 与订阅上传](docs/tutorials/03-iap-and-subscriptions.zh-CN.md) | 编写 `iap_packages.json`、上传一次性内购和订阅 |
-| 04 | [What's New 与商店 URL](docs/tutorials/04-whats-new-and-urls.zh-CN.md) | 更新版本说明和支持/营销/隐私政策 URL |
-| 05 | [构建与发布](docs/tutorials/05-build-and-deploy.zh-CN.md) | `asc build`、`asc deploy`、`asc release`、TestFlight 与 App Store |
-| 06 | [多 App Profile 管理](docs/tutorials/06-multi-app-profiles.zh-CN.md) | 管理多个 App、设置默认 App、在项目间切换 |
-| 07 | [Guard 安全守卫](docs/tutorials/07-guard-security.zh-CN.md) | 机器/IP/凭证绑定、冲突处理、CI 环境关闭守卫 |
-| 08 | [CI/CD 自动化](docs/tutorials/08-ci-cd.zh-CN.md) | GitHub Actions 示例、通过环境变量注入凭证 |
+元数据、截图、IAP 和 Web UI 工作流可以在 Linux 与 Windows 上运行。Apple 只允许每个 `.p8` 私钥下载一次，请妥善保管。
 
 ## 快速开始
 
-### 方式一：curl 安装
+### 1. 安装 `asc`
+
+推荐使用仓库安装脚本，它会自动选择可用的安装方式，并将 `asc` 命令配置到 PATH：
 
 ```bash
 curl -fL --retry 5 --connect-timeout 20 \
@@ -41,256 +37,159 @@ curl -fL --retry 5 --connect-timeout 20 \
 bash /tmp/asc-install.sh
 ```
 
-安装指定分支用于测试：
+也可以安装 PyPI 发布版本或 GitHub 最新源码：
 
 ```bash
-curl -fL --retry 5 --connect-timeout 20 \
-  -o /tmp/asc-install.sh \
-  https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh
-bash /tmp/asc-install.sh --branch feat/web-build-interactive-release-options
+python -m pip install asc-appstore-tools
+# 或
+python -m pip install git+https://github.com/yinghuiwang/AppStoreTools.git
 ```
 
-### 方式二：克隆仓库安装
+### 2. 配置项目
+
+在 Xcode 项目目录运行引导式配置。它会检查环境，并帮助创建或导入 App Profile：
+
+```bash
+cd /path/to/MyXcodeProject
+asc install
+```
+
+手动配置时，可以用 `asc init` 生成 `AppStore/` 数据模板，或用 `asc app add myapp` 创建 Profile。Profile 和复制后的私钥保存在项目目录之外的 `~/.config/asc/`。
+
+### 3. 检查并预览
+
+先验证凭证，再预览默认元数据和截图上传，避免直接修改 App Store Connect：
+
+```bash
+asc check
+asc upload --dry-run
+```
+
+使用 `asc --app myapp <command>` 可以显式选择 Profile；也可以运行 `asc app default myapp` 设置项目默认 App。
+
+## 常用工作流
+
+### 元数据和截图
+
+```bash
+# 通过 asc init 导入的 Profile 指向 AppStore/data/appstore_info.csv
+asc metadata --dry-run
+
+# 同一 Profile 指向 AppStore/data/screenshots/
+asc screenshots --dry-run
+```
+
+CSV 列、语言目录、支持的 display type 和上传规则请参阅[元数据与截图上传](docs/tutorials/02-metadata-and-screenshots.zh-CN.md)。
+
+### IAP 和订阅
+
+```bash
+asc iap --iap-file AppStore/data/iap_packages.json --dry-run
+asc iap --iap-file AppStore/data/iap_packages.json --update-existing
+
+# 查找缺少审核图的产品，并上传配置中的默认图片
+asc iap-screenshots --iap-file AppStore/data/iap_packages.json --dry-run
+```
+
+建议从 `asc init` 在 `AppStore/data/iap_packages.json` 生成的当前模板开始；仓库源码中也有 `data/iap_packages.json` 示例。JSON 结构和更新规则请参阅 [IAP 与订阅上传](docs/tutorials/03-iap-and-subscriptions.zh-CN.md)。
+
+### What's New 和商店 URL
+
+```bash
+asc whats-new --text "Bug fixes and performance improvements." --dry-run
+
+# 通过 OpenAI 兼容 API，将一份源文本翻译到 App 的其他语言
+asc whats-new --text "Bug fixes and performance improvements." \
+  --translate --source-locale en-US --dry-run
+
+asc set-support-url --text "https://example.com/support" --dry-run
+asc set-marketing-url --text "https://example.com" --dry-run
+asc set-privacy-policy-url --text "https://example.com/privacy" --dry-run
+```
+
+LLM 设置可通过 Web UI 或 `~/.config/asc/llm.toml` 管理，也支持 `OPENAI_API_KEY`。按文件维护版本说明和选择目标语言请参阅 [What's New 与商店 URL](docs/tutorials/04-whats-new-and-urls.zh-CN.md)。
+
+### 构建和发布
+
+```bash
+asc build --dry-run
+asc --app myapp deploy --ipa build/export/MyApp.ipa --dry-run
+asc --app myapp release --destination testflight --dry-run
+```
+
+`asc build` 和 `asc release` 可以发现 Xcode 项目、Scheme、Bundle ID、签名证书和描述文件，并把解析结果缓存到 `.asc/config.toml`。签名和 App Store 发布选项请参阅[构建与发布](docs/tutorials/05-build-and-deploy.zh-CN.md)。
+
+### 本地 Web UI
+
+```bash
+asc web
+asc web status
+asc web stop
+```
+
+Web UI 默认打开 `http://127.0.0.1:8080`。它覆盖主要的上传和发布工作流，将任务历史保存在 `~/.config/asc/tasks.db`，并可在设置页配置飞书、企业微信或钉钉任务完成通知。
+
+运行 `asc --help` 查看全部命令，运行 `asc <command> --help` 查看完整选项。
+
+## 配置
+
+配置按以下优先级解析，由高到低为：
+
+1. `--app`、`--csv`、`--screenshots` 等 CLI 选项
+2. 项目本地 `.asc/config.toml`
+3. 全局 App Profile
+4. 环境变量
+
+| 位置 | 用途 |
+|---|---|
+| `.asc/config.toml` | 项目默认值，包括默认 App 和构建配置 |
+| `.asc/error.log` | 当前项目内运行命令时记录的详细错误 |
+| `~/.config/asc/profiles/` | 可复用的 App Profile 与 App Store Connect 凭证 |
+| `~/.config/asc/keys/` | 配置 Profile 时复制的私钥 |
+| `~/.config/asc/llm.toml` | OpenAI 兼容翻译服务配置 |
+| `~/.config/asc/webhook.toml` | Web 任务通知配置 |
+| `~/.config/asc/tasks.db` | Web UI 持久化任务历史和日志 |
+
+多 App 管理、Profile 导入、默认 App 与 CI 环境变量请参阅[多 App Profile 管理](docs/tutorials/06-multi-app-profiles.zh-CN.md)和 [CI/CD 自动化](docs/tutorials/08-ci-cd.zh-CN.md)。
+
+## 使用教程
+
+| # | 教程 | 内容 |
+|---|---|---|
+| 01 | [安装与项目初始化](docs/tutorials/01-install-and-init.zh-CN.md) | 安装、API Key、项目模板与第一个 Profile |
+| 02 | [元数据与截图上传](docs/tutorials/02-metadata-and-screenshots.zh-CN.md) | CSV 内容、截图目录、校验与上传 |
+| 03 | [IAP 与订阅上传](docs/tutorials/03-iap-and-subscriptions.zh-CN.md) | JSON 结构、一次性购买与订阅 |
+| 04 | [What's New 与商店 URL](docs/tutorials/04-whats-new-and-urls.zh-CN.md) | 版本说明与支持、营销、隐私政策 URL |
+| 05 | [构建与发布](docs/tutorials/05-build-and-deploy.zh-CN.md) | Archive、签名、IPA 导出，以及面向 TestFlight 或 App Store 分发的上传 |
+| 06 | [多 App Profile 管理](docs/tutorials/06-multi-app-profiles.zh-CN.md) | Profile 管理与项目默认值 |
+| 07 | [Guard 安全守卫](docs/tutorials/07-guard-security.zh-CN.md) | 机器、网络与凭证绑定 |
+| 08 | [CI/CD 自动化](docs/tutorials/08-ci-cd.zh-CN.md) | 非交互式配置与 GitHub Actions |
+
+## 本地开发
 
 ```bash
 git clone https://github.com/yinghuiwang/AppStoreTools.git
 cd AppStoreTools
-bash install.sh
-asc install
-asc upload --dry-run
-```
-
-### 方式三：从 PyPI 或 GitHub 安装
-
-```bash
-pip install asc-appstore-tools
-# 或安装 GitHub 最新版本
-pip install git+https://github.com/yinghuiwang/AppStoreTools.git
-
-asc install
-asc upload --dry-run
-```
-
-本地开发安装：
-
-```bash
-pip install -e ".[dev]"
+python -m pip install -e ".[dev]"
 pytest
+python -m build
 ```
 
-## 前置准备
+源码位于 `src/asc/`，测试按功能对应放在 `tests/`。推送 `v*.*.*` Tag 后，`.github/workflows/publish.yml` 会负责发布。
 
-1. 在 [App Store Connect > 用户和访问 > 集成](https://appstoreconnect.apple.com/access/integrations/api) 创建 API Key。
-2. 建议使用 **App Manager** 或更高权限。
-3. 记录 **Issuer ID** 和 **Key ID**。
-4. 下载 `.p8` 私钥。Apple 只允许下载一次。
-5. 从 App Store Connect 复制目标 App 的数字 Apple ID。
+## 安全建议
 
-## 项目配置
-
-### 初始化新项目
-
-```bash
-cd /path/to/MyXcodeProject
-asc init
-# 填写 AppStore/Config/.env，然后：
-asc app import
-```
-
-### 导入已有 AppStore/Config/.env
-
-```bash
-asc app import --path /path/to/MyProject --name myapp
-```
-
-### 交互式配置
-
-```bash
-asc app add myapp
-```
-
-私钥会复制到 `~/.config/asc/keys/`。Profile 会保存到 `~/.config/asc/profiles/`。
-
-## 项目结构
-
-```text
-AppStoreTools/
-├── src/asc/                        # Python 包源码
-│   ├── commands/                   # CLI 子命令
-│   ├── web/                        # 本地 Web UI
-│   ├── api.py                      # App Store Connect REST 客户端
-│   ├── config.py                   # 配置管理
-│   └── i18n.py                     # 中英文 CLI 文案
-├── data/                           # 示例上传数据
-│   ├── appstore_info.csv           # 元数据 CSV
-│   ├── iap_packages.example.json   # IAP/订阅示例
-│   └── screenshots/                # 按语言存放截图
-├── docs/tutorials/                 # 工作流教程
-├── tests/                          # pytest 测试
-└── pyproject.toml
-```
-
-## CSV 格式
-
-`data/appstore_info.csv` 需要包含这些列：
-
-| 列名 | 含义 |
-|---|---|
-| `语言` | `显示名称(code)` 格式的语言，例如 `简体中文(zh-Hans)` |
-| `应用名称` | App 名称 |
-| `副标题` | 副标题 |
-| `长描述` | App 描述 |
-| `关键子` | 关键词，英文逗号分隔 |
-| `技术支持链接` | 技术支持 URL，可选 |
-| `营销网站` | 营销 URL，可选 |
-
-## 截图目录
-
-截图从 `data/screenshots/<folder>/` 读取：
-
-| 文件夹 | Locale |
-|---|---|
-| `cn` | `zh-Hans` |
-| `en` | `en-US` |
-| `ja` | `ja` |
-| `ko` | `ko` |
-
-截图按文件名中的数字顺序上传。设备类型会根据图片尺寸自动识别；也可以用 `--display-type` 只上传指定设备类型。
-
-## 命令速查
-
-```bash
-# 帮助 / 版本
-asc --help
-asc -h
-asc --version
-
-# 引导式配置和项目模板
-asc install
-asc init
-asc init --path /path/to/MyApp
-
-# App Profile
-asc app add myapp
-asc app import
-asc app import --path /path/to/project --name myapp
-asc app list
-asc app default myapp
-asc app show myapp
-asc app edit myapp
-asc app remove myapp
-
-# 元数据和截图
-asc --app myapp upload
-asc --app myapp upload --dry-run
-asc --app myapp metadata
-asc --app myapp keywords
-asc --app myapp screenshots
-asc --app myapp screenshots --display-type APP_IPHONE_67
-asc --app myapp check
-
-# IAP 和订阅
-asc --app myapp iap --iap-file data/iap_packages.json
-asc --app myapp iap --iap-file data/iap_packages.json --update-existing
-
-# What’s New
-asc --app myapp whats-new --text "修复已知问题，提升稳定性。"
-asc --app myapp whats-new --text "Bug fixes." --locales en-US
-asc --app myapp whats-new --file data/whats_new.txt
-
-# 商店 URL
-asc --app myapp set-support-url --text "https://example.com/support"
-asc --app myapp set-marketing-url --text "https://example.com" --locales en-US
-asc --app myapp set-privacy-policy-url --text "https://example.com/privacy"
-asc --app myapp support-url
-asc --app myapp marketing-url
-asc --app myapp privacy-policy-url
-
-# 构建和发布
-asc build
-asc build --project MyApp.xcworkspace --scheme MyApp
-asc build --signing manual --profile path/to/profile.mobileprovision --certificate "Apple Distribution: ACME"
-asc build --no-interactive --dry-run
-asc --app myapp deploy --ipa build/export/MyApp.ipa
-asc --app myapp release --destination testflight
-asc --app myapp release --destination appstore --reuse-archive
-
-# 本地 Web UI
-asc web
-asc web --port 9090
-asc web --foreground
-asc web status
-asc web stop
-asc web --host 0.0.0.0 --no-open
-
-# Guard
-asc guard status
-asc guard enable
-asc guard disable
-asc guard unbind --current
-asc guard unbind --credential <KEY_ID>
-asc guard reset
-
-# 维护
-asc update
-asc update --version 0.1.12
-asc update --branch main
-asc uninstall
-```
-
-## 构建默认配置
-
-构建配置可以保存在本地 `.asc/config.toml`：
-
-```toml
-[build]
-project = "MyApp.xcworkspace"
-scheme = "MyApp"
-bundle_id = "com.example.myapp"
-output = "build"
-signing = "auto"
-certificate = "Apple Distribution: Example Inc."
-profile = "/path/to/profile.mobileprovision"
-destination = "testflight"
-```
-
-`asc build` 和 `asc release` 可以自动检测项目、Scheme、Bundle ID、签名证书和描述文件，并把解析结果缓存到 `.asc/config.toml` 供后续运行复用。
-
-## 默认 App Profile
-
-设置默认 Profile 后可以省略 `--app`：
-
-```bash
-asc app default myapp
-```
-
-也可以手动写入配置：
-
-```toml
-[defaults]
-default_app = "myapp"
-```
-
-之后可以直接运行：
-
-```bash
-asc upload
-asc screenshots
-asc check
-```
-
-## 配置与安全
-
-- 全局 Profile 位于 `~/.config/asc/profiles/`。
-- 私钥会复制到 `~/.config/asc/keys/`。
-- 项目本地配置位于 `.asc/config.toml`。
-- 不要提交真实 `.p8` 私钥、`.env` 文件、本地 Profile 或生成的凭证。
-- 修改元数据、截图、IAP、订阅或发布状态前，建议先运行 `--dry-run`。
-- 构建和发布需要 macOS 与 Xcode 命令行工具；元数据相关命令可在 Linux 或 Windows 上运行。
+- 不要提交 `.p8` 私钥、`.env` 文件、本地 Profile 或生成的凭证。
+- 修改元数据、截图、IAP、URL、构建或发布状态前，先使用 `--dry-run`。
+- 开发机器上应保持 Guard 启用；使用 `asc guard status` 检查绑定状态。
+- 除非确实需要从其他机器访问，否则 Web UI 应绑定到 `127.0.0.1`。
+- API Key 与 Webhook Secret 应保存在环境变量或 `~/.config/asc/` 下的配置文件中，不要写入上传数据。
 
 ## 常见问题
 
 ### `asc: command not found`
+
+打开一个新终端，或重新加载 Shell 配置：
 
 ```bash
 source ~/.zshrc
@@ -300,10 +199,12 @@ source ~/.bash_profile
 
 ### `asc check` 提示没有可编辑版本
 
-请先在 App Store Connect 创建一个 App Store 版本。版本状态需要是 `PREPARE_FOR_SUBMISSION` 等可编辑状态。
+请先在 App Store Connect 创建一个 App Store 版本。版本必须处于 `PREPARE_FOR_SUBMISSION` 等可编辑状态。
 
-### `install.sh`、`asc install` 与 `asc init` 的区别
+### Guard 检查阻止了操作
 
-- `install.sh`：安装 CLI 工具本体，包括 Python 环境和 `asc` 命令。
-- `asc install`：引导式项目初始化，检查环境并配置 App Profile。
-- `asc init`：在 Xcode 项目目录生成 `AppStore/` 模板目录结构，每个项目通常只需要运行一次。
+运行 `asc guard status` 查看当前绑定和冲突。解除绑定或关闭保护前，请先阅读 [Guard 安全守卫](docs/tutorials/07-guard-security.zh-CN.md)。
+
+### 命令失败但信息不足
+
+使用全局调试选项重新运行，例如 `asc --debug upload --dry-run`，并检查 `.asc/error.log`。

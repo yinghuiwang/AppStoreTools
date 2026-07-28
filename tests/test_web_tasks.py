@@ -68,6 +68,37 @@ def test_list_recent():
     assert recent[0]["id"] == ids[2]  # newest first
 
 
+def test_list_recent_states_returns_newest_tasks_without_logs():
+    store = TaskStore()
+    first = store.create("metadata", profile="one")
+    second = store.create("build", profile="two")
+    store.append_log(second, "line")
+
+    recent = store.list_recent_states(limit=2)
+
+    assert [task["id"] for task in recent] == [second, first]
+    assert [task["logs"] for task in recent] == [[], []]
+    assert recent[0]["profile"] == "two"
+
+
+def test_list_recent_states_stops_after_limit(monkeypatch):
+    store = TaskStore()
+    task_ids = [store.create("metadata") for _ in range(3)]
+    public_task = store._public_task
+    converted_ids = []
+
+    def record_conversion(task):
+        converted_ids.append(task["id"])
+        return public_task(task)
+
+    monkeypatch.setattr(store, "_public_task", record_conversion)
+
+    recent = store.list_recent_states(limit=2)
+
+    assert [task["id"] for task in recent] == [task_ids[2], task_ids[1]]
+    assert converted_ids == [task_ids[2], task_ids[1]]
+
+
 @pytest.mark.parametrize(
     ("kind", "title", "retry_path"),
     [
@@ -163,3 +194,98 @@ def test_task_store_defaults_invalid_progress_on_load(tmp_path):
 
     store = TaskStore(storage_path)
     assert store.get("task-1")["progress"] == {"pct": 0, "msg": "ok"}
+
+
+def test_task_store_uses_sqlite_and_exposes_log_sequences(tmp_path):
+    storage_path = tmp_path / "tasks.db"
+    store = TaskStore(storage_path)
+    task_id = store.create("metadata")
+    store.append_log(task_id, "first")
+    store.append_log(task_id, "second")
+    store.set_status(task_id, TaskStatus.DONE)
+
+    assert storage_path.exists()
+    assert store.get_logs_after(task_id, 1) == [{"seq": 2, "message": "second"}]
+    restored = TaskStore(storage_path)
+    assert restored.get(task_id)["logs"] == ["first", "second"]
+
+
+def test_task_store_migrates_legacy_json_to_sqlite(tmp_path):
+    storage_path = tmp_path / "web_tasks.json"
+    storage_path.write_text(
+        '{"version": 1, "order": ["old"], "tasks": {'
+        '"old": {"id": "old", "kind": "build", "status": "done", '
+        '"logs": ["legacy"], "progress": {"pct": 100, "msg": "done"}}}}',
+        encoding="utf-8",
+    )
+
+    store = TaskStore(storage_path)
+
+    assert (tmp_path / "web_tasks.db").exists()
+    assert store.get("old")["logs"] == ["legacy"]
+
+
+def test_sqlite_append_log_does_not_rewrite_full_snapshot(tmp_path):
+    store = TaskStore(tmp_path / "tasks.db")
+    task_id = store.create("build")
+    store._save = lambda: (_ for _ in ()).throw(AssertionError("full snapshot save"))
+
+    store.append_log(task_id, "incremental")
+
+    assert store.get_logs_after(task_id) == [{"seq": 1, "message": "incremental"}]
+
+
+def test_sqlite_log_cursor_does_not_reload_all_tasks(tmp_path):
+    store = TaskStore(tmp_path / "tasks.db")
+    task_id = store.create("build")
+    store.append_log(task_id, "line")
+    store._refresh_db = lambda: (_ for _ in ()).throw(AssertionError("full reload"))
+
+    assert store.get_logs_after(task_id) == [{"seq": 1, "message": "line"}]
+
+
+def test_sqlite_task_state_query_does_not_load_logs(tmp_path):
+    store = TaskStore(tmp_path / "tasks.db")
+    task_id = store.create("build")
+    store.append_log(task_id, "line")
+    state = store.get_state(task_id)
+
+    assert state["id"] == task_id
+    assert state["logs"] == []
+
+
+def test_sqlite_list_recent_states_does_not_query_task_logs(tmp_path, monkeypatch):
+    store = TaskStore(tmp_path / "tasks.db")
+    task_ids = [store.create("build") for _ in range(3)]
+    store.append_log(task_ids[2], "line")
+    connect = store._connect
+    statements = []
+
+    def traced_connect():
+        connection = connect()
+        connection.set_trace_callback(statements.append)
+        return connection
+
+    monkeypatch.setattr(store, "_connect", traced_connect)
+
+    recent = store.list_recent_states(limit=2)
+
+    assert [task["id"] for task in recent] == [task_ids[2], task_ids[1]]
+    assert [task["logs"] for task in recent] == [[], []]
+    assert not any("task_logs" in statement.lower() for statement in statements)
+
+
+def test_sqlite_state_updates_do_not_rewrite_logs(tmp_path):
+    store = TaskStore(tmp_path / "tasks.db")
+    task_id = store.create("build")
+    store._save = lambda: (_ for _ in ()).throw(AssertionError("full snapshot save"))
+
+    store.set_status(task_id, TaskStatus.RUNNING)
+    store.set_progress(task_id, 42, "building")
+    store.set_result(task_id, {"ok": True})
+    store.request_cancel(task_id)
+
+    task = store.get(task_id)
+    assert task["progress"] == {"pct": 42, "msg": "building"}
+    assert task["result"] == {"ok": True}
+    assert task["cancel_requested"] is True

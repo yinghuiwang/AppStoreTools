@@ -38,12 +38,12 @@ After this, you can omit `--project` and `--scheme` on every command.
 **First time (interactive, auto-detects project/scheme/signing):**
 
 ```bash
-asc build
+asc --app myapp build
 ```
 
-> **Note:** Unlike metadata/IAP commands, `asc build` does **not** require `--app` because it operates on the local Xcode project, not on App Store Connect credentials. However, if you need to use a specific app profile's build configuration, you can still pass `--app myapp`.
+> **Note:** `asc build` still resolves an App Profile because Guard and cached build settings are profile-aware. You may omit `--app myapp` only after setting a project default with `asc app default myapp`.
 
-**Subsequent runs (uses cached config):**
+**Subsequent runs after setting the project default (uses cached config):**
 
 ```bash
 asc build
@@ -99,14 +99,16 @@ asc --app myapp deploy --ipa build/export/MyApp.ipa
 **Specify destination (TestFlight or App Store):**
 
 ```bash
-asc deploy --ipa build/export/MyApp.ipa --destination testflight
-asc deploy --ipa build/export/MyApp.ipa --destination appstore
+asc --app myapp deploy --ipa build/export/MyApp.ipa --destination testflight
+asc --app myapp deploy --ipa build/export/MyApp.ipa --destination appstore
 ```
+
+Currently both destination values use the same `app-store-connect` export method and the same App Store Connect upload path. The option records release intent; final TestFlight testing or App Store submission is selected in App Store Connect.
 
 **Stream upload output:**
 
 ```bash
-asc deploy --ipa build/export/MyApp.ipa --verbose
+asc --app myapp deploy --ipa build/export/MyApp.ipa --verbose
 ```
 
 ---
@@ -119,18 +121,20 @@ asc --app myapp release --scheme MyApp --destination testflight
 
 This runs `build` then `deploy` automatically.
 
+As with standalone `deploy`, `release --destination` does not submit a build for App Review; it uploads the build to App Store Connect for the later TestFlight or App Store workflow.
+
 > **Important:** The `--app myapp` flag is **required** because `asc release` needs your App Store Connect credentials for the deploy step.
 
 **With verbose output:**
 
 ```bash
-asc release --scheme MyApp --destination testflight --verbose
+asc --app myapp release --scheme MyApp --destination testflight --verbose
 ```
 
 **Dry run (validate without uploading):**
 
 ```bash
-asc release --scheme MyApp --dry-run
+asc --app myapp release --scheme MyApp --dry-run
 ```
 
 ---
@@ -141,7 +145,7 @@ Build logs are saved to:
 
 - `build/build.log` — xcodebuild archive output
 - `build/export.log` — xcodebuild export output
-- `build/upload.log` — upload output
+- `build/export/upload.log` — upload output
 
 On failure, the last 20 lines are printed automatically. Use `--verbose` to stream full output in real time.
 
@@ -152,8 +156,8 @@ On failure, the last 20 lines are printed automatically. Use `--verbose` to stre
 **`❌ 此命令仅支持 macOS`**
 Build/deploy commands only work on macOS. Metadata upload works on Linux/Windows.
 
-**`❌ No matching archive found`**
-The tool looks for `.xcarchive` files in the `output` directory. Ensure the build step completed successfully.
+**An existing archive was not reused**
+Archive reuse only happens when the archive in the output directory matches the current bundle ID, marketing version, and build number. Otherwise `asc` creates a new archive; use `--reuse-archive` or `--rebuild` to make the choice explicit.
 
 **Signing certificate not found**
 Check that your certificate is installed in Keychain and the provisioning profile is valid. Use `--interactive` to manually select.

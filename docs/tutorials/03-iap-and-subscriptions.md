@@ -7,13 +7,14 @@
 ## Prerequisites
 
 - Completed [01 Install & Project Init](01-install-and-init.md)
-- IAP products or subscription groups already created in App Store Connect (the tool creates missing ones, but the app must exist)
+- The app already exists in App Store Connect. The command creates missing IAP products, subscription groups, and subscriptions.
+- Subscription entries need a PNG/JPG/JPEG review screenshot that exists locally, including during `--dry-run` validation.
 
 ---
 
 ## Step 1: Create the IAP JSON file
 
-The tool reads from a JSON file. Three supported top-level structures:
+The tool reads either a top-level array of one-time IAP items or an object containing `items`, `subscriptionGroups`, or both.
 
 **One-time IAP only (array):**
 
@@ -21,13 +22,13 @@ The tool reads from a JSON file. Three supported top-level structures:
 [
   {
     "productId": "com.example.app.coins100",
-    "type": "CONSUMABLE",
+    "inAppPurchaseType": "CONSUMABLE",
     "name": "100 Coins",
     "price": { "baseTerritory": "USA", "baseAmount": "0.99" },
-    "localizations": [
-      { "locale": "en-US", "name": "100 Coins", "description": "Get 100 coins." },
-      { "locale": "zh-Hans", "name": "100 金币", "description": "获得 100 金币。" }
-    ]
+    "localizations": {
+      "en-US": { "name": "100 Coins", "description": "Get 100 coins." },
+      "zh-Hans": { "name": "100 金币", "description": "获得 100 金币。" }
+    }
   }
 ]
 ```
@@ -39,29 +40,34 @@ The tool reads from a JSON file. Three supported top-level structures:
   "items": [
     {
       "productId": "com.example.app.removeads",
-      "type": "NON_CONSUMABLE",
+      "inAppPurchaseType": "NON_CONSUMABLE",
       "name": "Remove Ads",
       "price": { "baseTerritory": "USA", "baseAmount": "2.99" },
-      "localizations": [
-        { "locale": "en-US", "name": "Remove Ads", "description": "Remove all ads." }
-      ]
+      "localizations": {
+        "en-US": { "name": "Remove Ads", "description": "Remove all ads." }
+      }
     }
   ],
   "subscriptionGroups": [
     {
       "referenceName": "Premium",
-      "localizations": [
-        { "locale": "en-US", "name": "Premium" }
-      ],
+      "localizations": {
+        "en-US": { "name": "Premium" }
+      },
       "subscriptions": [
         {
           "productId": "com.example.app.premium.monthly",
-          "referenceName": "Premium Monthly",
-          "duration": "ONE_MONTH",
+          "name": "Premium Monthly",
+          "subscriptionPeriod": "ONE_MONTH",
+          "groupLevel": 1,
           "price": { "baseTerritory": "USA", "baseAmount": "4.99" },
-          "localizations": [
-            { "locale": "en-US", "name": "Premium Monthly", "description": "Full access for one month." }
-          ]
+          "localizations": {
+            "en-US": { "name": "Premium Monthly", "description": "Full access for one month." }
+          },
+          "review": {
+            "screenshot": "./iap_review/premium_monthly.png",
+            "note": "Describe how the reviewer can access the subscription."
+          }
         }
       ]
     }
@@ -69,33 +75,34 @@ The tool reads from a JSON file. Three supported top-level structures:
 }
 ```
 
-Save the file as `data/iap_packages.json`. See `data/iap_packages.example.json` for the full schema including intro offers, promo offers, and review screenshots.
+Save the file as `AppStore/data/iap_packages.json`. `asc init` creates a current full template at this path, including intro offers, promo offers, pricing controls, and review screenshots. Relative `review.screenshot` paths are resolved from the JSON file's directory.
 
 ---
 
 ## Supported IAP types
 
-| `type` value | Meaning |
+| `inAppPurchaseType` value | Meaning |
 |---|---|
 | `CONSUMABLE` | Consumable (e.g. coins, lives) |
 | `NON_CONSUMABLE` | Non-consumable (e.g. remove ads, unlock feature) |
-| `AUTO_RENEWABLE_SUBSCRIPTION` | Auto-renewable subscription (goes in `subscriptionGroups`) |
+
+Auto-renewable subscriptions go in `subscriptionGroups`; they do not use `inAppPurchaseType`.
 
 ---
 
 ## Supported subscription durations
 
-`THREE_DAYS`, `ONE_WEEK`, `TWO_WEEKS`, `ONE_MONTH`, `TWO_MONTHS`, `THREE_MONTHS`, `SIX_MONTHS`, `ONE_YEAR`
+`ONE_WEEK`, `ONE_MONTH`, `TWO_MONTHS`, `THREE_MONTHS`, `SIX_MONTHS`, `ONE_YEAR`
 
 ---
 
 ## Step 2: Dry run
 
 ```bash
-asc --app myapp iap --iap-file data/iap_packages.json --dry-run
+asc --app myapp iap --iap-file AppStore/data/iap_packages.json --dry-run
 ```
 
-Validates the JSON structure and shows what would be created/updated without making API calls.
+Validates the JSON and local review-image paths, reads current App Store Connect state, and shows the plan without sending write requests.
 
 > **Important:** The `--app myapp` flag is **required** on every command unless you've set a default app with `asc app default myapp`. It tells `asc` which app profile (credentials, paths) to use. See [06 Multi-App Profiles](06-multi-app-profiles.md) for details.
 
@@ -104,7 +111,7 @@ Validates the JSON structure and shows what would be created/updated without mak
 ## Step 3: Upload
 
 ```bash
-asc --app myapp iap --iap-file data/iap_packages.json
+asc --app myapp iap --iap-file AppStore/data/iap_packages.json
 ```
 
 Default behavior is **create-only**: existing products are skipped.
@@ -116,7 +123,7 @@ Default behavior is **create-only**: existing products are skipped.
 **Overwrite existing products:**
 
 ```bash
-asc --app myapp iap --iap-file data/iap_packages.json --update-existing
+asc --app myapp iap --iap-file AppStore/data/iap_packages.json --update-existing
 ```
 
 Use this when you need to update prices, localizations, or descriptions on already-created products.
@@ -131,7 +138,7 @@ Use `iap-screenshots` to find IAP products that still need App Store review scre
 asc --app myapp iap-screenshots
 ```
 
-The command queries App Store Connect online state for all one-time IAP and subscriptions that are missing App Store review screenshots. The optional `data/iap_packages.json` file only prefills `review.screenshot` paths by `productId`; the online App Store Connect state decides which screenshots are missing.
+The command queries App Store Connect online state for all one-time IAP and subscriptions that are missing App Store review screenshots. The optional `AppStore/data/iap_packages.json` file only prefills `review.screenshot` paths by `productId`; the online App Store Connect state decides which screenshots are missing.
 
 Preview the scan and upload plan without changing App Store Connect:
 
@@ -142,10 +149,10 @@ asc --app myapp iap-screenshots --dry-run
 Run non-interactively with paths from your IAP JSON file:
 
 ```bash
-asc --app myapp iap-screenshots --iap-file data/iap_packages.json --no-prompt --yes
+asc --app myapp iap-screenshots --iap-file AppStore/data/iap_packages.json --no-prompt --yes
 ```
 
-In the Web UI, open **IAP 管理 / IAP Management**, go to **补审核截图**, click **扫描缺失**, choose PNG, JPG, or JPEG files for the products that need screenshots, then click **上传截图**. Paths selected in the Web UI are sent only with that upload request and are not written back to `data/iap_packages.json`.
+In the Web UI, open **IAP 管理 / IAP Management**, go to **补审核截图**, click **扫描缺失**, choose PNG, JPG, or JPEG files for the products that need screenshots, then click **上传截图**. Paths selected in the Web UI are sent only with that upload request and are not written back to `AppStore/data/iap_packages.json`.
 
 ---
 

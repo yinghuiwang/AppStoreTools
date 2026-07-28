@@ -23,7 +23,8 @@ curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/inst
 Install a specific branch for testing:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh | bash -s -- --branch feat/web-build-interactive-release-options
+asc_install_ref=your-branch-or-tag
+curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh | bash -s -- --ref "$asc_install_ref"
 ```
 
 **Option B — clone and install**
@@ -87,16 +88,23 @@ This creates an `AppStore/` directory tree:
 ```
 AppStore/
 ├── Config/
-│   └── .env          ← fill in your credentials
+│   ├── .env.example  ← copy to .env and fill in your credentials
+│   └── .gitignore    ← keeps .env out of git
 └── data/
     ├── appstore_info.csv
     ├── screenshots/
-    │   ├── cn/
-    │   └── en-US/
-    └── iap_packages.example.json
+    ├── iap_packages.json
+    └── iap_review/
+        └── premium_monthly.png
 ```
 
-Edit `AppStore/Config/.env`:
+Create the local credential file, then edit it:
+
+```bash
+cp AppStore/Config/.env.example AppStore/Config/.env
+```
+
+`AppStore/Config/.env`:
 
 ```dotenv
 ISSUER_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
@@ -112,10 +120,10 @@ APP_ID=1234567890
 **Option A — import from .env (recommended after `asc init`)**
 
 ```bash
-asc app import
+asc app import --name myapp
 ```
 
-Reads `AppStore/Config/.env` in the current directory and creates the profile automatically.
+Reads `AppStore/Config/.env` in the current directory and creates the `myapp` profile automatically. Without `--name`, the project directory name is used.
 
 **Option B — import from a specific path**
 
@@ -150,8 +158,8 @@ Expected output:
 ```
 ✅ Credentials valid
 ✅ Found editable version: 1.2.0 (PREPARE_FOR_SUBMISSION)
-✅ CSV file exists: data/appstore_info.csv
-✅ Screenshots directory exists: data/screenshots
+✅ CSV file exists: /path/to/MyXcodeProject/AppStore/data/appstore_info.csv
+✅ Screenshots directory exists: /path/to/MyXcodeProject/AppStore/data/screenshots
 ```
 
 ---

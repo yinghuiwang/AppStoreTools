@@ -13,7 +13,9 @@
 
 ## 步骤 1：填写元数据 CSV
 
-编辑 `data/appstore_info.csv`，必填列：
+如果你按教程 01 完成了初始化，请编辑 `AppStore/data/appstore_info.csv`。导入 Profile 时会保存该文件的绝对路径，因此之后可以从其他工作目录运行上传命令。
+
+结构上只有 `语言` 列必填；其余列按需要更新的字段填写：
 
 | 列名 | 含义 |
 |---|---|
@@ -21,12 +23,7 @@
 | `应用名称` | App 名称（最多 30 字符） |
 | `副标题` | 副标题（最多 30 字符） |
 | `长描述` | 完整描述（最多 4000 字符） |
-| `关键子` | 关键词，逗号分隔（总计最多 100 字符） |
-
-可选列：
-
-| 列名 | 含义 |
-|---|---|
+| `关键子` 或 `关键词` | 关键词，逗号分隔（总计最多 100 字符） |
 | `技术支持链接` | 技术支持 URL |
 | `营销网站` | 营销网站 URL |
 | `隐私政策网址` | 隐私政策 URL |
@@ -35,15 +32,15 @@
 
 ```
 语言,应用名称,副标题,长描述,关键子
-English(en-US),My App,The best app,A full description here.,productivity,tools
-简体中文(zh-Hans),我的应用,最好的应用,完整描述。,效率,工具
+English(en-US),My App,The best app,A full description here.,"productivity,tools"
+简体中文(zh-Hans),我的应用,最好的应用,完整描述。,"效率,工具"
 ```
 
 ---
 
 ## 步骤 2：准备截图
 
-将截图放入 `data/screenshots/<语言文件夹>/`：
+将截图放入 `AppStore/data/screenshots/<语言文件夹>/`：
 
 | 文件夹名 | 对应语言 |
 |---|---|
@@ -61,13 +58,19 @@ English(en-US),My App,The best app,A full description here.,productivity,tools
 | `APP_IPHONE_61` | 1179×2556 或 1170×2532 |
 | `APP_IPHONE_58` | 1125×2436 |
 | `APP_IPHONE_55` | 1242×2208 |
+| `APP_IPHONE_47` | 750×1334 |
 | `APP_IPAD_PRO_3GEN_129` | 2048×2732 |
 | `APP_IPAD_PRO_3GEN_11` | 1668×2388 |
+| `APP_IPAD_PRO_129` | 2064×2752 |
+
+对应的横屏尺寸同样可以识别。
+
+截图上传会遍历当前可编辑版本中已有的每个 locale。如果某个 locale 没有对应目录但存在 `en-US` 目录，`asc` 会使用英文截图回退；没有 `en-US` 目录时则跳过该 locale。由于上传会替换目标截图集，如果不希望英文图覆盖本地化截图，请为各语言准备明确的目录。
 
 文件名以数字开头可控制上传顺序：
 
 ```
-data/screenshots/cn/
+AppStore/data/screenshots/cn/
 ├── 01_首页.png
 ├── 02_详情.png
 └── 03_设置.png
@@ -144,7 +147,7 @@ asc --app myapp screenshots --screenshots /path/to/custom/screenshots
 1. 读取 CSV，解析语言区域代码
 2. 通过 ASC API 找到可编辑的 App 版本
 3. 逐语言创建或更新元数据字段
-4. 截图上传：先删除目标设备类型的现有截图，再按文件名顺序上传新截图
+4. 截图上传：先解析语言目录（必要时使用 `en-US` 回退），删除目标设备类型的现有截图，再按文件名顺序上传新截图
 
 > **注意：** 截图上传会**替换**同设备类型下的所有现有截图。如有需要，请在运行前备份现有截图。
 
@@ -156,7 +159,7 @@ asc --app myapp screenshots --screenshots /path/to/custom/screenshots
 App 版本必须已在 App Store Connect 中存在且处于可编辑状态，请先手动创建版本。
 
 **Q: 部分语言被跳过**
-CSV 中 `语言` 列的语言代码必须与 App Store Connect 中已添加的语言一致，请先在 App Store Connect 中添加缺失的语言。
+请在 `语言` 列中使用有效的 App Store Connect locale。元数据上传会在 API 允许时创建缺失的 App Info 或版本本地化；如果 Apple 拒绝该 locale，请在 App Store Connect 中确认当前 App 和版本支持该语言。
 
 **Q: 截图尺寸无法识别**
 检查图片尺寸是否与上表中的支持分辨率完全匹配，导出时不要缩放（使用 1x 原始尺寸）。

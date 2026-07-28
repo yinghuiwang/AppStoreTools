@@ -70,7 +70,7 @@ asc build               # 使用 production-app
 asc app list
 ```
 
-默认 App 会用 `*` 标记。
+默认 App 会用 `(default)` 标记。
 
 ---
 

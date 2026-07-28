@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
+import sqlite3
 import uuid
 from datetime import datetime
 from enum import Enum
@@ -54,8 +54,15 @@ class TaskStore:
         self._cancel_events: dict[str, Event] = {}
         self._lock = Lock()
         self._storage_path = storage_path
+        self._db_path = self._resolve_db_path(storage_path)
         if self._storage_path is not None:
             self._load()
+        if self._db_path is not None:
+            self._init_db()
+            if not self._tasks:
+                self._load_db(recover=True)
+            elif self._db_is_empty():
+                self._save()
 
     def create(self, kind: str, *, profile: str = "") -> str:
         task_id = str(uuid.uuid4())
@@ -74,6 +81,18 @@ class TaskStore:
             "cancel_requested": False,
         }
         with self._lock:
+            if self._db_path is not None:
+                with self._connect() as conn:
+                    conn.execute(
+                        """INSERT INTO task_runs
+                        (id, kind, profile, status, created_at, updated_at, progress_pct, progress_msg)
+                        VALUES (?, ?, ?, ?, ?, ?, 0, '')""",
+                        (task_id, kind, profile, TaskStatus.PENDING.value, now, now),
+                    )
+                    conn.execute("INSERT INTO task_order (task_id) VALUES (?)", (task_id,))
+                self._cancel_events[task_id] = Event()
+                return task_id
+            self._refresh_db()
             self._tasks[task_id] = task
             self._order.append(task_id)
             self._cancel_events[task_id] = Event()
@@ -82,6 +101,16 @@ class TaskStore:
 
     def get(self, task_id: str) -> Optional[dict]:
         with self._lock:
+            if self._db_path is not None:
+                with self._connect() as conn:
+                    row = conn.execute("SELECT * FROM task_runs WHERE id = ?", (task_id,)).fetchone()
+                    if row is None:
+                        return None
+                    logs = conn.execute(
+                        "SELECT message FROM task_logs WHERE task_id = ? ORDER BY seq", (task_id,)
+                    ).fetchall()
+                return self._public_task(self._task_from_row(row, logs))
+            self._refresh_db()
             task = self._tasks.get(task_id)
             if task is None:
                 return None
@@ -90,13 +119,62 @@ class TaskStore:
 
     def append_log(self, task_id: str, line: str) -> None:
         with self._lock:
+            if self._db_path is not None:
+                now = self._now()
+                with self._connect() as conn:
+                    conn.execute("BEGIN IMMEDIATE")
+                    exists = conn.execute("SELECT 1 FROM task_runs WHERE id = ?", (task_id,)).fetchone()
+                    if exists is None:
+                        conn.rollback()
+                        return
+                    seq = conn.execute(
+                        "SELECT COALESCE(MAX(seq), 0) + 1 FROM task_logs WHERE task_id = ?", (task_id,)
+                    ).fetchone()[0]
+                    conn.execute(
+                        "INSERT INTO task_logs (task_id, seq, message, created_at) VALUES (?, ?, ?, ?)",
+                        (task_id, seq, line, now),
+                    )
+                    conn.execute("UPDATE task_runs SET updated_at = ? WHERE id = ?", (now, task_id))
+                    conn.commit()
+                return
+            self._refresh_db()
             if task_id in self._tasks:
                 self._tasks[task_id]["logs"].append(line)
                 self._tasks[task_id]["updated_at"] = self._now()
                 self._save()
 
+    def get_logs_after(self, task_id: str, seq: int = 0) -> list[dict[str, Any]]:
+        """Return sequenced task logs after the supplied cursor."""
+        if self._db_path is not None:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT seq, message FROM task_logs WHERE task_id = ? AND seq > ? ORDER BY seq",
+                    (task_id, int(seq)),
+                ).fetchall()
+            return [{"seq": row[0], "message": row[1]} for row in rows]
+        self._refresh_db()
+        if self._db_path is None:
+            task = self._tasks.get(task_id, {})
+            return [
+                {"seq": index, "message": message}
+                for index, message in enumerate(task.get("logs", []), start=1)
+                if index > seq
+            ]
+        return []
+
     def set_status(self, task_id: str, status: TaskStatus) -> None:
         with self._lock:
+            if self._db_path is not None:
+                normalized = self._normalize_status(status)
+                now = self._now()
+                completed_at = now if normalized in TERMINAL_STATUSES else None
+                with self._connect() as conn:
+                    conn.execute(
+                        "UPDATE task_runs SET status = ?, updated_at = ?, completed_at = COALESCE(?, completed_at) WHERE id = ?",
+                        (normalized.value, now, completed_at, task_id),
+                    )
+                return
+            self._refresh_db()
             if task_id in self._tasks:
                 normalized = self._normalize_status(status)
                 self._tasks[task_id]["status"] = normalized
@@ -108,6 +186,21 @@ class TaskStore:
 
     def request_cancel(self, task_id: str) -> bool:
         with self._lock:
+            if self._db_path is not None:
+                now = self._now()
+                with self._connect() as conn:
+                    row = conn.execute("SELECT status FROM task_runs WHERE id = ?", (task_id,)).fetchone()
+                    if row is None:
+                        return False
+                    if self._normalize_status(row["status"]) not in TERMINAL_STATUSES:
+                        conn.execute(
+                            "UPDATE task_runs SET cancel_requested = 1, updated_at = ? WHERE id = ?",
+                            (now, task_id),
+                        )
+                event = self._cancel_events.setdefault(task_id, Event())
+                event.set()
+                return True
+            self._refresh_db()
             task = self._tasks.get(task_id)
             if task is None:
                 return False
@@ -125,6 +218,10 @@ class TaskStore:
 
     def is_cancel_requested(self, task_id: str) -> bool:
         with self._lock:
+            if self._db_path is not None:
+                with self._connect() as conn:
+                    row = conn.execute("SELECT cancel_requested FROM task_runs WHERE id = ?", (task_id,)).fetchone()
+                return bool(row and row[0])
             task = self._tasks.get(task_id)
             return bool(task and task.get("cancel_requested"))
 
@@ -140,6 +237,15 @@ class TaskStore:
 
     def set_result(self, task_id: str, result: Any) -> None:
         with self._lock:
+            if self._db_path is not None:
+                now = self._now()
+                with self._connect() as conn:
+                    conn.execute(
+                        "UPDATE task_runs SET result_json = ?, updated_at = ? WHERE id = ?",
+                        (json.dumps(result, ensure_ascii=False), now, task_id),
+                    )
+                return
+            self._refresh_db()
             if task_id in self._tasks:
                 self._tasks[task_id]["result"] = result
                 self._tasks[task_id]["updated_at"] = self._now()
@@ -147,6 +253,15 @@ class TaskStore:
 
     def set_progress(self, task_id: str, pct: int, msg: str) -> None:
         with self._lock:
+            if self._db_path is not None:
+                now = self._now()
+                with self._connect() as conn:
+                    conn.execute(
+                        "UPDATE task_runs SET progress_pct = ?, progress_msg = ?, updated_at = ? WHERE id = ?",
+                        (int(pct), msg, now, task_id),
+                    )
+                return
+            self._refresh_db()
             if task_id in self._tasks:
                 self._tasks[task_id]["progress"] = {"pct": pct, "msg": msg}
                 self._tasks[task_id]["updated_at"] = self._now()
@@ -154,12 +269,87 @@ class TaskStore:
 
     def list_recent(self, limit: int = 20) -> list[dict]:
         with self._lock:
+            if self._db_path is not None:
+                with self._connect() as conn:
+                    rows = conn.execute(
+                        """SELECT r.*, o.position FROM task_order o
+                        JOIN task_runs r ON r.id = o.task_id
+                        ORDER BY o.position DESC LIMIT ?""",
+                        (int(limit),),
+                    ).fetchall()
+                    logs = conn.execute(
+                        "SELECT task_id, message FROM task_logs WHERE task_id IN "
+                        "(SELECT task_id FROM task_order ORDER BY position DESC LIMIT ?) ORDER BY task_id, seq",
+                        (int(limit),),
+                    ).fetchall()
+                logs_by_id: dict[str, list] = {}
+                for log in logs:
+                    logs_by_id.setdefault(log["task_id"], []).append(log)
+                return [
+                    self._public_task(self._task_from_row(row, logs_by_id.get(row["id"], [])))
+                    for row in rows
+                ]
+            self._refresh_db()
             ordered = []
             for tid in reversed(self._order):
                 if tid in self._tasks:
                     task = self._tasks[tid]
                     ordered.append(self._public_task(task))
         return ordered[:limit]
+
+    def list_recent_states(self, limit: int = 500) -> list[dict]:
+        """Return recent task metadata without loading log history."""
+        normalized_limit = max(1, min(int(limit), 5000))
+        with self._lock:
+            if self._db_path is not None:
+                with self._connect() as conn:
+                    rows = conn.execute(
+                        """SELECT r.*, o.position FROM task_order o
+                        JOIN task_runs r ON r.id = o.task_id
+                        ORDER BY o.position DESC LIMIT ?""",
+                        (normalized_limit,),
+                    ).fetchall()
+                return [self._public_task(self._task_from_row(row, [])) for row in rows]
+            self._refresh_db()
+            ordered = []
+            for task_id in reversed(self._order):
+                if task_id in self._tasks:
+                    state = dict(self._tasks[task_id])
+                    state["logs"] = []
+                    ordered.append(self._public_task(state))
+                    if len(ordered) >= normalized_limit:
+                        break
+            return ordered
+
+    def get_state(self, task_id: str) -> Optional[dict]:
+        """Return task metadata without loading its log history."""
+        if self._db_path is None:
+            task = self._tasks.get(task_id)
+            if task is None:
+                return None
+            state = dict(task)
+            state["logs"] = []
+            return self._public_task(state)
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM task_runs WHERE id = ?", (task_id,)).fetchone()
+        return self._public_task(self._task_from_row(row, [])) if row is not None else None
+
+    def _task_from_row(self, row: Any, log_rows: list[Any]) -> dict:
+        logs = [row["message"] for row in log_rows]
+        result_json = row["result_json"]
+        return {
+            "id": row["id"],
+            "kind": row["kind"],
+            "profile": row["profile"],
+            "status": self._normalize_status(row["status"]),
+            "logs": logs,
+            "result": json.loads(result_json) if result_json else None,
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "completed_at": row["completed_at"],
+            "progress": {"pct": row["progress_pct"], "msg": row["progress_msg"]},
+            "cancel_requested": bool(row["cancel_requested"]),
+        }
 
     def _public_task(self, task: dict) -> dict:
         result = dict(task)
@@ -173,11 +363,15 @@ class TaskStore:
         return result
 
     def _load(self) -> None:
-        if self._storage_path is None or not self._storage_path.exists():
+        if (
+            self._storage_path is None
+            or self._storage_path.suffix.lower() != ".json"
+            or not self._storage_path.exists()
+        ):
             return
         try:
             data = json.loads(self._storage_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             return
 
         tasks = data.get("tasks", {})
@@ -198,7 +392,6 @@ class TaskStore:
 
         self._tasks = loaded_tasks
         self._order = loaded_order
-        self._save()
 
     def _normalize_loaded_task(self, task_id: str, task: Any) -> Optional[dict]:
         if not isinstance(task, dict):
@@ -283,39 +476,144 @@ class TaskStore:
         hours, minutes = divmod(minutes, 60)
         return f"{hours}h {minutes}m"
 
-    def _save(self) -> None:
-        if self._storage_path is None:
-            return
+    def _resolve_db_path(self, storage_path: Optional[Path]) -> Optional[Path]:
+        if storage_path is None:
+            return None
+        if storage_path.suffix.lower() == ".json":
+            return storage_path.with_suffix(".db")
+        return storage_path
 
-        payload = {
-            "version": 1,
-            "order": self._order,
-            "tasks": self._tasks,
-        }
-        tmp_name = None
-        try:
-            self._storage_path.parent.mkdir(parents=True, exist_ok=True)
-            fd, tmp_name = tempfile.mkstemp(
-                prefix=f".{self._storage_path.name}.",
-                suffix=".tmp",
-                dir=str(self._storage_path.parent),
+    def _connect(self) -> sqlite3.Connection:
+        assert self._db_path is not None
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(self._db_path), timeout=30)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _init_db(self) -> None:
+        with self._connect() as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS task_runs (
+                    id TEXT PRIMARY KEY,
+                    kind TEXT NOT NULL,
+                    profile TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL,
+                    result_json TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    completed_at TEXT,
+                    progress_pct INTEGER NOT NULL DEFAULT 0,
+                    progress_msg TEXT NOT NULL DEFAULT '',
+                    cancel_requested INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE TABLE IF NOT EXISTS task_order (
+                    position INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id TEXT NOT NULL UNIQUE
+                );
+                CREATE TABLE IF NOT EXISTS task_logs (
+                    task_id TEXT NOT NULL,
+                    seq INTEGER NOT NULL,
+                    message TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (task_id, seq)
+                );
+                """
             )
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(payload, f, ensure_ascii=False, indent=2)
-            os.replace(tmp_name, self._storage_path)
-        except (OSError, TypeError):
-            if tmp_name is not None:
-                try:
-                    os.unlink(tmp_name)
-                except OSError:
-                    pass
+
+    def _db_is_empty(self) -> bool:
+        with self._connect() as conn:
+            return conn.execute("SELECT 1 FROM task_runs LIMIT 1").fetchone() is None
+
+    def _load_db(self, *, recover: bool = False) -> None:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT * FROM task_runs ORDER BY id").fetchall()
+            order_rows = conn.execute("SELECT task_id FROM task_order ORDER BY position").fetchall()
+            logs = conn.execute("SELECT task_id, message FROM task_logs ORDER BY task_id, seq").fetchall()
+        by_id = {row["id"]: row for row in rows}
+        self._tasks = {}
+        self._order = [row["task_id"] for row in order_rows if row["task_id"] in by_id]
+        for task_id, row in by_id.items():
+            task = {
+                "id": task_id,
+                "kind": row["kind"],
+                "profile": row["profile"],
+                "status": self._normalize_status(row["status"]),
+                "logs": [],
+                "result": json.loads(row["result_json"]) if row["result_json"] else None,
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+                "completed_at": row["completed_at"],
+                "progress": {"pct": row["progress_pct"], "msg": row["progress_msg"]},
+                "cancel_requested": bool(row["cancel_requested"]),
+            }
+            self._tasks[task_id] = task
+        for row in logs:
+            if row["task_id"] in self._tasks:
+                self._tasks[row["task_id"]]["logs"].append(row["message"])
+        for task_id in self._tasks:
+            self._cancel_events[task_id] = Event()
+            if self._tasks[task_id]["cancel_requested"]:
+                self._cancel_events[task_id].set()
+
+        if not recover:
+            return
+        changed = False
+        for task_id in list(self._order):
+            task = self._tasks[task_id]
+            if self._normalize_status(task["status"]) in {TaskStatus.PENDING, TaskStatus.RUNNING}:
+                task["status"] = TaskStatus.ERROR
+                task["completed_at"] = self._now()
+                task["updated_at"] = task["completed_at"]
+                task["result"] = {"success": False, "error": "Task interrupted by server restart"}
+                task["logs"].append("⚠️ 服务重启，任务已中断")
+                changed = True
+        if changed:
+            self._save()
+
+    def _refresh_db(self) -> None:
+        if self._db_path is not None:
+            self._load_db(recover=False)
+
+    def _save(self) -> None:
+        if self._db_path is None:
+            return
+        try:
+            with self._connect() as conn:
+                conn.execute("BEGIN")
+                for task in self._tasks.values():
+                    result_json = json.dumps(task["result"], ensure_ascii=False) if task["result"] is not None else None
+                    conn.execute(
+                        """INSERT OR REPLACE INTO task_runs
+                        (id, kind, profile, status, result_json, created_at, updated_at, completed_at,
+                         progress_pct, progress_msg, cancel_requested)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (task["id"], task["kind"], task["profile"], self._normalize_status(task["status"]).value,
+                         result_json, task["created_at"], task["updated_at"], task["completed_at"],
+                         task["progress"]["pct"], task["progress"]["msg"], int(task["cancel_requested"])),
+                    )
+                    conn.execute("DELETE FROM task_logs WHERE task_id = ?", (task["id"],))
+                    conn.executemany(
+                        "INSERT INTO task_logs (task_id, seq, message, created_at) VALUES (?, ?, ?, ?)",
+                        [(task["id"], seq, message, task["updated_at"]) for seq, message in enumerate(task["logs"], start=1)],
+                    )
+                conn.execute("DELETE FROM task_order")
+                conn.executemany("INSERT INTO task_order (task_id) VALUES (?)", [(task_id,) for task_id in self._order])
+                conn.commit()
+        except (OSError, sqlite3.Error, TypeError):
+            return
 
 
 def _default_storage_path() -> Optional[Path]:
     env_path = os.getenv("ASC_WEB_TASKS_PATH")
     if env_path:
         return Path(env_path).expanduser()
-    return Path.home() / ".config" / "asc" / "web_tasks.json"
+    state_dir = Path.home() / ".config" / "asc"
+    legacy_path = state_dir / "web_tasks.json"
+    if legacy_path.exists():
+        return legacy_path
+    return state_dir / "tasks.db"
 
 
 # Module-level singleton used by server.py

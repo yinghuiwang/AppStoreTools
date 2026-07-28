@@ -7,13 +7,14 @@
 ## 前置条件
 
 - 已完成 [01 安装与项目初始化](01-install-and-init.zh-CN.md)
-- App 已在 App Store Connect 中存在（工具会自动创建缺失的 IAP 产品，但 App 本身必须已存在）
+- App 已在 App Store Connect 中存在。命令会创建缺失的 IAP 产品、订阅组和订阅。
+- 订阅条目必须配置本地存在的 PNG/JPG/JPEG 审核截图；`--dry-run` 也会验证该文件。
 
 ---
 
 ## 步骤 1：创建 IAP JSON 文件
 
-工具从 JSON 文件读取配置，支持三种顶层结构：
+JSON 顶层可以是一次性 IAP 数组，也可以是包含 `items`、`subscriptionGroups` 或两者的对象。
 
 **仅一次性内购（数组格式）：**
 
@@ -21,13 +22,13 @@
 [
   {
     "productId": "com.example.app.coins100",
-    "type": "CONSUMABLE",
+    "inAppPurchaseType": "CONSUMABLE",
     "name": "100 金币",
     "price": { "baseTerritory": "USA", "baseAmount": "0.99" },
-    "localizations": [
-      { "locale": "en-US", "name": "100 Coins", "description": "Get 100 coins." },
-      { "locale": "zh-Hans", "name": "100 金币", "description": "获得 100 金币。" }
-    ]
+    "localizations": {
+      "en-US": { "name": "100 Coins", "description": "Get 100 coins." },
+      "zh-Hans": { "name": "100 金币", "description": "获得 100 金币。" }
+    }
   }
 ]
 ```
@@ -39,32 +40,37 @@
   "items": [
     {
       "productId": "com.example.app.removeads",
-      "type": "NON_CONSUMABLE",
+      "inAppPurchaseType": "NON_CONSUMABLE",
       "name": "去除广告",
       "price": { "baseTerritory": "USA", "baseAmount": "2.99" },
-      "localizations": [
-        { "locale": "zh-Hans", "name": "去除广告", "description": "永久去除所有广告。" },
-        { "locale": "en-US", "name": "Remove Ads", "description": "Remove all ads." }
-      ]
+      "localizations": {
+        "zh-Hans": { "name": "去除广告", "description": "永久去除所有广告。" },
+        "en-US": { "name": "Remove Ads", "description": "Remove all ads." }
+      }
     }
   ],
   "subscriptionGroups": [
     {
       "referenceName": "高级会员",
-      "localizations": [
-        { "locale": "zh-Hans", "name": "高级会员" },
-        { "locale": "en-US", "name": "Premium" }
-      ],
+      "localizations": {
+        "zh-Hans": { "name": "高级会员" },
+        "en-US": { "name": "Premium" }
+      },
       "subscriptions": [
         {
           "productId": "com.example.app.premium.monthly",
-          "referenceName": "高级会员月度",
-          "duration": "ONE_MONTH",
+          "name": "高级会员月度",
+          "subscriptionPeriod": "ONE_MONTH",
+          "groupLevel": 1,
           "price": { "baseTerritory": "USA", "baseAmount": "4.99" },
-          "localizations": [
-            { "locale": "zh-Hans", "name": "高级会员月度", "description": "一个月完整访问权限。" },
-            { "locale": "en-US", "name": "Premium Monthly", "description": "Full access for one month." }
-          ]
+          "localizations": {
+            "zh-Hans": { "name": "高级会员月度", "description": "一个月完整访问权限。" },
+            "en-US": { "name": "Premium Monthly", "description": "Full access for one month." }
+          },
+          "review": {
+            "screenshot": "./iap_review/premium_monthly.png",
+            "note": "说明审核人员如何访问该订阅。"
+          }
         }
       ]
     }
@@ -72,33 +78,34 @@
 }
 ```
 
-将文件保存为 `data/iap_packages.json`。完整 schema（含介绍优惠、促销优惠、审核截图）请参考 `data/iap_packages.example.json`。
+将文件保存为 `AppStore/data/iap_packages.json`。`asc init` 会在此生成当前完整模板，其中包含介绍优惠、促销优惠、定价控制和审核截图。相对 `review.screenshot` 路径以 JSON 文件所在目录为基准解析。
 
 ---
 
 ## 支持的 IAP 类型
 
-| `type` 值 | 含义 |
+| `inAppPurchaseType` 值 | 含义 |
 |---|---|
 | `CONSUMABLE` | 消耗型（如金币、生命值） |
 | `NON_CONSUMABLE` | 非消耗型（如去除广告、解锁功能） |
-| `AUTO_RENEWABLE_SUBSCRIPTION` | 自动续期订阅（放在 `subscriptionGroups` 中） |
+
+自动续期订阅放在 `subscriptionGroups` 中，不使用 `inAppPurchaseType`。
 
 ---
 
 ## 支持的订阅周期
 
-`THREE_DAYS`、`ONE_WEEK`、`TWO_WEEKS`、`ONE_MONTH`、`TWO_MONTHS`、`THREE_MONTHS`、`SIX_MONTHS`、`ONE_YEAR`
+`ONE_WEEK`、`ONE_MONTH`、`TWO_MONTHS`、`THREE_MONTHS`、`SIX_MONTHS`、`ONE_YEAR`
 
 ---
 
 ## 步骤 2：预览（推荐）
 
 ```bash
-asc --app myapp iap --iap-file data/iap_packages.json --dry-run
+asc --app myapp iap --iap-file AppStore/data/iap_packages.json --dry-run
 ```
 
-验证 JSON 结构并显示将要创建/更新的内容，不会实际调用 API。
+验证 JSON 和本地审核截图路径，读取当前 App Store Connect 状态并显示执行计划，但不会发送写入请求。
 
 > **重要：** 每条命令都需要 `--app myapp` 标志，除非你已用 `asc app default myapp` 设置了默认 App。`--app` 告诉 `asc` 使用哪个 App Profile（凭证、路径）。详见 [06 多 App Profile 管理](06-multi-app-profiles.zh-CN.md)。
 
@@ -107,7 +114,7 @@ asc --app myapp iap --iap-file data/iap_packages.json --dry-run
 ## 步骤 3：执行上传
 
 ```bash
-asc --app myapp iap --iap-file data/iap_packages.json
+asc --app myapp iap --iap-file AppStore/data/iap_packages.json
 ```
 
 默认行为是**仅创建**：已存在的产品会被跳过。
@@ -119,7 +126,7 @@ asc --app myapp iap --iap-file data/iap_packages.json
 **覆盖更新已有产品：**
 
 ```bash
-asc --app myapp iap --iap-file data/iap_packages.json --update-existing
+asc --app myapp iap --iap-file AppStore/data/iap_packages.json --update-existing
 ```
 
 当需要更新已创建产品的价格、本地化文案或描述时使用此选项。
@@ -134,7 +141,7 @@ asc --app myapp iap --iap-file data/iap_packages.json --update-existing
 asc --app myapp iap-screenshots
 ```
 
-该命令会在线查询 App Store Connect 状态，扫描所有缺少 App Store 审核截图的一次性内购和订阅。可选的 `data/iap_packages.json` 只按 `productId` 预填 `review.screenshot` 路径；是否缺少截图由 App Store Connect 在线状态决定。
+该命令会在线查询 App Store Connect 状态，扫描所有缺少 App Store 审核截图的一次性内购和订阅。可选的 `AppStore/data/iap_packages.json` 只按 `productId` 预填 `review.screenshot` 路径；是否缺少截图由 App Store Connect 在线状态决定。
 
 只预览扫描和上传计划，不修改 App Store Connect：
 
@@ -145,10 +152,10 @@ asc --app myapp iap-screenshots --dry-run
 使用 IAP JSON 中的路径并以非交互方式执行：
 
 ```bash
-asc --app myapp iap-screenshots --iap-file data/iap_packages.json --no-prompt --yes
+asc --app myapp iap-screenshots --iap-file AppStore/data/iap_packages.json --no-prompt --yes
 ```
 
-在 Web UI 中，打开 **IAP 管理**，进入 **补审核截图**，点击 **扫描缺失**，为需要截图的产品选择 PNG、JPG 或 JPEG 文件，然后点击 **上传截图**。Web UI 中选择的路径只会作为本次上传请求的临时载荷发送，不会写回 `data/iap_packages.json`。
+在 Web UI 中，打开 **IAP 管理**，进入 **补审核截图**，点击 **扫描缺失**，为需要截图的产品选择 PNG、JPG 或 JPEG 文件，然后点击 **上传截图**。Web UI 中选择的路径只会作为本次上传请求的临时载荷发送，不会写回 `AppStore/data/iap_packages.json`。
 
 ---
 

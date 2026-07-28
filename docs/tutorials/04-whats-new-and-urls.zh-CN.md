@@ -16,18 +16,20 @@
 **单语言，直接输入文本：**
 
 ```bash
-asc --app myapp whats-new --text "修复已知问题，提升性能。"
+asc --app myapp whats-new --text "修复已知问题，提升性能。" --locales zh-Hans
 ```
 
-**多语言，直接输入文本：**
+**多个语言使用同一文本：**
 
 ```bash
-asc --app myapp whats-new --text "Bug fixes." --locales en-US zh-Hans
+asc --app myapp whats-new --text "Bug fixes." --locales en-US,zh-Hans
 ```
+
+如果省略 `--locales`，文本会应用到当前版本的所有可用语言。
 
 **多语言，从文件读取：**
 
-创建 `data/whats_new.txt`：
+创建 `AppStore/data/whats_new.txt`：
 
 ```
 en-US:
@@ -42,7 +44,7 @@ zh-Hans:
 然后运行：
 
 ```bash
-asc --app myapp whats-new --file data/whats_new.txt
+asc --app myapp whats-new --file AppStore/data/whats_new.txt
 ```
 
 ---
@@ -58,7 +60,7 @@ asc --app myapp set-support-url --text "https://example.com/support"
 **营销网站（支持多语言）：**
 
 ```bash
-asc --app myapp set-marketing-url --text "https://example.com" --locales en-US zh-Hans
+asc --app myapp set-marketing-url --text "https://example.com" --locales en-US,zh-Hans
 ```
 
 **隐私政策 URL：**
@@ -85,7 +87,7 @@ asc --app myapp privacy-policy-url
 确保每个语言区块以 `---`（单独一行三个破折号）结尾，语言代码必须与 App Store Connect 中的语言一致。
 
 **Q: URL 没有更新**
-URL 是 App 级别的设置，不是版本级别的，修改会立即生效。
+技术支持 URL 和营销 URL 属于版本本地化字段，因此需要可编辑的 App Store 版本；隐私政策 URL 属于 App Info 本地化字段。建议先用 `--dry-run` 确认目标语言。
 
 ---
 
