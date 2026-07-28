@@ -8,7 +8,8 @@
       close: function () {},
       isOpen: function () { return false; },
       currentTaskId: function () { return null; },
-      attachDock: function () {}
+      attachDock: function () {},
+      preferOverlay: function () {}
     };
     return;
   }
@@ -29,6 +30,7 @@
   var homeParent = drawer.parentElement;
   var homeNextSibling = drawer.nextSibling;
   var dockHost = null;
+  var forceOverlay = false;
 
   var eventSource = null;
   var statusController = null;
@@ -52,7 +54,15 @@
   }
 
   function isOverlayMode() {
-    return !dockHost || overlayMedia.matches;
+    return forceOverlay || !dockHost || overlayMedia.matches;
+  }
+
+  function setYieldPanelsHidden(hidden) {
+    document.querySelectorAll("[data-task-log-yield]").forEach(function (element) {
+      if (hidden) element.setAttribute("data-yielded", "true");
+      else element.removeAttribute("data-yielded");
+      element.setAttribute("aria-hidden", hidden ? "true" : "false");
+    });
   }
 
   function moveToHome() {
@@ -114,6 +124,11 @@
     } else if (dockHost && drawer.parentElement !== dockHost) {
       dockHost.appendChild(drawer);
     }
+    if (dockHost) {
+      dockHost.setAttribute("aria-hidden", isDrawerOpen() && !overlay ? "false" : "true");
+    }
+    // Build (and similar) right panels yield space while the drawer is docked open.
+    setYieldPanelsHidden(isDrawerOpen() && !overlay);
     var modal = isDrawerOpen() && overlay;
     drawer.setAttribute("aria-modal", modal ? "true" : "false");
     setBackgroundInert(modal);
@@ -406,6 +421,11 @@
     updateMode();
   }
 
+  function preferOverlay(enabled) {
+    forceOverlay = enabled !== false;
+    updateMode();
+  }
+
   if (closeControl) closeControl.addEventListener("click", close);
   if (clearControl) {
     clearControl.addEventListener("click", function () {
@@ -475,13 +495,17 @@
   if (overlayMedia.addEventListener) overlayMedia.addEventListener("change", updateMode);
   else overlayMedia.addListener(updateMode);
 
-  updateMode();
+  // Dock into #task-log-dock when present (dashboard right_panel or base layout).
+  var defaultDock = document.getElementById("task-log-dock");
+  if (defaultDock) attachDock(defaultDock);
+  else updateMode();
 
   window.TaskLogDrawer = {
     open: open,
     close: close,
     isOpen: isDrawerOpen,
     currentTaskId: function () { return activeTaskId; },
-    attachDock: attachDock
+    attachDock: attachDock,
+    preferOverlay: preferOverlay
   };
 })();

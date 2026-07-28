@@ -445,6 +445,9 @@
     </div>
     <!-- Optional right panel (override in child templates) -->
     {% block right_panel %}{% endblock %}
+    {% block task_log_dock %}
+    <div id="task-log-dock" class="task-log-dock" aria-hidden="true"></div>
+    {% endblock %}
     {% include "_task_log_drawer.html" %}
   </main>
 

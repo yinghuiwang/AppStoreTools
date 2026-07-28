@@ -594,16 +594,6 @@
 .dashboard-retry-link { margin-left: 4px; border-color: rgba(248, 113, 113, .25); color: var(--error); }
 .dashboard-table__empty { height: 80px !important; color: var(--text-muted) !important; text-align: center; }
 
-/* --- Task log dock host ---
-   Hosts the shared TaskLogDrawer (see task-log-drawer.css/js) as a flex
-   sibling when docked; stays empty (0 width) in overlay mode. */
-
-.task-log-dock {
-  display: flex;
-  align-self: stretch;
-  min-width: 0;
-}
-
 /* --- Breakpoints --- */
 
 @media (max-width: 1180px) {

@@ -44,6 +44,19 @@
   width: 390px;
 }
 
+/* Host for docked drawers (flex sibling of page content / right_panel).
+   Empty while overlay or closed — collapses to 0 width. */
+.task-log-dock {
+  display: flex;
+  align-self: stretch;
+  min-width: 0;
+}
+
+/* Companion right panels (e.g. build scan) yield to the docked open drawer. */
+[data-task-log-yield][data-yielded="true"] {
+  display: none !important;
+}
+
 .task-log-drawer__header {
   display: flex;
   align-items: center;

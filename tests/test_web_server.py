@@ -312,7 +312,6 @@ def test_dashboard_stylesheet_is_served_with_workspace_and_dock_layout(client):
 
     assert resp.status_code == 200
     assert ".dashboard-shell" in resp.text
-    assert ".task-log-dock" in resp.text
     assert ".dashboard-metrics-rail" in resp.text
     assert "height: calc(100vh - 4rem)" in resp.text
     assert "body > aside { display: none" not in resp.text
@@ -325,8 +324,9 @@ def test_dashboard_stylesheet_is_served_with_workspace_and_dock_layout(client):
     assert "rgba(248, 113, 113, .14)" in resp.text
     assert "#f87171" in resp.text
     assert ".dashboard-cancel-button { border-color: rgba(248, 113, 113, .25)" not in resp.text
-    # Drawer chrome now lives solely in task-log-drawer.css.
+    # Drawer chrome / dock host now live solely in task-log-drawer.css.
     assert ".dashboard-log-drawer" not in resp.text
+    assert ".task-log-dock" not in resp.text
 
 
 def test_task_log_drawer_stylesheet_defines_drawer_and_dock_modes(client):
@@ -336,6 +336,7 @@ def test_task_log_drawer_stylesheet_defines_drawer_and_dock_modes(client):
     assert ".task-log-drawer" in resp.text
     assert ".task-log-drawer.is-overlay" in resp.text
     assert ".task-log-drawer.is-docked" in resp.text
+    assert ".task-log-dock" in resp.text
     assert "@media (max-width: 1360px)" in resp.text
 
 
@@ -437,6 +438,7 @@ def test_build_page_uses_shared_task_log_drawer_and_keeps_scan_panel(client):
     assert resp.status_code == 200
     assert "TaskLogDrawer.open" in resp.text
     assert "data-task-log-open" in resp.text
+    assert "data-task-log-yield" in resp.text
     assert "自动检测结果" in resp.text
     assert "startBuildSSE" not in resp.text
     assert 'id="build-log-panel"' not in resp.text
@@ -1758,6 +1760,9 @@ def test_task_log_drawer_javascript_exposes_public_api(client):
     assert "window.TaskLogDrawer" in body
     assert "function open(" in body or "open: function" in body or "open(" in body
     assert "attachDock" in body
+    assert "preferOverlay" in body
+    assert 'getElementById("task-log-dock")' in body
+    assert "data-task-log-yield" in body
     assert "/api/task/" in body
     assert '"/status"' in body or "/status" in body
     assert "stream?after=0" in body
@@ -1772,6 +1777,7 @@ def test_base_layout_includes_task_log_drawer_assets(client):
     assert "task-log-drawer.css?v=" in resp.text
     assert "task-log-drawer.js?v=" in resp.text
     assert 'id="task-log-drawer"' in resp.text
+    assert 'id="task-log-dock"' in resp.text
     assert "data-task-log-close" in resp.text
 
 
