@@ -59,12 +59,13 @@ def test_init_gitignore_ignores_env_not_example(xcode_project):
 
 
 def test_init_csv_has_header_row(xcode_project):
-    """Generated appstore_info.csv has the required header columns."""
+    """Generated appstore_info.csv has the required English header columns."""
     runner.invoke(app, ["init", "--path", str(xcode_project)])
     content = (xcode_project / "AppStore" / "data" / "appstore_info.csv").read_text()
-    assert "语言" in content
-    assert "应用名称" in content
-    assert "关键子" in content
+    assert "locale" in content
+    assert "name" in content
+    assert "keywords" in content
+    assert "语言" not in content.splitlines()[0]
 
 
 def test_init_iap_json_is_valid_json(xcode_project):

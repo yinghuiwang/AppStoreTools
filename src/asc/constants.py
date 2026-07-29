@@ -1,5 +1,7 @@
 """Constants for App Store Connect API"""
 
+from typing import Optional
+
 BASE_URL = "https://api.appstoreconnect.apple.com"
 
 DISPLAY_TYPE_BY_SIZE = {
@@ -75,3 +77,43 @@ def normalize_locale_code(locale_code: str) -> str:
         if len(lang) == 2 and len(region) == 2:
             return f"{lang.lower()}-{region.upper()}"
     return code
+
+
+# Metadata CSV headers: English canonical (ASC API style) + Chinese aliases.
+# Every key maps to its canonical name; unknown headers are rejected by canonicalize.
+CSV_HEADER_ALIASES: dict[str, str] = {
+    # canonical → self
+    "locale": "locale",
+    "name": "name",
+    "subtitle": "subtitle",
+    "description": "description",
+    "keywords": "keywords",
+    "supportUrl": "supportUrl",
+    "marketingUrl": "marketingUrl",
+    "privacyPolicyUrl": "privacyPolicyUrl",
+    # Chinese aliases
+    "语言": "locale",
+    "应用名称": "name",
+    "副标题": "subtitle",
+    "长描述": "description",
+    "描述": "description",
+    "关键词": "keywords",
+    "关键字": "keywords",
+    "技术支持链接": "supportUrl",
+    "技术支持网址": "supportUrl",
+    "营销网站": "marketingUrl",
+    "营销网址": "marketingUrl",
+    "隐私政策网址": "privacyPolicyUrl",
+    "隐私政策链接": "privacyPolicyUrl",
+    "隐私政策URL": "privacyPolicyUrl",
+}
+
+
+def canonicalize_csv_header(raw: str) -> Optional[str]:
+    """Map a CSV header to its canonical English key, or None if unknown."""
+    if raw is None:
+        return None
+    cleaned = raw.strip().strip('"').strip("'").strip()
+    if not cleaned:
+        return None
+    return CSV_HEADER_ALIASES.get(cleaned)

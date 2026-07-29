@@ -83,7 +83,7 @@ class MetaFakeAPI:
 
 def test_metadata_dry_run_no_api_calls():
     api = MetaFakeAPI()
-    metadata = [{"语言": "zh-Hans", "应用名称": "测试", "长描述": "描述"}]
+    metadata = [{"locale": "zh-Hans", "name": "测试", "description": "描述"}]
     _upload_metadata_core(api, "app1", metadata, dry_run=True)
     write_calls = [c for c in api.calls if c[0].startswith(("update_", "create_"))]
     assert write_calls == []
@@ -91,7 +91,7 @@ def test_metadata_dry_run_no_api_calls():
 
 def test_metadata_updates_existing_info_localization():
     api = MetaFakeAPI()
-    metadata = [{"语言": "zh-Hans", "应用名称": "新名称", "副标题": "新副标题"}]
+    metadata = [{"locale": "zh-Hans", "name": "新名称", "subtitle": "新副标题"}]
     _upload_metadata_core(api, "app1", metadata)
     assert "iloc_zh" in api.updated_info_locs
     assert api.updated_info_locs["iloc_zh"]["name"] == "新名称"
@@ -100,7 +100,7 @@ def test_metadata_updates_existing_info_localization():
 def test_metadata_creates_new_info_localization():
     api = MetaFakeAPI()
     # en-US 不在 info_locs 中，应该创建
-    metadata = [{"语言": "en-US", "应用名称": "New Name"}]
+    metadata = [{"locale": "en-US", "name": "New Name"}]
     _upload_metadata_core(api, "app1", metadata)
     assert len(api.created_info_locs) == 1
     assert api.created_info_locs[0]["locale"] == "en-US"
@@ -109,7 +109,7 @@ def test_metadata_creates_new_info_localization():
 
 def test_metadata_updates_version_localization():
     api = MetaFakeAPI()
-    metadata = [{"语言": "zh-Hans", "长描述": "新描述", "关键子": "关键词1,关键词2"}]
+    metadata = [{"locale": "zh-Hans", "description": "新描述", "keywords": "关键词1,关键词2"}]
     _upload_metadata_core(api, "app1", metadata)
     assert "vloc_zh" in api.updated_ver_locs
     assert api.updated_ver_locs["vloc_zh"]["description"] == "新描述"
@@ -118,7 +118,7 @@ def test_metadata_updates_version_localization():
 
 def test_metadata_include_version_fields_keywords_only():
     api = MetaFakeAPI()
-    metadata = [{"语言": "zh-Hans", "长描述": "描述", "关键子": "kw1"}]
+    metadata = [{"locale": "zh-Hans", "description": "描述", "keywords": "kw1"}]
     _upload_metadata_core(api, "app1", metadata, include_version_fields={"keywords"})
     assert "vloc_zh" in api.updated_ver_locs
     assert "keywords" in api.updated_ver_locs["vloc_zh"]
@@ -129,11 +129,11 @@ def test_metadata_uses_app_info_for_editable_version_and_updates_version(capsys)
     api = MetaFakeAPI()
     metadata = [
         {
-            "语言": "zh-Hans",
-            "应用名称": "新名称",
-            "副标题": "新副标题",
-            "长描述": "新描述",
-            "关键词": "kw1,kw2",
+            "locale": "zh-Hans",
+            "name": "新名称",
+            "subtitle": "新副标题",
+            "description": "新描述",
+            "keywords": "kw1,kw2",
         }
     ]
     _upload_metadata_core(api, "app1", metadata)

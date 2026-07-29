@@ -402,7 +402,7 @@ asc
 ### CSV 元数据格式
 
 ```csv
-语言,应用名称,副标题,描述,关键词,支持网址,营销网址,隐私政策网址
+locale,name,subtitle,description,keywords,supportUrl,marketingUrl,privacyPolicyUrl
 简体中文(zh-Hans),我的应用,简介,完整描述,关键词1;关键词2,https://support.com,https://marketing.com,https://privacy.com
 英文(en-US),My App,Subtitle,Full description,keyword1;keyword2,https://support.com,https://marketing.com,https://privacy.com
 ```

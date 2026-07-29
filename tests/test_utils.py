@@ -47,7 +47,7 @@ def test_parse_real_csv_row_count():
 
 def test_parse_real_csv_locale_codes():
     rows = parse_csv(str(DATA_CSV))
-    locales = [r["语言"] for r in rows]
+    locales = [r["locale"] for r in rows]
     assert "zh-Hans" in locales
     assert "en-US" in locales
 
@@ -55,19 +55,18 @@ def test_parse_real_csv_locale_codes():
 def test_parse_real_csv_app_name_present():
     rows = parse_csv(str(DATA_CSV))
     for row in rows:
-        assert "应用名称" in row
-        assert row["应用名称"]
+        assert "name" in row
+        assert row["name"]
 
 
 def test_parse_csv_with_bom(tmp_path):
     csv_file = tmp_path / "test.csv"
-    # utf-8-sig BOM 编码
     content = "语言,应用名称\n简体中文(zh-Hans),测试应用\n"
     csv_file.write_bytes(b"\xef\xbb\xbf" + content.encode("utf-8"))
     rows = parse_csv(str(csv_file))
     assert len(rows) == 1
-    assert rows[0]["语言"] == "zh-Hans"
-    assert rows[0]["应用名称"] == "测试应用"
+    assert rows[0]["locale"] == "zh-Hans"
+    assert rows[0]["name"] == "测试应用"
 
 
 def test_parse_csv_skips_rows_without_locale(tmp_path):
@@ -76,7 +75,70 @@ def test_parse_csv_skips_rows_without_locale(tmp_path):
     csv_file.write_text(content, encoding="utf-8")
     rows = parse_csv(str(csv_file))
     assert len(rows) == 1
-    assert rows[0]["语言"] == "en-US"
+    assert rows[0]["locale"] == "en-US"
+
+
+def test_parse_csv_english_headers(tmp_path):
+    csv_file = tmp_path / "en.csv"
+    csv_file.write_text(
+        "locale,name,subtitle,description,keywords,supportUrl,marketingUrl,privacyPolicyUrl\n"
+        "en-US,App,Sub,Desc,kw,https://s.example,https://m.example,https://p.example\n",
+        encoding="utf-8",
+    )
+    rows = parse_csv(str(csv_file))
+    assert rows[0] == {
+        "locale": "en-US",
+        "name": "App",
+        "subtitle": "Sub",
+        "description": "Desc",
+        "keywords": "kw",
+        "supportUrl": "https://s.example",
+        "marketingUrl": "https://m.example",
+        "privacyPolicyUrl": "https://p.example",
+    }
+
+
+def test_parse_csv_mixed_headers(tmp_path):
+    csv_file = tmp_path / "mixed.csv"
+    csv_file.write_text(
+        "locale,应用名称,keywords\nzh-Hans,测试,kw1\n",
+        encoding="utf-8",
+    )
+    rows = parse_csv(str(csv_file))
+    assert rows[0]["locale"] == "zh-Hans"
+    assert rows[0]["name"] == "测试"
+    assert rows[0]["keywords"] == "kw1"
+
+
+def test_parse_csv_english_overrides_chinese_alias(tmp_path):
+    csv_file = tmp_path / "conflict.csv"
+    # Chinese first, English later → English wins
+    csv_file.write_text(
+        "关键字,keywords,语言\nchinese-kw,english-kw,en-US\n",
+        encoding="utf-8",
+    )
+    rows = parse_csv(str(csv_file))
+    assert rows[0]["keywords"] == "english-kw"
+
+
+def test_parse_csv_first_chinese_alias_wins_when_no_english(tmp_path):
+    csv_file = tmp_path / "alias_conflict.csv"
+    csv_file.write_text(
+        "关键词,关键字,语言\nfirst,second,en-US\n",
+        encoding="utf-8",
+    )
+    rows = parse_csv(str(csv_file))
+    assert rows[0]["keywords"] == "first"
+
+
+def test_parse_csv_drops_unknown_columns(tmp_path):
+    csv_file = tmp_path / "extra.csv"
+    csv_file.write_text(
+        "locale,name,extra_col\nen-US,App,ignored\n",
+        encoding="utf-8",
+    )
+    rows = parse_csv(str(csv_file))
+    assert rows[0] == {"locale": "en-US", "name": "App"}
 
 
 # ── resolve_locale ──

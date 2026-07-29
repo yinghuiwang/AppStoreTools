@@ -11,7 +11,7 @@ from typing import Optional
 
 import typer
 
-from asc.constants import CSV_LOCALE_TO_ASC, normalize_locale_code
+from asc.constants import CSV_LOCALE_TO_ASC, canonicalize_csv_header, normalize_locale_code
 from asc.error_handler import get_action_hint
 
 
@@ -24,26 +24,38 @@ def extract_locale(raw_lang: str) -> str:
 
 
 def parse_csv(csv_path: str) -> list[dict]:
-    """解析 CSV 元数据文件，返回每个语言的元数据字典列表"""
+    """Parse metadata CSV; return rows keyed by English canonical headers."""
     with open(csv_path, "r", encoding="utf-8-sig", newline="") as f:
         reader = csv.DictReader(f)
         raw_headers = reader.fieldnames or []
-        clean_headers = []
+
+        # (original DictReader key, canonical key or None)
+        header_plan: list[tuple[str, str | None]] = []
         for h in raw_headers:
-            stripped = h.strip().strip('"')
-            if stripped:
-                clean_headers.append((h, stripped))
+            stripped = (h or "").strip().strip('"')
+            if not stripped:
+                header_plan.append((h, None))
+                continue
+            header_plan.append((h, canonicalize_csv_header(stripped)))
 
         results = []
         for row in reader:
-            mapped = {}
-            for orig_key, clean_key in clean_headers:
+            mapped: dict[str, str] = {}
+            for orig_key, canonical in header_plan:
+                if canonical is None:
+                    continue
                 val = row.get(orig_key)
-                if val and val.strip():
-                    mapped[clean_key] = val.strip()
-            if "语言" not in mapped or not mapped["语言"]:
+                if not val or not str(val).strip():
+                    continue
+                value = str(val).strip()
+                # Set if unset; overwrite only when this column is the English canonical name
+                clean_orig = (orig_key or "").strip().strip('"').strip("'").strip()
+                if canonical not in mapped or clean_orig == canonical:
+                    mapped[canonical] = value
+
+            if "locale" not in mapped or not mapped["locale"]:
                 continue
-            mapped["语言"] = extract_locale(mapped["语言"])
+            mapped["locale"] = extract_locale(mapped["locale"])
             results.append(mapped)
 
     return results

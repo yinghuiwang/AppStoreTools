@@ -374,6 +374,9 @@ def test_homepage_dashboard_context_avoids_loading_task_logs(client, monkeypatch
 def test_metadata_page_returns_200(client):
     resp = client.get("/metadata")
     assert resp.status_code == 200
+    assert ">locale</code>" in resp.text
+    assert ">name</code>" in resp.text
+    assert "仍兼容中文表头" in resp.text
 
 
 def test_metadata_page_uses_shared_task_log_drawer(client):
@@ -516,6 +519,9 @@ def test_update_page_contains_always_available_advanced_install(client):
 def test_profiles_page_returns_200(client):
     resp = client.get("/profiles")
     assert resp.status_code == 200
+    assert ">locale</code>" in resp.text
+    assert ">name</code>" in resp.text
+    assert "仍兼容中文表头" in resp.text
 
 
 def test_settings_page_returns_200(client):
@@ -1593,8 +1599,8 @@ def test_metadata_core_outputs_progress(capsys):
     mock_api.create_app_info_localization.return_value = {"id": "loc1"}
     mock_api.create_version_localization.return_value = {"id": "vloc1"}
     metadata_list = [
-        {"语言": "en-US", "应用名称": "Test", "长描述": "desc"},
-        {"语言": "zh-CN", "应用名称": "测试", "长描述": "描述"},
+        {"locale": "en-US", "name": "Test", "description": "desc"},
+        {"locale": "zh-CN", "name": "测试", "description": "描述"},
     ]
     _upload_metadata_core(mock_api, "app1", metadata_list, dry_run=True)
     captured = capsys.readouterr()
@@ -1655,7 +1661,8 @@ def test_examples_csv_download(client):
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/csv")
     assert "appstore_info_example.csv" in resp.headers.get("content-disposition", "")
-    assert "语言" in resp.text
+    assert "locale" in resp.text
+    assert "name" in resp.text
 
 
 def test_examples_screenshots_download(client):

@@ -3,7 +3,12 @@ from __future__ import annotations
 
 import pytest
 
-from asc.constants import DISPLAY_TYPE_BY_SIZE, normalize_locale_code
+from asc.constants import (
+    CSV_HEADER_ALIASES,
+    DISPLAY_TYPE_BY_SIZE,
+    canonicalize_csv_header,
+    normalize_locale_code,
+)
 
 
 # ── normalize_locale_code ──
@@ -56,3 +61,48 @@ def test_unknown_size_not_in_dict():
 
 def test_ipad_pro_size():
     assert DISPLAY_TYPE_BY_SIZE[(2048, 2732)] == "APP_IPAD_PRO_3GEN_129"
+
+
+def test_canonicalize_english_headers():
+    assert canonicalize_csv_header("locale") == "locale"
+    assert canonicalize_csv_header("name") == "name"
+    assert canonicalize_csv_header("supportUrl") == "supportUrl"
+    assert canonicalize_csv_header("privacyPolicyUrl") == "privacyPolicyUrl"
+
+
+def test_canonicalize_chinese_aliases():
+    assert canonicalize_csv_header("语言") == "locale"
+    assert canonicalize_csv_header("应用名称") == "name"
+    assert canonicalize_csv_header("副标题") == "subtitle"
+    assert canonicalize_csv_header("长描述") == "description"
+    assert canonicalize_csv_header("描述") == "description"
+    assert canonicalize_csv_header("关键词") == "keywords"
+    assert canonicalize_csv_header("关键字") == "keywords"
+    assert canonicalize_csv_header("技术支持链接") == "supportUrl"
+    assert canonicalize_csv_header("技术支持网址") == "supportUrl"
+    assert canonicalize_csv_header("营销网站") == "marketingUrl"
+    assert canonicalize_csv_header("营销网址") == "marketingUrl"
+    assert canonicalize_csv_header("隐私政策网址") == "privacyPolicyUrl"
+    assert canonicalize_csv_header("隐私政策链接") == "privacyPolicyUrl"
+    assert canonicalize_csv_header("隐私政策URL") == "privacyPolicyUrl"
+
+
+def test_canonicalize_strips_whitespace_and_quotes():
+    assert canonicalize_csv_header('  "语言"  ') == "locale"
+    assert canonicalize_csv_header(" name ") == "name"
+
+
+def test_canonicalize_unknown_and_wrong_case_return_none():
+    assert canonicalize_csv_header("unknown") is None
+    assert canonicalize_csv_header("SupportUrl") is None  # case-sensitive
+    assert canonicalize_csv_header("") is None
+
+
+def test_csv_header_aliases_cover_all_canonicals():
+    canonicals = {
+        "locale", "name", "subtitle", "description", "keywords",
+        "supportUrl", "marketingUrl", "privacyPolicyUrl",
+    }
+    assert canonicals <= set(CSV_HEADER_ALIASES.values())
+    for c in canonicals:
+        assert CSV_HEADER_ALIASES[c] == c

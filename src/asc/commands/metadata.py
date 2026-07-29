@@ -99,20 +99,16 @@ def _upload_metadata_core(
     for idx, meta in enumerate(metadata_list):
         if cancel_event is not None and cancel_event.is_set():
             raise ProcessCanceled("metadata upload canceled")
-        csv_locale = meta["语言"]
+        csv_locale = meta["locale"]
         info_locale = resolve_locale(csv_locale, existing_info_locales)
         ver_locale = resolve_locale(csv_locale, existing_ver_locales)
         print(
             f"\n  ── 语言: {csv_locale} → App Info: {info_locale}, 版本: {ver_locale} ──"
         )
 
-        name = meta.get("应用名称", "")
-        subtitle = meta.get("副标题", "")
-        privacy_policy_url = (
-            meta.get("隐私政策网址", "")
-            or meta.get("隐私政策链接", "")
-            or meta.get("隐私政策URL", "")
-        )
+        name = meta.get("name", "")
+        subtitle = meta.get("subtitle", "")
+        privacy_policy_url = meta.get("privacyPolicyUrl", "")
 
         # appInfoLocalizations fields: name, subtitle, privacyPolicyUrl
         info_attrs = {}
@@ -147,10 +143,10 @@ def _upload_metadata_core(
                     print("    ✅ 已创建 App Info 本地化")
                     existing_info_locales.append(info_locale)
 
-        description = meta.get("长描述", "")
-        keywords = meta.get("关键词", "") or meta.get("关键子", "")
-        support_url = meta.get("技术支持网址", "") or meta.get("技术支持链接", "")
-        marketing_url = meta.get("营销网站", "") or meta.get("营销网址", "")
+        description = meta.get("description", "")
+        keywords = meta.get("keywords", "")
+        support_url = meta.get("supportUrl", "")
+        marketing_url = meta.get("marketingUrl", "")
 
         ver_attrs = {}
         if description and (
@@ -418,7 +414,8 @@ def cmd_metadata(
     """Upload metadata only: name, subtitle, description, keywords, URLs.
 
     Metadata is read from the CSV file and uploaded to App Store Connect.
-    The CSV should have columns like: 语言, 应用名称, 副标题, 长描述, 关键子.
+    The CSV should have columns like: locale, name, subtitle, description, keywords.
+    Chinese headers (语言, 应用名称, …) are still accepted.
 
     \b
     Example:
@@ -468,8 +465,8 @@ def cmd_keywords(
 ):
     """Upload keywords only from CSV.
 
-    Reads the '关键词' or '关键子' column from your CSV and updates keywords
-    for all locales in App Store Connect.
+    Reads the 'keywords' column from your CSV and updates keywords for all
+    locales in App Store Connect. Chinese header aliases are still accepted.
 
     \b
     Example:
@@ -520,8 +517,8 @@ def cmd_support_url(
 ):
     """Upload support URL from CSV.
 
-    Reads '技术支持网址' or '技术支持链接' from your metadata CSV and
-    updates the support URL for all locales.
+    Reads 'supportUrl' from your metadata CSV and updates the support URL for
+    all locales. Chinese header aliases are still accepted.
 
     \b
     Example:
@@ -577,8 +574,8 @@ def cmd_marketing_url(
 ):
     """Upload marketing URL from CSV.
 
-    Reads '营销网站' or '营销网址' from your metadata CSV and updates the
-    marketing URL for all locales.
+    Reads 'marketingUrl' from your metadata CSV and updates the marketing URL
+    for all locales. Chinese header aliases are still accepted.
 
     \b
     Example:
@@ -634,8 +631,8 @@ def cmd_privacy_policy_url(
 ):
     """Upload privacy policy URL from CSV.
 
-    Reads '隐私政策网址' or '隐私政策链接' from your metadata CSV and updates
-    the privacy policy URL for all locales.
+    Reads 'privacyPolicyUrl' from your metadata CSV and updates the privacy
+    policy URL for all locales. Chinese header aliases are still accepted.
 
     \b
     Example:

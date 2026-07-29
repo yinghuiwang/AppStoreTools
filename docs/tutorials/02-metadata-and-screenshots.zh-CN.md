@@ -15,26 +15,41 @@
 
 如果你按教程 01 完成了初始化，请编辑 `AppStore/data/appstore_info.csv`。导入 Profile 时会保存该文件的绝对路径，因此之后可以从其他工作目录运行上传命令。
 
-结构上只有 `语言` 列必填；其余列按需要更新的字段填写：
+结构上只有 `locale` 列必填；其余列按需要更新的字段填写：
 
 | 列名 | 含义 |
 |---|---|
-| `语言` | 语言区域，格式为 `显示名称(代码)`，例如 `简体中文(zh-Hans)` 或 `English(en-US)` |
-| `应用名称` | App 名称（最多 30 字符） |
-| `副标题` | 副标题（最多 30 字符） |
-| `长描述` | 完整描述（最多 4000 字符） |
-| `关键子` 或 `关键词` | 关键词，逗号分隔（总计最多 100 字符） |
-| `技术支持链接` | 技术支持 URL |
-| `营销网站` | 营销网站 URL |
-| `隐私政策网址` | 隐私政策 URL |
+| `locale` | 语言区域，格式为 `显示名称(代码)`，例如 `简体中文(zh-Hans)` 或 `English(en-US)` |
+| `name` | App 名称（最多 30 字符） |
+| `subtitle` | 副标题（最多 30 字符） |
+| `description` | 完整描述（最多 4000 字符） |
+| `keywords` | 关键词，逗号分隔（总计最多 100 字符） |
+| `supportUrl` | 技术支持 URL |
+| `marketingUrl` | 营销网站 URL |
+| `privacyPolicyUrl` | 隐私政策 URL |
 
-示例行：
+示例 CSV：
 
+```csv
+locale,name,subtitle,description,keywords
+简体中文(zh-Hans),应用名称,副标题,完整描述,"keyword1,keyword2"
+English(en-US),App Name,Subtitle,Full description,"keyword1,keyword2"
 ```
-语言,应用名称,副标题,长描述,关键子
-English(en-US),My App,The best app,A full description here.,"productivity,tools"
-简体中文(zh-Hans),我的应用,最好的应用,完整描述。,"效率,工具"
-```
+
+### 兼容中文列名对照表
+
+已有 CSV 可以继续使用以下中文别名：
+
+| 英文列名（默认） | 兼容中文列名 |
+|---|---|
+| `locale` | `语言` |
+| `name` | `应用名称` |
+| `subtitle` | `副标题` |
+| `description` | `长描述`、`描述` |
+| `keywords` | `关键词`、`关键字` |
+| `supportUrl` | `技术支持链接`、`技术支持网址` |
+| `marketingUrl` | `营销网站`、`营销网址` |
+| `privacyPolicyUrl` | `隐私政策网址`、`隐私政策链接`、`隐私政策URL` |
 
 ---
 
@@ -159,7 +174,7 @@ asc --app myapp screenshots --screenshots /path/to/custom/screenshots
 App 版本必须已在 App Store Connect 中存在且处于可编辑状态，请先手动创建版本。
 
 **Q: 部分语言被跳过**
-请在 `语言` 列中使用有效的 App Store Connect locale。元数据上传会在 API 允许时创建缺失的 App Info 或版本本地化；如果 Apple 拒绝该 locale，请在 App Store Connect 中确认当前 App 和版本支持该语言。
+请在 `locale` 列中使用有效的 App Store Connect locale（仍兼容中文别名 `语言`）。元数据上传会在 API 允许时创建缺失的 App Info 或版本本地化；如果 Apple 拒绝该 locale，请在 App Store Connect 中确认当前 App 和版本支持该语言。
 
 **Q: 截图尺寸无法识别**
 检查图片尺寸是否与上表中的支持分辨率完全匹配，导出时不要缩放（使用 1x 原始尺寸）。

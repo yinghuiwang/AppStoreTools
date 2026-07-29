@@ -134,7 +134,7 @@ Source lives in `src/asc/`. Key modules:
 
 ## Data Files
 
-- **`data/appstore_info.csv`** — One row per locale. Required columns: `语言` (locale in `DisplayName(code)` format), `应用名称`, `副标题`, `长描述`, `关键子`. Optional: `技术支持链接`, `营销网站`, `隐私政策网址`.
+- **`data/appstore_info.csv`** — One row per locale. Required column: `locale` (in `DisplayName(code)` format). Optional columns: `name`, `subtitle`, `description`, `keywords`, `supportUrl`, `marketingUrl`, `privacyPolicyUrl`. Compatible Chinese aliases are accepted through `CSV_HEADER_ALIASES`.
 - **`data/screenshots/<locale-folder>/`** — PNG/JPG screenshots; sorted by filename number for upload order. Supported device types:
   - iPhone: 6.7", 6.5", 5.5"
   - iPad: Pro 12.9", Pro 11"

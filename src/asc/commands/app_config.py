@@ -629,9 +629,9 @@ APP_ID=0000000000
 """
 
 _CSV_TEMPLATE = (
-    '"语言",应用名称,副标题,"长描述","关键子","技术支持链接",营销网站\n'
-    '简体中文(zh-Hans),应用名称,副标题,"在这里填写应用的完整描述","关键词1,关键词2",,\n'
-    '英文(en-US),App Name,Subtitle,"Write your full app description here","keyword1,keyword2",,\n'
+    "locale,name,subtitle,description,keywords,supportUrl,marketingUrl\n"
+    'zh-Hans,应用名称,副标题,"在这里填写应用的完整描述","关键词1,关键词2",,\n'
+    'en-US,App Name,Subtitle,"Write your full app description here","keyword1,keyword2",,\n'
 )
 
 _GITIGNORE = ".env\n"

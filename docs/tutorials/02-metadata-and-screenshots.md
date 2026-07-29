@@ -15,26 +15,41 @@
 
 If you followed tutorial 01, edit `AppStore/data/appstore_info.csv`. The imported profile stores this absolute path, so upload commands can find it from any working directory.
 
-The only structurally required column is `语言`. Add the other columns for the fields you want to update:
+The only structurally required column is `locale`. Add the other columns for the fields you want to update:
 
 | Column header | Meaning |
 |---|---|
-| `语言` | Locale in `DisplayName(code)` format, e.g. `简体中文(zh-Hans)` or `English(en-US)` |
-| `应用名称` | App name (max 30 chars) |
-| `副标题` | Subtitle (max 30 chars) |
-| `长描述` | Full description (max 4000 chars) |
-| `关键子` or `关键词` | Keywords, comma-separated (max 100 chars total) |
-| `技术支持链接` | Support URL |
-| `营销网站` | Marketing URL |
-| `隐私政策网址` | Privacy policy URL |
+| `locale` | Locale in `DisplayName(code)` format, e.g. `简体中文(zh-Hans)` or `English(en-US)` |
+| `name` | App name (max 30 chars) |
+| `subtitle` | Subtitle (max 30 chars) |
+| `description` | Full description (max 4000 chars) |
+| `keywords` | Keywords, comma-separated (max 100 chars total) |
+| `supportUrl` | Support URL |
+| `marketingUrl` | Marketing URL |
+| `privacyPolicyUrl` | Privacy policy URL |
 
-Example row:
+Example CSV:
 
+```csv
+locale,name,subtitle,description,keywords
+简体中文(zh-Hans),应用名称,副标题,完整描述,"keyword1,keyword2"
+English(en-US),App Name,Subtitle,Full description,"keyword1,keyword2"
 ```
-语言,应用名称,副标题,长描述,关键子
-English(en-US),My App,The best app,A full description here.,"productivity,tools"
-简体中文(zh-Hans),我的应用,最好的应用,完整描述。,"效率,工具"
-```
+
+### Compatible Chinese headers
+
+Existing CSV files can continue to use these Chinese aliases:
+
+| English header | Compatible Chinese headers |
+|---|---|
+| `locale` | `语言` |
+| `name` | `应用名称` |
+| `subtitle` | `副标题` |
+| `description` | `长描述`, `描述` |
+| `keywords` | `关键词`, `关键字` |
+| `supportUrl` | `技术支持链接`, `技术支持网址` |
+| `marketingUrl` | `营销网站`, `营销网址` |
+| `privacyPolicyUrl` | `隐私政策网址`, `隐私政策链接`, `隐私政策URL` |
 
 ---
 
@@ -159,7 +174,7 @@ asc --app myapp screenshots --screenshots /path/to/custom/screenshots
 The app version must already exist in App Store Connect with an editable state. Create one manually first.
 
 **Some locales are skipped**
-Use a valid App Store Connect locale code in the `语言` column. Metadata upload creates missing App Info or version localizations when the API allows it; if Apple rejects the locale, confirm that the locale is available for the app and version in App Store Connect.
+Use a valid App Store Connect locale code in the `locale` column (`语言` remains supported as a compatible alias). Metadata upload creates missing App Info or version localizations when the API allows it; if Apple rejects the locale, confirm that the locale is available for the app and version in App Store Connect.
 
 **Screenshot dimensions not recognized**
 Check the image size matches one of the supported resolutions in the table above. Export at exactly 1x (no scaling).
