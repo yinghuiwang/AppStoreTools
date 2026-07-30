@@ -23,11 +23,14 @@ module.exports = {
           100: "#dddde3",
           50: "#f0f0f4",
         },
+        // Named amber historically; values are the mint / signal-lime accent scale.
         amber: {
-          650: "#d4880a",
-          600: "#e09413",
-          550: "#e8a125",
-          500: "#f0b03a",
+          650: "#147d72",
+          600: "#199c89",
+          550: "#23c9a8",
+          500: "#8ff5d2",
+          400: "#b9ef5b",
+          300: "#e4ffd0",
         },
       },
     },

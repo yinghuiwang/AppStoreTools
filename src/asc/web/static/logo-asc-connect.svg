@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="App Store Connect connected app logo">
+  <defs>
+    <linearGradient id="connect" x1="5" y1="6" x2="27" y2="25" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8ff5d2"/><stop offset="1" stop-color="#23c9a8"/>
+    </linearGradient>
+  </defs>
+  <rect x="1" y="1" width="30" height="30" rx="8" fill="#101c20"/>
+  <path d="M11.2 10.2h-2.1a4.1 4.1 0 0 0 0 8.2h2.1m9.6-8.2h2.1a4.1 4.1 0 0 1 0 8.2h-2.1M10.7 14.3h10.6" fill="none" stroke="url(#connect)" stroke-width="2.65" stroke-linecap="round"/>
+  <rect x="10.05" y="5.2" width="11.9" height="21.6" rx="3.25" fill="#14262a" stroke="#b9ef5b" stroke-width="1.35"/>
+  <path d="m13.1 20.4 2.35-6.3h1.1l2.35 6.3m-4.7-2.05h3.6" fill="none" stroke="#e4ffd0" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="13.1" y="8.4" width="5.8" height="1.25" rx=".625" fill="#23c9a8"/>
+  <circle cx="16" cy="23.7" r=".9" fill="#b9ef5b"/>
+</svg>

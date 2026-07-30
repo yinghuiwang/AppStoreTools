@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AppStore Tools</title>
+  <link id="asc-favicon" rel="icon" type="image/svg+xml" href="/static/logo.svg?v={{ asset_version }}">
   <link rel="stylesheet" href="/static/fonts.css?v={{ asset_version }}">
   <link rel="stylesheet" href="/static/tailwind.css?v={{ asset_version }}">
   <script src="/static/vendor/htmx-1.9.12.min.js?v={{ asset_version }}"></script>
@@ -19,10 +20,14 @@
       --text-primary: #dddde3;
       --text-secondary: #91919e;
       --text-muted: #6b6b78;
-      --accent: #e8a125;
-      --accent-dim: #d4880a;
-      --accent-glow: rgba(232, 161, 37, 0.15);
-      --accent-glow-strong: rgba(232, 161, 37, 0.3);
+      --accent: #8ff5d2;
+      --accent-dim: #23c9a8;
+      --accent-deep: #147d72;
+      --accent-bright: #e4ffd0;
+      --accent-glow: rgba(35, 201, 168, 0.15);
+      --accent-glow-strong: rgba(35, 201, 168, 0.3);
+      --accent-border: rgba(143, 245, 210, 0.24);
+      --accent-mist: rgba(35, 201, 168, 0.055);
       --success: #34d399;
       --error: #f87171;
       --info: #60a5fa;
@@ -324,8 +329,8 @@
     <!-- Brand -->
     <div class="px-5 py-5 border-b border-obsidian-700">
       <div class="flex items-center gap-2.5">
-        <div class="w-7 h-7 rounded-md flex items-center justify-center" style="background: linear-gradient(135deg, var(--accent-dim), var(--accent));">
-          <svg class="w-4 h-4 text-obsidian-950" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z"/></svg>
+        <div class="w-7 h-7 shrink-0" aria-hidden="true">
+          <img class="w-full h-full" src="/static/logo.svg?v={{ asset_version }}" alt="">
         </div>
         <div>
           <span class="font-semibold text-sm tracking-tight text-obsidian-50">AppStore</span>
@@ -444,7 +449,7 @@
   </aside>
 
   <!-- Main content -->
-  <main class="flex-1 flex overflow-hidden page-enter" style="background: radial-gradient(ellipse at 20% 0%, rgba(232,161,37,0.03) 0%, transparent 50%), var(--bg-base);">
+  <main class="flex-1 flex overflow-hidden page-enter" style="background: radial-gradient(ellipse at 20% 0%, var(--accent-mist) 0%, transparent 50%), var(--bg-base);">
     <!-- Content area -->
     <div class="flex-1 overflow-y-auto p-8 min-w-0">
       {% block content %}{% endblock %}
@@ -543,6 +548,33 @@
       if (stored === 'zh' || stored === 'en') {
         window.__ascSetLang(stored);
       }
+    })();
+
+    (function syncAscFavicon() {
+      var styles = getComputedStyle(document.documentElement);
+      var deep = (styles.getPropertyValue('--accent-deep') || '#147d72').trim() || '#147d72';
+      var dim = (styles.getPropertyValue('--accent-dim') || '#23c9a8').trim() || '#23c9a8';
+      var bright = (styles.getPropertyValue('--accent-bright') || '#e4ffd0').trim() || '#e4ffd0';
+      var svg = [
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">',
+        '<defs><linearGradient id="g" x1="5" y1="6" x2="27" y2="25" gradientUnits="userSpaceOnUse">',
+        '<stop stop-color="' + bright + '"/><stop offset="1" stop-color="' + dim + '"/>',
+        '</linearGradient></defs>',
+        '<rect x="1" y="1" width="30" height="30" rx="8" fill="#101c20"/>',
+        '<path d="M11.2 10.2h-2.1a4.1 4.1 0 0 0 0 8.2h2.1m9.6-8.2h2.1a4.1 4.1 0 0 1 0 8.2h-2.1M10.7 14.3h10.6" fill="none" stroke="url(#g)" stroke-width="2.65" stroke-linecap="round"/>',
+        '<rect x="10.05" y="5.2" width="11.9" height="21.6" rx="3.25" fill="#14262a" stroke="#b9ef5b" stroke-width="1.35"/>',
+        '<path d="m13.1 20.4 2.35-6.3h1.1l2.35 6.3m-4.7-2.05h3.6" fill="none" stroke="' + bright + '" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>',
+        '<rect x="13.1" y="8.4" width="5.8" height="1.25" rx=".625" fill="' + dim + '"/><circle cx="16" cy="23.7" r=".9" fill="#b9ef5b"/></svg>'
+      ].join('');
+      var link = document.getElementById('asc-favicon');
+      if (!link) {
+        link = document.createElement('link');
+        link.id = 'asc-favicon';
+        link.rel = 'icon';
+        link.type = 'image/svg+xml';
+        document.head.appendChild(link);
+      }
+      link.href = 'data:image/svg+xml,' + encodeURIComponent(svg);
     })();
   </script>
 
