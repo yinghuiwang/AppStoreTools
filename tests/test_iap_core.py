@@ -705,3 +705,104 @@ def test_load_iap_config_warns_for_large_iap_review_screenshot(tmp_path, capsys)
     assert subs == []
     out = capsys.readouterr().out
     assert "exceeds 5MB" in out
+
+
+class RecordingSink:
+    def __init__(self):
+        self.logs = []
+        self.progress_events = []
+
+    def on_log(self, message, *, level="info"):
+        self.logs.append((level, message))
+
+    def on_progress(self, *, pct, msg, phase, phase_label, phase_index, phase_total):
+        self.progress_events.append({
+            "pct": pct,
+            "msg": msg,
+            "phase": phase,
+            "phase_label": phase_label,
+            "phase_index": phase_index,
+            "phase_total": phase_total,
+        })
+
+
+def test_iap_skip_existing_still_reports_progress():
+    """Existing-item continue must still advance reporter.progress (skip path)."""
+    from asc.reporting import TaskReporter
+
+    sink = RecordingSink()
+    reporter = TaskReporter(sinks=[sink], verbose=False)
+    existing = [
+        {"id": "iap_old", "attributes": {"productId": "com.example.item1"}},
+    ]
+    api = IapFakeAPI(existing_iaps=existing)
+    items = [
+        {"productId": "com.example.item1", "name": "Item 1"},
+        {"productId": "com.example.item2", "name": "Item 2"},
+    ]
+
+    _upload_iap_core(api, "app1", items, reporter=reporter)
+
+    item_progress = [
+        e for e in sink.progress_events
+        if e["phase"] == "iap_items" and e["msg"].startswith("IAP ") and "/" in e["msg"]
+    ]
+    assert len(item_progress) == 2
+    assert item_progress[0]["msg"] == "IAP 1/2"
+    assert item_progress[1]["msg"] == "IAP 2/2"
+    assert item_progress[-1]["pct"] == 100
+    pcts = [e["pct"] for e in sink.progress_events]
+    assert pcts == sorted(pcts)
+
+
+def test_iap_source_has_no_progress_protocol():
+    src = Path(__file__).resolve().parents[1] / "src" / "asc" / "commands" / "iap.py"
+    assert "[PROGRESS:" not in src.read_text(encoding="utf-8")
+
+
+def test_iap_logs_summaries_via_reporter():
+    from asc.reporting import TaskReporter
+
+    sink = RecordingSink()
+    reporter = TaskReporter(sinks=[sink], verbose=False)
+    api = IapFakeAPI()
+    items = [{"productId": "com.example.item1", "name": "Item 1"}]
+
+    _upload_iap_core(api, "app1", items, reporter=reporter)
+
+    joined = "\n".join(msg for _, msg in sink.logs)
+    assert "上传 IAP" in joined
+    assert "com.example.item1" in joined
+    assert "IAP 上传完成" in joined
+
+
+def test_iap_web_starter_uses_start_background_task():
+    import inspect
+    from asc.web import routes_api
+
+    starter = inspect.getsource(routes_api._start_iap_task)
+    assert "start_background_task" in starter
+    assert "_PROGRESS_RE" not in starter
+    assert "reporter=" in starter
+    assert "reporter._sinks" not in starter
+
+
+def test_iap_phase_plan_folds_when_no_subscriptions():
+    from asc.commands.iap import _iap_phase_plan
+
+    both = _iap_phase_plan(has_items=True, has_groups=True)
+    assert both == [
+        ("parse", 5, "解析"),
+        ("iap_items", 40, "IAP"),
+        ("subscriptions", 55, "订阅"),
+    ]
+    items_only = _iap_phase_plan(has_items=True, has_groups=False)
+    assert items_only == [
+        ("parse", 5, "解析"),
+        ("iap_items", 95, "IAP"),
+    ]
+    groups_only = _iap_phase_plan(has_items=False, has_groups=True)
+    assert groups_only == [
+        ("parse", 5, "解析"),
+        ("subscriptions", 95, "订阅"),
+    ]

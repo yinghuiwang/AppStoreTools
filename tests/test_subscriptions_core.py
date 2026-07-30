@@ -587,3 +587,69 @@ def test_dry_run_performs_no_writes(fake_api, tmp_png):
     )
     writes = [c for c in fake_api.calls if c[0].startswith(write_prefixes)]
     assert writes == [], f"dry-run should not write; got {writes}"
+
+
+class RecordingSink:
+    def __init__(self):
+        self.logs = []
+        self.progress_events = []
+
+    def on_log(self, message, *, level="info"):
+        self.logs.append((level, message))
+
+    def on_progress(self, *, pct, msg, phase, phase_label, phase_index, phase_total):
+        self.progress_events.append({
+            "pct": pct,
+            "msg": msg,
+            "phase": phase,
+            "phase_label": phase_label,
+            "phase_index": phase_index,
+            "phase_total": phase_total,
+        })
+
+
+def test_subscription_skip_existing_still_reports_progress(fake_api, tmp_png):
+    """Skipped existing subscription must still call reporter.progress."""
+    from asc.reporting import TaskReporter
+
+    g = fake_api.create_subscription_group("app1", "Pro")
+    gid = g["data"]["id"]
+    fake_api.create_subscription(gid, {
+        "productId": "com.a.monthly",
+        "name": "old",
+        "subscriptionPeriod": "ONE_MONTH",
+        "groupLevel": 1,
+    })
+    groups = [{
+        "referenceName": "Pro",
+        "localizations": {"en-US": {"name": "Pro"}},
+        "subscriptions": [
+            _min_sub(tmp_png, "com.a.monthly"),
+            _min_sub(tmp_png, "com.a.yearly", level=2),
+        ],
+    }]
+    fake_api.find_subscription_price_point = lambda s, t, a: "pp_usd_999"
+
+    sink = RecordingSink()
+    reporter = TaskReporter(sinks=[sink], verbose=False)
+    _upload_subscriptions_core(
+        fake_api, "app1", groups,
+        update_existing=False, dry_run=False, reporter=reporter,
+    )
+
+    sub_progress = [
+        e for e in sink.progress_events
+        if e["phase"] == "subscriptions" and e["msg"].startswith("订阅 ")
+        and "/" in e["msg"]
+    ]
+    assert len(sub_progress) == 2
+    assert sub_progress[0]["msg"] == "订阅 1/2"
+    assert sub_progress[1]["msg"] == "订阅 2/2"
+    assert sub_progress[-1]["pct"] == 100
+
+
+def test_subscriptions_source_has_no_progress_protocol():
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parents[1] / "src" / "asc" / "commands" / "subscriptions.py"
+    assert "[PROGRESS:" not in src.read_text(encoding="utf-8")

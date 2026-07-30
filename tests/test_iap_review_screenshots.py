@@ -363,3 +363,86 @@ def test_upload_review_screenshots_continues_after_failure(tmp_path):
     assert result.uploaded == 1
     assert result.failed == 1
     assert result.failures == [("coins.100", "commit failed")]
+
+
+class RecordingSink:
+    def __init__(self):
+        self.logs = []
+        self.progress_events = []
+
+    def on_log(self, message, *, level="info"):
+        self.logs.append((level, message))
+
+    def on_progress(self, *, pct, msg, phase, phase_label, phase_index, phase_total):
+        self.progress_events.append({
+            "pct": pct,
+            "msg": msg,
+            "phase": phase,
+            "phase_label": phase_label,
+            "phase_index": phase_index,
+            "phase_total": phase_total,
+        })
+
+
+def test_upload_review_screenshots_skip_still_reports_progress(tmp_path):
+    """Skip path (existing online screenshot) must still advance progress."""
+    from pathlib import Path
+    from asc.reporting import TaskReporter
+
+    api = UploadReviewScreenshotFakeAPI()
+    api.iap_shots["iap_1"] = [{"id": "existing"}]
+    shot = tmp_path / "iap.png"
+    shot.write_bytes(b"iap")
+    other = tmp_path / "sub.jpg"
+    other.write_bytes(b"sub")
+
+    sink = RecordingSink()
+    reporter = TaskReporter(sinks=[sink], verbose=False)
+    result = upload_review_screenshots(
+        api,
+        [
+            ReviewScreenshotUploadItem(
+                kind="iap", id="iap_1", product_id="coins.100", path=str(shot)
+            ),
+            ReviewScreenshotUploadItem(
+                kind="subscription",
+                id="sub_1",
+                product_id="premium.monthly",
+                path=str(other),
+            ),
+        ],
+        reporter=reporter,
+    )
+
+    assert result.skipped == 1
+    assert result.uploaded == 1
+    upload_progress = [
+        e for e in sink.progress_events
+        if e["phase"] == "upload" and e["msg"].startswith("IAP 审核截图 ")
+    ]
+    assert len(upload_progress) == 2
+    assert upload_progress[-1]["pct"] == 100
+    assert upload_progress[-1]["msg"] == "IAP 审核截图 2/2"
+
+
+def test_iap_review_screenshots_source_has_no_progress_protocol():
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parents[1]
+        / "src"
+        / "asc"
+        / "commands"
+        / "iap_review_screenshots.py"
+    )
+    assert "[PROGRESS:" not in src.read_text(encoding="utf-8")
+
+
+def test_iap_review_web_starter_uses_start_background_task():
+    import inspect
+    from asc.web import routes_api
+
+    starter = inspect.getsource(routes_api._start_iap_review_screenshots_task)
+    assert "start_background_task" in starter
+    assert "_PROGRESS_RE" not in starter
+    assert "reporter=" in starter

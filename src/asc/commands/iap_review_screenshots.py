@@ -13,6 +13,7 @@ from asc.config import Config
 from asc.error_handler import get_action_hint
 from asc.guard import Guard, GuardViolationError
 from asc.i18n import HELP, t
+from asc.reporting import TaskReporter, make_cli_reporter
 from asc.utils import make_api_from_config, resolve_app_profile
 
 
@@ -247,10 +248,30 @@ def _has_existing_review_screenshot(api, item: ReviewScreenshotUploadItem) -> bo
 
 
 def upload_review_screenshots(
-    api, items: list[ReviewScreenshotUploadItem], dry_run: bool = False
+    api,
+    items: list[ReviewScreenshotUploadItem],
+    dry_run: bool = False,
+    reporter: TaskReporter | None = None,
+    verbose: bool = False,
+    manage_phases: bool = True,
+    finalize: bool = True,
 ) -> ReviewScreenshotUploadResult:
+    if reporter is None:
+        reporter = make_cli_reporter(verbose=verbose)
+
+    if manage_phases:
+        reporter.set_phases([("upload", 100, "上传")])
+    reporter.phase("upload")
+
     result = ReviewScreenshotUploadResult()
     total = len(items)
+    if total == 0:
+        reporter.progress(1, 1, msg="IAP 审核截图 0/0")
+        if finalize:
+            reporter.done("IAP 审核截图上传完成")
+        else:
+            reporter.log("IAP 审核截图上传完成")
+        return result
 
     for idx, item in enumerate(items, start=1):
         try:
@@ -258,15 +279,15 @@ def upload_review_screenshots(
             if not validation.ok:
                 result.failed += 1
                 result.failures.append((item.product_id, validation.error))
-                print(f"  ❌ {item.product_id}: {validation.error}")
+                reporter.log(f"  ❌ {item.product_id}: {validation.error}")
                 continue
 
             if validation.warning:
-                print(f"  ⚠️  {item.product_id}: {validation.warning}")
+                reporter.log(f"  ⚠️  {item.product_id}: {validation.warning}")
 
             if _has_existing_review_screenshot(api, item):
                 result.skipped += 1
-                print(f"  {item.product_id}: 审核截图已存在，跳过")
+                reporter.log(f"  {item.product_id}: 审核截图已存在，跳过")
                 continue
 
             path = validation.path
@@ -275,7 +296,7 @@ def upload_review_screenshots(
 
             if dry_run:
                 result.skipped += 1
-                print(f"  [预览] {item.product_id}: 将上传审核截图 {path.name}")
+                reporter.log(f"  [预览] {item.product_id}: 将上传审核截图 {path.name}")
                 continue
 
             if item.kind == "iap":
@@ -286,15 +307,20 @@ def upload_review_screenshots(
                 raise ValueError(f"unsupported review screenshot kind: {item.kind}")
 
             result.uploaded += 1
-            print(f"  {item.product_id}: 审核截图 {path.name} 上传 ✅")
+            reporter.log(f"  {item.product_id}: 审核截图 {path.name} 上传 ✅")
         except Exception as exc:
             result.failed += 1
             result.failures.append((item.product_id, str(exc)))
-            print(f"  ❌ {item.product_id}: {exc}")
+            reporter.log(f"  ❌ {item.product_id}: {exc}")
         finally:
-            pct = int(idx / total * 100) if total else 100
-            print(f"[PROGRESS:{pct}:IAP 审核截图 {idx}/{total}]")
+            reporter.progress(
+                idx, total, msg=f"IAP 审核截图 {idx}/{total}"
+            )
 
+    if finalize:
+        reporter.done("IAP 审核截图上传完成")
+    else:
+        reporter.log("IAP 审核截图上传完成")
     return result
 
 
@@ -374,6 +400,7 @@ def cmd_iap_screenshots(
         False, "--no-prompt", help="不交互提示，仅上传配置中已有默认路径的截图"
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="跳过上传确认"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed progress logs"),
 ):
     """Upload missing IAP and subscription review screenshots."""
     config = Config(app)
@@ -433,7 +460,7 @@ def cmd_iap_screenshots(
             typer.echo("已取消。")
             raise typer.Exit(1)
 
-    result = upload_review_screenshots(api, upload_items, dry_run=dry_run)
+    result = upload_review_screenshots(api, upload_items, dry_run=dry_run, verbose=verbose)
     typer.echo(
         f"\n完成: uploaded={result.uploaded}, skipped={result.skipped}, "
         f"failed={result.failed}"

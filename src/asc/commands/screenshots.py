@@ -16,6 +16,7 @@ from asc.constants import DISPLAY_TYPE_BY_SIZE, SCREENSHOT_FOLDER_TO_LOCALE
 from asc.error_handler import get_action_hint
 from asc.guard import Guard, GuardViolationError
 from asc.progress import ProcessCanceled
+from asc.reporting import TaskReporter, make_cli_reporter
 from asc.utils import make_api_from_config, resolve_app_profile, resolve_locale, md5_of_file
 from asc.i18n import t, ERRORS, HELP
 
@@ -26,7 +27,6 @@ def _detect_display_type(image_path: Path) -> Optional[str]:
     display_type = DISPLAY_TYPE_BY_SIZE.get(size)
     if display_type:
         return display_type
-    print(f"  ⚠️  无法从尺寸 {size} 自动识别设备类型")
     return None
 
 
@@ -45,6 +45,13 @@ def _get_sorted_screenshots(folder: Path) -> list[Path]:
     return sorted(files, key=sort_key)
 
 
+def _finish_screenshots(reporter: TaskReporter, finalize: bool) -> None:
+    if finalize:
+        reporter.done("截图上传完成")
+    else:
+        reporter.log("截图上传完成")
+
+
 def _upload_screenshots_core(
     api,
     app_id: str,
@@ -52,23 +59,39 @@ def _upload_screenshots_core(
     display_type_override: Optional[str] = None,
     dry_run: bool = False,
     cancel_event=None,
+    reporter: TaskReporter | None = None,
+    verbose: bool = False,
+    manage_phases: bool = True,
+    finalize: bool = True,
 ):
     """Core screenshots upload logic"""
-    print("\n" + "=" * 60)
-    print("🖼️  上传截图")
-    print("=" * 60)
+    if reporter is None:
+        reporter = make_cli_reporter(verbose=verbose)
+
+    if manage_phases:
+        reporter.set_phases([
+            ("scan", 5, "扫描"),
+            ("upload", 95, "上传"),
+        ])
+    reporter.phase("scan")
+
+    reporter.log("=" * 60)
+    reporter.log("🖼️  上传截图")
+    reporter.log("=" * 60)
 
     screenshots_path = Path(screenshots_dir)
     if not screenshots_path.exists():
-        print(f"❌ {t(ERRORS['screenshots_dir_not_found']).format(path=screenshots_dir)}")
-        print(f"💡 可使用 --screenshots-dir 参数指定其他路径")
-        return
+        msg = t(ERRORS["screenshots_dir_not_found"]).format(path=screenshots_dir)
+        reporter.fail(f"❌ {msg}")
+        reporter.log("💡 可使用 --screenshots-dir 参数指定其他路径")
+        raise RuntimeError(msg)
 
     version = api.get_editable_version(app_id)
     if not version:
-        print(f"❌ {t(ERRORS['no_editable_version'])}")
-        print(f"💡 请在 App Store Connect 中确认版本状态为可编辑状态")
-        return
+        msg = t(ERRORS["no_editable_version"])
+        reporter.fail(f"❌ {msg}")
+        reporter.log("💡 请在 App Store Connect 中确认版本状态为可编辑状态")
+        raise RuntimeError(msg)
     version_id = version["id"]
 
     ver_locs = api.get_version_localizations(version_id)
@@ -77,7 +100,9 @@ def _upload_screenshots_core(
 
     folders = [f for f in screenshots_path.iterdir() if f.is_dir()]
     if not folders:
-        print("  截图目录中没有子文件夹")
+        reporter.log("  截图目录中没有子文件夹")
+        reporter.progress(1, 1, msg="ok")
+        _finish_screenshots(reporter, finalize)
         return
 
     locale_to_folder: dict[str, Path] = {}
@@ -94,52 +119,84 @@ def _upload_screenshots_core(
                 en_us_folder = folder
                 break
 
-    total_locales = len(ver_loc_map)
-    locale_keys = list(ver_loc_map.keys())
-
+    # Scan: collect per-locale upload jobs; total = image file count.
+    jobs: list[tuple[str, dict, Path, list[Path], str, bool]] = []
     for resolved, loc_data in sorted(ver_loc_map.items()):
         if cancel_event is not None and cancel_event.is_set():
             raise ProcessCanceled("screenshots upload canceled")
-        current_idx = locale_keys.index(resolved) + 1
-        pct = int(current_idx / total_locales * 100)
 
         folder = locale_to_folder.get(resolved)
+        used_fallback = False
         if folder is None:
             if en_us_folder is None:
-                print(
-                    f"\n  ── locale: {resolved} → 无截图文件夹且无 en-US 可回退，跳过 ──"
+                reporter.log(
+                    f"  ── locale: {resolved} → 无截图文件夹且无 en-US 可回退，跳过 ──"
                 )
-                print(f"[PROGRESS:{pct}:截图 {current_idx}/{total_locales} 语言]")
                 continue
-            print(f"\n  ── locale: {resolved} → 无截图文件夹，使用 en-US 截图回退 ──")
             folder = en_us_folder
-        else:
-            print(f"\n  ── 文件夹: {folder.name} → locale: {resolved} ──")
+            used_fallback = True
 
-        localization_id = loc_data["id"]
         files = _get_sorted_screenshots(folder)
         if not files:
-            print("    没有找到截图文件，跳过")
-            print(f"[PROGRESS:{pct}:截图 {current_idx}/{total_locales} 语言]")
+            reporter.log(
+                f"  ── 文件夹: {folder.name} → locale: {resolved} ──"
+            )
+            reporter.log("    没有找到截图文件，跳过")
             continue
-
-        print(f"    找到 {len(files)} 张截图: {[f.name for f in files]}")
 
         display_type = display_type_override
         if not display_type:
             display_type = _detect_display_type(files[0])
         if not display_type:
-            print("💡 无法确定设备类型，请使用 --display-type 手动指定")
-            print(f"[PROGRESS:{pct}:截图 {current_idx}/{total_locales} 语言]")
+            with Image.open(files[0]) as img:
+                size = img.size
+            reporter.log(
+                f"  ── 文件夹: {folder.name} → locale: {resolved} ──"
+            )
+            reporter.log(f"  ⚠️  无法从尺寸 {size} 自动识别设备类型")
+            reporter.log("💡 无法确定设备类型，请使用 --display-type 手动指定")
             continue
-        print(f"    设备类型: {display_type}")
+
+        jobs.append((resolved, loc_data, folder, files, display_type, used_fallback))
+
+    total_files = sum(len(files) for _, _, _, files, _, _ in jobs)
+    reporter.log(f"  待上传截图: {total_files} 张（{len(jobs)} 个语言）")
+    reporter.progress(1, 1, msg="ok")
+    reporter.phase("upload")
+
+    if total_files == 0:
+        _finish_screenshots(reporter, finalize)
+        return
+
+    current = 0
+    for resolved, loc_data, folder, files, display_type, used_fallback in jobs:
+        if cancel_event is not None and cancel_event.is_set():
+            raise ProcessCanceled("screenshots upload canceled")
+
+        if used_fallback:
+            reporter.log(
+                f"  ── locale: {resolved} → 无截图文件夹，使用 en-US 截图回退 ──"
+            )
+        else:
+            reporter.log(
+                f"  ── 文件夹: {folder.name} → locale: {resolved} ──"
+            )
+        reporter.log(f"    找到 {len(files)} 张截图: {[f.name for f in files]}")
+        reporter.log(f"    设备类型: {display_type}")
+
+        localization_id = loc_data["id"]
 
         if dry_run:
             for f in files:
-                print(
+                reporter.debug(
                     f"    [预览] 将上传: {f.name} ({f.stat().st_size / 1024:.0f} KB)"
                 )
-            print(f"[PROGRESS:{pct}:截图 {current_idx}/{total_locales} 语言]")
+                current += 1
+                reporter.progress(
+                    current,
+                    total_files,
+                    msg=f"截图 {current}/{total_files} 文件",
+                )
             continue
 
         sets_resp = api.get_screenshot_sets(localization_id)
@@ -168,25 +225,25 @@ def _upload_screenshots_core(
                 existing_shots = api.get_screenshots_in_set(set_id)
 
             if existing_shots:
-                print(f"    🗑️  删除 {len(existing_shots)} 张已有截图...")
+                reporter.log(f"    🗑️  删除 {len(existing_shots)} 张已有截图...")
                 for shot in existing_shots:
                     if cancel_event is not None and cancel_event.is_set():
                         raise ProcessCanceled("screenshots upload canceled")
                     api.delete_screenshot(shot["id"])
                 time.sleep(1)
         else:
-            print("    创建截图集...")
+            reporter.log("    创建截图集...")
             resp = api.create_screenshot_set(localization_id, display_type)
             set_id = resp["data"]["id"]
 
-        print(f"    截图集 ID: {set_id}")
+        reporter.log(f"    截图集 ID: {set_id}")
 
         for idx, file_path in enumerate(files, 1):
             if cancel_event is not None and cancel_event.is_set():
                 raise ProcessCanceled("screenshots upload canceled")
             filesize = file_path.stat().st_size
             filename = file_path.name
-            print(
+            reporter.log(
                 f"    [{idx}/{len(files)}] 上传: {filename} ({filesize / 1024:.0f} KB)"
             )
 
@@ -207,27 +264,29 @@ def _upload_screenshots_core(
                 check = api.get(f"/v1/appScreenshots/{screenshot_id}")
                 state = check["data"]["attributes"]["assetDeliveryState"]["state"]
                 if state == "COMPLETE":
-                    print("         ✅ 上传完成")
+                    reporter.log("         ✅ 上传完成")
                     break
                 elif state == "FAILED":
                     errors = check["data"]["attributes"]["assetDeliveryState"].get(
                         "errors", []
                     )
-                    print(f"         ❌ 上传失败: {errors}")
-                    print(f"💡 请检查网络连接后重试")
+                    reporter.log(f"         ❌ 上传失败: {errors}")
+                    reporter.log("💡 请检查网络连接后重试")
                     break
                 else:
                     if retry % 5 == 4:
-                        print(f"         ⏳ 处理中 ({state})...")
+                        reporter.debug(f"         ⏳ 处理中 ({state})...")
             else:
-                print("         ⚠️  处理超时，请在 App Store Connect 中检查状态")
+                reporter.log("         ⚠️  处理超时，请在 App Store Connect 中检查状态")
 
-        # Progress output for Web UI
-        current_idx = locale_keys.index(resolved) + 1
-        pct = int(current_idx / total_locales * 100)
-        print(f"[PROGRESS:{pct}:截图 {current_idx}/{total_locales} 语言]")
+            current += 1
+            reporter.progress(
+                current,
+                total_files,
+                msg=f"截图 {current}/{total_files} 文件",
+            )
 
-    print("\n✅ 截图上传完成")
+    _finish_screenshots(reporter, finalize)
 
 
 def cmd_screenshots(
@@ -238,6 +297,7 @@ def cmd_screenshots(
     display_type: Optional[str] = typer.Option(None, "--display-type",
         help=t(HELP['screenshots_display_type']),
     ),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed progress logs"),
 ):
     """Upload screenshots to App Store Connect.
 
@@ -293,4 +353,9 @@ def cmd_screenshots(
             raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
     screenshots_dir = screenshots or config.screenshots_path
-    _upload_screenshots_core(api, app_id, screenshots_dir, display_type, dry_run)
+    try:
+        _upload_screenshots_core(
+            api, app_id, screenshots_dir, display_type, dry_run, verbose=verbose
+        )
+    except RuntimeError:
+        raise typer.Exit(1)

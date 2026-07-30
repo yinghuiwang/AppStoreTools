@@ -1,13 +1,14 @@
 """asc update — check for and install the latest version from GitHub."""
 from __future__ import annotations
 
-import json
 import subprocess
 import sys
 from typing import Optional
 
 import typer
 import requests
+
+from asc.reporting import TaskReporter, make_cli_reporter
 
 GITHUB_API = "https://api.github.com/repos/yinghuiwang/AppStoreTools/releases/latest"
 INSTALL_URL = "https://github.com/yinghuiwang/AppStoreTools.git"
@@ -151,106 +152,174 @@ def _similar_versions(target: str, all_versions: list[str], limit: int = 3) -> l
     return [v for _, v in scored[:limit]]
 
 
-def cmd_update(
-    version: Optional[str] = typer.Option(None, "--version", help="Install a specific version."),
-    branch: Optional[str] = typer.Option(None, "--branch", help="Install from a specific branch."),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt (for CI/scripts)."),
-):
-    """Check for updates and install the latest version from GitHub."""
+def _update_phase_plan() -> list[tuple[str, int, str]]:
+    return [("download", 70, "下载"), ("install", 30, "安装")]
+
+
+class UpdateError(Exception):
+    """User-facing update failure (maps to non-zero CLI exit)."""
+
+
+def _install_with_reporter(
+    reporter: TaskReporter,
+    *,
+    install_ref: str,
+    commit: Optional[str],
+    success_message: str,
+    fail_hint: str,
+) -> None:
+    reporter.phase("install")
+    try:
+        _install_git_ref(install_ref, commit)
+    except subprocess.CalledProcessError as exc:
+        reporter.fail("Update failed. Try manually:")
+        reporter.log(f"  {fail_hint}", level="error")
+        raise UpdateError("install failed") from exc
+    reporter.progress(1, 1, msg="installed")
+    reporter.done(success_message)
+
+
+def _update_core(
+    *,
+    version: Optional[str] = None,
+    branch: Optional[str] = None,
+    yes: bool = False,
+    reporter: TaskReporter | None = None,
+    confirm: bool = False,
+    verbose: bool = False,
+) -> None:
+    """Shared update logic for CLI and Web.
+
+    ``confirm``: when True and ``yes`` is False, prompt before installing the
+    latest release (CLI interactive path only).
+    """
+    if reporter is None:
+        reporter = make_cli_reporter(verbose=verbose)
+
     if version and branch:
-        typer.echo("❌ Cannot use --version and --branch at the same time.", err=True)
-        raise typer.Exit(1)
+        msg = "Cannot use --version and --branch at the same time."
+        reporter.fail(f"❌ {msg}")
+        raise UpdateError(msg)
 
     # Only check editable mode for latest update; version/branch install always proceeds
     if _is_editable() and not version and not branch:
-        typer.echo("Running in development mode (editable install). Skipping auto-update.")
-        typer.echo(f"To update manually: git pull && pip install -e .")
+        reporter.log("Running in development mode (editable install). Skipping auto-update.")
+        reporter.log("To update manually: git pull && pip install -e .")
+        reporter.done()
         return
 
+    reporter.set_phases(_update_phase_plan())
+    reporter.phase("download")
+
     if branch:
-        # Branch installation
-        typer.echo(f"Installing from branch '{branch}'...")
+        reporter.log(f"Installing from branch '{branch}'...")
         commit = _resolve_git_ref_commit(branch)
         if commit:
-            typer.echo(f"Install commit : {commit}")
+            reporter.log(f"Install commit : {commit}")
         else:
-            typer.echo("Install commit : unable to resolve before install")
-        try:
-            _install_git_ref(branch, commit)
-            suffix = f" (commit {commit})" if commit else ""
-            typer.echo(f"Done. asc installed from branch '{branch}'{suffix}.")
-        except subprocess.CalledProcessError:
-            typer.echo("Update failed. Try manually:", err=True)
-            typer.echo(f"  pip install git+https://github.com/yinghuiwang/AppStoreTools.git@{branch}", err=True)
-            raise typer.Exit(1)
+            reporter.log("Install commit : unable to resolve before install")
+        reporter.progress(1, 1, msg="resolved")
+        suffix = f" (commit {commit})" if commit else ""
+        _install_with_reporter(
+            reporter,
+            install_ref=branch,
+            commit=commit,
+            success_message=f"Done. asc installed from branch '{branch}'{suffix}.",
+            fail_hint=f"pip install git+https://github.com/yinghuiwang/AppStoreTools.git@{branch}",
+        )
         return
 
     if version:
-        # Specific version installation
         target_version = version.lstrip("v")
-        typer.echo(f"Installing version {target_version}...")
+        reporter.log(f"Installing version {target_version}...")
 
-        # Check if version exists
         all_versions = _all_versions_from_github()
         if all_versions and f"v{target_version}" not in [f"v{v}" for v in all_versions]:
             similar = _similar_versions(target_version, all_versions)
             similar_str = ", ".join(f"v{v}" for v in similar) if similar else "N/A"
-            typer.echo(f"❌ Version v{target_version} not found.", err=True)
+            reporter.fail(f"❌ Version v{target_version} not found.")
             if similar:
-                typer.echo(f"Similar versions: {similar_str}", err=True)
-            raise typer.Exit(1)
+                reporter.log(f"Similar versions: {similar_str}", level="error")
+            raise UpdateError(f"version not found: {target_version}")
 
         install_version = f"v{target_version}"
         commit = _resolve_git_ref_commit(install_version)
         if commit:
-            typer.echo(f"Install commit : {commit}")
+            reporter.log(f"Install commit : {commit}")
         else:
-            typer.echo("Install commit : unable to resolve before install")
-        try:
-            _install_git_ref(install_version, commit)
-            suffix = f" (commit {commit})" if commit else ""
-            typer.echo(f"Done. asc updated to v{target_version}{suffix}.")
-        except subprocess.CalledProcessError:
-            typer.echo("Update failed. Try manually:", err=True)
-            typer.echo(f"  pip install git+https://github.com/yinghuiwang/AppStoreTools.git@{install_version}", err=True)
-            raise typer.Exit(1)
+            reporter.log("Install commit : unable to resolve before install")
+        reporter.progress(1, 1, msg="resolved")
+        suffix = f" (commit {commit})" if commit else ""
+        _install_with_reporter(
+            reporter,
+            install_ref=install_version,
+            commit=commit,
+            success_message=f"Done. asc updated to v{target_version}{suffix}.",
+            fail_hint=(
+                f"pip install git+https://github.com/yinghuiwang/AppStoreTools.git@"
+                f"{install_version}"
+            ),
+        )
         return
 
     current = _current_version()
-    typer.echo(f"Checking for updates...")
-    typer.echo(f"Current version : {current}")
+    reporter.log("Checking for updates...")
+    reporter.log(f"Current version : {current}")
 
     latest = _latest_version_from_github()
     if not latest:
-        typer.echo("Unable to reach GitHub. Check your internet connection.", err=True)
-        raise typer.Exit(1)
+        reporter.fail("Unable to reach GitHub. Check your internet connection.")
+        raise UpdateError("github unreachable")
 
-    typer.echo(f"Latest version  : {latest}  (github.com/yinghuiwang/AppStoreTools)")
+    reporter.log(f"Latest version  : {latest}  (github.com/yinghuiwang/AppStoreTools)")
 
     if _parse_version(latest) <= _parse_version(current):
-        typer.echo(f"\nasc is already up to date ({current}).")
+        reporter.log(f"\nasc is already up to date ({current}).")
+        reporter.done()
         return
 
-    typer.echo(f"\nUpdate available: {current} → {latest}")
-    if not yes:
-        confirm = typer.confirm("Install now?", default=True)
-        if not confirm:
-            typer.echo("Update cancelled.")
+    reporter.log(f"\nUpdate available: {current} → {latest}")
+    if confirm and not yes:
+        if not typer.confirm("Install now?", default=True):
+            reporter.log("Update cancelled.")
+            reporter.done()
             return
 
-    typer.echo(f"Updating asc to {latest}...")
+    reporter.log(f"Updating asc to {latest}...")
     install_version = f"v{latest}"
     commit = _resolve_git_ref_commit(install_version)
     if commit:
-        typer.echo(f"Install commit : {commit}")
+        reporter.log(f"Install commit : {commit}")
     else:
-        typer.echo("Install commit : unable to resolve before install")
+        reporter.log("Install commit : unable to resolve before install")
+    reporter.progress(1, 1, msg="resolved")
+    suffix = f" (commit {commit})" if commit else ""
+    _install_with_reporter(
+        reporter,
+        install_ref=install_version,
+        commit=commit,
+        success_message=f"Done. asc updated to {latest}{suffix}.",
+        fail_hint=f"pip install git+https://github.com/yinghuiwang/AppStoreTools.git@v{latest}",
+    )
+    reporter.log("Restart your shell or re-run asc for the new version.")
+
+
+def cmd_update(
+    version: Optional[str] = typer.Option(None, "--version", help="Install a specific version."),
+    branch: Optional[str] = typer.Option(None, "--branch", help="Install from a specific branch."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt (for CI/scripts)."),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed progress logs"),
+):
+    """Check for updates and install the latest version from GitHub."""
+    reporter = make_cli_reporter(verbose=verbose)
     try:
-        _install_git_ref(install_version, commit)
-        suffix = f" (commit {commit})" if commit else ""
-        typer.echo(f"Done. asc updated to {latest}{suffix}.")
-        typer.echo("Restart your shell or re-run asc for the new version.")
-    except subprocess.CalledProcessError:
-        typer.echo("Update failed. Try manually:", err=True)
-        typer.echo(f"  pip install git+https://github.com/yinghuiwang/AppStoreTools.git@v{latest}", err=True)
+        _update_core(
+            version=version,
+            branch=branch,
+            yes=yes,
+            reporter=reporter,
+            confirm=True,
+            verbose=verbose,
+        )
+    except UpdateError:
         raise typer.Exit(1)

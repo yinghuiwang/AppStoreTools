@@ -356,9 +356,10 @@ function metadataLogOptions() {
   const d = Alpine.$data(root);
   return {
     title: window.t('metadata.log_title'),
-    onProgress: (pct, msg) => {
-      if (pct != null) d.progress = pct;
-      d.progressMsg = msg || '';
+    onProgress: (progress) => {
+      if (!progress) return;
+      if (progress.pct != null) d.progress = progress.pct;
+      d.progressMsg = progress.msg || '';
     },
     onDone: () => { d.status = 'done'; d.progress = 100; },
     onError: () => { d.status = 'error'; },

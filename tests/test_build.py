@@ -30,11 +30,12 @@ class _FakeSpinner:
     returncode: int = 0
     stderr: str = ""
 
-    def __init__(self, label, *, log_path, verbose=False, tty=None):
+    def __init__(self, label, *, log_path, verbose=False, tty=None, on_log_line=None):
         self.label = label
         self.log_path = log_path
+        self.on_log_line = on_log_line
 
-    def run(self, cmd, output_callback=None):
+    def run(self, cmd, output_callback=None, cancel_event=None):
         # Write a minimal log file so helpers that read it don't error
         Path(self.log_path).parent.mkdir(parents=True, exist_ok=True)
         Path(self.log_path).write_text(self.__class__.stderr or "")
@@ -395,13 +396,13 @@ def test_upload_ipa_verbose_streams_altool_output(tmp_path, monkeypatch):
     captured = {}
 
     class _TrackingSpinner(_FakeSpinner):
-        def __init__(self, label, *, log_path, verbose=False, tty=None):
-            super().__init__(label, log_path=log_path, verbose=verbose, tty=tty)
+        def __init__(self, label, *, log_path, verbose=False, tty=None, on_log_line=None):
+            super().__init__(label, log_path=log_path, verbose=verbose, tty=tty, on_log_line=on_log_line)
             captured["verbose"] = verbose
 
-        def run(self, cmd, output_callback=None):
+        def run(self, cmd, output_callback=None, cancel_event=None):
             captured["has_output_callback"] = output_callback is not None
-            return super().run(cmd, output_callback=output_callback)
+            return super().run(cmd, output_callback=output_callback, cancel_event=cancel_event)
 
     _TrackingSpinner.returncode = 0
     _TrackingSpinner.stderr = "Uploading package: 25%"

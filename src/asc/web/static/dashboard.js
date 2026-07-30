@@ -341,8 +341,8 @@
     var titleText = titleNode ? titleNode.textContent : "";
     TaskLogDrawer.open(taskId, {
       title: tt("dashboard.task_log_title", { title: titleText || tt("dashboard.task_fallback") }),
-      onProgress: function (pct, msg) {
-        updateTaskProgress(taskId, { pct: pct, msg: msg });
+      onProgress: function (progress) {
+        updateTaskProgress(taskId, progress);
       },
       onDone: function () { refreshDashboard(); },
       onError: function () { refreshDashboard(); },

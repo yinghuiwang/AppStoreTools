@@ -95,8 +95,8 @@ def test_dashboard_javascript_wires_progress_callback_through_task_log_drawer(cl
     assert script.status_code == 200
     assert page.status_code == 200
     assert "function updateTaskProgress(taskId, progress)" in script.text
-    assert "onProgress: function (pct, msg)" in script.text
-    assert "updateTaskProgress(taskId, { pct: pct, msg: msg })" in script.text
+    assert "onProgress: function (progress)" in script.text
+    assert "updateTaskProgress(taskId, progress)" in script.text
     # Error filter/copy tooling now lives in the shared drawer markup, not dashboard.js.
     assert "renderLogEntries" not in script.text
     assert 'data-task-log-errors aria-pressed="false"' in page.text
@@ -1513,7 +1513,14 @@ def test_task_store_create_with_profile_and_progress():
     task = store.get(task_id)
     assert task["kind"] == "metadata"
     assert task["profile"] == "myapp"
-    assert task["progress"] == {"pct": 0, "msg": ""}
+    assert task["progress"] == {
+        "pct": 0,
+        "msg": "",
+        "phase": "",
+        "phase_label": "",
+        "phase_index": 0,
+        "phase_total": 0,
+    }
 
 
 def test_task_store_list_recent_includes_profile():
@@ -1555,7 +1562,14 @@ def test_task_store_set_progress():
     task_id = store.create("build", profile="staging")
     store.set_progress(task_id, 45, "元数据 5/11 语言")
     task = store.get(task_id)
-    assert task["progress"] == {"pct": 45, "msg": "元数据 5/11 语言"}
+    assert task["progress"] == {
+        "pct": 45,
+        "msg": "元数据 5/11 语言",
+        "phase": "",
+        "phase_label": "",
+        "phase_index": 0,
+        "phase_total": 0,
+    }
 
 
 def test_metadata_check_returns_level(client):
@@ -1623,8 +1637,9 @@ def test_metadata_core_outputs_progress(capsys):
     ]
     _upload_metadata_core(mock_api, "app1", metadata_list, dry_run=True)
     captured = capsys.readouterr()
-    assert "[PROGRESS:50:元数据 1/2 语言]" in captured.out
-    assert "[PROGRESS:100:元数据 2/2 语言]" in captured.out
+    assert "[PROGRESS:" not in captured.out
+    assert "[52%] 上传:" in captured.out or "[52%] 上传" in captured.out
+    assert "[100%]" in captured.out
 
 
 def test_screenshots_core_outputs_progress(capsys, tmp_path):
@@ -1647,17 +1662,9 @@ def test_screenshots_core_outputs_progress(capsys, tmp_path):
          patch("asc.commands.screenshots._get_sorted_screenshots", return_value=[en_dir / "screen1.png"]):
         _upload_screenshots_core(mock_api, "app1", str(tmp_path), dry_run=True)
     captured = capsys.readouterr()
-    assert "[PROGRESS:" in captured.out
+    assert "[PROGRESS:" not in captured.out
+    assert "[100%]" in captured.out
     assert "截图" in captured.out
-
-
-def test_progress_parsing_in_drain_loop():
-    import re
-    line = "[PROGRESS:45:元数据 5/11 语言]"
-    match = re.match(r"\[PROGRESS:(\d+):(.+)\]", line)
-    assert match is not None
-    assert match.group(1) == "45"
-    assert match.group(2) == "元数据 5/11 语言"
 
 
 def test_sse_stream_emits_progress():
@@ -1795,6 +1802,12 @@ def test_task_log_drawer_javascript_exposes_public_api(client):
     assert "data-task-log-errors" in body
     assert "data-task-log-follow" in body
     assert "drawer.missing" in body or "window.t(\"drawer.missing\")" in body or "任务不存在或已被清理" in body
+
+
+def test_task_log_drawer_forwards_phase_fields(client):
+    body = client.get("/static/task-log-drawer.js").text
+    assert "onProgress" in body
+    assert "phase_index" in body
 
 
 def test_base_layout_includes_task_log_drawer_assets(client):

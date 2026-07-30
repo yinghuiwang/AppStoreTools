@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Optional
+from threading import Event
+from typing import Any, Optional, Sequence
 
 import typer
 
 from asc.config import Config
 from asc.error_handler import get_action_hint
 from asc.guard import Guard, GuardViolationError
+from asc.progress import ProcessCanceled
+from asc.reporting import TaskReporter, make_cli_reporter
 from asc.utils import make_api_from_config, resolve_app_profile, resolve_locale
 from asc.i18n import t, ERRORS, HELP
 
@@ -58,6 +61,303 @@ def _parse_whats_new_file(file_path: str) -> dict[str, str]:
     return entries
 
 
+def _whats_new_phase_plan(*, translate: bool, upload: bool = True) -> list[tuple[str, int, str]]:
+    """Return phase weights for What's New modes."""
+    if translate and upload:
+        return [("translate", 60, "翻译"), ("upload", 40, "上传")]
+    if translate:
+        return [("translate", 100, "翻译")]
+    return [("upload", 100, "上传")]
+
+
+def _make_translator(config: Config):
+    from asc.llm import LLMClient
+    from asc.services.translator import OpenAITranslator
+
+    llm_client = LLMClient(
+        api_key=config.llm_api_key,
+        base_url=config.llm_base_url,
+        model=config.llm_model,
+    )
+    return OpenAITranslator(llm_client)
+
+
+def _whats_new_translate_locales(
+    translator: Any,
+    text: str,
+    target_locales: Sequence[str],
+    source_locale: str,
+    *,
+    reporter: TaskReporter,
+    cancel_event: Event | None = None,
+) -> tuple[dict[str, str], list[str]]:
+    """Translate text for each target locale; failed locales log + still advance progress."""
+    translations: dict[str, str] = {}
+    errors: list[str] = []
+    total = len(target_locales)
+    if total == 0:
+        reporter.progress(1, 1, msg="无目标语言")
+        return translations, errors
+
+    for i, locale in enumerate(target_locales, start=1):
+        if cancel_event is not None and cancel_event.is_set():
+            raise ProcessCanceled("whats-new translate canceled")
+        try:
+            result = translator.translate(text, locale, source_locale)
+            if result:
+                translations[locale] = result
+                preview = result[:50] + "..." if len(result) > 50 else result
+                reporter.log(f"  {locale}: {preview}")
+            else:
+                errors.append(f"{locale}: empty translation")
+                reporter.log(f"  ⚠️  {locale}: empty translation")
+        except Exception as exc:
+            errors.append(f"{locale}: {exc}")
+            reporter.log(f"  ⚠️  {locale} 翻译失败: {exc}")
+        reporter.progress(i, total, msg=f"翻译 {i}/{total} · {locale}")
+    return translations, errors
+
+
+def _upload_whats_new_locales(
+    api: Any,
+    ver_loc_map: dict[str, dict],
+    entries: dict[str, str],
+    *,
+    dry_run: bool = False,
+    reporter: TaskReporter,
+    cancel_event: Event | None = None,
+) -> int:
+    """Upload What's New per locale. Returns success count. Missing locales skip but still progress."""
+    items = list(entries.items())
+    total = len(items)
+    if total == 0:
+        reporter.progress(1, 1, msg="无上传项")
+        return 0
+
+    success = 0
+    for i, (locale, content) in enumerate(items, start=1):
+        if cancel_event is not None and cancel_event.is_set():
+            raise ProcessCanceled("whats-new upload canceled")
+        if locale not in ver_loc_map:
+            reporter.log(f"  ⚠️  {locale}: 不存在，跳过")
+            reporter.progress(i, total, msg=f"上传 {i}/{total} · {locale}")
+            continue
+        if dry_run:
+            preview = content[:50] + "..." if len(content) > 50 else content
+            reporter.log(f"  [DRYRUN] {locale}: {preview}")
+            reporter.progress(i, total, msg=f"上传 {i}/{total} · {locale}")
+            success += 1
+            continue
+        api.update_version_localization(ver_loc_map[locale]["id"], {"whatsNew": content})
+        reporter.log(f"  ✅ {locale}: 已上传")
+        reporter.progress(i, total, msg=f"上传 {i}/{total} · {locale}")
+        success += 1
+    return success
+
+
+def _whats_new_core(
+    api: Any,
+    app_id: str,
+    *,
+    text: str | None = None,
+    translations: dict[str, str] | None = None,
+    locales: list[str] | None = None,
+    translate: bool = False,
+    source_locale: str = "auto",
+    dry_run: bool = False,
+    translator: Any | None = None,
+    reporter: TaskReporter | None = None,
+    cancel_event: Event | None = None,
+    manage_phases: bool = True,
+    finalize: bool = True,
+    verbose: bool = False,
+    require_editable_state: bool = False,
+) -> dict[str, Any]:
+    """Shared What's New translate / upload core for CLI and Web.
+
+    Returns dict with keys: success, translations, errors, uploaded, version.
+    """
+    if reporter is None:
+        reporter = make_cli_reporter(verbose=verbose)
+
+    version = api.get_editable_version(app_id)
+    if not version:
+        reporter.fail(t(ERRORS["no_editable_version"]))
+        raise RuntimeError(t(ERRORS["no_editable_version"]))
+
+    if require_editable_state:
+        app_store_state = version["attributes"].get("appStoreState", "")
+        editable_states = {"PREPARE_FOR_SUBMISSION", "DEVELOPER_REJECTED", "REJECTED"}
+        if app_store_state and app_store_state not in editable_states:
+            state_hint = {
+                "READY_FOR_SALE": "版本已上架，无法编辑更新说明。如需修改，请创建新版本。",
+                "WAITING_FOR_REVIEW": "版本正在等待审核，请先拒绝版本后再修改。",
+                "IN_REVIEW": "版本正在审核中，无法修改更新说明。",
+                "PENDING_APPLE_RELEASE": "版本待 Apple 发布，无法修改更新说明。",
+                "ACCEPTED": "版本已通过审核，无法修改更新说明。",
+            }.get(app_store_state, f"当前版本状态「{app_store_state}」不允许编辑更新说明。")
+            msg = (
+                f"无法编辑 What's New：{state_hint}\n"
+                f"💡 可编辑状态：{', '.join(sorted(editable_states))}"
+            )
+            reporter.fail(msg)
+            raise RuntimeError(msg)
+
+    version_id = version["id"]
+    version_string = version["attributes"].get("versionString", "?")
+    reporter.log(f"📋 更新版本描述 (What's New)  版本: {version_string}")
+
+    ver_locs = api.get_version_localizations(version_id)
+    if not ver_locs:
+        reporter.fail(t(ERRORS["no_localization"]))
+        raise RuntimeError(t(ERRORS["no_localization"]))
+    ver_loc_map = {loc["attributes"]["locale"]: loc for loc in ver_locs}
+
+    do_translate = bool(translate) and translations is None and bool(text)
+    do_upload = True
+    if manage_phases:
+        reporter.set_phases(_whats_new_phase_plan(translate=do_translate, upload=do_upload))
+
+    result_translations = dict(translations) if translations is not None else None
+    errors: list[str] = []
+    uploaded = 0
+
+    if do_translate:
+        if translator is None:
+            raise ValueError("translator is required when translate=True")
+        source = source_locale or "auto"
+        target_locs = ver_locs
+        if locales:
+            target_locs = [loc for loc in ver_locs if loc["attributes"]["locale"] in locales]
+            if not target_locs:
+                raise RuntimeError(f"指定的语言不存在，可用语言: {list(ver_loc_map.keys())}")
+        target_locales = [
+            loc["attributes"]["locale"]
+            for loc in target_locs
+            if source == "auto" or loc["attributes"]["locale"] != source
+        ]
+        reporter.phase("translate")
+        reporter.log(f"🌐 翻译模式: 源语言={source}, 目标={len(target_locales)} 个语言")
+        result_translations, errors = _whats_new_translate_locales(
+            translator,
+            text or "",
+            target_locales,
+            source,
+            reporter=reporter,
+            cancel_event=cancel_event,
+        )
+        if not result_translations:
+            msg = t(ERRORS["llm_all_translations_failed"])
+            if errors:
+                msg = f"{msg} {'; '.join(errors)}"
+            reporter.fail(msg)
+            raise RuntimeError(msg)
+
+    # Resolve upload entries
+    if result_translations is not None:
+        entries = result_translations
+    else:
+        target_locs = ver_locs
+        if locales:
+            target_locs = [loc for loc in ver_locs if loc["attributes"]["locale"] in locales]
+            if not target_locs:
+                raise RuntimeError(f"指定的语言不存在，可用语言: {list(ver_loc_map.keys())}")
+        entries = {loc["attributes"]["locale"]: (text or "") for loc in target_locs}
+
+    reporter.phase("upload")
+    if dry_run:
+        reporter.log("⚠️  预览模式，不实际上传")
+    uploaded = _upload_whats_new_locales(
+        api,
+        ver_loc_map,
+        entries,
+        dry_run=dry_run,
+        reporter=reporter,
+        cancel_event=cancel_event,
+    )
+
+    if errors:
+        reporter.log(f"⚠️  以下语言翻译失败: {', '.join(errors)}")
+    summary = f"✅ 版本描述更新完成 ({uploaded}/{len(entries)} 成功)"
+    if finalize:
+        reporter.done(summary)
+    else:
+        reporter.log(summary)
+
+    return {
+        "success": True,
+        "translations": result_translations,
+        "errors": errors,
+        "uploaded": uploaded,
+        "version": version_string,
+        "source_locale": source_locale,
+    }
+
+
+def _whats_new_translate_only_core(
+    api: Any,
+    app_id: str,
+    *,
+    text: str,
+    source_locale: str = "auto",
+    translator: Any,
+    reporter: TaskReporter | None = None,
+    cancel_event: Event | None = None,
+    manage_phases: bool = True,
+    finalize: bool = True,
+    verbose: bool = False,
+) -> dict[str, Any]:
+    """Preview-translate only: phase translate 100%."""
+    if reporter is None:
+        reporter = make_cli_reporter(verbose=verbose)
+
+    version = api.get_editable_version(app_id)
+    if not version:
+        reporter.fail(t(ERRORS["no_editable_version"]))
+        raise RuntimeError(t(ERRORS["no_editable_version"]))
+    version_id = version["id"]
+    ver_locs = api.get_version_localizations(version_id)
+    all_locales = [loc["attributes"]["locale"] for loc in ver_locs]
+    source = source_locale or "auto"
+    target_locales = (
+        [locale for locale in all_locales if locale != source]
+        if source != "auto"
+        else all_locales
+    )
+
+    if manage_phases:
+        reporter.set_phases(_whats_new_phase_plan(translate=True, upload=False))
+    reporter.phase("translate")
+    reporter.log(f"🌐 预览翻译: 源语言={source}, 目标={len(target_locales)} 个语言")
+    translations, errors = _whats_new_translate_locales(
+        translator,
+        text,
+        target_locales,
+        source,
+        reporter=reporter,
+        cancel_event=cancel_event,
+    )
+    if not translations:
+        msg = "All translations failed."
+        if errors:
+            msg = f"{msg} {'; '.join(errors)}"
+        reporter.fail(msg)
+        raise RuntimeError(msg)
+
+    summary = f"✅ 翻译完成 ({len(translations)}/{len(target_locales)})"
+    if finalize:
+        reporter.done(summary)
+    else:
+        reporter.log(summary)
+
+    return {
+        "success": True,
+        "translations": translations,
+        "errors": errors,
+        "source_locale": source,
+    }
+
+
 def cmd_whats_new(
     text: Optional[str] = typer.Option(
         None, "--text", "-t", help=t(HELP['release_notes_text'])
@@ -79,6 +379,7 @@ def cmd_whats_new(
         None, "--source-locale", "-s",
         help=t(HELP['llm_source_locale']),
     ),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed progress logs"),
 ):
     """Update What's New (release notes) for the current version.
 
@@ -139,24 +440,7 @@ def cmd_whats_new(
                 typer.echo(f"💡 {hint}", err=True)
             raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
-
-    version = api.get_editable_version(app_id)
-    if not version:
-        typer.echo(f"❌ {t(ERRORS['no_editable_version'])}", err=True)
-        typer.echo("💡 请在 App Store Connect 中确认版本状态为可编辑状态（如 PREPARE_FOR_SUBMISSION）", err=True)
-        raise typer.Exit(1)
-    version_id = version["id"]
-    version_string = version["attributes"].get("versionString", "?")
-    print("\n📋 更新版本描述 (What's New)")
-    print(f"  版本: {version_string}")
-
-    ver_locs = api.get_version_localizations(version_id)
-    if not ver_locs:
-        typer.echo(f"❌ {t(ERRORS['no_localization'])}", err=True)
-        typer.echo("💡 请先通过 asc metadata 命令上传至少一个本地化描述文件", err=True)
-        raise typer.Exit(1)
-    ver_loc_map = {loc["attributes"]["locale"]: loc for loc in ver_locs}
-    existing_locales = list(ver_loc_map.keys())
+    reporter = make_cli_reporter(verbose=verbose)
 
     if file:
         file_path = Path(file)
@@ -170,114 +454,74 @@ def cmd_whats_new(
             typer.echo("💡 请确保文件格式正确，包含有效的更新描述文本", err=True)
             raise typer.Exit(1)
 
+        version = api.get_editable_version(app_id)
+        if not version:
+            typer.echo(f"❌ {t(ERRORS['no_editable_version'])}", err=True)
+            typer.echo("💡 请在 App Store Connect 中确认版本状态为可编辑状态（如 PREPARE_FOR_SUBMISSION）", err=True)
+            raise typer.Exit(1)
+        version_id = version["id"]
+        version_string = version["attributes"].get("versionString", "?")
+        reporter.log(f"📋 更新版本描述 (What's New)  版本: {version_string}")
+        ver_locs = api.get_version_localizations(version_id)
+        if not ver_locs:
+            typer.echo(f"❌ {t(ERRORS['no_localization'])}", err=True)
+            typer.echo("💡 请先通过 asc metadata 命令上传至少一个本地化描述文件", err=True)
+            raise typer.Exit(1)
+        existing_locales = [loc["attributes"]["locale"] for loc in ver_locs]
+        ver_loc_map = {loc["attributes"]["locale"]: loc for loc in ver_locs}
+
+        # Resolve file locales then upload-only
+        resolved_entries: dict[str, str] = {}
         for locale, content in entries.items():
             resolved = resolve_locale(locale, existing_locales)
             preview = content[:60] + "..." if len(content) > 60 else content
-            print(f"\n  ── {locale} → {resolved} ──")
-            print(f"    内容: {preview}")
+            reporter.log(f"  ── {locale} → {resolved} ──  内容: {preview}")
             if resolved not in ver_loc_map:
-                print(f"    ⚠️  locale '{resolved}' 不存在，跳过")
+                reporter.log(f"    ⚠️  locale '{resolved}' 不存在，跳过")
                 continue
-            if not dry_run:
-                api.update_version_localization(
-                    ver_loc_map[resolved]["id"], {"whatsNew": content}
-                )
-                print("    ✅ 已更新")
-    else:
-        locale_list = None
-        if locales:
-            locale_list = [l.strip() for l in locales.split(",")]
+            resolved_entries[resolved] = content
 
-        target_locs = ver_locs
-        if locale_list:
-            target_locs = [
-                loc for loc in ver_locs if loc["attributes"]["locale"] in locale_list
-            ]
-            if not target_locs:
-                typer.echo(
-                    f"❌ 指定的语言不存在，可用语言: {existing_locales}", err=True
-                )
-                raise typer.Exit(1)
-
-        if translate:
-            if not text:
-                typer.echo(f"❌ {t(ERRORS['llm_translate_requires_text'])}", err=True)
-                raise typer.Exit(1)
-
-            if not config.llm_api_key:
-                typer.echo(f"❌ {t(ERRORS['llm_api_key_required'])}", err=True)
-                raise typer.Exit(1)
-
-            from asc.llm import LLMClient
-            from asc.services.translator import OpenAITranslator
-
-            llm_client = LLMClient(
-                api_key=config.llm_api_key,
-                base_url=config.llm_base_url,
-                model=config.llm_model,
-            )
-            translator = OpenAITranslator(llm_client)
-
-            # Source locale for translation (exclude from targets)
-            source = source_locale or "auto"
-            target_locs_for_translate = [
-                loc for loc in target_locs
-                if loc["attributes"]["locale"] != source
-            ] if source != "auto" else target_locs
-
-            translations: dict[str, str] = {}
-            failed_locales: list[str] = []
-
-            print(f"\n🌐 翻译模式: 源语言={source}, 目标={len(target_locs_for_translate)} 个语言")
-
-            for loc in target_locs_for_translate:
-                locale = loc["attributes"]["locale"]
-                try:
-                    result = translator.translate(text, locale, source)
-                    translations[locale] = result
-                    preview = result[:50] + "..." if len(result) > 50 else result
-                    print(f"  {locale}: {preview}")
-                except Exception as e:
-                    failed_locales.append(locale)
-                    print(f"  ⚠️  {locale} 翻译失败: {e}")
-
-            if not translations:
-                typer.echo(f"❌ {t(ERRORS['llm_all_translations_failed'])}", err=True)
-                raise typer.Exit(1)
-
-            if dry_run:
-                print("\n  ⚠️  预览模式，不实际上传")
-                return
-
-            # Upload
-            success_count = 0
-            for loc in target_locs_for_translate:
-                locale = loc["attributes"]["locale"]
-                if locale not in translations:
-                    print(f"  ⚠️  {locale}: 跳过（翻译失败）")
-                    continue
-                loc_id = loc["id"]
-                api.update_version_localization(loc_id, {"whatsNew": translations[locale]})
-                print(f"  ✅ {locale}: 已上传")
-                success_count += 1
-
-            if failed_locales:
-                print(f"\n⚠️  以下语言翻译失败: {', '.join(failed_locales)}")
-            print(f"\n✅ 版本描述更新完成 ({success_count}/{len(translations) + len(failed_locales)} 成功)")
-            return
-
-        preview = text[:80] + "..." if len(text) > 80 else text
-        print(f"  更新内容: {preview}")
-        print(f"  目标语言: {[loc['attributes']['locale'] for loc in target_locs]}")
-
+        reporter.set_phases(_whats_new_phase_plan(translate=False, upload=True))
+        reporter.phase("upload")
         if dry_run:
-            print("  ⚠️  预览模式，不实际更新")
-            return
+            reporter.log("⚠️  预览模式，不实际上传")
+        _upload_whats_new_locales(
+            api,
+            ver_loc_map,
+            resolved_entries,
+            dry_run=dry_run,
+            reporter=reporter,
+        )
+        reporter.done("✅ 版本描述更新完成")
+        return
 
-        for loc in target_locs:
-            locale = loc["attributes"]["locale"]
-            loc_id = loc["id"]
-            api.update_version_localization(loc_id, {"whatsNew": text})
-            print(f"  ✅ {locale}: 已更新")
+    locale_list = None
+    if locales:
+        locale_list = [l.strip() for l in locales.split(",")]
 
-    print("\n✅ 版本描述更新完成")
+    translator = None
+    if translate:
+        if not text:
+            typer.echo(f"❌ {t(ERRORS['llm_translate_requires_text'])}", err=True)
+            raise typer.Exit(1)
+        if not config.llm_api_key:
+            typer.echo(f"❌ {t(ERRORS['llm_api_key_required'])}", err=True)
+            raise typer.Exit(1)
+        translator = _make_translator(config)
+
+    try:
+        _whats_new_core(
+            api,
+            app_id,
+            text=text,
+            locales=locale_list,
+            translate=translate,
+            source_locale=source_locale or "auto",
+            dry_run=dry_run,
+            translator=translator,
+            reporter=reporter,
+            verbose=verbose,
+        )
+    except RuntimeError as exc:
+        typer.echo(f"❌ {exc}", err=True)
+        raise typer.Exit(1)

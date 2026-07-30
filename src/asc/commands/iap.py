@@ -14,6 +14,7 @@ import typer
 from asc.config import Config
 from asc.error_handler import get_action_hint
 from asc.guard import Guard, GuardViolationError
+from asc.reporting import TaskReporter, make_cli_reporter
 from asc.utils import make_api_from_config, resolve_app_profile
 from asc.i18n import t, ERRORS, HELP
 
@@ -144,10 +145,53 @@ def _load_iap_package(file_path: str) -> list[dict]:
     return items
 
 
-def _upload_iap_core(api, app_id: str, iap_items: list[dict], dry_run: bool = False, update_existing: bool = False):
-    print("\n" + "=" * 60)
-    print("🛍️  上传 IAP 包")
-    print("=" * 60)
+def _iap_phase_plan(*, has_items: bool, has_groups: bool) -> list[tuple[str, int, str]]:
+    """Build phase weights; fold missing side into the other upload phase."""
+    if has_items and has_groups:
+        return [
+            ("parse", 5, "解析"),
+            ("iap_items", 40, "IAP"),
+            ("subscriptions", 55, "订阅"),
+        ]
+    if has_items:
+        return [
+            ("parse", 5, "解析"),
+            ("iap_items", 95, "IAP"),
+        ]
+    return [
+        ("parse", 5, "解析"),
+        ("subscriptions", 95, "订阅"),
+    ]
+
+
+def _finish_iap(reporter: TaskReporter, finalize: bool) -> None:
+    if finalize:
+        reporter.done("IAP 上传完成")
+    else:
+        reporter.log("IAP 上传完成")
+
+
+def _upload_iap_core(
+    api,
+    app_id: str,
+    iap_items: list[dict],
+    dry_run: bool = False,
+    update_existing: bool = False,
+    reporter: TaskReporter | None = None,
+    verbose: bool = False,
+    manage_phases: bool = True,
+    finalize: bool = True,
+):
+    if reporter is None:
+        reporter = make_cli_reporter(verbose=verbose)
+
+    if manage_phases:
+        reporter.set_phases([("iap_items", 100, "IAP")])
+    reporter.phase("iap_items")
+
+    reporter.log("=" * 60)
+    reporter.log("🛍️  上传 IAP 包")
+    reporter.log("=" * 60)
 
     existing_iaps = api.list_in_app_purchases(app_id)
     existing_by_product_id = {}
@@ -157,10 +201,18 @@ def _upload_iap_core(api, app_id: str, iap_items: list[dict], dry_run: bool = Fa
             existing_by_product_id[product_id] = iap
 
     total_items = len(iap_items)
+    if total_items == 0:
+        reporter.progress(1, 1, msg="IAP 0/0")
+        _finish_iap(reporter, finalize)
+        return
+
     for idx, item in enumerate(iap_items):
         product_id = str(item.get("productId", "")).strip()
         if not product_id:
-            print("  ❌ 跳过：缺少 productId")
+            reporter.log("  ❌ 跳过：缺少 productId")
+            reporter.progress(
+                idx + 1, total_items, msg=f"IAP {idx + 1}/{total_items}"
+            )
             continue
 
         name = str(item.get("name", "")).strip()
@@ -173,7 +225,7 @@ def _upload_iap_core(api, app_id: str, iap_items: list[dict], dry_run: bool = Fa
         price = item.get("price") if isinstance(item.get("price"), dict) else {}
         localizations = item.get("localizations", {})
 
-        print(f"\n  ── IAP: {product_id} ──")
+        reporter.log(f"  ── IAP: {product_id} ──")
         existing = existing_by_product_id.get(product_id)
 
         attrs = {"productId": product_id}
@@ -187,9 +239,14 @@ def _upload_iap_core(api, app_id: str, iap_items: list[dict], dry_run: bool = Fa
         if existing:
             iap_id = existing["id"]
             if not update_existing:
-                print(f"    已存在 (ID: {iap_id})，跳过（使用 --update-existing 以更新）")
+                reporter.log(
+                    f"    已存在 (ID: {iap_id})，跳过（使用 --update-existing 以更新）"
+                )
+                reporter.progress(
+                    idx + 1, total_items, msg=f"IAP {idx + 1}/{total_items}"
+                )
                 continue
-            print(f"    已存在 (ID: {iap_id})，执行更新")
+            reporter.log(f"    已存在 (ID: {iap_id})，执行更新")
             if not dry_run:
                 update_attrs = {}
                 if name:
@@ -197,32 +254,43 @@ def _upload_iap_core(api, app_id: str, iap_items: list[dict], dry_run: bool = Fa
                 if update_attrs:
                     api.update_in_app_purchase(iap_id, update_attrs)
         else:
-            print("    不存在，执行创建")
+            reporter.log("    不存在，执行创建")
             if not dry_run:
                 create_resp = api.create_in_app_purchase(app_id, attrs)
                 iap_id = create_resp["data"]["id"]
-                print(f"    ✅ 已创建，ID: {iap_id}")
+                reporter.log(f"    ✅ 已创建，ID: {iap_id}")
             else:
                 iap_id = "DRY_RUN_ID"
 
-        _sync_iap_availability(api, iap_id, item, update_existing, dry_run)
-        _sync_iap_price(api, iap_id, price, update_existing, dry_run)
+        _sync_iap_availability(
+            api, iap_id, item, update_existing, dry_run, log=reporter.log
+        )
+        _sync_iap_price(
+            api, iap_id, price, update_existing, dry_run, log=reporter.log
+        )
 
         if review_screenshot:
             _sync_iap_review_screenshot(
-                api, iap_id, review_screenshot, update_existing, dry_run
+                api,
+                iap_id,
+                review_screenshot,
+                update_existing,
+                dry_run,
+                log=reporter.log,
             )
 
         if not isinstance(localizations, dict) or not localizations:
-            print("    ⚠️  无本地化配置，跳过本地化上传")
-            pct = int((idx + 1) / total_items * 100)
-            print(f"[PROGRESS:{pct}:IAP {idx + 1}/{total_items}]")
+            reporter.log("    ⚠️  无本地化配置，跳过本地化上传")
+            reporter.progress(
+                idx + 1, total_items, msg=f"IAP {idx + 1}/{total_items}"
+            )
             continue
 
         if dry_run:
-            print(f"    [预览] 将更新本地化: {list(localizations.keys())}")
-            pct = int((idx + 1) / total_items * 100)
-            print(f"[PROGRESS:{pct}:IAP {idx + 1}/{total_items}]")
+            reporter.log(f"    [预览] 将更新本地化: {list(localizations.keys())}")
+            reporter.progress(
+                idx + 1, total_items, msg=f"IAP {idx + 1}/{total_items}"
+            )
             continue
 
         existing_locs = api.get_in_app_purchase_localizations(iap_id)
@@ -230,7 +298,7 @@ def _upload_iap_core(api, app_id: str, iap_items: list[dict], dry_run: bool = Fa
 
         for locale, loc_data in localizations.items():
             if not isinstance(loc_data, dict):
-                print(f"    ⚠️  locale={locale} 配置格式错误，已跳过")
+                reporter.log(f"    ⚠️  locale={locale} 配置格式错误，已跳过")
                 continue
             loc_attrs = {}
             display_name = str(
@@ -242,48 +310,50 @@ def _upload_iap_core(api, app_id: str, iap_items: list[dict], dry_run: bool = Fa
             if description:
                 loc_attrs["description"] = description
             if not loc_attrs:
-                print(f"    ⚠️  locale={locale} 无有效字段（name/description），已跳过")
+                reporter.log(
+                    f"    ⚠️  locale={locale} 无有效字段（name/description），已跳过"
+                )
                 continue
 
             if locale in loc_map:
                 api.update_in_app_purchase_localization(
                     loc_map[locale]["id"], loc_attrs
                 )
-                print(f"    ✅ {locale}: 已更新本地化")
+                reporter.log(f"    ✅ {locale}: 已更新本地化")
             else:
                 api.create_in_app_purchase_localization(iap_id, locale, loc_attrs)
-                print(f"    ✅ {locale}: 已创建本地化")
+                reporter.log(f"    ✅ {locale}: 已创建本地化")
 
-        # Progress output for Web UI
-        pct = int((idx + 1) / total_items * 100)
-        print(f"[PROGRESS:{pct}:IAP {idx + 1}/{total_items}]")
+        reporter.progress(
+            idx + 1, total_items, msg=f"IAP {idx + 1}/{total_items}"
+        )
 
-    print("\n✅ IAP 上传完成")
+    _finish_iap(reporter, finalize)
 
 
-def _sync_iap_availability(api, iap_id, item, update_existing, dry_run):
+def _sync_iap_availability(api, iap_id, item, update_existing, dry_run, log=print):
     available_all = bool(item.get("availableInAllTerritories", True))
     territory_ids = item.get("availableTerritories") or item.get("territories")
 
     if territory_ids is not None:
         if not isinstance(territory_ids, list):
-            print("    ⚠️  销售地区: availableTerritories/territories 必须是列表，跳过")
+            log("    ⚠️  销售地区: availableTerritories/territories 必须是列表，跳过")
             return
         territory_ids = [str(t).strip() for t in territory_ids if str(t).strip()]
     elif available_all:
         if dry_run:
-            print("    [预览] 销售地区: 全部国家/地区")
+            log("    [预览] 销售地区: 全部国家/地区")
             return
         territory_ids = [t["id"] for t in api.list_territories()]
     else:
         territory_ids = []
 
     if not territory_ids:
-        print("    ⚠️  销售地区: 无可用地区配置，跳过")
+        log("    ⚠️  销售地区: 无可用地区配置，跳过")
         return
 
     if dry_run:
-        print(f"    [预览] 销售地区: {len(territory_ids)} 个地区")
+        log(f"    [预览] 销售地区: {len(territory_ids)} 个地区")
         return
 
     try:
@@ -292,10 +362,10 @@ def _sync_iap_availability(api, iap_id, item, update_existing, dry_run):
         existing = None
 
     if existing and not update_existing:
-        print("    销售地区: 已存在，跳过")
+        log("    销售地区: 已存在，跳过")
         return
     if existing and update_existing:
-        print("    销售地区: 已存在（Apple API 不支持直接替换），跳过")
+        log("    销售地区: 已存在（Apple API 不支持直接替换），跳过")
         return
 
     try:
@@ -304,14 +374,14 @@ def _sync_iap_availability(api, iap_id, item, update_existing, dry_run):
             available_in_new_territories=available_all,
             territory_ids=territory_ids,
         )
-        print(f"    销售地区: 已设置 {len(territory_ids)} 个地区 ✅")
+        log(f"    销售地区: 已设置 {len(territory_ids)} 个地区 ✅")
     except Exception as e:
-        print(f"    ⚠️  销售地区设置跳过: {e}")
+        log(f"    ⚠️  销售地区设置跳过: {e}")
 
 
-def _sync_iap_price(api, iap_id, price_cfg, update_existing, dry_run):
+def _sync_iap_price(api, iap_id, price_cfg, update_existing, dry_run, log=print):
     if not price_cfg:
-        print("    ⚠️  无价格配置，跳过价格时间表")
+        log("    ⚠️  无价格配置，跳过价格时间表")
         return
 
     territory = str(
@@ -323,7 +393,7 @@ def _sync_iap_price(api, iap_id, price_cfg, update_existing, dry_run):
 
     if not pp_id:
         if not territory or amount is None:
-            print("    ⚠️  价格: 需要 pricePointId 或 baseTerritory + baseAmount，跳过")
+            log("    ⚠️  价格: 需要 pricePointId 或 baseTerritory + baseAmount，跳过")
             return
         pp_id = api.find_in_app_purchase_price_point(iap_id, territory, amount)
     if not pp_id:
@@ -337,9 +407,9 @@ def _sync_iap_price(api, iap_id, price_cfg, update_existing, dry_run):
 
     if dry_run:
         if amount is not None:
-            print(f"    [预览] 价格: 基准 {territory} {amount} → Price Point {pp_id}")
+            log(f"    [预览] 价格: 基准 {territory} {amount} → Price Point {pp_id}")
         else:
-            print(f"    [预览] 价格: Price Point {pp_id}")
+            log(f"    [预览] 价格: Price Point {pp_id}")
         return
 
     try:
@@ -348,10 +418,10 @@ def _sync_iap_price(api, iap_id, price_cfg, update_existing, dry_run):
         existing = None
 
     if _iap_price_schedule_has_prices(existing) and not update_existing:
-        print("    价格: 时间表已存在，跳过")
+        log("    价格: 时间表已存在，跳过")
         return
     if _iap_price_schedule_has_prices(existing) and update_existing:
-        print("    价格: 时间表已存在（Apple API 不支持直接替换），跳过")
+        log("    价格: 时间表已存在（Apple API 不支持直接替换），跳过")
         return
 
     price_points = [(territory, pp_id)]
@@ -364,7 +434,7 @@ def _sync_iap_price(api, iap_id, price_cfg, update_existing, dry_run):
             if not any(price_territory == territory for price_territory, _ in price_points):
                 price_points.insert(0, (territory, pp_id))
         except Exception as e:
-            print(f"    ⚠️  等价价格点查询失败，仅设置基准地区: {e}")
+            log(f"    ⚠️  等价价格点查询失败，仅设置基准地区: {e}")
 
     api.create_in_app_purchase_price_schedule(
         iap_id,
@@ -374,9 +444,9 @@ def _sync_iap_price(api, iap_id, price_cfg, update_existing, dry_run):
         end_date=price_cfg.get("endDate"),
     )
     if amount is not None:
-        print(f"    价格: 基准 {territory} {amount} → 已设置 {len(price_points)} 个地区 ✅")
+        log(f"    价格: 基准 {territory} {amount} → 已设置 {len(price_points)} 个地区 ✅")
     else:
-        print(f"    价格: Price Point {pp_id} → 已设置 {len(price_points)} 个地区 ✅")
+        log(f"    价格: Price Point {pp_id} → 已设置 {len(price_points)} 个地区 ✅")
 
 
 def _iap_price_schedule_has_prices(schedule) -> bool:
@@ -427,16 +497,16 @@ def _nearest_iap_price_points(candidates: list, target, limit: int) -> list[str]
     return [price for _, price in scored[:limit]]
 
 
-def _sync_iap_review_screenshot(api, iap_id, shot_path, update_existing, dry_run):
+def _sync_iap_review_screenshot(api, iap_id, shot_path, update_existing, dry_run, log=print):
     path = Path(shot_path)
 
     if dry_run:
-        print(f"    [预览] IAP 审核截图: 将上传 {path.name}")
+        log(f"    [预览] IAP 审核截图: 将上传 {path.name}")
         return
 
     existing = api.list_in_app_purchase_review_screenshots(iap_id)
     if existing and not update_existing:
-        print("    IAP 审核截图: 已存在，跳过")
+        log("    IAP 审核截图: 已存在，跳过")
         return
 
     for s in existing:
@@ -451,7 +521,7 @@ def _sync_iap_review_screenshot(api, iap_id, shot_path, update_existing, dry_run
     api.upload_in_app_purchase_review_screenshot(upload_ops, file_bytes)
     md5 = hashlib.md5(file_bytes).hexdigest()
     api.commit_in_app_purchase_review_screenshot(shot_id, md5)
-    print(f"    IAP 审核截图: {path.name} 上传 ✅")
+    log(f"    IAP 审核截图: {path.name} 上传 ✅")
 
 
 def cmd_iap(
@@ -463,6 +533,7 @@ def cmd_iap(
         False, "--update-existing", "-u",
         help=t(HELP['update_existing']),
     ),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="显示详细日志"),
 ):
     """Upload in-app purchases and subscriptions from JSON file.
 
@@ -550,6 +621,7 @@ def cmd_iap(
         typer.echo(f"💡 可使用 --iap-file 参数指定其他路径。", err=True)
         raise typer.Exit(1)
 
+    reporter = make_cli_reporter(verbose=verbose)
     try:
         items, groups = _load_iap_config(str(iap_path))
     except ValueError as e:
@@ -559,16 +631,38 @@ def cmd_iap(
             typer.echo(f"💡 {hint}", err=True)
         raise typer.Exit(1)
 
+    reporter.set_phases(
+        _iap_phase_plan(has_items=bool(items), has_groups=bool(groups))
+    )
+    reporter.phase("parse")
+    reporter.progress(1, 1, msg="ok")
+
     exit_code = 0
     if items:
-        print(f"\n📦 一次性 IAP: {len(items)} 项")
-        _upload_iap_core(api, app_id, items, dry_run, update_existing=update_existing)
+        reporter.log(f"📦 一次性 IAP: {len(items)} 项")
+        _upload_iap_core(
+            api,
+            app_id,
+            items,
+            dry_run,
+            update_existing=update_existing,
+            reporter=reporter,
+            manage_phases=False,
+            finalize=not bool(groups),
+        )
 
     if groups:
         total_subs = sum(len(g.get("subscriptions", [])) for g in groups)
-        print(f"\n🔁 订阅: {len(groups)} 组 / {total_subs} 商品")
+        reporter.log(f"🔁 订阅: {len(groups)} 组 / {total_subs} 商品")
         failed = _upload_subscriptions_core(
-            api, app_id, groups, update_existing=update_existing, dry_run=dry_run
+            api,
+            app_id,
+            groups,
+            update_existing=update_existing,
+            dry_run=dry_run,
+            reporter=reporter,
+            manage_phases=False,
+            finalize=True,
         )
         if failed:
             exit_code = 1

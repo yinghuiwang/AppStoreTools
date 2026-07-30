@@ -5,7 +5,9 @@ import hashlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Optional, Tuple
+from typing import Any, Callable, Optional, Tuple
+
+from asc.reporting import TaskReporter, make_cli_reporter
 
 
 VALID_PERIODS = {
@@ -156,14 +158,36 @@ def _valid_territory_id(value: Any) -> bool:
 # ---------- Orchestrator ----------
 
 
+def _finish_subscriptions(reporter: TaskReporter, finalize: bool) -> None:
+    if finalize:
+        reporter.done("订阅上传完成")
+    else:
+        reporter.log("订阅上传完成")
+
+
 def _upload_subscriptions_core(
-    api, app_id: str, groups: list[dict], update_existing: bool, dry_run: bool
+    api,
+    app_id: str,
+    groups: list[dict],
+    update_existing: bool,
+    dry_run: bool,
+    reporter: TaskReporter | None = None,
+    verbose: bool = False,
+    manage_phases: bool = True,
+    finalize: bool = True,
 ) -> int:
+    if reporter is None:
+        reporter = make_cli_reporter(verbose=verbose)
+
     validate_subscription_config(groups)
 
-    print("\n" + "=" * 60)
-    print("🔁  上传订阅")
-    print("=" * 60)
+    if manage_phases:
+        reporter.set_phases([("subscriptions", 100, "订阅")])
+    reporter.phase("subscriptions")
+
+    reporter.log("=" * 60)
+    reporter.log("🔁  上传订阅")
+    reporter.log("=" * 60)
 
     stats = {
         "groups_created": 0, "groups_updated": 0, "groups_skipped": 0,
@@ -171,21 +195,23 @@ def _upload_subscriptions_core(
         "subs_failed": 0,
     }
     failures: list[tuple[str, str]] = []
+    log = reporter.log
 
     total_subs = sum(len(g.get("subscriptions", [])) for g in groups)
-    total_items = len(groups) + total_subs
-    completed = 0
+    if total_subs == 0:
+        reporter.progress(1, 1, msg="订阅 0/0")
+        _print_summary(stats, failures, log=log)
+        _finish_subscriptions(reporter, finalize)
+        return 0
 
+    completed = 0
     for group_cfg in groups:
         ref_name = group_cfg["referenceName"]
-        print(f"\n── 订阅组: {ref_name} ──")
+        reporter.log(f"── 订阅组: {ref_name} ──")
         group_id, group_status = _sync_group(
-            api, app_id, group_cfg, update_existing, dry_run
+            api, app_id, group_cfg, update_existing, dry_run, log=log
         )
         stats[f"groups_{group_status}"] += 1
-        completed += 1
-        pct = int(completed / total_items * 100) if total_items else 0
-        print(f"[PROGRESS:{pct}:订阅组 {completed}/{total_items}]")
         if group_id is None:
             group_id = "DRY_RUN_GROUP"
 
@@ -193,42 +219,45 @@ def _upload_subscriptions_core(
             pid = sub_cfg["productId"]
             try:
                 status = _sync_subscription(
-                    api, group_id, sub_cfg, update_existing, dry_run
+                    api, group_id, sub_cfg, update_existing, dry_run, log=log
                 )
                 stats[f"subs_{status}"] += 1
             except Exception as e:
                 stats["subs_failed"] += 1
                 failures.append((pid, str(e)))
-                print(f"  ❌ {pid} 失败: {e}")
+                reporter.log(f"  ❌ {pid} 失败: {e}")
 
             completed += 1
-            pct = int(completed / total_items * 100) if total_items else 0
-            print(f"[PROGRESS:{pct}:订阅 {completed}/{total_items}]")
+            reporter.progress(
+                completed, total_subs, msg=f"订阅 {completed}/{total_subs}"
+            )
 
-    _print_summary(stats, failures)
+    _print_summary(stats, failures, log=log)
+    _finish_subscriptions(reporter, finalize)
     return stats["subs_failed"]
 
 
-def _print_summary(stats: dict, failures: list) -> None:
-    print("\n" + "=" * 60)
-    print("📊  订阅上传汇总")
-    print(f"    订阅组: {stats['groups_created']} 创建 / "
-          f"{stats['groups_updated']} 更新 / {stats['groups_skipped']} 跳过")
-    print(f"    订阅:   {stats['subs_created']} 创建 / "
-          f"{stats['subs_updated']} 更新 / {stats['subs_skipped']} 跳过 / "
-          f"{stats['subs_failed']} 失败")
-    print("=" * 60)
+def _print_summary(stats: dict, failures: list, log: Callable[..., None] = print) -> None:
+    log("=" * 60)
+    log("📊  订阅上传汇总")
+    log(f"    订阅组: {stats['groups_created']} 创建 / "
+        f"{stats['groups_updated']} 更新 / {stats['groups_skipped']} 跳过")
+    log(f"    订阅:   {stats['subs_created']} 创建 / "
+        f"{stats['subs_updated']} 更新 / {stats['subs_skipped']} 跳过 / "
+        f"{stats['subs_failed']} 失败")
+    log("=" * 60)
     if failures:
-        print("\n失败明细:")
+        log("失败明细:")
         for pid, err in failures:
-            print(f"  • {pid}: {err}")
+            log(f"  • {pid}: {err}")
 
 
 # ---------- Phase 1: Groups ----------
 
 
 def _sync_group(
-    api, app_id: str, group_cfg: dict, update_existing: bool, dry_run: bool
+    api, app_id: str, group_cfg: dict, update_existing: bool, dry_run: bool,
+    log: Callable[..., None] = print,
 ) -> Tuple[Optional[str], str]:
     ref_name = group_cfg["referenceName"]
     existing_groups = api.list_subscription_groups(app_id)
@@ -239,41 +268,42 @@ def _sync_group(
     if ref_name in existing_by_ref:
         group_id = existing_by_ref[ref_name]["id"]
         if not update_existing:
-            print(f"    已存在 (ID: {group_id})，跳过")
+            log(f"    已存在 (ID: {group_id})，跳过")
             _sync_group_localizations(
                 api, group_id, group_cfg.get("localizations", {}),
-                update_existing=False, dry_run=dry_run,
+                update_existing=False, dry_run=dry_run, log=log,
             )
             return group_id, "skipped"
-        print(f"    已存在 (ID: {group_id})，更新本地化")
+        log(f"    已存在 (ID: {group_id})，更新本地化")
         _sync_group_localizations(
             api, group_id, group_cfg.get("localizations", {}),
-            update_existing=True, dry_run=dry_run,
+            update_existing=True, dry_run=dry_run, log=log,
         )
         return group_id, "updated"
 
     if dry_run:
-        print(f"    [预览] 将创建订阅组: {ref_name}")
+        log(f"    [预览] 将创建订阅组: {ref_name}")
         return None, "created"
 
-    print(f"    不存在，创建中...")
+    log(f"    不存在，创建中...")
     resp = api.create_subscription_group(app_id, ref_name)
     group_id = resp["data"]["id"]
-    print(f"    ✅ 已创建，ID: {group_id}")
+    log(f"    ✅ 已创建，ID: {group_id}")
     _sync_group_localizations(
         api, group_id, group_cfg.get("localizations", {}),
-        update_existing=False, dry_run=False,
+        update_existing=False, dry_run=False, log=log,
     )
     return group_id, "created"
 
 
 def _sync_group_localizations(
-    api, group_id: str, loc_cfg: dict, update_existing: bool, dry_run: bool
+    api, group_id: str, loc_cfg: dict, update_existing: bool, dry_run: bool,
+    log: Callable[..., None] = print,
 ) -> None:
     if not loc_cfg:
         return
     if dry_run and group_id == "DRY_RUN_GROUP":
-        print(f"    [预览] 将同步组本地化: {list(loc_cfg.keys())}")
+        log(f"    [预览] 将同步组本地化: {list(loc_cfg.keys())}")
         return
 
     existing = api.list_subscription_group_localizations(group_id)
@@ -292,61 +322,63 @@ def _sync_group_localizations(
                 api.update_subscription_group_localization(
                     by_locale[locale]["id"], attrs
                 )
-                print(f"    本地化 {locale}: 更新 ✅")
+                log(f"    本地化 {locale}: 更新 ✅")
             else:
-                print(f"    本地化 {locale}: 已存在，跳过")
+                log(f"    本地化 {locale}: 已存在，跳过")
         else:
             if dry_run:
-                print(f"    [预览] 本地化 {locale}: 将创建")
+                log(f"    [预览] 本地化 {locale}: 将创建")
             else:
                 api.create_subscription_group_localization(
                     group_id, locale, name, custom_app_name
                 )
-                print(f"    本地化 {locale}: 创建 ✅")
+                log(f"    本地化 {locale}: 创建 ✅")
 
 
 # ---------- Phase 2-7: Subscription (placeholder — filled in later tasks) ----------
 
 
 def _sync_subscription(
-    api, group_id: str, sub_cfg: dict, update_existing: bool, dry_run: bool
+    api, group_id: str, sub_cfg: dict, update_existing: bool, dry_run: bool,
+    log: Callable[..., None] = print,
 ) -> str:
     pid = sub_cfg["productId"]
-    print(f"\n  ── 订阅: {pid} ──")
+    log(f"\n  ── 订阅: {pid} ──")
 
     sub_id, status = _sync_subscription_main(
-        api, group_id, sub_cfg, update_existing, dry_run
+        api, group_id, sub_cfg, update_existing, dry_run, log=log
     )
 
     if sub_id is None:
         return status
 
     _sync_subscription_availability(
-        api, sub_id, sub_cfg, update_existing, dry_run
+        api, sub_id, sub_cfg, update_existing, dry_run, log=log
     )
     _sync_subscription_localizations(
-        api, sub_id, sub_cfg["localizations"], update_existing, dry_run
+        api, sub_id, sub_cfg["localizations"], update_existing, dry_run, log=log
     )
     _sync_review_screenshot(
         api, sub_id, sub_cfg["review"]["screenshot"],
-        update_existing, dry_run,
+        update_existing, dry_run, log=log,
     )
     _sync_subscription_price(
-        api, sub_id, sub_cfg["price"], update_existing, dry_run
+        api, sub_id, sub_cfg["price"], update_existing, dry_run, log=log
     )
     _sync_intro_offer(
         api, sub_id, sub_cfg.get("introductoryOffer"),
-        update_existing, dry_run,
+        update_existing, dry_run, log=log,
     )
     _sync_promo_offers(
         api, sub_id, sub_cfg.get("promotionalOffers", []),
-        update_existing, dry_run,
+        update_existing, dry_run, log=log,
     )
     return status
 
 
 def _sync_subscription_main(
-    api, group_id: str, sub_cfg: dict, update_existing: bool, dry_run: bool
+    api, group_id: str, sub_cfg: dict, update_existing: bool, dry_run: bool,
+    log: Callable[..., None] = print,
 ) -> Tuple[Optional[str], str]:
     pid = sub_cfg["productId"]
     existing_subs = api.list_subscriptions(group_id)
@@ -367,48 +399,48 @@ def _sync_subscription_main(
         sub_id = by_pid[pid]["id"]
         if update_existing:
             if dry_run:
-                print(f"    [预览] 已存在 (ID: {sub_id})，将更新")
+                log(f"    [预览] 已存在 (ID: {sub_id})，将更新")
             else:
                 update_attrs = {k: v for k, v in attrs.items() if k != "productId"}
                 api.update_subscription(sub_id, update_attrs)
-                print(f"    已存在 (ID: {sub_id})，已更新 ✅")
+                log(f"    已存在 (ID: {sub_id})，已更新 ✅")
             return sub_id, "updated"
-        print(f"    已存在 (ID: {sub_id})，跳过")
+        log(f"    已存在 (ID: {sub_id})，跳过")
         return sub_id, "skipped"
 
     if dry_run:
-        print(f"    [预览] 将创建订阅: {pid}")
+        log(f"    [预览] 将创建订阅: {pid}")
         return None, "created"
 
     resp = api.create_subscription(group_id, attrs)
     sub_id = resp["data"]["id"]
-    print(f"    已创建，ID: {sub_id} ✅")
+    log(f"    已创建，ID: {sub_id} ✅")
     return sub_id, "created"
 
 
-def _sync_subscription_availability(api, sub_id, sub_cfg, update_existing, dry_run):
+def _sync_subscription_availability(api, sub_id, sub_cfg, update_existing, dry_run, log=print):
     available_all = bool(sub_cfg.get("availableInAllTerritories", True))
     territory_ids = sub_cfg.get("availableTerritories") or sub_cfg.get("territories")
 
     if territory_ids is not None:
         if not isinstance(territory_ids, list):
-            print("    ⚠️  销售地区: availableTerritories/territories 必须是列表，跳过")
+            log("    ⚠️  销售地区: availableTerritories/territories 必须是列表，跳过")
             return
         territory_ids = [str(t).strip() for t in territory_ids if str(t).strip()]
     elif available_all:
         if dry_run:
-            print("    [预览] 销售地区: 全部国家/地区")
+            log("    [预览] 销售地区: 全部国家/地区")
             return
         territory_ids = [t["id"] for t in api.list_territories()]
     else:
         territory_ids = []
 
     if not territory_ids:
-        print("    ⚠️  销售地区: 无可用地区配置，跳过")
+        log("    ⚠️  销售地区: 无可用地区配置，跳过")
         return
 
     if dry_run:
-        print(f"    [预览] 销售地区: {len(territory_ids)} 个地区")
+        log(f"    [预览] 销售地区: {len(territory_ids)} 个地区")
         return
 
     try:
@@ -417,10 +449,10 @@ def _sync_subscription_availability(api, sub_id, sub_cfg, update_existing, dry_r
         existing = None
 
     if existing and not update_existing:
-        print("    销售地区: 已存在，跳过")
+        log("    销售地区: 已存在，跳过")
         return
     if existing and update_existing:
-        print("    销售地区: 已存在（Apple API 不支持直接替换），跳过")
+        log("    销售地区: 已存在（Apple API 不支持直接替换），跳过")
         return
 
     try:
@@ -429,16 +461,16 @@ def _sync_subscription_availability(api, sub_id, sub_cfg, update_existing, dry_r
             available_in_new_territories=available_all,
             territory_ids=territory_ids,
         )
-        print(f"    销售地区: 已设置 {len(territory_ids)} 个地区 ✅")
+        log(f"    销售地区: 已设置 {len(territory_ids)} 个地区 ✅")
     except Exception as e:
-        print(f"    ⚠️  销售地区设置跳过: {e}")
+        log(f"    ⚠️  销售地区设置跳过: {e}")
 
 
-def _sync_subscription_localizations(api, sub_id, loc_cfg, update_existing, dry_run):
+def _sync_subscription_localizations(api, sub_id, loc_cfg, update_existing, dry_run, log=print):
     if not loc_cfg:
         return
     if dry_run:
-        print(f"    [预览] 将同步订阅本地化: {list(loc_cfg.keys())}")
+        log(f"    [预览] 将同步订阅本地化: {list(loc_cfg.keys())}")
         return
 
     existing = api.list_subscription_localizations(sub_id)
@@ -452,15 +484,15 @@ def _sync_subscription_localizations(api, sub_id, loc_cfg, update_existing, dry_
                 api.update_subscription_localization(
                     by_locale[locale]["id"], {"name": name, "description": desc}
                 )
-                print(f"    本地化 {locale}: 更新 ✅")
+                log(f"    本地化 {locale}: 更新 ✅")
             else:
-                print(f"    本地化 {locale}: 已存在，跳过")
+                log(f"    本地化 {locale}: 已存在，跳过")
         else:
             api.create_subscription_localization(sub_id, locale, name, desc)
-            print(f"    本地化 {locale}: 创建 ✅")
+            log(f"    本地化 {locale}: 创建 ✅")
 
 
-def _sync_subscription_price(api, sub_id, price_cfg, update_existing, dry_run):
+def _sync_subscription_price(api, sub_id, price_cfg, update_existing, dry_run, log=print):
     territory = price_cfg.get("territory") or price_cfg.get("baseTerritory")
     amount = price_cfg.get("baseAmount")
     pp_id = str(price_cfg.get("pricePointId") or "").strip()
@@ -480,19 +512,19 @@ def _sync_subscription_price(api, sub_id, price_cfg, update_existing, dry_run):
 
     if dry_run:
         if amount:
-            print(f"    [预览] 价格: 基准 {territory} {amount} → Price Point {pp_id}")
+            log(f"    [预览] 价格: 基准 {territory} {amount} → Price Point {pp_id}")
         else:
-            print(f"    [预览] 价格: Price Point {pp_id}")
+            log(f"    [预览] 价格: Price Point {pp_id}")
         return
 
     existing = api.list_subscription_prices(sub_id)
     if existing and not update_existing:
-        print(f"    价格: 已存在 {len(existing)} 条，跳过")
+        log(f"    价格: 已存在 {len(existing)} 条，跳过")
         return
     if existing and update_existing:
         for p in existing:
             api.delete_subscription_price(p["id"])
-        print(f"    价格: 已删除 {len(existing)} 条旧价格")
+        log(f"    价格: 已删除 {len(existing)} 条旧价格")
 
     price_points = [(territory, pp_id)]
     if apply_equalized:
@@ -502,19 +534,19 @@ def _sync_subscription_price(api, sub_id, price_cfg, update_existing, dry_run):
             if not any(t == territory for t, _ in price_points):
                 price_points.insert(0, (territory, pp_id))
         except Exception as e:
-            print(f"    ⚠️  等价价格点查询失败，仅设置基准地区: {e}")
+            log(f"    ⚠️  等价价格点查询失败，仅设置基准地区: {e}")
 
     created, failed = _create_subscription_prices(
-        api, sub_id, price_points, price_cfg, max_workers
+        api, sub_id, price_points, price_cfg, max_workers, log=log
     )
 
     if amount:
-        print(
+        log(
             f"    价格: 基准 {territory} {amount} → 已设置 {created} 个地区"
             f"{f' / {failed} 失败' if failed else ''} ✅"
         )
     else:
-        print(
+        log(
             f"    价格: Price Point {pp_id} → 已设置 {created} 个地区"
             f"{f' / {failed} 失败' if failed else ''} ✅"
         )
@@ -528,7 +560,7 @@ def _positive_int(value: Any, default: int) -> int:
     return parsed if parsed > 0 else default
 
 
-def _create_subscription_prices(api, sub_id, price_points, price_cfg, max_workers):
+def _create_subscription_prices(api, sub_id, price_points, price_cfg, max_workers, log=print):
     mode = str(price_cfg.get("creationMode", "inlinePatch")).strip()
     if (
         mode != "post"
@@ -536,24 +568,26 @@ def _create_subscription_prices(api, sub_id, price_points, price_cfg, max_worker
         and hasattr(api, "update_subscription_prices_inline")
     ):
         created, failed, fallback_points = _create_subscription_prices_inline(
-            api, sub_id, price_points, price_cfg
+            api, sub_id, price_points, price_cfg, log=log
         )
         if not fallback_points:
             return created, failed
         fallback_created, fallback_failed = _create_subscription_prices_post(
-            api, sub_id, fallback_points, price_cfg, max_workers
+            api, sub_id, fallback_points, price_cfg, max_workers, log=log
         )
         return created + fallback_created, failed + fallback_failed
 
-    return _create_subscription_prices_post(api, sub_id, price_points, price_cfg, max_workers)
+    return _create_subscription_prices_post(
+        api, sub_id, price_points, price_cfg, max_workers, log=log
+    )
 
 
-def _create_subscription_prices_inline(api, sub_id, price_points, price_cfg):
+def _create_subscription_prices_inline(api, sub_id, price_points, price_cfg, log=print):
     batch_size = min(_positive_int(price_cfg.get("inlineBatchSize"), default=50), 50)
     created = 0
     failed = 0
     batches = list(_chunks(price_points, batch_size))
-    print(f"    价格: inline PATCH 创建 {len(price_points)} 个地区（batch={batch_size}）")
+    log(f"    价格: inline PATCH 创建 {len(price_points)} 个地区（batch={batch_size}）")
 
     for idx, batch in enumerate(batches):
         try:
@@ -569,7 +603,7 @@ def _create_subscription_prices_inline(api, sub_id, price_points, price_cfg):
             remaining = batch[:]
             for later in batches[idx + 1:]:
                 remaining.extend(later)
-            print(f"    ⚠️  inline 价格创建失败，回退并发 POST: {e}")
+            log(f"    ⚠️  inline 价格创建失败，回退并发 POST: {e}")
             return created, failed, remaining
 
     return created, failed, []
@@ -580,14 +614,16 @@ def _chunks(items, size):
         yield items[idx:idx + size]
 
 
-def _create_subscription_prices_post(api, sub_id, price_points, price_cfg, max_workers):
+def _create_subscription_prices_post(api, sub_id, price_points, price_cfg, max_workers, log=print):
     if len(price_points) <= 1 or max_workers <= 1:
-        return _create_subscription_prices_sequential(api, sub_id, price_points, price_cfg)
+        return _create_subscription_prices_sequential(
+            api, sub_id, price_points, price_cfg, log=log
+        )
 
     created = 0
     failed = 0
     workers = min(max_workers, len(price_points))
-    print(f"    价格: 并发创建 {len(price_points)} 个地区（workers={workers}）")
+    log(f"    价格: 并发创建 {len(price_points)} 个地区（workers={workers}）")
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
         future_map = {
@@ -608,12 +644,12 @@ def _create_subscription_prices_post(api, sub_id, price_points, price_cfg, max_w
                 created += 1
             except Exception as e:
                 failed += 1
-                print(f"    ⚠️  价格创建跳过 {target_territory}: {e}")
+                log(f"    ⚠️  价格创建跳过 {target_territory}: {e}")
 
     return created, failed
 
 
-def _create_subscription_prices_sequential(api, sub_id, price_points, price_cfg):
+def _create_subscription_prices_sequential(api, sub_id, price_points, price_cfg, log=print):
     created = 0
     failed = 0
     for target_territory, target_pp_id in price_points:
@@ -628,7 +664,7 @@ def _create_subscription_prices_sequential(api, sub_id, price_points, price_cfg)
             created += 1
         except Exception as e:
             failed += 1
-            print(f"    ⚠️  价格创建跳过 {target_territory}: {e}")
+            log(f"    ⚠️  价格创建跳过 {target_territory}: {e}")
     return created, failed
 
 
@@ -667,13 +703,13 @@ def _nearest_price_points(candidates: list, target: str, limit: int) -> list[str
     return [p for _, p in scored[:limit]]
 
 
-def _sync_intro_offer(api, sub_id, offer_cfg, update_existing, dry_run):
+def _sync_intro_offer(api, sub_id, offer_cfg, update_existing, dry_run, log=print):
     if offer_cfg is None:
         return
 
     existing = api.list_subscription_intro_offers(sub_id)
     if existing and not update_existing:
-        print("    入门优惠: 已存在，跳过")
+        log("    入门优惠: 已存在，跳过")
         return
 
     pp_id = None
@@ -687,7 +723,7 @@ def _sync_intro_offer(api, sub_id, offer_cfg, update_existing, dry_run):
             )
 
     if dry_run:
-        print(f"    [预览] 入门优惠: {offer_cfg['offerMode']} / {offer_cfg['duration']}")
+        log(f"    [预览] 入门优惠: {offer_cfg['offerMode']} / {offer_cfg['duration']}")
         return
 
     if existing:
@@ -700,10 +736,10 @@ def _sync_intro_offer(api, sub_id, offer_cfg, update_existing, dry_run):
         "numberOfPeriods": offer_cfg["numberOfPeriods"],
     }
     api.create_subscription_intro_offer(sub_id, attrs, pp_id, territory)
-    print(f"    入门优惠: {attrs['offerMode']} / {attrs['duration']} ✅")
+    log(f"    入门优惠: {attrs['offerMode']} / {attrs['duration']} ✅")
 
 
-def _sync_promo_offers(api, sub_id, offers_cfg, update_existing, dry_run):
+def _sync_promo_offers(api, sub_id, offers_cfg, update_existing, dry_run, log=print):
     if not offers_cfg:
         return
 
@@ -732,31 +768,31 @@ def _sync_promo_offers(api, sub_id, offers_cfg, update_existing, dry_run):
         if code in by_code:
             if update_existing:
                 if dry_run:
-                    print(f"    [预览] 促销优惠 {code}: 将重建")
+                    log(f"    [预览] 促销优惠 {code}: 将重建")
                 else:
                     api.delete_subscription_promo_offer(by_code[code]["id"])
                     api.create_subscription_promo_offer(sub_id, attrs, pp_id)
-                    print(f"    促销优惠 {code}: 重建 ✅")
+                    log(f"    促销优惠 {code}: 重建 ✅")
             else:
-                print(f"    促销优惠 {code}: 已存在，跳过")
+                log(f"    促销优惠 {code}: 已存在，跳过")
         else:
             if dry_run:
-                print(f"    [预览] 促销优惠 {code}: 将创建")
+                log(f"    [预览] 促销优惠 {code}: 将创建")
             else:
                 api.create_subscription_promo_offer(sub_id, attrs, pp_id)
-                print(f"    促销优惠 {code}: 创建 ✅")
+                log(f"    促销优惠 {code}: 创建 ✅")
 
 
-def _sync_review_screenshot(api, sub_id, shot_path, update_existing, dry_run):
+def _sync_review_screenshot(api, sub_id, shot_path, update_existing, dry_run, log=print):
     path = Path(shot_path)
 
     existing = api.list_subscription_review_screenshots(sub_id)
     if existing and not update_existing:
-        print(f"    审核截图: 已存在，跳过")
+        log(f"    审核截图: 已存在，跳过")
         return
 
     if dry_run:
-        print(f"    [预览] 审核截图: 将上传 {path.name}")
+        log(f"    [预览] 审核截图: 将上传 {path.name}")
         return
 
     for s in existing:
@@ -771,4 +807,4 @@ def _sync_review_screenshot(api, sub_id, shot_path, update_existing, dry_run):
     api.upload_subscription_review_screenshot(upload_ops, file_bytes)
     md5 = hashlib.md5(file_bytes).hexdigest()
     api.commit_subscription_review_screenshot(shot_id, md5)
-    print(f"    审核截图: {path.name} 上传 ✅")
+    log(f"    审核截图: {path.name} 上传 ✅")

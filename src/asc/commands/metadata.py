@@ -12,6 +12,7 @@ from asc.config import Config
 from asc.error_handler import get_action_hint
 from asc.guard import Guard, GuardViolationError
 from asc.progress import ProcessCanceled
+from asc.reporting import TaskReporter, make_cli_reporter
 from asc.utils import make_api_from_config, parse_csv, resolve_locale, resolve_app_profile
 from asc.i18n import t, HELP, ERRORS
 
@@ -58,42 +59,61 @@ def _upload_metadata_core(
     include_version_fields: Optional[set[str]] = None,
     app_profile: str = "",
     cancel_event=None,
+    reporter: TaskReporter | None = None,
+    verbose: bool = False,
+    manage_phases: bool = True,
+    finalize: bool = True,
 ):
     """Core metadata upload logic"""
-    print("\n" + "=" * 60)
-    print("📝 上传元数据")
-    print("=" * 60)
+    if reporter is None:
+        reporter = make_cli_reporter(verbose=verbose)
+
+    if manage_phases:
+        reporter.set_phases([
+            ("check", 5, "校验"),
+            ("locales", 95, "上传"),
+        ])
+    reporter.phase("check")
+
+    reporter.log("=" * 60)
+    reporter.log("📝 上传元数据")
+    reporter.log("=" * 60)
     if app_profile:
-        print(f"  App Profile: {app_profile}")
+        reporter.log(f"  App Profile: {app_profile}")
 
     version = api.get_editable_version(app_id)
     if not version:
-        print(f"❌ {t(ERRORS['no_editable_version'])}")
-        return
+        msg = t(ERRORS["no_editable_version"])
+        reporter.fail(f"❌ {msg}")
+        raise RuntimeError(msg)
     version_id = version["id"]
     version_string = version["attributes"].get("versionString", "?")
     version_state = version["attributes"].get("appStoreState") or version[
         "attributes"
     ].get("appVersionState", "?")
-    print(f"  版本: {version_string} (状态: {version_state})")
-    print(f"  版本 ID: {version_id}")
+    reporter.log(f"  版本: {version_string} (状态: {version_state})")
+    reporter.log(f"  版本 ID: {version_id}")
 
     app_infos = api.get_app_infos(app_id)
     if not app_infos:
-        print(f"❌ {t(ERRORS['no_app_info'])}")
-        return
+        msg = t(ERRORS["no_app_info"])
+        reporter.fail(f"❌ {msg}")
+        raise RuntimeError(msg)
     app_info_id = _select_app_info_id(app_infos, version_id, version_state)
-    print(f"  App Info ID: {app_info_id}")
+    reporter.log(f"  App Info ID: {app_info_id}")
 
     info_locs = api.get_app_info_localizations(app_info_id)
     info_loc_map = {loc["attributes"]["locale"]: loc for loc in info_locs}
     existing_info_locales = list(info_loc_map.keys())
-    print(f"  已有 App Info 语言: {existing_info_locales}")
+    reporter.log(f"  已有 App Info 语言: {existing_info_locales}")
 
     ver_locs = api.get_version_localizations(version_id)
     ver_loc_map = {loc["attributes"]["locale"]: loc for loc in ver_locs}
     existing_ver_locales = list(ver_loc_map.keys())
-    print(f"  已有版本语言: {existing_ver_locales}")
+    reporter.log(f"  已有版本语言: {existing_ver_locales}")
+
+    reporter.progress(1, 1, msg="ok")
+    reporter.phase("locales")
 
     total_locales = len(metadata_list)
     for idx, meta in enumerate(metadata_list):
@@ -102,8 +122,8 @@ def _upload_metadata_core(
         csv_locale = meta["locale"]
         info_locale = resolve_locale(csv_locale, existing_info_locales)
         ver_locale = resolve_locale(csv_locale, existing_ver_locales)
-        print(
-            f"\n  ── 语言: {csv_locale} → App Info: {info_locale}, 版本: {ver_locale} ──"
+        reporter.log(
+            f"  ── 语言: {csv_locale} → App Info: {info_locale}, 版本: {ver_locale} ──"
         )
 
         name = meta.get("name", "")
@@ -124,24 +144,26 @@ def _upload_metadata_core(
 
         if info_attrs:
             if name:
-                print(f"    应用名称: {name}")
+                reporter.debug(f"    应用名称: {name}")
             if subtitle:
-                print(f"    副标题: {subtitle}")
+                reporter.debug(f"    副标题: {subtitle}")
             if privacy_policy_url:
-                print(f"    隐私政策: {privacy_policy_url}")
+                reporter.debug(f"    隐私政策: {privacy_policy_url}")
 
             if not dry_run:
                 if info_locale in info_loc_map:
                     api.update_app_info_localization(
                         info_loc_map[info_locale]["id"], info_attrs
                     )
-                    print("    ✅ 已更新 App Info 本地化")
+                    reporter.log("    ✅ 已更新 App Info 本地化")
                 else:
                     api.create_app_info_localization(
                         app_info_id, info_locale, info_attrs
                     )
-                    print("    ✅ 已创建 App Info 本地化")
+                    reporter.log("    ✅ 已创建 App Info 本地化")
                     existing_info_locales.append(info_locale)
+            else:
+                reporter.log("    ⏭ App Info 本地化（dry-run）")
 
         description = meta.get("description", "")
         keywords = meta.get("keywords", "")
@@ -170,31 +192,31 @@ def _upload_metadata_core(
             desc_preview = (
                 description[:60] + "..." if len(description) > 60 else description
             )
-            print(f"    描述: {desc_preview}")
+            reporter.debug(f"    描述: {desc_preview}")
             if keywords:
-                print(
+                reporter.debug(
                     f"    关键词: {keywords[:60]}{'...' if len(keywords) > 60 else ''}"
                 )
             if support_url:
-                print(f"    技术支持: {support_url}")
+                reporter.debug(f"    技术支持: {support_url}")
             if marketing_url:
-                print(f"    营销网站: {marketing_url}")
+                reporter.debug(f"    营销网站: {marketing_url}")
 
             if not dry_run:
                 if ver_locale in ver_loc_map:
                     api.update_version_localization(
                         ver_loc_map[ver_locale]["id"], ver_attrs
                     )
-                    print("    ✅ 已更新版本本地化")
+                    reporter.log("    ✅ 已更新版本本地化")
                 else:
                     try:
                         api.create_version_localization(
                             version_id, ver_locale, ver_attrs
                         )
-                        print("    ✅ 已创建版本本地化")
+                        reporter.log("    ✅ 已创建版本本地化")
                     except Exception as e:
                         if "409" in str(e) or "already exists" in str(e):
-                            print("    ⚠️  版本本地化已存在，重新获取后更新...")
+                            reporter.log("    ⚠️  版本本地化已存在，重新获取后更新...")
                             ver_locs = api.get_version_localizations(version_id)
                             ver_loc_map = {
                                 loc["attributes"]["locale"]: loc for loc in ver_locs
@@ -203,18 +225,33 @@ def _upload_metadata_core(
                                 api.update_version_localization(
                                     ver_loc_map[ver_locale]["id"], ver_attrs
                                 )
-                                print("    ✅ 已更新版本本地化")
+                                reporter.log("    ✅ 已更新版本本地化")
                             else:
-                                print(f"    ❌ 无法处理版本本地化: {e}")
+                                reporter.log(f"    ❌ 无法处理版本本地化: {e}")
                         else:
                             raise
+            else:
+                reporter.log("    ⏭ 版本本地化（dry-run）")
 
-        # Progress output for Web UI
+        if not info_attrs and not ver_attrs:
+            reporter.log("    ⏭ 无字段可更新，已跳过")
+
         current_idx = idx + 1
-        pct = int(current_idx / total_locales * 100)
-        print(f"[PROGRESS:{pct}:元数据 {current_idx}/{total_locales} 语言]")
+        reporter.progress(
+            current_idx,
+            total_locales,
+            msg=f"元数据 {current_idx}/{total_locales} 语言",
+        )
 
-    print("\n✅ 元数据上传完成")
+    if finalize:
+        reporter.done("元数据上传完成")
+    else:
+        reporter.log("元数据上传完成")
+
+
+def _url_phase_plan() -> list[tuple[str, int, str]]:
+    """Single update phase for set-*-url commands."""
+    return [("update", 100, "更新")]
 
 
 def _update_app_info_field_core(
@@ -226,22 +263,31 @@ def _update_app_info_field_core(
     locales: Optional[list[str]] = None,
     dry_run: bool = False,
     cancel_event=None,
+    reporter: TaskReporter | None = None,
+    verbose: bool = False,
 ):
     """Core implementation for set-*-url commands that target appInfoLocalizations"""
-    print("\n" + "=" * 60)
-    print(f"🔧 更新 App 信息字段 ({field_label})")
-    print("=" * 60)
+    if reporter is None:
+        reporter = make_cli_reporter(verbose=verbose)
+
+    reporter.set_phases(_url_phase_plan())
+    reporter.phase("update")
+    reporter.log("=" * 60)
+    reporter.log(f"🔧 更新 App 信息字段 ({field_label})")
+    reporter.log("=" * 60)
 
     app_infos = api.get_app_infos(app_id)
     if not app_infos:
-        print(f"❌ {t(ERRORS['no_app_info'])}")
-        return
+        msg = f"❌ {t(ERRORS['no_app_info'])}"
+        reporter.fail(msg)
+        raise RuntimeError(msg)
     app_info_id = app_infos[0]["id"]
 
     info_locs = api.get_app_info_localizations(app_info_id)
     if not info_locs:
-        print(f"❌ {t(ERRORS['app_no_localization'])}")
-        return
+        msg = f"❌ {t(ERRORS['app_no_localization'])}"
+        reporter.fail(msg)
+        raise RuntimeError(msg)
 
     target_locs = info_locs
     if locales:
@@ -250,26 +296,34 @@ def _update_app_info_field_core(
         ]
         if not target_locs:
             available = [loc["attributes"]["locale"] for loc in info_locs]
-            print(f"❌ {t(ERRORS['invalid_locale']).format(locales=available)}")
-            return
+            msg = f"❌ {t(ERRORS['invalid_locale']).format(locales=available)}"
+            reporter.fail(msg)
+            raise RuntimeError(msg)
 
     preview = field_value[:80] + "..." if len(field_value) > 80 else field_value
-    print(f"  {field_label}: {preview}")
-    print(f"  目标语言: {[loc['attributes']['locale'] for loc in target_locs]}")
+    reporter.log(f"  {field_label}: {preview}")
+    reporter.log(f"  目标语言: {[loc['attributes']['locale'] for loc in target_locs]}")
 
+    # locales × fields written (one field per call)
+    total = max(len(target_locs), 1)
     if dry_run:
-        print("  ⚠️  预览模式，不实际更新")
+        reporter.log("  ⚠️  预览模式，不实际更新")
+        for i, loc in enumerate(target_locs, start=1):
+            locale = loc["attributes"]["locale"]
+            reporter.progress(i, total, msg=f"更新 {i}/{total} · {locale}")
+        reporter.done(f"✅ {field_label} 预览完成")
         return
 
-    for loc in target_locs:
+    for i, loc in enumerate(target_locs, start=1):
         if cancel_event is not None and cancel_event.is_set():
             raise ProcessCanceled(f"{field_label} update canceled")
         locale = loc["attributes"]["locale"]
         loc_id = loc["id"]
         api.update_app_info_localization(loc_id, {field_key: field_value})
-        print(f"  ✅ {locale}: 已更新")
+        reporter.log(f"  ✅ {locale}: 已更新")
+        reporter.progress(i, total, msg=f"更新 {i}/{total} · {locale}")
 
-    print(f"\n✅ {field_label} 更新完成")
+    reporter.done(f"✅ {field_label} 更新完成")
 
 
 def _update_version_field_core(
@@ -281,27 +335,36 @@ def _update_version_field_core(
     locales: Optional[list[str]] = None,
     dry_run: bool = False,
     cancel_event=None,
+    reporter: TaskReporter | None = None,
+    verbose: bool = False,
 ):
     """Core implementation for set-*-url commands"""
-    print("\n" + "=" * 60)
-    print(f"🔧 更新版本字段 ({field_label})")
-    print("=" * 60)
+    if reporter is None:
+        reporter = make_cli_reporter(verbose=verbose)
+
+    reporter.set_phases(_url_phase_plan())
+    reporter.phase("update")
+    reporter.log("=" * 60)
+    reporter.log(f"🔧 更新版本字段 ({field_label})")
+    reporter.log("=" * 60)
 
     version = api.get_editable_version(app_id)
     if not version:
-        print(f"❌ {t(ERRORS['no_editable_version'])}")
-        return
+        msg = f"❌ {t(ERRORS['no_editable_version'])}"
+        reporter.fail(msg)
+        raise RuntimeError(msg)
     version_id = version["id"]
     version_string = version["attributes"].get("versionString", "?")
     version_state = version["attributes"].get("appStoreState") or version[
         "attributes"
     ].get("appVersionState", "?")
-    print(f"  版本: {version_string} (状态: {version_state})")
+    reporter.log(f"  版本: {version_string} (状态: {version_state})")
 
     ver_locs = api.get_version_localizations(version_id)
     if not ver_locs:
-        print(f"❌ {t(ERRORS['no_localization'])}")
-        return
+        msg = f"❌ {t(ERRORS['no_localization'])}"
+        reporter.fail(msg)
+        raise RuntimeError(msg)
 
     target_locs = ver_locs
     if locales:
@@ -310,26 +373,34 @@ def _update_version_field_core(
         ]
         if not target_locs:
             available = [loc["attributes"]["locale"] for loc in ver_locs]
-            print(f"❌ {t(ERRORS['invalid_locale']).format(locales=available)}")
-            return
+            msg = f"❌ {t(ERRORS['invalid_locale']).format(locales=available)}"
+            reporter.fail(msg)
+            raise RuntimeError(msg)
 
     preview = field_value[:80] + "..." if len(field_value) > 80 else field_value
-    print(f"  {field_label}: {preview}")
-    print(f"  目标语言: {[loc['attributes']['locale'] for loc in target_locs]}")
+    reporter.log(f"  {field_label}: {preview}")
+    reporter.log(f"  目标语言: {[loc['attributes']['locale'] for loc in target_locs]}")
 
+    # locales × fields written (one field per call)
+    total = max(len(target_locs), 1)
     if dry_run:
-        print("  ⚠️  预览模式，不实际更新")
+        reporter.log("  ⚠️  预览模式，不实际更新")
+        for i, loc in enumerate(target_locs, start=1):
+            locale = loc["attributes"]["locale"]
+            reporter.progress(i, total, msg=f"更新 {i}/{total} · {locale}")
+        reporter.done(f"✅ {field_label} 预览完成")
         return
 
-    for loc in target_locs:
+    for i, loc in enumerate(target_locs, start=1):
         if cancel_event is not None and cancel_event.is_set():
             raise ProcessCanceled(f"{field_label} update canceled")
         locale = loc["attributes"]["locale"]
         loc_id = loc["id"]
         api.update_version_localization(loc_id, {field_key: field_value})
-        print(f"  ✅ {locale}: 已更新")
+        reporter.log(f"  ✅ {locale}: 已更新")
+        reporter.progress(i, total, msg=f"更新 {i}/{total} · {locale}")
 
-    print(f"\n✅ {field_label} 更新完成")
+    reporter.done(f"✅ {field_label} 更新完成")
 
 
 # ── typer command functions ──
@@ -345,6 +416,7 @@ def cmd_upload(
     display_type: Optional[str] = typer.Option(None, "--display-type",
         help=t(HELP['display_type']),
     ),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed progress logs"),
 ):
     """Upload all content: metadata (from CSV) + screenshots.
 
@@ -387,20 +459,35 @@ def cmd_upload(
             raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
     csv_path = Path(csv or config.csv_path)
-    if csv_path.exists():
-        metadata_list = parse_csv(str(csv_path))
-        print(f"\n📄 从 CSV 读取了 {len(metadata_list)} 个语言的元数据")
-        _upload_metadata_core(api, app_id, metadata_list, dry_run=dry_run, app_profile=app or "")
-    else:
-        print(f"\n⚠️  CSV 文件不存在: {csv_path}")
-        print(f"💡 可使用 --csv 参数指定其他路径，或参考 'asc upload --help'")
-    screenshots_path = Path(screenshots or config.screenshots_path)
-    if screenshots_path.exists():
-        _upload_screenshots_core(
-            api, app_id, str(screenshots_path), display_type, dry_run
-        )
-    else:
-        print(f"\n⚠️  截图目录不存在: {screenshots_path}")
+    try:
+        if csv_path.exists():
+            metadata_list = parse_csv(str(csv_path))
+            print(f"\n📄 从 CSV 读取了 {len(metadata_list)} 个语言的元数据")
+            _upload_metadata_core(
+                api,
+                app_id,
+                metadata_list,
+                dry_run=dry_run,
+                app_profile=app or "",
+                verbose=verbose,
+            )
+        else:
+            print(f"\n⚠️  CSV 文件不存在: {csv_path}")
+            print(f"💡 可使用 --csv 参数指定其他路径，或参考 'asc upload --help'")
+        screenshots_path = Path(screenshots or config.screenshots_path)
+        if screenshots_path.exists():
+            _upload_screenshots_core(
+                api,
+                app_id,
+                str(screenshots_path),
+                display_type,
+                dry_run,
+                verbose=verbose,
+            )
+        else:
+            print(f"\n⚠️  截图目录不存在: {screenshots_path}")
+    except RuntimeError:
+        raise typer.Exit(1)
     print("\n" + "=" * 60)
     print("🎉 全部完成！")
     print("=" * 60)
@@ -410,6 +497,7 @@ def cmd_metadata(
     app: Optional[str] = typer.Option(None, "--app", "-a", help=t(HELP['app_profile_name'])),
     dry_run: bool = typer.Option(False, "--dry-run", "-d", help=t(HELP['dry_run'])),
     csv: Optional[str] = typer.Option(None, "--csv", "-c", help=t(HELP['csv_file_short'])),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed progress logs"),
 ):
     """Upload metadata only: name, subtitle, description, keywords, URLs.
 
@@ -455,13 +543,24 @@ def cmd_metadata(
         typer.echo(f"💡 可使用 --csv 参数指定其他路径，或参考 'asc upload --help'", err=True)
         raise typer.Exit(1)
     metadata_list = parse_csv(str(csv_path))
-    _upload_metadata_core(api, app_id, metadata_list, dry_run=dry_run, app_profile=app or "")
+    try:
+        _upload_metadata_core(
+            api,
+            app_id,
+            metadata_list,
+            dry_run=dry_run,
+            app_profile=app or "",
+            verbose=verbose,
+        )
+    except RuntimeError:
+        raise typer.Exit(1)
 
 
 def cmd_keywords(
     app: Optional[str] = typer.Option(None, "--app", "-a", help=t(HELP['app_profile_name'])),
     dry_run: bool = typer.Option(False, "--dry-run", "-d", help=t(HELP['dry_run'])),
     csv: Optional[str] = typer.Option(None, "--csv", "-c", help=t(HELP['csv_file_short'])),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed progress logs"),
 ):
     """Upload keywords only from CSV.
 
@@ -505,15 +604,19 @@ def cmd_keywords(
         typer.echo(f"💡 可使用 --csv 参数指定其他路径，或参考 'asc upload --help'", err=True)
         raise typer.Exit(1)
     metadata_list = parse_csv(str(csv_path))
-    _upload_metadata_core(
-        api, app_id, metadata_list, dry_run=dry_run, include_version_fields={"keywords"}, app_profile=app or ""
-    )
+    try:
+        _upload_metadata_core(
+            api, app_id, metadata_list, dry_run=dry_run, include_version_fields={"keywords"}, app_profile=app or "", verbose=verbose
+        )
+    except RuntimeError:
+        raise typer.Exit(1)
 
 
 def cmd_support_url(
     app: Optional[str] = typer.Option(None, "--app", "-a", help=t(HELP['app_profile_name'])),
     dry_run: bool = typer.Option(False, "--dry-run", "-d", help=t(HELP['dry_run'])),
     csv: Optional[str] = typer.Option(None, "--csv", "-c", help=t(HELP['csv_file_short'])),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed progress logs"),
 ):
     """Upload support URL from CSV.
 
@@ -557,20 +660,25 @@ def cmd_support_url(
         typer.echo(f"💡 可使用 --csv 参数指定其他路径，或参考 'asc upload --help'", err=True)
         raise typer.Exit(1)
     metadata_list = parse_csv(str(csv_path))
-    _upload_metadata_core(
-        api,
-        app_id,
-        metadata_list,
-        dry_run=dry_run,
-        include_version_fields={"supportUrl"},
-        app_profile=app or "",
-    )
+    try:
+        _upload_metadata_core(
+            api,
+            app_id,
+            metadata_list,
+            dry_run=dry_run,
+            include_version_fields={"supportUrl"},
+            app_profile=app or "",
+            verbose=verbose,
+        )
+    except RuntimeError:
+        raise typer.Exit(1)
 
 
 def cmd_marketing_url(
     app: Optional[str] = typer.Option(None, "--app", "-a", help=t(HELP['app_profile_name'])),
     dry_run: bool = typer.Option(False, "--dry-run", "-d", help=t(HELP['dry_run'])),
     csv: Optional[str] = typer.Option(None, "--csv", "-c", help=t(HELP['csv_file_short'])),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed progress logs"),
 ):
     """Upload marketing URL from CSV.
 
@@ -614,20 +722,25 @@ def cmd_marketing_url(
         typer.echo(f"💡 可使用 --csv 参数指定其他路径，或参考 'asc upload --help'", err=True)
         raise typer.Exit(1)
     metadata_list = parse_csv(str(csv_path))
-    _upload_metadata_core(
-        api,
-        app_id,
-        metadata_list,
-        dry_run=dry_run,
-        include_version_fields={"marketingUrl"},
-        app_profile=app or "",
-    )
+    try:
+        _upload_metadata_core(
+            api,
+            app_id,
+            metadata_list,
+            dry_run=dry_run,
+            include_version_fields={"marketingUrl"},
+            app_profile=app or "",
+            verbose=verbose,
+        )
+    except RuntimeError:
+        raise typer.Exit(1)
 
 
 def cmd_privacy_policy_url(
     app: Optional[str] = typer.Option(None, "--app", "-a", help=t(HELP['app_profile_name'])),
     dry_run: bool = typer.Option(False, "--dry-run", "-d", help=t(HELP['dry_run'])),
     csv: Optional[str] = typer.Option(None, "--csv", "-c", help=t(HELP['csv_file_short'])),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed progress logs"),
 ):
     """Upload privacy policy URL from CSV.
 
@@ -671,14 +784,18 @@ def cmd_privacy_policy_url(
         typer.echo(f"💡 可使用 --csv 参数指定其他路径，或参考 'asc upload --help'", err=True)
         raise typer.Exit(1)
     metadata_list = parse_csv(str(csv_path))
-    _upload_metadata_core(
-        api,
-        app_id,
-        metadata_list,
-        dry_run=dry_run,
-        include_version_fields={"privacyPolicyUrl"},
-        app_profile=app or "",
-    )
+    try:
+        _upload_metadata_core(
+            api,
+            app_id,
+            metadata_list,
+            dry_run=dry_run,
+            include_version_fields={"privacyPolicyUrl"},
+            app_profile=app or "",
+            verbose=verbose,
+        )
+    except RuntimeError:
+        raise typer.Exit(1)
 
 
 def cmd_set_support_url(
@@ -688,6 +805,7 @@ def cmd_set_support_url(
     ),
     app: Optional[str] = typer.Option(None, "--app", "-a", help=t(HELP['app_profile_name'])),
     dry_run: bool = typer.Option(False, "--dry-run", "-d", help=t(HELP['preview_without_upload'])),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed progress logs"),
 ):
     """Set support URL directly (not from CSV).
 
@@ -727,9 +845,12 @@ def cmd_set_support_url(
             raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
     locale_list = [l.strip() for l in locales.split(",")] if locales else None
-    _update_version_field_core(
-        api, app_id, "supportUrl", "Support URL", url, locale_list, dry_run
-    )
+    try:
+        _update_version_field_core(
+            api, app_id, "supportUrl", "Support URL", url, locale_list, dry_run, verbose=verbose
+        )
+    except RuntimeError:
+        raise typer.Exit(1)
 
 
 def cmd_set_marketing_url(
@@ -738,6 +859,7 @@ def cmd_set_marketing_url(
         help=t(HELP['locales_option'])),
     app: Optional[str] = typer.Option(None, "--app", "-a", help=t(HELP['app_profile_name'])),
     dry_run: bool = typer.Option(False, "--dry-run", "-d", help=t(HELP['preview_without_upload'])),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed progress logs"),
 ):
     """Set marketing URL directly (not from CSV).
 
@@ -776,9 +898,12 @@ def cmd_set_marketing_url(
             raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
     locale_list = [l.strip() for l in locales.split(",")] if locales else None
-    _update_version_field_core(
-        api, app_id, "marketingUrl", "Marketing URL", url, locale_list, dry_run
-    )
+    try:
+        _update_version_field_core(
+            api, app_id, "marketingUrl", "Marketing URL", url, locale_list, dry_run, verbose=verbose
+        )
+    except RuntimeError:
+        raise typer.Exit(1)
 
 
 def cmd_set_privacy_policy_url(
@@ -787,6 +912,7 @@ def cmd_set_privacy_policy_url(
         help=t(HELP['locales_option'])),
     app: Optional[str] = typer.Option(None, "--app", "-a", help=t(HELP['app_profile_name'])),
     dry_run: bool = typer.Option(False, "--dry-run", "-d", help=t(HELP['preview_without_upload'])),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed progress logs"),
 ):
     """Set privacy policy URL directly (not from CSV).
 
@@ -825,15 +951,19 @@ def cmd_set_privacy_policy_url(
             raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
     locale_list = [l.strip() for l in locales.split(",")] if locales else None
-    _update_app_info_field_core(
-        api,
-        app_id,
-        "privacyPolicyUrl",
-        "Privacy Policy URL",
-        url,
-        locale_list,
-        dry_run,
-    )
+    try:
+        _update_app_info_field_core(
+            api,
+            app_id,
+            "privacyPolicyUrl",
+            "Privacy Policy URL",
+            url,
+            locale_list,
+            dry_run,
+            verbose=verbose,
+        )
+    except RuntimeError:
+        raise typer.Exit(1)
 
 
 def cmd_check(

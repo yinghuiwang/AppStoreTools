@@ -61,10 +61,12 @@ class Spinner:
         log_path,
         verbose: bool = False,
         tty: Optional[bool] = None,
+        on_log_line: Optional[Callable[[str], None]] = None,
     ):
         self.label = label
         self.log_path = Path(log_path)
         self.verbose = verbose
+        self.on_log_line = on_log_line
         if tty is None:
             tty = sys.stderr.isatty()
         self.tty = tty
@@ -98,6 +100,8 @@ class Spinner:
             sys.stderr.write("   ── 最后 " + str(len(tail)) + " 行 ──\n")
             for line in tail:
                 sys.stderr.write(f"   {line}\n")
+                if self.on_log_line is not None:
+                    self.on_log_line(line)
             sys.stderr.flush()
 
     def run(

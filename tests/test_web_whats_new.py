@@ -71,10 +71,17 @@ def test_whats_new_check_no_editable_version(client):
     assert "message" in data
 
 
-def test_whats_new_translate_returns_translations(client):
-    """POST /api/whats-new/translate with text+source_locale returns translations dict (excluding source locale from results)."""
+def test_whats_new_translate_returns_task_id(client):
+    """POST /api/whats-new/translate returns {task_id}; translations live on task result."""
+    import time
+    from asc.web.tasks import TaskStatus
+    from asc.web import routes_api
+
     mock_api = MagicMock()
-    mock_api.get_editable_version.return_value = {"id": "v1", "attributes": {"versionString": "2.0.0"}}
+    mock_api.get_editable_version.return_value = {
+        "id": "v1",
+        "attributes": {"versionString": "2.0.0", "appStoreState": "PREPARE_FOR_SUBMISSION"},
+    }
     mock_api.get_version_localizations.return_value = [
         {"id": "l1", "attributes": {"locale": "en-US"}},
         {"id": "l2", "attributes": {"locale": "zh-CN"}},
@@ -87,23 +94,32 @@ def test_whats_new_translate_returns_translations(client):
     mock_translator = MagicMock()
     mock_translator.translate.side_effect = lambda text, locale, source: f"translated_{locale}"
 
-    with patch("asc.web.routes_api.Config", return_value=mock_config):
-        with patch("asc.web.routes_api.make_api_from_config", return_value=(mock_api, "app123")):
-            with patch("asc.llm.LLMClient", return_value=MagicMock()):
-                with patch("asc.services.translator.OpenAITranslator", return_value=mock_translator):
-                    response = client.post(
-                        "/api/whats-new/translate",
-                        cookies={"asc_profile": "test"},
-                        json={"text": "Hello world", "source_locale": "en-US"},
-                    )
+    with patch("asc.web.routes_api.Config", return_value=mock_config), \
+         patch("asc.web.routes_api.make_api_from_config", return_value=(mock_api, "app123")), \
+         patch("asc.llm.LLMClient", return_value=MagicMock()), \
+         patch("asc.services.translator.OpenAITranslator", return_value=mock_translator):
+        response = client.post(
+            "/api/whats-new/translate",
+            cookies={"asc_profile": "test"},
+            json={"text": "Hello world", "source_locale": "en-US"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "task_id" in data
+        assert "translations" not in data
 
-    assert response.status_code == 200
-    data = response.json()
-    assert "translations" in data
-    # en-US should be excluded since it's the source locale
-    assert "en-US" not in data["translations"]
-    assert "zh-CN" in data["translations"]
-    assert data["translations"]["zh-CN"] == "translated_zh-CN"
+        task_id = data["task_id"]
+        task = None
+        for _ in range(100):
+            task = routes_api._task_store.get(task_id)
+            if task and task["status"] in {TaskStatus.DONE, TaskStatus.ERROR, TaskStatus.CANCELED}:
+                break
+            time.sleep(0.02)
+
+    assert task is not None
+    assert task["status"] == TaskStatus.DONE
+    assert "en-US" not in task["result"]["translations"]
+    assert task["result"]["translations"]["zh-CN"] == "translated_zh-CN"
 
 
 def test_whats_new_translate_no_api_key_returns_400(client):
@@ -209,13 +225,53 @@ def test_whats_new_run_accepts_json_direct_payload(client):
     assert kwargs["locales"] == ["en-US", "zh-CN"]
 
 
-def test_whats_new_run_translates_when_translate_requested(client):
-    """POST /api/whats-new/run with translate=true translates before starting the upload task."""
+def test_whats_new_run_translates_inside_worker_not_request_thread(client):
+    """POST /api/whats-new/run with translate=true defers LLM to the background worker."""
+    mock_translator = MagicMock()
+    mock_translator.translate.side_effect = lambda text, locale, source: f"translated_{locale}"
+
+    with patch("asc.web.routes_api._start_whats_new_task", return_value="task-789") as mock_start:
+        with patch("asc.services.translator.OpenAITranslator", return_value=mock_translator):
+            response = client.post(
+                "/api/whats-new/run",
+                cookies={"asc_profile": "test"},
+                json={
+                    "text": "Bug fixes.",
+                    "source_locale": "en-US",
+                    "translate": True,
+                    "dry_run": 0,
+                },
+            )
+
+    assert response.status_code == 200
+    assert response.json()["task_id"] == "task-789"
+    mock_translator.translate.assert_not_called()
+    kwargs = mock_start.call_args.kwargs
+    assert kwargs["translate"] is True
+    assert kwargs["text"] == "Bug fixes."
+    assert kwargs["source_locale"] == "en-US"
+    assert kwargs["translations"] is None
+    assert kwargs["locales"] is None
+
+
+def test_whats_new_run_worker_translate_uses_60_40_phases(monkeypatch):
+    """translate=true run: worker LLM + phases translate 60% / upload 40%."""
+    import time
+    from asc.web import routes_api
+    from asc.web.tasks import TaskStatus, TaskStore
+
+    store = TaskStore()
+    monkeypatch.setattr(routes_api, "_task_store", store)
+
     mock_api = MagicMock()
-    mock_api.get_editable_version.return_value = {"id": "v1", "attributes": {"versionString": "2.0.0"}}
+    mock_api.get_editable_version.return_value = {
+        "id": "v1",
+        "attributes": {"versionString": "2.0.0", "appStoreState": "PREPARE_FOR_SUBMISSION"},
+    }
     mock_api.get_version_localizations.return_value = [
         {"id": "l1", "attributes": {"locale": "en-US"}},
         {"id": "l2", "attributes": {"locale": "zh-CN"}},
+        {"id": "l3", "attributes": {"locale": "ja-JP"}},
     ]
     mock_config = MagicMock()
     mock_config.llm_api_key = "fake-api-key"
@@ -225,29 +281,47 @@ def test_whats_new_run_translates_when_translate_requested(client):
     mock_translator = MagicMock()
     mock_translator.translate.side_effect = lambda text, locale, source: f"translated_{locale}"
 
-    with patch("asc.web.routes_api.Config", return_value=mock_config):
-        with patch("asc.web.routes_api.make_api_from_config", return_value=(mock_api, "app123")):
-            with patch("asc.llm.LLMClient", return_value=MagicMock()):
-                with patch("asc.services.translator.OpenAITranslator", return_value=mock_translator):
-                    with patch("asc.web.routes_api._start_whats_new_task", return_value="task-789") as mock_start:
-                        response = client.post(
-                            "/api/whats-new/run",
-                            cookies={"asc_profile": "test"},
-                            json={
-                                "text": "Bug fixes.",
-                                "source_locale": "en-US",
-                                "translate": True,
-                                "dry_run": 0,
-                            },
-                        )
+    with patch("asc.web.routes_api.Config", return_value=mock_config), \
+         patch("asc.web.routes_api.make_api_from_config", return_value=(mock_api, "app123")), \
+         patch("asc.llm.LLMClient", return_value=MagicMock()), \
+         patch("asc.services.translator.OpenAITranslator", return_value=mock_translator):
+        task_id = routes_api._start_whats_new_task(
+            profile="test",
+            dry_run=False,
+            text="Bug fixes.",
+            translate=True,
+            source_locale="en-US",
+        )
+        task = None
+        for _ in range(100):
+            task = store.get(task_id)
+            if task and task["status"] in {TaskStatus.DONE, TaskStatus.ERROR, TaskStatus.CANCELED}:
+                break
+            time.sleep(0.02)
 
-    assert response.status_code == 200
-    assert response.json()["task_id"] == "task-789"
-    mock_translator.translate.assert_called_once_with("Bug fixes.", "zh-CN", "en-US")
-    kwargs = mock_start.call_args.kwargs
-    assert kwargs["translations"] == {"zh-CN": "translated_zh-CN"}
-    assert kwargs["text"] == "Bug fixes."
-    assert kwargs["locales"] is None
+    assert task is not None
+    assert task["status"] == TaskStatus.DONE
+    mock_translator.translate.assert_called()
+    assert mock_api.update_version_localization.call_count == 2
+    assert task["result"]["translations"]["zh-CN"] == "translated_zh-CN"
+    assert task["result"]["translations"]["ja-JP"] == "translated_ja-JP"
+    assert task["progress"]["pct"] == 100
+    # Logs should mention both phases via reporter
+    joined = "\n".join(task["logs"])
+    assert "翻译" in joined or "翻译模式" in joined
+    assert "已上传" in joined
+
+
+def test_whats_new_web_starter_uses_start_background_task():
+    import inspect
+    from asc.web import routes_api
+
+    starter = inspect.getsource(routes_api._start_whats_new_task)
+    assert "start_background_task" in starter
+    assert "_PROGRESS_RE" not in starter
+
+    translate_starter = inspect.getsource(routes_api._start_whats_new_translate_task)
+    assert "start_background_task" in translate_starter
 
 
 def test_whats_new_template_uses_alpine_data_helper():
@@ -275,6 +349,17 @@ def test_whats_new_template_has_translate_and_upload_action():
     template = Path("src/asc/web/templates/whats_new.html").read_text(encoding="utf-8")
     assert ("翻译并上传" in template) or ('whats_new.translate_upload' in template)
     assert "translate: true" in template
+
+
+def test_whats_new_template_preview_waits_on_task_result():
+    """Preview translate must wait on task SSE/status then read result.translations."""
+    from pathlib import Path
+
+    template = Path("src/asc/web/templates/whats_new.html").read_text(encoding="utf-8")
+    assert "task_id" in template
+    assert "/api/task/" in template
+    assert "result.translations" in template or "result?.translations" in template
+    assert "TaskLogDrawer.open" in template
 
 
 def test_settings_llm_get_returns_config(client):

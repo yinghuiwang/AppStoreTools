@@ -1,9 +1,31 @@
 """Tests for src/asc/commands/metadata.py"""
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from asc.commands.metadata import _select_app_info_id, _update_version_field_core, _upload_metadata_core
+from asc.reporting import TaskReporter
+
+
+class RecordingSink:
+    def __init__(self):
+        self.logs = []
+        self.progress_events = []
+
+    def on_log(self, message, *, level="info"):
+        self.logs.append((level, message))
+
+    def on_progress(self, *, pct, msg, phase, phase_label, phase_index, phase_total):
+        self.progress_events.append({
+            "pct": pct,
+            "msg": msg,
+            "phase": phase,
+            "phase_label": phase_label,
+            "phase_index": phase_index,
+            "phase_total": phase_total,
+        })
 
 
 class MetaFakeAPI:
@@ -81,6 +103,22 @@ class MetaFakeAPI:
 
 # ── _upload_metadata_core ──
 
+def test_metadata_no_editable_version_raises():
+    api = MetaFakeAPI()
+    api.get_editable_version = lambda app_id: None  # type: ignore[method-assign]
+    metadata = [{"locale": "zh-Hans", "name": "测试"}]
+    with pytest.raises(RuntimeError):
+        _upload_metadata_core(api, "app1", metadata)
+
+
+def test_metadata_no_app_info_raises():
+    api = MetaFakeAPI()
+    api.app_infos = []
+    metadata = [{"locale": "zh-Hans", "name": "测试"}]
+    with pytest.raises(RuntimeError):
+        _upload_metadata_core(api, "app1", metadata)
+
+
 def test_metadata_dry_run_no_api_calls():
     api = MetaFakeAPI()
     metadata = [{"locale": "zh-Hans", "name": "测试", "description": "描述"}]
@@ -153,6 +191,104 @@ def test_metadata_selects_app_info_by_state_when_relationship_missing():
     assert _select_app_info_id(app_infos, "ver_1", "PREPARE_FOR_SUBMISSION") == "appinfo_new"
 
 
+def test_upload_metadata_core_reports_progress_per_locale():
+    sink = RecordingSink()
+    reporter = TaskReporter(sinks=[sink], verbose=False)
+    api = MetaFakeAPI()
+    metadata = [
+        {"locale": "zh-Hans", "name": "测试", "description": "描述"},
+        {"locale": "en-US", "name": "Test", "description": "desc"},
+    ]
+    _upload_metadata_core(api, "app1", metadata, dry_run=True, reporter=reporter)
+
+    phases = [e["phase"] for e in sink.progress_events]
+    assert "check" in phases
+    assert "locales" in phases
+
+    locale_with_msg = [
+        e
+        for e in sink.progress_events
+        if e["phase"] == "locales" and e["msg"].startswith("元数据 ")
+    ]
+    assert len(locale_with_msg) == 2
+    assert locale_with_msg[0]["pct"] == 5 + int(0.5 * 95)
+    assert locale_with_msg[1]["pct"] == 100
+    assert locale_with_msg[0]["phase_index"] == 2
+    assert locale_with_msg[0]["phase_total"] == 2
+
+    pcts = [e["pct"] for e in sink.progress_events]
+    assert pcts == sorted(pcts)
+
+
+def test_upload_metadata_core_logs_summaries_via_reporter():
+    """Key start / per-locale / end lines go to reporter.log (Web TaskStore path)."""
+    sink = RecordingSink()
+    reporter = TaskReporter(sinks=[sink], verbose=False)
+    api = MetaFakeAPI()
+    metadata = [
+        {"locale": "zh-Hans", "name": "测试", "description": "描述"},
+        {"locale": "en-US", "name": "Test", "description": "desc"},
+    ]
+    _upload_metadata_core(api, "app1", metadata, dry_run=False, reporter=reporter)
+
+    info_logs = [msg for level, msg in sink.logs if level == "info"]
+    assert any("上传元数据" in msg for msg in info_logs)
+    assert any("App Info ID: appinfo_1" in msg for msg in info_logs)
+    assert any("语言: zh-Hans" in msg for msg in info_logs)
+    assert any("已更新 App Info 本地化" in msg for msg in info_logs)
+    assert any("已更新版本本地化" in msg or "已创建版本本地化" in msg for msg in info_logs)
+    assert any("元数据上传完成" in msg for msg in info_logs)
+    # Field-level dumps stay out of default info logs (debug or print).
+    assert not any(msg.strip().startswith("应用名称:") for msg in info_logs)
+
+
+def test_metadata_source_has_no_progress_protocol():
+    import asc.commands.metadata as metadata_mod
+
+    src = Path(metadata_mod.__file__).read_text(encoding="utf-8")
+    assert "[PROGRESS:" not in src
+
+
+def test_upload_metadata_skips_done_when_not_finalize():
+    sink = RecordingSink()
+    reporter = TaskReporter(sinks=[sink], verbose=False)
+    reporter.set_phases([
+        ("check", 5, "校验"),
+        ("locales", 45, "元数据"),
+        ("scan", 5, "扫描"),
+        ("upload", 45, "截图"),
+    ])
+    api = MetaFakeAPI()
+    metadata = [{"locale": "en-US", "name": "Test", "description": "desc"}]
+    _upload_metadata_core(
+        api,
+        "app1",
+        metadata,
+        dry_run=True,
+        reporter=reporter,
+        manage_phases=False,
+        finalize=False,
+    )
+    pcts = [e["pct"] for e in sink.progress_events]
+    assert pcts == sorted(pcts)
+    assert pcts[-1] < 100  # must not force 100 before screenshots
+    info_logs = [msg for level, msg in sink.logs if level == "info"]
+    assert any("元数据上传完成" in msg for msg in info_logs)
+
+
+def test_metadata_web_starter_does_not_use_private_sinks():
+    from pathlib import Path
+    import asc.web.routes_api as routes_api
+
+    src = Path(routes_api.__file__).read_text(encoding="utf-8")
+    # Only check the metadata starter region for private sink access.
+    start = src.index("def _start_metadata_task")
+    end = src.index("def _start_build_task", start)
+    metadata_starter = src[start:end]
+    assert "reporter._sinks" not in metadata_starter
+    assert 'getattr(sink, "_task_id"' not in metadata_starter
+
+
 # ── _update_version_field_core ──
 
 def test_update_version_field_all_locales():
@@ -175,10 +311,11 @@ def test_update_version_field_filtered_locale():
 
 def test_update_version_field_nonexistent_locale_no_api_call():
     api = MetaFakeAPI()
-    _update_version_field_core(
-        api, "app1", "supportUrl", "Support URL", "https://example.com",
-        locales=["fr-FR"]
-    )
+    with pytest.raises(RuntimeError):
+        _update_version_field_core(
+            api, "app1", "supportUrl", "Support URL", "https://example.com",
+            locales=["fr-FR"]
+        )
     write_calls = [c for c in api.calls if c[0].startswith("update_")]
     assert write_calls == []
 

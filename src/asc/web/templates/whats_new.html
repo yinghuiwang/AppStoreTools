@@ -131,10 +131,50 @@
                           return data;
                         }))
                         .then(data => {
-                          translations = data.translations || {};
-                          if (!Object.keys(translations).length) throw new Error(window.t('whats_new.no_results'));
-                          step = 2;
-                          submitting = false;
+                          if (!data.task_id) throw new Error(window.t('whats_new.translate_failed'));
+                          taskId = data.task_id;
+                          status = 'running';
+                          progress = 0;
+                          progressMsg = '';
+                          TaskLogDrawer.open(taskId, {
+                            title: window.t('whats_new.log_title_upload'),
+                            onProgress: (p) => {
+                              if (!p) return;
+                              if (p.pct != null) progress = p.pct;
+                              progressMsg = p.msg || '';
+                            },
+                            onDone: () => {
+                              fetch('/api/task/' + encodeURIComponent(taskId) + '/status')
+                                .then(r => r.json())
+                                .then(st => {
+                                  const result = st.result || {};
+                                  translations = result.translations || {};
+                                  if (!Object.keys(translations).length) {
+                                    throw new Error(window.t('whats_new.no_results'));
+                                  }
+                                  status = 'done';
+                                  progress = 100;
+                                  submitting = false;
+                                  step = 2;
+                                })
+                                .catch(err => {
+                                  translateError = err.message || window.t('whats_new.translate_failed');
+                                  status = 'error';
+                                  submitting = false;
+                                });
+                            },
+                            onError: (msg) => {
+                              translateError = msg || window.t('whats_new.translate_failed');
+                              status = 'error';
+                              submitting = false;
+                            },
+                            onCanceled: () => {
+                              translateError = window.t('whats_new.canceled_msg');
+                              status = 'canceled';
+                              canceling = false;
+                              submitting = false;
+                            }
+                          });
                         })
                         .catch(err => {
                           translateError = err.message || window.t('whats_new.translate_failed');
@@ -413,9 +453,10 @@ function whatsNewLogOptions() {
   const d = Alpine.$data(root);
   return {
     title: window.t('whats_new.log_title_upload'),
-    onProgress: (pct, msg) => {
-      if (pct != null) d.progress = pct;
-      d.progressMsg = msg || '';
+    onProgress: (progress) => {
+      if (!progress) return;
+      if (progress.pct != null) d.progress = progress.pct;
+      d.progressMsg = progress.msg || '';
     },
     onDone: () => { d.status = 'done'; d.progress = 100; },
     onError: () => { d.status = 'error'; },

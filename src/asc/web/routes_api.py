@@ -5,13 +5,14 @@ import copy
 import json
 import re
 import tempfile
+import time
 from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
-from asc.commands.iap import _upload_iap_core, _load_iap_config
+from asc.commands.iap import _upload_iap_core, _load_iap_config, _iap_phase_plan
 from asc.commands.iap_review_screenshots import (
     ReviewScreenshotUploadItem,
     attach_default_paths,
@@ -26,6 +27,7 @@ from asc.utils import make_api_from_config
 from asc.web import notifications
 from asc.web.dashboard import MANUAL_BASELINE_MINUTES, build_dashboard_summary
 from asc.web.i18n import t
+from asc.web.task_runner import SSE_ABSOLUTE_TIMEOUT_SEC, start_background_task
 
 router = APIRouter()
 
@@ -35,6 +37,16 @@ _TMPDIR = Path(tempfile.gettempdir()).resolve()
 _ALLOWED_ROOTS = (_HOME, _TMPDIR)
 _DATA_DIR = Path(__file__).resolve().parents[3] / "data"
 _TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates"
+
+
+def _as_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _lang(request: Request) -> str:
@@ -305,86 +317,88 @@ def _start_metadata_task(
     include_metadata: bool,
     include_screenshots: bool,
     dry_run: bool,
+    verbose: bool = False,
 ) -> str:
-    task_id = _task_store.create("metadata", profile=profile)
     guard_enforcer = enforce_config_guard
+    task_id = _task_store.create("metadata", profile=profile)
 
-    def _run():
-        import queue
-        from asc.web.sse import capture_stdout_to_queue
+    def run(reporter, cancel_event):
         from asc.config import Config
         from asc.utils import make_api_from_config, parse_csv
-
-        _task_store.set_status(task_id, _TaskStatus.RUNNING)
-        cancel_event = _task_store.cancel_event(task_id)
-        q: queue.Queue = queue.Queue()
-        done_flag = _threading.Event()
-
-        _PROGRESS_RE = re.compile(r"\[PROGRESS:(\d+):(.+)\]")
-
-        def _drain_loop():
-            while not done_flag.is_set():
-                while not q.empty():
-                    line = q.get_nowait()
-                    m = _PROGRESS_RE.match(line)
-                    if m:
-                        _task_store.set_progress(task_id, int(m.group(1)), m.group(2))
-                    else:
-                        _task_store.append_log(task_id, line)
-                done_flag.wait(timeout=0.05)
-            while not q.empty():
-                line = q.get_nowait()
-                m = _PROGRESS_RE.match(line)
-                if m:
-                    _task_store.set_progress(task_id, int(m.group(1)), m.group(2))
-                else:
-                    _task_store.append_log(task_id, line)
-
-        _threading.Thread(target=_drain_loop, daemon=True).start()
 
         try:
             config = Config(app_name=profile)
             guard_enforcer(config, interactive=False)
             api, app_id = make_api_from_config(config)
 
-            with capture_stdout_to_queue(q):
-                if include_metadata:
-                    from asc.commands.metadata import _upload_metadata_core
-                    metadata_list = parse_csv(csv_path)
-                    _upload_metadata_core(
-                        api,
-                        app_id,
-                        metadata_list,
-                        dry_run=dry_run,
-                        cancel_event=cancel_event,
-                    )
-                if include_screenshots:
-                    from asc.commands.screenshots import _upload_screenshots_core
-                    _upload_screenshots_core(
-                        api,
-                        app_id,
-                        screenshots_dir,
-                        dry_run=dry_run,
-                        cancel_event=cancel_event,
-                    )
+            combined = include_metadata and include_screenshots
+            if combined:
+                # One phase plan for the whole task so pct stays monotonic.
+                reporter.set_phases([
+                    ("check", 5, "校验"),
+                    ("locales", 45, "元数据"),
+                    ("scan", 5, "扫描"),
+                    ("upload", 45, "截图"),
+                ])
 
-            done_flag.set()
+            if include_metadata:
+                from asc.commands.metadata import _upload_metadata_core
+
+                metadata_list = parse_csv(csv_path)
+                _upload_metadata_core(
+                    api,
+                    app_id,
+                    metadata_list,
+                    dry_run=dry_run,
+                    cancel_event=cancel_event,
+                    reporter=reporter,
+                    manage_phases=not combined,
+                    finalize=not combined,
+                )
+
+            if include_screenshots:
+                from asc.commands.screenshots import _upload_screenshots_core
+
+                _upload_screenshots_core(
+                    api,
+                    app_id,
+                    screenshots_dir,
+                    dry_run=dry_run,
+                    cancel_event=cancel_event,
+                    reporter=reporter,
+                    manage_phases=not combined,
+                    finalize=True,
+                )
+
             if cancel_event.is_set():
-                _task_store.append_log(task_id, "⏹ 用户已终止上传")
-                _finish_task(task_id, _TaskStatus.CANCELED, {"success": False, "canceled": True})
-            else:
-                _finish_task(task_id, _TaskStatus.DONE, {"success": True})
-        except ProcessCanceled:
-            done_flag.set()
-            _task_store.append_log(task_id, "⏹ 用户已终止上传")
-            _finish_task(task_id, _TaskStatus.CANCELED, {"success": False, "canceled": True})
-        except Exception as e:
-            done_flag.set()
-            _task_store.append_log(task_id, f"❌ 错误：{e}")
-            _finish_task(task_id, _TaskStatus.ERROR, {"success": False, "error": str(e)})
+                raise ProcessCanceled("metadata upload canceled")
 
-    _threading.Thread(target=_run, daemon=True).start()
-    return task_id
+            _finish_task(task_id, _TaskStatus.DONE, {"success": True})
+            return {"success": True}
+        except ProcessCanceled:
+            reporter.log("⏹ 用户已终止上传")
+            _finish_task(
+                task_id,
+                _TaskStatus.CANCELED,
+                {"success": False, "canceled": True},
+            )
+            raise
+        except Exception as e:
+            _finish_task(
+                task_id,
+                _TaskStatus.ERROR,
+                {"success": False, "error": str(e)},
+            )
+            raise
+
+    return start_background_task(
+        _task_store,
+        kind="metadata",
+        profile=profile,
+        verbose=verbose,
+        run=run,
+        task_id=task_id,
+    )
 
 
 @router.post("/metadata/check")
@@ -402,6 +416,7 @@ async def metadata_run(
     include_metadata: str = _Form(""),
     include_screenshots: str = _Form(""),
     dry_run: str = _Form(""),
+    verbose: str = _Form(""),
 ):
     profile = request.cookies.get("asc_profile", "")
     task_id = _start_metadata_task(
@@ -411,6 +426,7 @@ async def metadata_run(
         include_metadata=bool(include_metadata),
         include_screenshots=bool(include_screenshots),
         dry_run=bool(dry_run),
+        verbose=bool(verbose),
     )
     return {"task_id": task_id}
 
@@ -429,66 +445,39 @@ def _start_build_task(
     dry_run: bool = False,
     reuse_archive: str = "",
 ) -> str:
+    from asc.commands.build import _build_phase_plan, build_core, deploy_core
+    from asc.config import Config
+
     task_id = _task_store.create("build", profile=profile)
     guard_enforcer = enforce_config_guard
 
-    def _run():
-        import queue
-        from asc.web.sse import capture_stdout_to_queue
-        from asc.config import Config
-
-        _task_store.set_status(task_id, _TaskStatus.RUNNING)
-        cancel_event = _task_store.cancel_event(task_id)
-        q: queue.Queue = queue.Queue()
-        done_flag = _threading.Event()
-
-        _PROGRESS_RE = re.compile(r"\[PROGRESS:(\d+):(.+)\]")
-
-        def _drain_loop():
-            while not done_flag.is_set():
-                while not q.empty():
-                    line = q.get_nowait()
-                    m = _PROGRESS_RE.match(line)
-                    if m:
-                        _task_store.set_progress(task_id, int(m.group(1)), m.group(2))
-                    else:
-                        _task_store.append_log(task_id, line)
-                done_flag.wait(timeout=0.05)
-            while not q.empty():
-                line = q.get_nowait()
-                m = _PROGRESS_RE.match(line)
-                if m:
-                    _task_store.set_progress(task_id, int(m.group(1)), m.group(2))
-                else:
-                    _task_store.append_log(task_id, line)
-
-        _threading.Thread(target=_drain_loop, daemon=True).start()
-
+    def run(reporter, cancel_event):
         try:
             config = Config(app_name=profile)
             guard_enforcer(config, interactive=False)
 
-            with capture_stdout_to_queue(q):
-                if mode in ("full", "build"):
-                    from asc.commands.build_inputs import (
-                        BuildInputsCLI, prepare_build_inputs
-                    )
-                    from asc.commands.build import build_core
-                    cli = BuildInputsCLI(
-                        project=project or None,
-                        scheme=scheme or None,
-                        destination=destination or None,
-                        signing=signing or None,
-                        certificate=certificate or None,
-                        profile=provisioning_profile or None,
-                    )
-                    resolved = prepare_build_inputs(cli, config, interactive=False)
-                    enforce_bundle_guard(config, resolved.bundle_id)
-                    reuse_value = None
-                    if reuse_archive == "reuse":
-                        reuse_value = True
-                    elif reuse_archive == "rebuild":
-                        reuse_value = False
+            if mode in ("full", "build"):
+                from asc.commands.build_inputs import (
+                    BuildInputsCLI, prepare_build_inputs
+                )
+                cli = BuildInputsCLI(
+                    project=project or None,
+                    scheme=scheme or None,
+                    destination=destination or None,
+                    signing=signing or None,
+                    certificate=certificate or None,
+                    profile=provisioning_profile or None,
+                )
+                resolved = prepare_build_inputs(cli, config, interactive=False)
+                enforce_bundle_guard(config, resolved.bundle_id)
+                reuse_value = None
+                if reuse_archive == "reuse":
+                    reuse_value = True
+                elif reuse_archive == "rebuild":
+                    reuse_value = False
+
+                if mode == "full":
+                    reporter.set_phases(_build_phase_plan(mode="full"))
                     ipa = build_core(
                         resolved,
                         config.build_output,
@@ -497,9 +486,10 @@ def _start_build_task(
                         interactive=False,
                         verbose=verbose,
                         cancel_event=cancel_event,
+                        reporter=reporter,
+                        configure_phases=False,
                     )
-                    if mode == "full" and ipa:
-                        from asc.commands.build import deploy_core
+                    if ipa:
                         deploy_core(
                             ipa_path=ipa,
                             issuer_id=config.issuer_id,
@@ -509,38 +499,65 @@ def _start_build_task(
                             dry_run=dry_run,
                             verbose=verbose,
                             cancel_event=cancel_event,
+                            reporter=reporter,
+                            configure_phases=False,
                         )
-                elif mode == "deploy":
-                    from asc.commands.build import deploy_core
-                    enforce_bundle_guard(config, read_ipa_bundle_id(ipa_path))
-                    deploy_core(
-                        ipa_path=ipa_path,
-                        issuer_id=config.issuer_id,
-                        key_id=config.key_id,
-                        key_file=config.key_file,
-                        destination=destination or "appstore",
+                    elif dry_run:
+                        reporter.done()
+                else:
+                    build_core(
+                        resolved,
+                        config.build_output,
                         dry_run=dry_run,
+                        reuse_archive=reuse_value,
+                        interactive=False,
                         verbose=verbose,
                         cancel_event=cancel_event,
+                        reporter=reporter,
                     )
+            elif mode == "deploy":
+                enforce_bundle_guard(config, read_ipa_bundle_id(ipa_path))
+                deploy_core(
+                    ipa_path=ipa_path,
+                    issuer_id=config.issuer_id,
+                    key_id=config.key_id,
+                    key_file=config.key_file,
+                    destination=destination or "appstore",
+                    dry_run=dry_run,
+                    verbose=verbose,
+                    cancel_event=cancel_event,
+                    reporter=reporter,
+                )
 
-            done_flag.set()
             if cancel_event.is_set():
-                _task_store.append_log(task_id, "⏹ 用户已终止上传")
-                _finish_task(task_id, _TaskStatus.CANCELED, {"success": False, "canceled": True})
-            else:
-                _finish_task(task_id, _TaskStatus.DONE, {"success": True})
+                raise ProcessCanceled("build canceled")
+            result = {"success": True}
+            _finish_task(task_id, _TaskStatus.DONE, result)
+            return result
         except ProcessCanceled:
-            done_flag.set()
-            _task_store.append_log(task_id, "⏹ 用户已终止上传")
-            _finish_task(task_id, _TaskStatus.CANCELED, {"success": False, "canceled": True})
+            reporter.log("⏹ 用户已终止上传")
+            _finish_task(
+                task_id,
+                _TaskStatus.CANCELED,
+                {"success": False, "canceled": True},
+            )
+            raise
         except Exception as e:
-            done_flag.set()
-            _task_store.append_log(task_id, f"❌ 错误：{e}")
-            _finish_task(task_id, _TaskStatus.ERROR, {"success": False, "error": str(e)})
+            _finish_task(
+                task_id,
+                _TaskStatus.ERROR,
+                {"success": False, "error": str(e)},
+            )
+            raise
 
-    _threading.Thread(target=_run, daemon=True).start()
-    return task_id
+    return start_background_task(
+        _task_store,
+        kind="build",
+        profile=profile,
+        verbose=verbose,
+        run=run,
+        task_id=task_id,
+    )
 
 
 def _archive_summary(archive):
@@ -714,9 +731,9 @@ async def task_stream(
             except ValueError:
                 pass
         last_progress = None
-        max_polls = 1500  # 300 seconds at 0.2s intervals
         polls = 0
-        while polls < max_polls:
+        started = time.monotonic()
+        while True:
             current = _task_store.get_state(task_id)
             if current is None:
                 yield _fmt_sse("error_event", "task not found")
@@ -740,12 +757,13 @@ async def task_stream(
             elif status == _TaskStatus.ERROR:
                 yield _fmt_sse("error_event", "")
                 break
-            elif polls % 15 == 0:
+            if time.monotonic() - started >= SSE_ABSOLUTE_TIMEOUT_SEC:
+                yield _fmt_sse("error_event", "timeout")
+                break
+            if polls % 15 == 0:
                 yield ": heartbeat\n\n"
             polls += 1
             await _asyncio.sleep(0.2)
-        else:
-            yield _fmt_sse("error_event", "timeout")
 
     return _StreamingResponse(
         _generate(),
@@ -1216,7 +1234,7 @@ def whats_new_check(request: Request):
 
 @router.post("/whats-new/translate")
 async def whats_new_translate(request: Request):
-    """Translate text to all available locales using LLM."""
+    """Start a preview-translate background task; result.translations on task done."""
     lang = _lang(request)
     profile = request.cookies.get("asc_profile", "")
     if not profile:
@@ -1229,79 +1247,86 @@ async def whats_new_translate(request: Request):
             data = dict(form)
         text = str(data.get("text", "")).strip()
         source_locale = data.get("source_locale", "auto") or "auto"
+        verbose = _as_bool(data.get("verbose", False))
         if not text:
             return JSONResponse({"error": "Text is required"}, status_code=400)
         config = Config(app_name=profile)
-        try:
-            translations, errors = _translate_whats_new_text(
-                config=config,
-                text=text,
-                source_locale=source_locale,
-                lang=lang,
+        if not config.llm_api_key:
+            return JSONResponse(
+                {"error": "LLM API key not configured. Set it in Web settings or OPENAI_API_KEY."},
+                status_code=400,
             )
-        except ValueError as e:
-            return JSONResponse({"error": str(e)}, status_code=400)
-        if not translations:
-            message = "All translations failed."
-            if errors:
-                message = f"{message} {'; '.join(errors)}"
-            return JSONResponse({"error": message, "errors": errors}, status_code=500)
-        resp = {
-            "source_locale": source_locale,
-            "translations": translations,
-        }
-        if errors:
-            resp["errors"] = errors
-        return resp
+        task_id = _start_whats_new_translate_task(
+            profile=profile,
+            text=text,
+            source_locale=source_locale,
+            verbose=verbose,
+        )
+        return {"task_id": task_id}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-def _translate_whats_new_text(
-    config: Config,
+def _start_whats_new_translate_task(
+    profile: str,
     text: str,
-    source_locale: str,
-    lang: str = "en",
-) -> tuple[dict[str, str], list[str]]:
-    """Translate What's New text to all version locales except the source locale."""
-    if not config.llm_api_key:
-        raise ValueError("LLM API key not configured. Set it in Web settings or OPENAI_API_KEY.")
+    source_locale: str = "auto",
+    verbose: bool = False,
+) -> str:
+    """Preview translate only: translate phase 100%; result.translations (+ errors)."""
+    from asc.commands.whats_new import _make_translator, _whats_new_translate_only_core
 
-    from asc.llm import LLMClient
-    from asc.services.translator import OpenAITranslator
+    task_id = _task_store.create("whats-new-translate", profile=profile)
+    guard_enforcer = enforce_config_guard
 
-    llm_client = LLMClient(
-        api_key=config.llm_api_key,
-        base_url=config.llm_base_url,
-        model=config.llm_model,
-    )
-    translator = OpenAITranslator(llm_client)
-
-    api, app_id = make_api_from_config(config)
-    version = api.get_editable_version(app_id)
-    if not version:
-        raise ValueError(t("api.no_editable_version", lang=lang))
-    version_id = version["id"]
-    ver_locs = api.get_version_localizations(version_id)
-    all_locales = [loc["attributes"]["locale"] for loc in ver_locs]
-    target_locales = (
-        [locale for locale in all_locales if locale != source_locale]
-        if source_locale != "auto"
-        else all_locales
-    )
-
-    translations: dict[str, str] = {}
-    errors: list[str] = []
-    for locale in target_locales:
+    def run(reporter, cancel_event):
         try:
-            result = translator.translate(text, locale, source_locale)
-            if result:
-                translations[locale] = result
-            else:
-                errors.append(f"{locale}: empty translation")
+            config = Config(app_name=profile)
+            guard_enforcer(config, interactive=False)
+            if not config.llm_api_key:
+                raise ValueError(
+                    "LLM API key not configured. Set it in Web settings or OPENAI_API_KEY."
+                )
+            api, app_id = make_api_from_config(config)
+            translator = _make_translator(config)
+            result = _whats_new_translate_only_core(
+                api,
+                app_id,
+                text=text,
+                source_locale=source_locale or "auto",
+                translator=translator,
+                reporter=reporter,
+                cancel_event=cancel_event,
+            )
+            if cancel_event.is_set():
+                raise ProcessCanceled("whats-new translate canceled")
+            _finish_task(task_id, _TaskStatus.DONE, result)
+            return result
+        except ProcessCanceled:
+            reporter.log("⏹ 用户已终止翻译")
+            _finish_task(
+                task_id,
+                _TaskStatus.CANCELED,
+                {"success": False, "canceled": True},
+            )
+            raise
         except Exception as e:
-            errors.append(f"{locale}: {e}")
-    return translations, errors
+            reporter.fail(str(e))
+            _finish_task(
+                task_id,
+                _TaskStatus.ERROR,
+                {"success": False, "error": str(e)},
+            )
+            raise
+
+    return start_background_task(
+        _task_store,
+        kind="whats-new-translate",
+        profile=profile,
+        verbose=verbose,
+        run=run,
+        task_id=task_id,
+    )
 
 
 def _start_whats_new_task(
@@ -1310,120 +1335,73 @@ def _start_whats_new_task(
     translations: dict[str, str] | None = None,
     text: str | None = None,
     locales: list[str] | None = None,
+    *,
+    translate: bool = False,
+    source_locale: str = "auto",
+    verbose: bool = False,
 ) -> str:
+    from asc.commands.whats_new import _make_translator, _whats_new_core
+
     task_id = _task_store.create("whats-new", profile=profile)
     guard_enforcer = enforce_config_guard
 
-    def _run():
-        import queue
-        from asc.web.sse import capture_stdout_to_queue
-        from asc.utils import make_api_from_config
-
-        _task_store.set_status(task_id, _TaskStatus.RUNNING)
-        cancel_event = _task_store.cancel_event(task_id)
-        q: "queue.Queue" = queue.Queue()
-        done_flag = _threading.Event()
-
-        _PROGRESS_RE = re.compile(r"\[PROGRESS:(\d+)\:(.+)\]")
-
-        def _drain_loop():
-            while not done_flag.is_set():
-                while not q.empty():
-                    line = q.get_nowait()
-                    m = _PROGRESS_RE.match(line)
-                    if m:
-                        _task_store.set_progress(task_id, int(m.group(1)), m.group(2))
-                    else:
-                        _task_store.append_log(task_id, line)
-                done_flag.wait(timeout=0.05)
-            while not q.empty():
-                line = q.get_nowait()
-                m = _PROGRESS_RE.match(line)
-                if m:
-                    _task_store.set_progress(task_id, int(m.group(1)), m.group(2))
-                else:
-                    _task_store.append_log(task_id, line)
-
-        _threading.Thread(target=_drain_loop, daemon=True).start()
-
+    def run(reporter, cancel_event):
         try:
             config = Config(app_name=profile)
             guard_enforcer(config, interactive=False)
             api, app_id = make_api_from_config(config)
-            version = api.get_editable_version(app_id)
-            if not version:
-                raise Exception("无可编辑版本")
 
-            app_store_state = version["attributes"].get("appStoreState", "")
-            editable_states = {"PREPARE_FOR_SUBMISSION", "DEVELOPER_REJECTED", "REJECTED"}
-            if app_store_state not in editable_states:
-                state_hint = {
-                    "READY_FOR_SALE": "版本已上架，无法编辑更新说明。如需修改，请创建新版本。",
-                    "WAITING_FOR_REVIEW": "版本正在等待审核，请先拒绝版本后再修改。",
-                    "IN_REVIEW": "版本正在审核中，无法修改更新说明。",
-                    "PENDING_APPLE_RELEASE": "版本待 Apple 发布，无法修改更新说明。",
-                    "ACCEPTED": "版本已通过审核，无法修改更新说明。",
-                }.get(app_store_state, f"当前版本状态「{app_store_state}」不允许编辑更新说明。")
-                raise Exception(
-                    f"无法编辑 What's New：{state_hint}\n"
-                    f"💡 可编辑状态：{', '.join(editable_states)}"
-                )
+            translator = None
+            if translate and translations is None:
+                if not config.llm_api_key:
+                    raise ValueError(
+                        "LLM API key not configured. Set it in Web settings or OPENAI_API_KEY."
+                    )
+                translator = _make_translator(config)
 
-            version_id = version["id"]
-            ver_locs = api.get_version_localizations(version_id)
-            ver_loc_map = {loc["attributes"]["locale"]: loc for loc in ver_locs}
-
-            if translations is not None:
-                # Translation flow: use pre-translated dict
-                total = len(translations)
-                for i, (locale, content) in enumerate(translations.items()):
-                    if cancel_event.is_set():
-                        raise ProcessCanceled("whats-new upload canceled")
-                    if locale not in ver_loc_map:
-                        _task_store.append_log(task_id, f"⚠️  {locale}: 不存在，跳过")
-                        continue
-                    if dry_run:
-                        _task_store.append_log(task_id, f"[DRYRUN] {locale}: {content[:50]}...")
-                        continue
-                    api.update_version_localization(ver_loc_map[locale]["id"], {"whatsNew": content})
-                    _task_store.append_log(task_id, f"✅ {locale}: 已上传")
-                    _task_store.set_progress(task_id, int((i + 1) / total * 100), f"上传 {locale}")
-            else:
-                # Direct text flow: apply same text to target locales
-                target_locs = ver_locs
-                if locales:
-                    target_locs = [loc for loc in ver_locs if loc["attributes"]["locale"] in locales]
-                    if not target_locs:
-                        raise Exception(f"指定的语言不存在，可用语言: {list(ver_loc_map.keys())}")
-
-                if dry_run:
-                    _task_store.append_log(task_id, f"[DRYRUN] 预览模式，目标语言: {[l['attributes']['locale'] for l in target_locs]}")
-                else:
-                    for i, loc in enumerate(target_locs):
-                        if cancel_event.is_set():
-                            raise ProcessCanceled("whats-new upload canceled")
-                        locale = loc["attributes"]["locale"]
-                        api.update_version_localization(loc["id"], {"whatsNew": text or ""})
-                        _task_store.append_log(task_id, f"✅ {locale}: 已更新")
-                        _task_store.set_progress(task_id, int((i + 1) / len(target_locs) * 100), f"上传 {locale}")
-
-            done_flag.set()
+            result = _whats_new_core(
+                api,
+                app_id,
+                text=text,
+                translations=translations,
+                locales=locales,
+                translate=translate and translations is None,
+                source_locale=source_locale or "auto",
+                dry_run=dry_run,
+                translator=translator,
+                reporter=reporter,
+                cancel_event=cancel_event,
+                require_editable_state=True,
+            )
             if cancel_event.is_set():
-                _task_store.append_log(task_id, "⏹ 用户已终止上传")
-                _finish_task(task_id, _TaskStatus.CANCELED, {"success": False, "canceled": True})
-            else:
-                _finish_task(task_id, _TaskStatus.DONE, {"success": True})
+                raise ProcessCanceled("whats-new upload canceled")
+            _finish_task(task_id, _TaskStatus.DONE, result)
+            return result
         except ProcessCanceled:
-            done_flag.set()
-            _task_store.append_log(task_id, "⏹ 用户已终止上传")
-            _finish_task(task_id, _TaskStatus.CANCELED, {"success": False, "canceled": True})
+            reporter.log("⏹ 用户已终止上传")
+            _finish_task(
+                task_id,
+                _TaskStatus.CANCELED,
+                {"success": False, "canceled": True},
+            )
+            raise
         except Exception as e:
-            done_flag.set()
-            _task_store.append_log(task_id, f"❌ 错误：{e}")
-            _finish_task(task_id, _TaskStatus.ERROR, {"success": False, "error": str(e)})
+            reporter.fail(str(e))
+            _finish_task(
+                task_id,
+                _TaskStatus.ERROR,
+                {"success": False, "error": str(e)},
+            )
+            raise
 
-    _threading.Thread(target=_run, daemon=True).start()
-    return task_id
+    return start_background_task(
+        _task_store,
+        kind="whats-new",
+        profile=profile,
+        verbose=verbose,
+        run=run,
+        task_id=task_id,
+    )
 
 
 @router.post("/whats-new/run")
@@ -1435,6 +1413,7 @@ async def whats_new_run(
     dry_run: str = _Form(""),
     translate: str = _Form(""),
     source_locale: str = _Form("auto"),
+    verbose: str = _Form(""),
 ):
     """Run whats-new upload. Supports translated dicts, translate mode, and direct text mode."""
     import json
@@ -1442,15 +1421,6 @@ async def whats_new_run(
     profile = request.cookies.get("asc_profile", "")
     if not profile:
         return JSONResponse({"error": t("api.no_profile", lang=lang)}, status_code=400)
-
-    def _as_bool(value) -> bool:
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, (int, float)):
-            return value != 0
-        if value is None:
-            return False
-        return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
     translations = None
     locale_list = None
@@ -1473,31 +1443,20 @@ async def whats_new_run(
             dry_run = payload["dry_run"]
         if not translate and "translate" in payload:
             translate = payload["translate"]
+        if not verbose and "verbose" in payload:
+            verbose = payload["verbose"]
 
     translate_requested = _as_bool(translate)
 
     if translations_json:
-        # Translate mode: pre-translated dict
+        # Pre-supplied translations: upload-only
         try:
             translations = json.loads(translations_json)
         except json.JSONDecodeError:
             return JSONResponse({"error": "Invalid JSON"}, status_code=400)
     elif translate_requested and text:
-        try:
-            config = Config(app_name=profile)
-            translations, errors = _translate_whats_new_text(
-                config=config,
-                text=text.strip(),
-                source_locale=source_locale,
-                lang=lang,
-            )
-        except Exception as e:
-            return JSONResponse({"error": str(e)}, status_code=400)
-        if not translations:
-            message = "All translations failed."
-            if errors:
-                message = f"{message} {'; '.join(errors)}"
-            return JSONResponse({"error": message, "errors": errors}, status_code=500)
+        # LLM runs inside the worker (not request thread)
+        locale_list = [l.strip() for l in locales.split(",")] if locales else None
     elif text:
         # Direct mode: same text to specified locales
         locale_list = [l.strip() for l in locales.split(",")] if locales else None
@@ -1510,6 +1469,9 @@ async def whats_new_run(
         translations=translations,
         text=text or None,
         locales=locale_list,
+        translate=translate_requested and translations is None,
+        source_locale=source_locale or "auto",
+        verbose=_as_bool(verbose),
     )
     return {"task_id": task_id}
 
@@ -1564,39 +1526,12 @@ def _start_iap_review_screenshots_task(
     profile: str,
     items: list[ReviewScreenshotUploadItem],
     dry_run: bool,
+    verbose: bool = False,
 ) -> str:
     task_id = _task_store.create("iap-review-screenshots", profile=profile)
     guard_enforcer = enforce_config_guard
 
-    def _run():
-        import queue
-        from asc.web.sse import capture_stdout_to_queue
-
-        _task_store.set_status(task_id, _TaskStatus.RUNNING)
-        q: "queue.Queue" = queue.Queue()
-        done_flag = _threading.Event()
-        _PROGRESS_RE = re.compile(r"\[PROGRESS:(\d+):(.+)\]")
-
-        def _drain_loop():
-            while not done_flag.is_set():
-                while not q.empty():
-                    line = q.get_nowait()
-                    m = _PROGRESS_RE.match(line)
-                    if m:
-                        _task_store.set_progress(task_id, int(m.group(1)), m.group(2))
-                    else:
-                        _task_store.append_log(task_id, line)
-                done_flag.wait(timeout=0.05)
-            while not q.empty():
-                line = q.get_nowait()
-                m = _PROGRESS_RE.match(line)
-                if m:
-                    _task_store.set_progress(task_id, int(m.group(1)), m.group(2))
-                else:
-                    _task_store.append_log(task_id, line)
-
-        _threading.Thread(target=_drain_loop, daemon=True).start()
-
+    def run(reporter, cancel_event):
         try:
             config = Config(app_name=profile)
             guard_enforcer(config, interactive=False)
@@ -1606,9 +1541,8 @@ def _start_iap_review_screenshots_task(
                 api, app_id, items
             )
             for error in scan_errors:
-                _task_store.append_log(task_id, f"⚠️ {error}")
+                reporter.log(f"⚠️ {error}")
             if invalid_items:
-                done_flag.set()
                 message = (
                     "review screenshot target no longer eligible for current "
                     "app/profile or already has a screenshot"
@@ -1617,31 +1551,27 @@ def _start_iap_review_screenshots_task(
                     f"{item.kind}:{item.product_id} ({item.id})"
                     for item in invalid_items
                 )
-                _task_store.append_log(task_id, f"❌ {message}: {labels}")
-                _finish_task(
-                    task_id,
-                    _TaskStatus.ERROR,
-                    {
-                        "success": False,
-                        "uploaded": 0,
-                        "skipped": 0,
-                        "failed": len(invalid_items),
-                        "failures": [
-                            {
-                                "productId": item.product_id,
-                                "error": f"{message}: {item.kind}:{item.id}",
-                            }
-                            for item in invalid_items
-                        ],
-                        "error": f"{message}: {labels}",
-                    },
-                )
-                return
+                reporter.log(f"❌ {message}: {labels}")
+                payload = {
+                    "success": False,
+                    "uploaded": 0,
+                    "skipped": 0,
+                    "failed": len(invalid_items),
+                    "failures": [
+                        {
+                            "productId": item.product_id,
+                            "error": f"{message}: {item.kind}:{item.id}",
+                        }
+                        for item in invalid_items
+                    ],
+                    "error": f"{message}: {labels}",
+                }
+                _finish_task(task_id, _TaskStatus.ERROR, payload)
+                raise RuntimeError(payload["error"])
 
-            with capture_stdout_to_queue(q):
-                result = upload_review_screenshots(api, items, dry_run=dry_run)
-
-            done_flag.set()
+            result = upload_review_screenshots(
+                api, items, dry_run=dry_run, reporter=reporter
+            )
             payload = {
                 "success": result.failed == 0,
                 "uploaded": result.uploaded,
@@ -1654,101 +1584,127 @@ def _start_iap_review_screenshots_task(
             }
             if result.failed == 0:
                 _finish_task(task_id, _TaskStatus.DONE, payload)
-            else:
-                _finish_task(task_id, _TaskStatus.ERROR, payload)
-        except Exception as e:
-            done_flag.set()
-            _task_store.append_log(task_id, f"❌ 错误：{e}")
-            _finish_task(
-                task_id,
-                _TaskStatus.ERROR,
-                {
-                    "success": False,
-                    "uploaded": 0,
-                    "skipped": 0,
-                    "failed": len(items) or 1,
-                    "failures": [{"productId": "", "error": str(e)}],
-                    "error": str(e),
-                },
+                return payload
+            _finish_task(task_id, _TaskStatus.ERROR, payload)
+            raise RuntimeError(
+                f"review screenshot upload failed: {result.failed} item(s)"
             )
+        except Exception as e:
+            current = _task_store.get_state(task_id) or _task_store.get(task_id)
+            current_status = (
+                getattr(current.get("status"), "value", current.get("status"))
+                if current
+                else None
+            )
+            if current_status not in {"done", "error", "canceled"}:
+                reporter.fail(f"❌ 错误：{e}")
+                _finish_task(
+                    task_id,
+                    _TaskStatus.ERROR,
+                    {
+                        "success": False,
+                        "uploaded": 0,
+                        "skipped": 0,
+                        "failed": len(items) or 1,
+                        "failures": [{"productId": "", "error": str(e)}],
+                        "error": str(e),
+                    },
+                )
+            raise
 
-    _threading.Thread(target=_run, daemon=True).start()
-    return task_id
+    return start_background_task(
+        _task_store,
+        kind="iap-review-screenshots",
+        profile=profile,
+        verbose=verbose,
+        run=run,
+        task_id=task_id,
+    )
+
 
 def _start_iap_task(
         profile: str,
         iap_file: str,
         dry_run: bool,
         update_existing: bool,
+        verbose: bool = False,
 ) -> str:
     task_id = _task_store.create("iap", profile=profile)
     guard_enforcer = enforce_config_guard
 
-    def _run():
-        import queue
-        from asc.web.sse import capture_stdout_to_queue
-        from asc.config import Config
-        from asc.utils import make_api_from_config
-
-        _task_store.set_status(task_id, _TaskStatus.RUNNING)
-        q: "queue.Queue" = queue.Queue()
-        done_flag = _threading.Event()
-
-        _PROGRESS_RE = re.compile(r"\[PROGRESS:(\d+)\:(.+)\]")
-
-        def _drain_loop():
-            while not done_flag.is_set():
-                while not q.empty():
-                    line = q.get_nowait()
-                    m = _PROGRESS_RE.match(line)
-                    if m:
-                        _task_store.set_progress(task_id, int(m.group(1)), m.group(2))
-                    else:
-                        _task_store.append_log(task_id, line)
-                done_flag.wait(timeout=0.05)
-            while not q.empty():
-                line = q.get_nowait()
-                m = _PROGRESS_RE.match(line)
-                if m:
-                    _task_store.set_progress(task_id, int(m.group(1)), m.group(2))
-                else:
-                    _task_store.append_log(task_id, line)
-
-        _threading.Thread(target=_drain_loop, daemon=True).start()
-
+    def run(reporter, cancel_event):
         try:
             config = Config(app_name=profile)
             guard_enforcer(config, interactive=False)
             api, app_id = make_api_from_config(config)
 
             items, groups = _load_iap_config(iap_file)
-            with capture_stdout_to_queue(q):
-                if items:
-                    _upload_iap_core(api, app_id, items,
-                                     dry_run=dry_run,
-                                     update_existing=update_existing)
-                if groups:
-                    _upload_subscriptions_core(
-                        api, app_id, groups,
-                        update_existing=update_existing, dry_run=dry_run
-                    )
+            reporter.set_phases(
+                _iap_phase_plan(has_items=bool(items), has_groups=bool(groups))
+            )
+            reporter.phase("parse")
+            reporter.progress(1, 1, msg="ok")
 
-            done_flag.set()
+            if items:
+                reporter.log(f"📦 一次性 IAP: {len(items)} 项")
+                _upload_iap_core(
+                    api,
+                    app_id,
+                    items,
+                    dry_run=dry_run,
+                    update_existing=update_existing,
+                    reporter=reporter,
+                    manage_phases=False,
+                    finalize=not bool(groups),
+                )
+            if groups:
+                total_subs = sum(len(g.get("subscriptions", [])) for g in groups)
+                reporter.log(f"🔁 订阅: {len(groups)} 组 / {total_subs} 商品")
+                failed = _upload_subscriptions_core(
+                    api,
+                    app_id,
+                    groups,
+                    update_existing=update_existing,
+                    dry_run=dry_run,
+                    reporter=reporter,
+                    manage_phases=False,
+                    finalize=True,
+                )
+                if failed:
+                    raise RuntimeError(f"subscription upload failed: {failed} item(s)")
+
             _finish_task(task_id, _TaskStatus.DONE, {"success": True})
+            return {"success": True}
         except Exception as e:
-            done_flag.set()
-            _task_store.append_log(task_id, f"❌ 错误：{e}")
-            _finish_task(task_id, _TaskStatus.ERROR, {"success": False, "error": str(e)})
+            current = _task_store.get_state(task_id) or _task_store.get(task_id)
+            current_status = (
+                getattr(current.get("status"), "value", current.get("status"))
+                if current
+                else None
+            )
+            if current_status not in {"done", "error", "canceled"}:
+                _finish_task(
+                    task_id,
+                    _TaskStatus.ERROR,
+                    {"success": False, "error": str(e)},
+                )
+            raise
 
-    _threading.Thread(target=_run, daemon=True).start()
-    return task_id
-
+    return start_background_task(
+        _task_store,
+        kind="iap",
+        profile=profile,
+        verbose=verbose,
+        run=run,
+        task_id=task_id,
+    )
 @router.post("/iap/run")
 async def iap_run(
         request: Request,
         iap_file: str = _Form("data/iap_packages.json"),
         dry_run: str = _Form(""),
         update_existing: str = _Form(""),
+        verbose: str = _Form(""),
 ):
     profile = request.cookies.get("asc_profile", "")
     task_id = _start_iap_task(
@@ -1756,6 +1712,7 @@ async def iap_run(
         iap_file=iap_file,
         dry_run=bool(dry_run),
         update_existing=bool(update_existing),
+        verbose=bool(verbose),
     )
     return {"task_id": task_id}
 
@@ -1845,6 +1802,10 @@ async def iap_review_screenshots_upload(request: Request):
     if not isinstance(dry_run, bool):
         raise HTTPException(status_code=400, detail="dryRun must be a boolean")
 
+    verbose = payload.get("verbose", False) if isinstance(payload, dict) else False
+    if not isinstance(verbose, bool):
+        verbose = _as_bool(verbose)
+
     items: list[ReviewScreenshotUploadItem] = []
     for item in items_payload:
         if not isinstance(item, dict):
@@ -1874,6 +1835,7 @@ async def iap_review_screenshots_upload(request: Request):
         profile=profile,
         items=items,
         dry_run=dry_run,
+        verbose=verbose,
     )
     return {"task_id": task_id}
 
@@ -1924,68 +1886,97 @@ async def urls_set(
     url: str = _Form(...),
     locales: str = _Form(""),  # comma-separated or empty for all
     dry_run: str = _Form(""),
+    verbose: str = _Form(""),
 ):
     """Set a URL field directly."""
     profile = request.cookies.get("asc_profile", "")
+    task_id = _start_urls_task(
+        profile=profile,
+        field=field,
+        url=url,
+        locales=locales,
+        dry_run=bool(dry_run),
+        verbose=bool(verbose),
+    )
+    return {"task_id": task_id}
+
+
+def _start_urls_task(
+    *,
+    profile: str,
+    field: str,
+    url: str,
+    locales: str = "",
+    dry_run: bool = False,
+    verbose: bool = False,
+) -> str:
     task_id = _task_store.create("urls", profile=profile)
     guard_enforcer = enforce_config_guard
 
-    def _run():
-        import queue
-        from asc.web.sse import capture_stdout_to_queue
-
-        _task_store.set_status(task_id, _TaskStatus.RUNNING)
-        cancel_event = _task_store.cancel_event(task_id)
-        q: "queue.Queue" = queue.Queue()
-        done_flag = _threading.Event()
-
-        def _drain_loop():
-            while not done_flag.is_set():
-                while not q.empty():
-                    _task_store.append_log(task_id, q.get_nowait())
-                done_flag.wait(timeout=0.05)
-            while not q.empty():
-                _task_store.append_log(task_id, q.get_nowait())
-
-        _threading.Thread(target=_drain_loop, daemon=True).start()
-
+    def run(reporter, cancel_event):
         try:
             config = Config(app_name=profile)
             guard_enforcer(config, interactive=False)
             api, app_id = make_api_from_config(config)
             locale_list = [l.strip() for l in locales.split(",")] if locales else None
 
-            with capture_stdout_to_queue(q):
-                if field == "privacyPolicyUrl":
-                    from asc.commands.metadata import _update_app_info_field_core
-                    _update_app_info_field_core(
-                        api, app_id, field, field, url, locale_list, bool(dry_run),
-                        cancel_event=cancel_event,
-                    )
-                else:
-                    from asc.commands.metadata import _update_version_field_core
-                    _update_version_field_core(
-                        api, app_id, field, field, url, locale_list, bool(dry_run),
-                        cancel_event=cancel_event,
-                    )
-
-            done_flag.set()
-            if cancel_event.is_set():
-                _task_store.append_log(task_id, "⏹ 用户已终止上传")
-                _finish_task(task_id, _TaskStatus.CANCELED, {"success": False, "canceled": True})
+            if field == "privacyPolicyUrl":
+                from asc.commands.metadata import _update_app_info_field_core
+                _update_app_info_field_core(
+                    api,
+                    app_id,
+                    field,
+                    field,
+                    url,
+                    locale_list,
+                    dry_run,
+                    cancel_event=cancel_event,
+                    reporter=reporter,
+                )
             else:
-                _finish_task(task_id, _TaskStatus.DONE, {"success": True})
-        except ProcessCanceled:
-            done_flag.set()
-            _task_store.append_log(task_id, "⏹ 用户已终止上传")
-            _finish_task(task_id, _TaskStatus.CANCELED, {"success": False, "canceled": True})
-        except Exception as e:
-            done_flag.set()
-            _task_store.append_log(task_id, f"❌ 错误：{e}")
-            _finish_task(task_id, _TaskStatus.ERROR, {"success": False, "error": str(e)})
+                from asc.commands.metadata import _update_version_field_core
+                _update_version_field_core(
+                    api,
+                    app_id,
+                    field,
+                    field,
+                    url,
+                    locale_list,
+                    dry_run,
+                    cancel_event=cancel_event,
+                    reporter=reporter,
+                )
 
-    _threading.Thread(target=_run, daemon=True).start()
-    return {"task_id": task_id}
+            if cancel_event.is_set():
+                raise ProcessCanceled("urls update canceled")
+            result = {"success": True}
+            _finish_task(task_id, _TaskStatus.DONE, result)
+            return result
+        except ProcessCanceled:
+            reporter.log("⏹ 用户已终止上传")
+            _finish_task(
+                task_id,
+                _TaskStatus.CANCELED,
+                {"success": False, "canceled": True},
+            )
+            raise
+        except Exception as e:
+            # Core already called reporter.fail for RuntimeError; avoid duplicate.
+            _finish_task(
+                task_id,
+                _TaskStatus.ERROR,
+                {"success": False, "error": str(e)},
+            )
+            raise
+
+    return start_background_task(
+        _task_store,
+        kind="urls",
+        profile=profile,
+        verbose=verbose,
+        run=run,
+        task_id=task_id,
+    )
 
 
 # ---------- Update API ----------
@@ -2067,36 +2058,78 @@ async def update_branches(request: Request):
 
 
 @router.post("/update/run")
-async def update_run(version: str = _Form(""), branch: str = _Form(""), dry_run: str = _Form("")):
+async def update_run(
+    version: str = _Form(""),
+    branch: str = _Form(""),
+    dry_run: str = _Form(""),
+    verbose: str = _Form(""),
+):
     """Run update."""
+    task_id = _start_update_task(
+        version=version or None,
+        branch=branch or None,
+        verbose=bool(verbose),
+    )
+    return {"task_id": task_id}
+
+
+def _start_update_task(
+    *,
+    version: str | None = None,
+    branch: str | None = None,
+    verbose: bool = False,
+) -> str:
+    from asc.commands.update_cmd import UpdateError, _update_core
+
     task_id = _task_store.create("update", profile="system")
 
-    def _run():
-        _task_store.set_status(task_id, _TaskStatus.RUNNING)
+    def run(reporter, cancel_event):
         try:
-            from asc.commands.update_cmd import cmd_update
-            import io
-            import sys
-
-            old_stdout = sys.stdout
-            sys.stdout = captured = io.StringIO()
-
-            try:
-                cmd_update(version=version or None, branch=branch or None, yes=True)
-            finally:
-                sys.stdout = old_stdout
-
-            output = captured.getvalue()
-            for line in output.splitlines():
-                _task_store.append_log(task_id, line)
-
-            _finish_task(task_id, _TaskStatus.DONE, {"success": True})
+            _update_core(
+                version=version or None,
+                branch=branch or None,
+                yes=True,
+                reporter=reporter,
+                confirm=False,
+            )
+            if cancel_event.is_set():
+                raise ProcessCanceled("update canceled")
+            result = {"success": True}
+            _finish_task(task_id, _TaskStatus.DONE, result)
+            return result
+        except ProcessCanceled:
+            reporter.log("⏹ 用户已终止更新")
+            _finish_task(
+                task_id,
+                _TaskStatus.CANCELED,
+                {"success": False, "canceled": True},
+            )
+            raise
+        except UpdateError as e:
+            # Core already called reporter.fail; do not fail again.
+            _finish_task(
+                task_id,
+                _TaskStatus.ERROR,
+                {"success": False, "error": str(e)},
+            )
+            raise
         except Exception as e:
-            _task_store.append_log(task_id, f"❌ 错误：{e}")
-            _finish_task(task_id, _TaskStatus.ERROR, {"success": False, "error": str(e)})
+            reporter.fail(str(e))
+            _finish_task(
+                task_id,
+                _TaskStatus.ERROR,
+                {"success": False, "error": str(e)},
+            )
+            raise
 
-    _threading.Thread(target=_run, daemon=True).start()
-    return {"task_id": task_id}
+    return start_background_task(
+        _task_store,
+        kind="update",
+        profile="system",
+        verbose=verbose,
+        run=run,
+        task_id=task_id,
+    )
 
 @router.get("/settings/llm")
 async def get_llm_config(request: Request):

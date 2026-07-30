@@ -332,11 +332,17 @@
     source.addEventListener("progress", function (event) {
       if (eventSource !== source) return;
       try {
-        var progress = JSON.parse(event.data);
+        var raw = JSON.parse(event.data) || {};
         if (typeof callbacks.onProgress === "function") {
-          var pct = Number(progress && progress.pct);
-          var msg = progress && progress.msg == null ? "" : String(progress.msg);
-          callbacks.onProgress(Number.isFinite(pct) ? Math.max(0, Math.min(100, pct)) : null, msg);
+          var pct = Number(raw.pct);
+          callbacks.onProgress({
+            pct: Number.isFinite(pct) ? Math.max(0, Math.min(100, pct)) : null,
+            msg: raw.msg == null ? "" : String(raw.msg),
+            phase: raw.phase == null ? "" : String(raw.phase),
+            phase_label: raw.phase_label == null ? "" : String(raw.phase_label),
+            phase_index: Number(raw.phase_index) || 0,
+            phase_total: Number(raw.phase_total) || 0
+          });
         }
       } catch (error) {
         setConnectionStatus(tt("drawer.invalid_progress"), true);

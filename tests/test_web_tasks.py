@@ -145,7 +145,14 @@ def test_task_store_persists_tasks(tmp_path):
     assert task["kind"] == "metadata"
     assert task["profile"] == "myapp"
     assert task["logs"] == ["uploaded metadata"]
-    assert task["progress"] == {"pct": 80, "msg": "uploading"}
+    assert task["progress"] == {
+        "pct": 80,
+        "msg": "uploading",
+        "phase": "",
+        "phase_label": "",
+        "phase_index": 0,
+        "phase_total": 0,
+    }
     assert task["status"] == TaskStatus.DONE
     assert task["result"] == {"success": True}
 
@@ -193,7 +200,14 @@ def test_task_store_defaults_invalid_progress_on_load(tmp_path):
     )
 
     store = TaskStore(storage_path)
-    assert store.get("task-1")["progress"] == {"pct": 0, "msg": "ok"}
+    assert store.get("task-1")["progress"] == {
+        "pct": 0,
+        "msg": "ok",
+        "phase": "",
+        "phase_label": "",
+        "phase_index": 0,
+        "phase_total": 0,
+    }
 
 
 def test_task_store_uses_sqlite_and_exposes_log_sequences(tmp_path):
@@ -286,6 +300,42 @@ def test_sqlite_state_updates_do_not_rewrite_logs(tmp_path):
     store.request_cancel(task_id)
 
     task = store.get(task_id)
-    assert task["progress"] == {"pct": 42, "msg": "building"}
+    assert task["progress"] == {
+        "pct": 42,
+        "msg": "building",
+        "phase": "",
+        "phase_label": "",
+        "phase_index": 0,
+        "phase_total": 0,
+    }
     assert task["result"] == {"ok": True}
     assert task["cancel_requested"] is True
+
+
+def test_set_progress_persists_phase_fields(tmp_path):
+    store = TaskStore(tmp_path / "tasks.db")
+    task_id = store.create("metadata", profile="demo")
+    store.set_progress(
+        task_id, 52, "en-US",
+        phase="locales", phase_label="上传本地化",
+        phase_index=2, phase_total=2,
+    )
+    task = store.get(task_id)
+    assert task["progress"]["pct"] == 52
+    assert task["progress"]["phase"] == "locales"
+    assert task["progress"]["phase_label"] == "上传本地化"
+    assert task["progress"]["phase_index"] == 2
+    assert task["progress"]["phase_total"] == 2
+    restored = TaskStore(tmp_path / "tasks.db")
+    assert restored.get(task_id)["progress"]["phase"] == "locales"
+
+
+def test_legacy_progress_defaults_phase_fields(tmp_path):
+    store = TaskStore(tmp_path / "tasks.db")
+    task_id = store.create("build", profile="demo")
+    store.set_progress(task_id, 10, "old")
+    task = store.get(task_id)
+    assert task["progress"]["phase"] == ""
+    assert task["progress"]["phase_index"] == 0
+    assert task["progress"]["phase_total"] == 0
+

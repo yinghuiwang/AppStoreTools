@@ -77,7 +77,14 @@ class TaskStore:
             "created_at": now,
             "updated_at": now,
             "completed_at": None,
-            "progress": {"pct": 0, "msg": ""},
+            "progress": {
+                "pct": 0,
+                "msg": "",
+                "phase": "",
+                "phase_label": "",
+                "phase_index": 0,
+                "phase_total": 0,
+            },
             "cancel_requested": False,
         }
         with self._lock:
@@ -85,8 +92,10 @@ class TaskStore:
                 with self._connect() as conn:
                     conn.execute(
                         """INSERT INTO task_runs
-                        (id, kind, profile, status, created_at, updated_at, progress_pct, progress_msg)
-                        VALUES (?, ?, ?, ?, ?, ?, 0, '')""",
+                        (id, kind, profile, status, created_at, updated_at,
+                         progress_pct, progress_msg, progress_phase, progress_phase_label,
+                         phase_index, phase_total)
+                        VALUES (?, ?, ?, ?, ?, ?, 0, '', '', '', 0, 0)""",
                         (task_id, kind, profile, TaskStatus.PENDING.value, now, now),
                     )
                     conn.execute("INSERT INTO task_order (task_id) VALUES (?)", (task_id,))
@@ -251,19 +260,49 @@ class TaskStore:
                 self._tasks[task_id]["updated_at"] = self._now()
                 self._save()
 
-    def set_progress(self, task_id: str, pct: int, msg: str) -> None:
+    def set_progress(
+        self,
+        task_id: str,
+        pct: int,
+        msg: str,
+        *,
+        phase: str = "",
+        phase_label: str = "",
+        phase_index: int = 0,
+        phase_total: int = 0,
+    ) -> None:
+        progress = {
+            "pct": int(pct),
+            "msg": msg,
+            "phase": phase,
+            "phase_label": phase_label,
+            "phase_index": int(phase_index),
+            "phase_total": int(phase_total),
+        }
         with self._lock:
             if self._db_path is not None:
                 now = self._now()
                 with self._connect() as conn:
                     conn.execute(
-                        "UPDATE task_runs SET progress_pct = ?, progress_msg = ?, updated_at = ? WHERE id = ?",
-                        (int(pct), msg, now, task_id),
+                        """UPDATE task_runs SET progress_pct = ?, progress_msg = ?,
+                           progress_phase = ?, progress_phase_label = ?,
+                           phase_index = ?, phase_total = ?, updated_at = ?
+                           WHERE id = ?""",
+                        (
+                            progress["pct"],
+                            progress["msg"],
+                            progress["phase"],
+                            progress["phase_label"],
+                            progress["phase_index"],
+                            progress["phase_total"],
+                            now,
+                            task_id,
+                        ),
                     )
                 return
             self._refresh_db()
             if task_id in self._tasks:
-                self._tasks[task_id]["progress"] = {"pct": pct, "msg": msg}
+                self._tasks[task_id]["progress"] = progress
                 self._tasks[task_id]["updated_at"] = self._now()
                 self._save()
 
@@ -347,8 +386,31 @@ class TaskStore:
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
             "completed_at": row["completed_at"],
-            "progress": {"pct": row["progress_pct"], "msg": row["progress_msg"]},
+            "progress": self._progress_from_row(row),
             "cancel_requested": bool(row["cancel_requested"]),
+        }
+
+    def _progress_from_row(self, row: Any) -> dict:
+        keys = set(row.keys())
+        return {
+            "pct": row["progress_pct"],
+            "msg": row["progress_msg"],
+            "phase": row["progress_phase"] if "progress_phase" in keys else "",
+            "phase_label": row["progress_phase_label"] if "progress_phase_label" in keys else "",
+            "phase_index": int(row["phase_index"]) if "phase_index" in keys else 0,
+            "phase_total": int(row["phase_total"]) if "phase_total" in keys else 0,
+        }
+
+    def _normalize_progress(self, progress: Any) -> dict:
+        if not isinstance(progress, dict):
+            progress = {}
+        return {
+            "pct": self._coerce_int(progress.get("pct"), default=0),
+            "msg": str(progress.get("msg", "") or ""),
+            "phase": str(progress.get("phase", "") or ""),
+            "phase_label": str(progress.get("phase_label", "") or ""),
+            "phase_index": self._coerce_int(progress.get("phase_index"), default=0),
+            "phase_total": self._coerce_int(progress.get("phase_total"), default=0),
         }
 
     def _public_task(self, task: dict) -> dict:
@@ -408,9 +470,6 @@ class TaskStore:
             task["updated_at"] = now
             task["completed_at"] = now
 
-        progress = task.get("progress")
-        if not isinstance(progress, dict):
-            progress = {"pct": 0, "msg": ""}
         now = self._now()
 
         return {
@@ -423,10 +482,7 @@ class TaskStore:
             "created_at": task.get("created_at") or now,
             "updated_at": task.get("updated_at") or task.get("created_at") or now,
             "completed_at": task.get("completed_at"),
-            "progress": {
-                "pct": self._coerce_int(progress.get("pct"), default=0),
-                "msg": str(progress.get("msg", "") or ""),
-            },
+            "progress": self._normalize_progress(task.get("progress")),
             "cancel_requested": bool(task.get("cancel_requested")),
         }
 
@@ -506,6 +562,10 @@ class TaskStore:
                     completed_at TEXT,
                     progress_pct INTEGER NOT NULL DEFAULT 0,
                     progress_msg TEXT NOT NULL DEFAULT '',
+                    progress_phase TEXT NOT NULL DEFAULT '',
+                    progress_phase_label TEXT NOT NULL DEFAULT '',
+                    phase_index INTEGER NOT NULL DEFAULT 0,
+                    phase_total INTEGER NOT NULL DEFAULT 0,
                     cancel_requested INTEGER NOT NULL DEFAULT 0
                 );
                 CREATE TABLE IF NOT EXISTS task_order (
@@ -521,6 +581,15 @@ class TaskStore:
                 );
                 """
             )
+            existing = {row[1] for row in conn.execute("PRAGMA table_info(task_runs)")}
+            for column, declaration in (
+                ("progress_phase", "TEXT NOT NULL DEFAULT ''"),
+                ("progress_phase_label", "TEXT NOT NULL DEFAULT ''"),
+                ("phase_index", "INTEGER NOT NULL DEFAULT 0"),
+                ("phase_total", "INTEGER NOT NULL DEFAULT 0"),
+            ):
+                if column not in existing:
+                    conn.execute(f"ALTER TABLE task_runs ADD COLUMN {column} {declaration}")
 
     def _db_is_empty(self) -> bool:
         with self._connect() as conn:
@@ -545,7 +614,7 @@ class TaskStore:
                 "created_at": row["created_at"],
                 "updated_at": row["updated_at"],
                 "completed_at": row["completed_at"],
-                "progress": {"pct": row["progress_pct"], "msg": row["progress_msg"]},
+                "progress": self._progress_from_row(row),
                 "cancel_requested": bool(row["cancel_requested"]),
             }
             self._tasks[task_id] = task
@@ -584,14 +653,30 @@ class TaskStore:
                 conn.execute("BEGIN")
                 for task in self._tasks.values():
                     result_json = json.dumps(task["result"], ensure_ascii=False) if task["result"] is not None else None
+                    progress = self._normalize_progress(task.get("progress"))
                     conn.execute(
                         """INSERT OR REPLACE INTO task_runs
                         (id, kind, profile, status, result_json, created_at, updated_at, completed_at,
-                         progress_pct, progress_msg, cancel_requested)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                        (task["id"], task["kind"], task["profile"], self._normalize_status(task["status"]).value,
-                         result_json, task["created_at"], task["updated_at"], task["completed_at"],
-                         task["progress"]["pct"], task["progress"]["msg"], int(task["cancel_requested"])),
+                         progress_pct, progress_msg, progress_phase, progress_phase_label,
+                         phase_index, phase_total, cancel_requested)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            task["id"],
+                            task["kind"],
+                            task["profile"],
+                            self._normalize_status(task["status"]).value,
+                            result_json,
+                            task["created_at"],
+                            task["updated_at"],
+                            task["completed_at"],
+                            progress["pct"],
+                            progress["msg"],
+                            progress["phase"],
+                            progress["phase_label"],
+                            progress["phase_index"],
+                            progress["phase_total"],
+                            int(task["cancel_requested"]),
+                        ),
                     )
                     conn.execute("DELETE FROM task_logs WHERE task_id = ?", (task["id"],))
                     conn.executemany(

@@ -78,14 +78,21 @@ class TestWebWhatsNewTranslatePreviewFlow:
     """Test 2: Web UI translate preview flow."""
 
     def test_web_whats_new_translate_preview_flow(self):
-        """Web UI translate preview flow: translate -> run -> check status."""
+        """Web UI translate preview flow: translate task -> status.result -> run -> status."""
+        import time
+        from asc.web import routes_api
+        from asc.web.tasks import TaskStatus
+
         app_instance = create_app()
         client = TestClient(app_instance)
 
         mock_api = MagicMock()
         mock_api.get_editable_version.return_value = {
             "id": "v1",
-            "attributes": {"versionString": "1.0.0"}
+            "attributes": {
+                "versionString": "1.0.0",
+                "appStoreState": "PREPARE_FOR_SUBMISSION",
+            },
         }
         mock_api.get_version_localizations.return_value = [
             {"id": "l1", "attributes": {"locale": "en-US"}},
@@ -100,42 +107,64 @@ class TestWebWhatsNewTranslatePreviewFlow:
         mock_translator = MagicMock()
         mock_translator.translate.side_effect = lambda text, locale, source: f"translated_{locale}"
 
-        with patch("asc.web.routes_api.make_api_from_config", return_value=(mock_api, "app123")):
-            with patch("asc.web.routes_api.Config", return_value=mock_config):
-                with patch("asc.llm.LLMClient", return_value=MagicMock()):
-                    with patch("asc.services.translator.OpenAITranslator", return_value=mock_translator):
-                        # Step 1: POST /api/whats-new/translate
-                        translate_resp = client.post(
-                            "/api/whats-new/translate",
-                            cookies={"asc_profile": "test"},
-                            data={"text": "Bug fixes.", "source_locale": "en-US"},
-                        )
+        with patch("asc.web.routes_api.make_api_from_config", return_value=(mock_api, "app123")), \
+             patch("asc.web.routes_api.Config", return_value=mock_config), \
+             patch("asc.web.routes_api.enforce_config_guard", MagicMock()), \
+             patch("asc.llm.LLMClient", return_value=MagicMock()), \
+             patch("asc.services.translator.OpenAITranslator", return_value=mock_translator):
+            # Step 1: POST /api/whats-new/translate → task_id
+            translate_resp = client.post(
+                "/api/whats-new/translate",
+                cookies={"asc_profile": "test"},
+                data={"text": "Bug fixes.", "source_locale": "en-US"},
+            )
+            assert translate_resp.status_code == 200
+            translate_data = translate_resp.json()
+            assert "task_id" in translate_data
+            assert "translations" not in translate_data
+            translate_task_id = translate_data["task_id"]
 
-        assert translate_resp.status_code == 200
-        translate_data = translate_resp.json()
-        assert "translations" in translate_data
-        assert "source_locale" in translate_data
-        assert translate_data["source_locale"] == "en-US"
+            task = None
+            for _ in range(100):
+                task = routes_api._task_store.get(translate_task_id)
+                if task and task["status"] in {TaskStatus.DONE, TaskStatus.ERROR, TaskStatus.CANCELED}:
+                    break
+                time.sleep(0.02)
 
-        # Step 2: POST /api/whats-new/run with translations
-        with patch("asc.web.routes_api.make_api_from_config", return_value=(mock_api, "app123")):
-            with patch("asc.web.routes_api.Config", return_value=mock_config):
-                run_resp = client.post(
-                    "/api/whats-new/run",
-                    cookies={"asc_profile": "test"},
-                    data={"translations_json": '{"zh-CN": "你好世界"}', "dry_run": "1"},
-                )
+            assert task is not None, f"task missing: {translate_task_id}"
+            assert task["status"] == TaskStatus.DONE, task.get("result")
+            assert "translations" in task["result"]
+            assert task["result"]["source_locale"] == "en-US"
+            assert "zh-CN" in task["result"]["translations"]
 
-        assert run_resp.status_code == 200
-        run_data = run_resp.json()
-        assert "task_id" in run_data
-        task_id = run_data["task_id"]
+            status_resp = client.get(f"/api/task/{translate_task_id}/status")
+            assert status_resp.status_code == 200
+            assert status_resp.json()["result"]["translations"]["zh-CN"] == "translated_zh-CN"
 
-        # Step 3: GET /api/task/{task_id}/status
-        status_resp = client.get(f"/api/task/{task_id}/status")
-        assert status_resp.status_code == 200
-        status_data = status_resp.json()
-        assert "status" in status_data
+            # Step 2: POST /api/whats-new/run with translations
+            run_resp = client.post(
+                "/api/whats-new/run",
+                cookies={"asc_profile": "test"},
+                data={"translations_json": '{"zh-CN": "你好世界"}', "dry_run": "1"},
+            )
+            assert run_resp.status_code == 200
+            run_data = run_resp.json()
+            assert "task_id" in run_data
+            task_id = run_data["task_id"]
+
+            # Step 3: GET /api/task/{task_id}/status
+            status_data = None
+            for _ in range(100):
+                status_resp = client.get(f"/api/task/{task_id}/status")
+                assert status_resp.status_code == 200
+                status_data = status_resp.json()
+                st = status_data["status"]
+                st_val = getattr(st, "value", st)
+                if st_val in {"done", "error", "canceled"}:
+                    break
+                time.sleep(0.02)
+            assert status_data is not None
+            assert "status" in status_data
 
 
 class TestWhatsNewPageLoads:

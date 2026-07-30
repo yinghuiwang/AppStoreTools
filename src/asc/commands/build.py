@@ -2,7 +2,7 @@
 from __future__ import annotations
 import os
 import re
-from typing import Optional
+from typing import Callable, Literal, Optional
 
 import plistlib
 import subprocess
@@ -21,7 +21,8 @@ from asc.guard import (
     read_ipa_bundle_id,
 )
 from asc.i18n import t, HELP, ERRORS
-from asc.progress import Spinner
+from asc.progress import ProcessCanceled, Spinner
+from asc.reporting import TaskReporter, make_cli_reporter
 from asc.utils import resolve_app_profile
 
 from asc.commands.build_inputs import (
@@ -59,16 +60,55 @@ def _format_bytes(num_bytes: int) -> str:
     return f"{size:.1f} GB"
 
 
+def _build_phase_plan(
+    *, mode: Literal["full", "build", "deploy"] = "full"
+) -> list[tuple[str, int, str]]:
+    """Return phase weights for build/deploy/release modes.
+
+    build-only keeps archive+export weights (35/15); TaskReporter renormalizes.
+    deploy-only is upload 100%. full/release uses archive 35 / export 15 / upload 50.
+    """
+    if mode == "deploy":
+        return [("upload", 100, "上传")]
+    if mode == "build":
+        return [
+            ("archive", 35, "归档"),
+            ("export", 15, "导出"),
+        ]
+    return [
+        ("archive", 35, "归档"),
+        ("export", 15, "导出"),
+        ("upload", 50, "上传"),
+    ]
+
+
+def _spinner_log_callback(reporter: TaskReporter | None) -> Callable[[str], None] | None:
+    if reporter is None:
+        return None
+    return lambda line: reporter.log(line)
+
+
 class UploadProgressReporter:
     """Print user-facing IPA upload progress from altool/Transporter output."""
 
-    def __init__(self, total_bytes: int):
+    def __init__(
+        self,
+        total_bytes: int,
+        task_reporter: TaskReporter | None = None,
+    ):
         self.total_bytes = total_bytes
+        self._task_reporter = task_reporter
         self._last_percent: Optional[int] = None
 
     def print_start(self) -> None:
-        typer.echo(f"  IPA 总大小: {_format_bytes(self.total_bytes)}")
-        typer.echo("  上传进度: 等待 App Store Connect 接收数据...")
+        size_msg = f"  IPA 总大小: {_format_bytes(self.total_bytes)}"
+        wait_msg = "  上传进度: 等待 App Store Connect 接收数据..."
+        if self._task_reporter is not None:
+            self._task_reporter.log(size_msg)
+            self._task_reporter.log(wait_msg)
+        else:
+            typer.echo(size_msg)
+            typer.echo(wait_msg)
 
     def handle_output_line(self, line: str) -> None:
         progress = self._parse_progress(line)
@@ -80,11 +120,18 @@ class UploadProgressReporter:
             return
         self._last_percent = percent
 
-        typer.echo(
+        msg = (
             "  已上传: "
             f"{_format_bytes(uploaded)} / {_format_bytes(self.total_bytes)} "
             f"({percent}%)"
         )
+        if self._task_reporter is not None:
+            self._task_reporter.progress(
+                uploaded, self.total_bytes, msg=f"{percent}%"
+            )
+            self._task_reporter.log(msg)
+        else:
+            typer.echo(msg)
 
     def _parse_progress(self, line: str) -> Optional[tuple[int, int]]:
         byte_match = _BYTE_PROGRESS_RE.search(line)
@@ -200,6 +247,7 @@ def run_xcodebuild_archive(
     *,
     verbose: bool = False,
     cancel_event=None,
+    on_log_line: Optional[Callable[[str], None]] = None,
 ) -> str:
     """Run xcodebuild archive. Return archive_path on success."""
     flag = "-workspace" if kind == "workspace" else "-project"
@@ -213,7 +261,12 @@ def run_xcodebuild_archive(
         "-allowProvisioningUpdates",
     ]
     log_path = Path(archive_path).parent / "build.log"
-    sp = Spinner("构建 Archive", log_path=str(log_path), verbose=verbose)
+    sp = Spinner(
+        "构建 Archive",
+        log_path=str(log_path),
+        verbose=verbose,
+        on_log_line=on_log_line,
+    )
     if cancel_event is None:
         result = sp.run(cmd)
     else:
@@ -230,6 +283,7 @@ def run_xcodebuild_export(
     *,
     verbose: bool = False,
     cancel_event=None,
+    on_log_line: Optional[Callable[[str], None]] = None,
 ) -> str:
     """Run xcodebuild -exportArchive. Return path to .ipa file."""
     cmd = [
@@ -240,7 +294,12 @@ def run_xcodebuild_export(
         "-exportPath", output_dir,
     ]
     log_path = Path(output_dir).parent / "export.log"
-    sp = Spinner("导出 IPA", log_path=str(log_path), verbose=verbose)
+    sp = Spinner(
+        "导出 IPA",
+        log_path=str(log_path),
+        verbose=verbose,
+        on_log_line=on_log_line,
+    )
     if cancel_event is None:
         result = sp.run(cmd)
     else:
@@ -264,85 +323,110 @@ def build_core(
     interactive: bool = False,
     verbose: bool = False,
     cancel_event=None,
+    reporter: TaskReporter | None = None,
+    configure_phases: bool = True,
 ) -> Optional[str]:
     """Core build logic. Returns .ipa path, or None if dry_run."""
-    typer.echo(f"\n{'='*56}")
-    typer.echo("  asc build")
-    typer.echo(f"{'='*56}")
-    typer.echo(f"  项目: {resolved.project_path}")
-    typer.echo(f"  Scheme: {resolved.scheme}")
-    typer.echo(f"  配置: {configuration}")
-    typer.echo(f"  签名: {resolved.signing}")
-    typer.echo(f"  目标: {resolved.destination}")
+    if reporter is None:
+        reporter = make_cli_reporter(verbose=verbose)
+    if configure_phases:
+        reporter.set_phases(_build_phase_plan(mode="build"))
+
+    reporter.log(f"\n{'='*56}")
+    reporter.log("  asc build")
+    reporter.log(f"{'='*56}")
+    reporter.log(f"  项目: {resolved.project_path}")
+    reporter.log(f"  Scheme: {resolved.scheme}")
+    reporter.log(f"  配置: {configuration}")
+    reporter.log(f"  签名: {resolved.signing}")
+    reporter.log(f"  目标: {resolved.destination}")
     if resolved.signing == "manual":
-        typer.echo(f"  Bundle ID: {resolved.bundle_id}")
-        typer.echo(f"  证书: {resolved.certificate}")
-        typer.echo(f"  描述文件: {resolved.profile}")
+        reporter.log(f"  Bundle ID: {resolved.bundle_id}")
+        reporter.log(f"  证书: {resolved.certificate}")
+        reporter.log(f"  描述文件: {resolved.profile}")
 
     output_dir = Path(output)
     archive_path = str(output_dir / f"{resolved.scheme}.xcarchive")
     export_dir = str(output_dir / "export")
 
     if dry_run:
-        typer.echo("\n[预览] 将运行：")
-        typer.echo(f"  xcodebuild archive → {archive_path}")
-        typer.echo(f"  xcodebuild -exportArchive → {export_dir}/*.ipa")
+        reporter.log("\n[预览] 将运行：")
+        reporter.log(f"  xcodebuild archive → {archive_path}")
+        reporter.log(f"  xcodebuild -exportArchive → {export_dir}/*.ipa")
+        if configure_phases:
+            reporter.done()
         return None
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-    Path(export_dir).mkdir(parents=True, exist_ok=True)
+    try:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        Path(export_dir).mkdir(parents=True, exist_ok=True)
 
-    # === Step 0: archive reuse check ===
-    reuse_path: Optional[str] = None
-    if reuse_archive is not False:  # explicit False = forced rebuild
-        versions = detect_versions(resolved.project_path, resolved.project_kind, resolved.scheme)
-        if versions:
-            mv, bn = versions
-            archives = scan_archives(output, resolved.scheme)
-            match = find_matching_archive(
-                archives,
-                bundle_id=resolved.bundle_id,
-                marketing_version=mv,
-                build_number=bn,
-            )
-            if match:
-                if reuse_archive is True:
-                    reuse_path = match.path
-                    typer.echo(f"\n♻️  复用 archive: {reuse_path}")
-                else:
-                    if prompt_reuse_archive(match, interactive=interactive):
+        # === Step 0: archive reuse check ===
+        reuse_path: Optional[str] = None
+        if reuse_archive is not False:  # explicit False = forced rebuild
+            versions = detect_versions(resolved.project_path, resolved.project_kind, resolved.scheme)
+            if versions:
+                mv, bn = versions
+                archives = scan_archives(output, resolved.scheme)
+                match = find_matching_archive(
+                    archives,
+                    bundle_id=resolved.bundle_id,
+                    marketing_version=mv,
+                    build_number=bn,
+                )
+                if match:
+                    if reuse_archive is True:
                         reuse_path = match.path
+                        reporter.log(f"\n♻️  复用 archive: {reuse_path}")
+                    else:
+                        if prompt_reuse_archive(match, interactive=interactive):
+                            reuse_path = match.path
 
-    typer.echo("\n  ── 步骤 1/3：生成 ExportOptions.plist ──")
-    export_options = generate_export_options(
-        signing=resolved.signing, destination=resolved.destination,
-        profile=resolved.profile, certificate=resolved.certificate,
-        output_dir=str(output_dir), bundle_id=resolved.bundle_id,
-    )
+        reporter.log("\n  ── 步骤 1/3：生成 ExportOptions.plist ──")
+        export_options = generate_export_options(
+            signing=resolved.signing, destination=resolved.destination,
+            profile=resolved.profile, certificate=resolved.certificate,
+            output_dir=str(output_dir), bundle_id=resolved.bundle_id,
+        )
 
-    if reuse_path:
-        archive_path = reuse_path
-        typer.echo(f"  ── 步骤 2/3：跳过 archive（复用: {archive_path}） ──")
-    else:
-        typer.echo("  ── 步骤 2/3：构建 Archive ──")
-        run_xcodebuild_archive(
-            resolved.project_path, resolved.project_kind, resolved.scheme,
-            configuration, archive_path,
+        on_log = _spinner_log_callback(reporter)
+        reporter.phase("archive")
+        if reuse_path:
+            archive_path = reuse_path
+            reporter.log(f"  ── 步骤 2/3：跳过 archive（复用: {archive_path}） ──")
+            reporter.progress(1, 1, msg="复用 archive")
+        else:
+            reporter.log("  ── 步骤 2/3：构建 Archive ──")
+            run_xcodebuild_archive(
+                resolved.project_path, resolved.project_kind, resolved.scheme,
+                configuration, archive_path,
+                verbose=verbose,
+                cancel_event=cancel_event,
+                on_log_line=on_log,
+            )
+            reporter.log(f"  ✅ Archive: {archive_path}")
+            reporter.progress(1, 1, msg="archive 完成")
+
+        reporter.phase("export")
+        reporter.log("  ── 步骤 3/3：导出 IPA ──")
+        ipa_path = run_xcodebuild_export(
+            archive_path,
+            export_options,
+            export_dir,
             verbose=verbose,
             cancel_event=cancel_event,
+            on_log_line=on_log,
         )
-        typer.echo(f"  ✅ Archive: {archive_path}")
-
-    typer.echo("  ── 步骤 3/3：导出 IPA ──")
-    ipa_path = run_xcodebuild_export(
-        archive_path,
-        export_options,
-        export_dir,
-        verbose=verbose,
-        cancel_event=cancel_event,
-    )
-    typer.echo(f"  ✅ IPA: {ipa_path}")
-    return ipa_path
+        reporter.log(f"  ✅ IPA: {ipa_path}")
+        reporter.progress(1, 1, msg="export 完成")
+        if configure_phases:
+            reporter.done(f"构建完成: {ipa_path}")
+        return ipa_path
+    except ProcessCanceled:
+        raise
+    except Exception as e:
+        reporter.fail(str(e))
+        raise
 
 
 def cmd_build(
@@ -444,6 +528,7 @@ def upload_ipa(
     verbose: bool = False,
     progress_reporter: Optional[UploadProgressReporter] = None,
     cancel_event=None,
+    on_log_line: Optional[Callable[[str], None]] = None,
 ) -> None:
     """Upload .ipa using xcrun altool.
 
@@ -465,7 +550,12 @@ def upload_ipa(
     if progress_reporter is None:
         progress_reporter = UploadProgressReporter(Path(ipa_path).stat().st_size)
         progress_reporter.print_start()
-    sp = Spinner("上传到 App Store Connect", log_path=str(log_path), verbose=verbose)
+    sp = Spinner(
+        "上传到 App Store Connect",
+        log_path=str(log_path),
+        verbose=verbose,
+        on_log_line=on_log_line,
+    )
     if cancel_event is None:
         result = sp.run(cmd, output_callback=progress_reporter.handle_output_line)
     else:
@@ -488,40 +578,60 @@ def deploy_core(
     *,
     verbose: bool = False,
     cancel_event=None,
+    reporter: TaskReporter | None = None,
+    configure_phases: bool = True,
 ) -> None:
     """Core deploy logic."""
-    typer.echo(f"\n{'='*56}")
-    typer.echo("  asc deploy")
-    typer.echo(f"{'='*56}")
-    typer.echo(f"  IPA: {ipa_path}")
-    typer.echo(f"  目标: {destination}")
+    if reporter is None:
+        reporter = make_cli_reporter(verbose=verbose)
+    if configure_phases:
+        reporter.set_phases(_build_phase_plan(mode="deploy"))
 
-    typer.echo("\n  ── 步骤 1/3：检查 IPA 文件 ──")
+    reporter.log(f"\n{'='*56}")
+    reporter.log("  asc deploy")
+    reporter.log(f"{'='*56}")
+    reporter.log(f"  IPA: {ipa_path}")
+    reporter.log(f"  目标: {destination}")
+
+    reporter.log("\n  ── 步骤 1/3：检查 IPA 文件 ──")
     if not Path(ipa_path).exists():
-        typer.echo(f"❌ {t(ERRORS['ipa_not_found']).format(path=ipa_path)}", err=True)
+        msg = t(ERRORS['ipa_not_found']).format(path=ipa_path)
+        reporter.fail(f"❌ {msg}")
+        typer.echo(f"❌ {msg}", err=True)
         raise typer.Exit(1)
     ipa_size = Path(ipa_path).stat().st_size
-    progress_reporter = UploadProgressReporter(ipa_size)
+    progress_reporter = UploadProgressReporter(ipa_size, task_reporter=reporter)
     progress_reporter.print_start()
 
     if dry_run:
-        typer.echo("\n[预览] 将上传：")
-        typer.echo(f"  xcrun altool --upload-app -f {ipa_path}")
+        reporter.log("\n[预览] 将上传：")
+        reporter.log(f"  xcrun altool --upload-app -f {ipa_path}")
+        reporter.done()
         return
 
-    typer.echo("  ── 步骤 2/3：上传 IPA 到 App Store Connect ──")
-    upload_ipa(
-        ipa_path,
-        issuer_id,
-        key_id,
-        key_file,
-        destination,
-        verbose=verbose,
-        progress_reporter=progress_reporter,
-        cancel_event=cancel_event,
-    )
-    typer.echo("  ── 步骤 3/3：等待 altool 返回上传结果 ──")
-    typer.echo("  ✅ 上传成功")
+    try:
+        reporter.phase("upload")
+        reporter.log("  ── 步骤 2/3：上传 IPA 到 App Store Connect ──")
+        upload_ipa(
+            ipa_path,
+            issuer_id,
+            key_id,
+            key_file,
+            destination,
+            verbose=verbose,
+            progress_reporter=progress_reporter,
+            cancel_event=cancel_event,
+            on_log_line=_spinner_log_callback(reporter),
+        )
+        reporter.log("  ── 步骤 3/3：等待 altool 返回上传结果 ──")
+        reporter.log("  ✅ 上传成功")
+        reporter.progress(1, 1, msg="上传完成")
+        reporter.done("上传成功")
+    except ProcessCanceled:
+        raise
+    except Exception as e:
+        reporter.fail(str(e))
+        raise
 
 
 def cmd_deploy(
@@ -672,6 +782,8 @@ def cmd_release(
 
     try:
         enforce_bundle_guard(config, resolved.bundle_id)
+        reporter = make_cli_reporter(verbose=verbose)
+        reporter.set_phases(_build_phase_plan(mode="full"))
         ipa_path = build_core(
             resolved,
             output=output or config.build_output,
@@ -680,6 +792,8 @@ def cmd_release(
             reuse_archive=reuse_archive,
             interactive=resolve_interactive(interactive),
             verbose=verbose,
+            reporter=reporter,
+            configure_phases=False,
         )
         if ipa_path:
             deploy_core(
@@ -690,7 +804,11 @@ def cmd_release(
                 destination=resolved.destination,
                 dry_run=dry_run,
                 verbose=verbose,
+                reporter=reporter,
+                configure_phases=False,
             )
+        elif dry_run:
+            reporter.done()
     except (RuntimeError, GuardError) as e:
         typer.echo(f"❌ {e}", err=True)
         hint = get_action_hint(e)

@@ -540,14 +540,16 @@ function buildLogOptions() {
   const d = Alpine.$data(document.getElementById('build-page-state'));
   return {
     title: window.t('build.log_title'),
-    onProgress(pct, msg) {
-      d.progress = pct;
-      d.progressMsg = msg || '';
-    },
-    onLog(line) {
-      if (line.includes('archive') || line.includes('归档')) d.phase = Math.max(d.phase, 1);
-      if (line.includes('export') || line.includes('导出')) d.phase = Math.max(d.phase, 2);
-      if (line.includes('upload') || line.includes('上传')) d.phase = Math.max(d.phase, 3);
+    onProgress(progress) {
+      if (!progress) return;
+      if (progress.pct != null) d.progress = progress.pct;
+      d.progressMsg = progress.msg || '';
+      const phaseMap = { archive: 1, export: 2, upload: 3 };
+      if (progress.phase && phaseMap[progress.phase] != null) {
+        d.phase = phaseMap[progress.phase];
+      } else {
+        d.phase = Number(progress.phase_index) || d.phase;
+      }
     },
     onDone() { d.status = 'done'; d.progress = 100; d.phase = 3; },
     onError() { d.status = 'error'; },
