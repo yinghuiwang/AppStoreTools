@@ -5,7 +5,7 @@
           class="ml-2 shrink-0 px-3 py-1 text-[11px] font-medium rounded-md cursor-pointer transition-colors duration-150"
           style="background: var(--accent); color: var(--bg-base);"
           data-fb-action="select"
-          data-fb-path="{{ current_path | e }}">选择此目录</button>
+          data-fb-path="{{ current_path | e }}">{{ t("filebrowser.select_dir") }}</button>
   {% endif %}
 </div>
 {% if entries %}
@@ -34,6 +34,6 @@
 </ul>
 {% else %}
 <div class="text-center py-8 text-sm text-obsidian-500">
-  此目录为空
+  {{ t("filebrowser.empty") }}
 </div>
 {% endif %}

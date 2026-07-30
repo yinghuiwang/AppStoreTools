@@ -1,6 +1,11 @@
 (function () {
   "use strict";
 
+  function tt(key, vars) {
+    if (typeof window.t === "function") return window.t(key, vars);
+    return key;
+  }
+
   var drawer = document.getElementById("task-log-drawer");
   if (!drawer) {
     window.TaskLogDrawer = {
@@ -42,7 +47,7 @@
   var newLogCount = 0;
   var logEntries = [];
   var onlyErrors = false;
-  var connectionStatus = "等待选择任务";
+  var connectionStatus = tt("drawer.waiting");
   var closeTransitionHandler = null;
   var closeFallbackTimer = null;
   var backgroundInertEntries = null;
@@ -203,8 +208,8 @@
   function updatePosition() {
     if (!positionEl || !statusEl) return;
     if (newLogCount > 0) {
-      positionEl.textContent = newLogCount + " 条未读";
-      statusEl.textContent = "有 " + newLogCount + " 条新日志";
+      positionEl.textContent = tt("drawer.unread", { n: newLogCount });
+      statusEl.textContent = tt("drawer.new_logs", { n: newLogCount });
       if (latestControl) latestControl.hidden = false;
     } else {
       positionEl.textContent = lastSeq + " / ?";
@@ -309,10 +314,10 @@
     eventSource = source;
     // EventSource automatically sends Last-Event-ID when it reconnects.
     source.onopen = function () {
-      if (eventSource === source) setConnectionStatus("实时连接", true);
+      if (eventSource === source) setConnectionStatus(tt("drawer.connected"), true);
     };
     source.onerror = function () {
-      if (eventSource === source) setConnectionStatus("连接中断，正在重连");
+      if (eventSource === source) setConnectionStatus(tt("drawer.reconnecting"));
     };
     source.addEventListener("log", function (event) {
       if (eventSource !== source) return;
@@ -334,19 +339,19 @@
           callbacks.onProgress(Number.isFinite(pct) ? Math.max(0, Math.min(100, pct)) : null, msg);
         }
       } catch (error) {
-        setConnectionStatus("收到无效进度数据", true);
+        setConnectionStatus(tt("drawer.invalid_progress"), true);
       }
     });
-    source.addEventListener("done", function () { finishStream(source, "任务已完成", "onDone"); });
+    source.addEventListener("done", function () { finishStream(source, tt("drawer.done"), "onDone"); });
     source.addEventListener("error_event", function (event) {
       if (eventSource !== source) return;
       if (event.data === "timeout") {
-        setConnectionStatus("连接超时，正在重连");
+        setConnectionStatus(tt("drawer.timeout"));
         return;
       }
-      finishStream(source, "任务失败", "onError", event.data);
+      finishStream(source, tt("drawer.failed"), "onError", event.data);
     });
-    source.addEventListener("canceled", function () { finishStream(source, "任务已取消", "onCanceled"); });
+    source.addEventListener("canceled", function () { finishStream(source, tt("drawer.canceled"), "onCanceled"); });
   }
 
   async function loadStatusThenStream(taskId, requestId, controller) {
@@ -357,15 +362,15 @@
       });
       if (requestId !== openRequestId || !isDrawerOpen()) return;
       if (response.status === 404) {
-        setConnectionStatus("任务不存在或已被清理");
-        if (output) output.textContent = "任务不存在或已被清理\n";
+        setConnectionStatus(tt("drawer.missing"));
+        if (output) output.textContent = tt("drawer.missing") + "\n";
         return;
       }
       if (!response.ok) throw new Error("HTTP " + response.status);
     } catch (error) {
       if (requestId !== openRequestId || (error && error.name === "AbortError")) return;
-      setConnectionStatus("连接失败，请关闭后重试");
-      if (output) output.textContent = "无法连接任务日志，请关闭后重试。\n";
+      setConnectionStatus(tt("drawer.connect_failed"));
+      if (output) output.textContent = tt("drawer.connect_failed_body");
       return;
     } finally {
       if (requestId === openRequestId) statusController = null;
@@ -390,8 +395,8 @@
       onLog: options.onLog
     };
     resetLogState();
-    if (titleEl) titleEl.textContent = options.title || "任务日志";
-    setConnectionStatus("正在连接");
+    if (titleEl) titleEl.textContent = options.title || tt("drawer.title");
+    setConnectionStatus(tt("drawer.connecting"));
     updatePosition();
     previouslyFocused = document.activeElement;
     openDrawerPanel();
@@ -433,7 +438,7 @@
       if (output) output.replaceChildren();
       newLogCount = 0;
       updatePosition();
-      if (statusEl) statusEl.textContent = "显示已清空";
+      if (statusEl) statusEl.textContent = tt("drawer.cleared");
     });
   }
   if (errorsControl) {
@@ -450,13 +455,13 @@
     copyControl.addEventListener("click", function () {
       pauseAtCurrentViewport();
       if (!navigator.clipboard || !navigator.clipboard.writeText) {
-        if (statusEl) statusEl.textContent = "浏览器不支持自动复制";
+        if (statusEl) statusEl.textContent = tt("drawer.copy_unsupported");
         return;
       }
       navigator.clipboard.writeText(output ? output.textContent : "").then(function () {
-        if (statusEl) statusEl.textContent = "日志已复制";
+        if (statusEl) statusEl.textContent = tt("drawer.copied");
       }).catch(function () {
-        if (statusEl) statusEl.textContent = "复制失败，请手动选择";
+        if (statusEl) statusEl.textContent = tt("drawer.copy_failed");
       });
     });
   }

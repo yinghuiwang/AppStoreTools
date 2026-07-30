@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="{{ html_lang }}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -336,7 +336,7 @@
 
     <!-- App switcher -->
     <div class="px-4 py-3.5 border-b border-obsidian-700">
-      <label for="app-switcher" class="text-[10px] uppercase tracking-widest text-obsidian-400 mb-1.5 block font-medium">Current App</label>
+      <label for="app-switcher" class="text-[10px] uppercase tracking-widest text-obsidian-400 mb-1.5 block font-medium">{{ t("nav.current_app") }}</label>
       <select id="app-switcher"
               class="field-select w-full text-xs"
               onchange="
@@ -349,90 +349,96 @@
         <option value="{{ p }}"
                 {% if p == current_profile %}selected{% endif %}
                 {% if not access.get('enabled', True) %}disabled{% endif %}>
-          {{ p }}{% if not access.get('enabled', True) %}（其他机器）{% endif %}
+          {{ p }}{% if not access.get('enabled', True) %}{{ t("nav.other_machine") }}{% endif %}
         </option>
         {% endfor %}
       </select>
       {% if not has_machine_profile %}
-      <a href="/profiles" class="block mt-2 text-[11px] text-amber-550 hover:text-amber-500">+ 新建 App Profile</a>
+      <a href="/profiles" class="block mt-2 text-[11px] text-amber-550 hover:text-amber-500">{{ t("nav.new_profile") }}</a>
       {% endif %}
     </div>
 
     <nav class="flex-1 px-2.5 py-4 space-y-0.5">
-      <a href="/" aria-label="仪表盘" title="仪表盘"
+      <a href="/" aria-label="{{ t('nav.dashboard') }}" title="{{ t('nav.dashboard') }}"
          class="nav-item flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] cursor-pointer focus-ring
                 {% if request.url.path == '/' %}active{% endif %}">
         <svg class="w-[18px] h-[18px] shrink-0 text-obsidian-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25a2.25 2.25 0 0 1-2.25-2.25v-2.25Z"/></svg>
-        仪表盘
+        {{ t("nav.dashboard") }}
       </a>
-      <a href="/metadata" aria-label="元数据上传" title="元数据上传"
+      <a href="/metadata" aria-label="{{ t('nav.metadata') }}" title="{{ t('nav.metadata') }}"
          class="nav-item flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] cursor-pointer focus-ring
                 {% if request.url.path == '/metadata' %}active{% endif %}">
         <svg class="w-[18px] h-[18px] shrink-0 text-obsidian-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"/></svg>
-        元数据上传
+        {{ t("nav.metadata") }}
       </a>
-      <a href="/urls" aria-label="URL 设置" title="URL 设置"
+      <a href="/urls" aria-label="{{ t('nav.urls') }}" title="{{ t('nav.urls') }}"
          class="nav-item flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] cursor-pointer focus-ring
                 {% if request.url.path == '/urls' %}active{% endif %}">
         <svg class="w-[18px] h-[18px] shrink-0 text-obsidian-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"/></svg>
-        URL 设置
+        {{ t("nav.urls") }}
       </a>
-      <a href="/build" aria-label="构建上传" title="构建上传"
+      <a href="/build" aria-label="{{ t('nav.build') }}" title="{{ t('nav.build') }}"
          class="nav-item flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] cursor-pointer focus-ring
                 {% if request.url.path == '/build' %}active{% endif %}">
         <svg class="w-[18px] h-[18px] shrink-0 text-obsidian-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M11.42 15.17 17.25 21A2.652 2.652 0 0 0 21 17.25l-5.877-5.877M11.42 15.17l2.496-3.03c.317-.384.74-.626 1.208-.766M11.42 15.17l-4.655 5.653a2.548 2.548 0 1 1-3.586-3.586l6.837-5.63m5.108-.233c.55-.164 1.163-.188 1.743-.14a4.5 4.5 0 0 0 4.486-6.336l-3.276 3.277a3.004 3.004 0 0 1-2.25-2.25l3.276-3.276a4.5 4.5 0 0 0-6.336 4.486c.091 1.076-.071 2.264-.904 2.95l-.102.085"/></svg>
-        构建上传
+        {{ t("nav.build") }}
       </a>
-      <a href="/whats-new" aria-label="更新说明" title="更新说明"
+      <a href="/whats-new" aria-label="{{ t('nav.whats_new') }}" title="{{ t('nav.whats_new') }}"
          class="nav-item flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] cursor-pointer focus-ring
                 {% if request.url.path == '/whats-new' %}active{% endif %}">
         <svg class="w-[18px] h-[18px] shrink-0 text-obsidian-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 0 1 .865-.501 48.172 48.172 0 0 0 3.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z"/></svg>
-        更新说明
+        {{ t("nav.whats_new") }}
       </a>
 
       <div class="pt-3 pb-1 px-3">
         <div class="h-px bg-gradient-to-r from-transparent via-obsidian-600 to-transparent"></div>
       </div>
 
-      <a href="/iap" aria-label="IAP" title="IAP"
+      <a href="/iap" aria-label="{{ t('nav.iap') }}" title="{{ t('nav.iap') }}"
          class="nav-item flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] cursor-pointer focus-ring
                 {% if request.url.path == '/iap' %}active{% endif %}">
         <svg class="w-[18px] h-[18px] shrink-0 text-obsidian-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M20.25 7.5v-.085a2.25 2.25 0 0 0-.329-.985l-1.17-3.51a2.25 2.25 0 0 0-2.14-1.517v-.07a2.25 2.25 0 0 0-.402-1.298L13.5.555a2.25 2.25 0 0 0-2.475 0L5.646 5.738a2.25 2.25 0 0 0-.402 1.298v.07a2.25 2.25 0 0 0-2.14 1.517l-1.17 3.51a2.25 2.25 0 0 0-.329.985v.085m16.5 0a2.25 2.25 0 0 0 .329-.985l1.17-3.51a2.25 2.25 0 0 0-2.14-1.516v-.07a2.25 2.25 0 0 0-.402-1.298L10.5.555a2.25 2.25 0 0 0-2.475 0L2.696 5.738a2.25 2.25 0 0 0-.402 1.298v.07a2.25 2.25 0 0 0-2.14 1.516l-1.17 3.51a2.25 2.25 0 0 0 .329.985m16.5 0a2.25 2.25 0 0 0 .329-.985l1.17-3.51a2.25 2.25 0 0 0-2.14-1.516v-.07a2.25 2.25 0 0 0-.402-1.298L13.5.555a2.25 2.25 0 0 0-2.475 0L5.646 5.738a2.25 2.25 0 0 0-.402 1.298v.07a2.25 2.25 0 0 0-2.14 1.516l-1.17 3.51a2.25 2.25 0 0 0 .329.985"/></svg>
-        IAP
+        {{ t("nav.iap") }}
       </a>
 
       <div class="pt-3 pb-1 px-3">
         <div class="h-px bg-gradient-to-r from-transparent via-obsidian-600 to-transparent"></div>
       </div>
 
-      <a href="/profiles" aria-label="App 管理" title="App 管理"
+      <a href="/profiles" aria-label="{{ t('nav.profiles') }}" title="{{ t('nav.profiles') }}"
          class="nav-item flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] cursor-pointer focus-ring
                 {% if request.url.path == '/profiles' %}active{% endif %}">
         <svg class="w-[18px] h-[18px] shrink-0 text-obsidian-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z"/></svg>
-        App 管理
+        {{ t("nav.profiles") }}
       </a>
-      <a href="/guard" aria-label="Guard 安全守卫" title="Guard 安全守卫"
+      <a href="/guard" aria-label="{{ t('nav.guard') }}" title="{{ t('nav.guard') }}"
          class="nav-item flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] cursor-pointer focus-ring
                 {% if request.url.path == '/guard' %}active{% endif %}">
         <svg class="w-[18px] h-[18px] shrink-0 text-obsidian-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z"/></svg>
-        Guard 安全守卫
+        {{ t("nav.guard") }}
       </a>
-      <a href="/settings" aria-label="设置" title="设置"
+      <a href="/settings" aria-label="{{ t('nav.settings') }}" title="{{ t('nav.settings') }}"
          class="nav-item flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] cursor-pointer focus-ring
                 {% if request.url.path == '/settings' %}active{% endif %}">
         <svg class="w-[18px] h-[18px] shrink-0 text-obsidian-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></svg>
-        设置
+        {{ t("nav.settings") }}
       </a>
-      <a href="/update" aria-label="检查更新" title="检查更新"
+      <a href="/update" aria-label="{{ t('nav.update') }}" title="{{ t('nav.update') }}"
          class="nav-item flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] cursor-pointer focus-ring
                 {% if request.url.path == '/update' %}active{% endif %}">
         <svg class="w-[18px] h-[18px] shrink-0 text-obsidian-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"/></svg>
-        检查更新
+        {{ t("nav.update") }}
       </a>
     </nav>
 
-    <!-- Footer branding -->
-    <div class="px-5 py-3 border-t border-obsidian-700">
+    <!-- Language switcher + footer branding -->
+    <div class="px-4 py-3 border-t border-obsidian-700 space-y-2">
+      <label class="text-[10px] uppercase tracking-widest text-obsidian-400 font-medium block">{{ t("settings.language") }}</label>
+      <select id="lang-switcher" class="field-select w-full text-xs"
+              onchange="window.__ascSetLang(this.value)">
+        <option value="zh" {% if lang == 'zh' %}selected{% endif %}>{{ t("settings.lang_zh") }}</option>
+        <option value="en" {% if lang == 'en' %}selected{% endif %}>{{ t("settings.lang_en") }}</option>
+      </select>
       <p class="text-[10px] text-obsidian-500 tracking-wide uppercase">App Store Connect</p>
     </div>
   </aside>
@@ -497,6 +503,47 @@
         window.selectFile(path);
       }
     });
+  </script>
+  <script>
+    window.__I18N = {{ i18n_catalog | tojson }};
+    window.__ASC_LANG = {{ lang | tojson }};
+    window.t = function(key, vars) {
+      var s = (window.__I18N && window.__I18N[key]) || key;
+      if (vars) {
+        Object.keys(vars).forEach(function(k) {
+          s = s.replace(new RegExp('\\{' + k + '\\}', 'g'), vars[k]);
+        });
+      }
+      return s;
+    };
+    window.__ascSetLang = function(code) {
+      var body = new URLSearchParams();
+      body.set('lang', code);
+      fetch('/api/settings/lang', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: body
+      }).then(function(r) {
+        if (!r.ok) throw new Error('fail');
+        try { localStorage.setItem('asc_lang', code); } catch (e) {}
+        location.reload();
+      }).catch(function() {
+        alert(window.t('lang.switch_failed'));
+      });
+    };
+    (function syncLangStorage() {
+      var cookieMatch = document.cookie.match(/(?:^|; )asc_lang=([^;]*)/);
+      var cookieLang = cookieMatch ? decodeURIComponent(cookieMatch[1]) : null;
+      var stored = null;
+      try { stored = localStorage.getItem('asc_lang'); } catch (e) {}
+      if (cookieLang) {
+        try { localStorage.setItem('asc_lang', cookieLang); } catch (e) {}
+        return;
+      }
+      if (stored === 'zh' || stored === 'en') {
+        window.__ascSetLang(stored);
+      }
+    })();
   </script>
 
 </body>

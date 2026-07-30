@@ -16,9 +16,25 @@ _STATIC_DIR = Path(__file__).parent / "static"
 
 
 def create_app() -> FastAPI:
+    from asc.web.i18n import (
+        COOKIE_NAME,
+        html_lang as map_html_lang,
+        load_catalog,
+        resolve_lang,
+        t as translate,
+    )
+
     app = FastAPI(title="asc Web UI", docs_url=None, redoc_url=None)
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
     templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
+
+    @app.middleware("http")
+    async def language_middleware(request: Request, call_next):
+        request.state.lang = resolve_lang(
+            cookie=request.cookies.get(COOKIE_NAME),
+            accept_language=request.headers.get("accept-language"),
+        )
+        return await call_next(request)
 
     def _get_profile_context(request: Request) -> dict:
         """Extract current profile from cookie or config, including profile defaults."""
@@ -40,6 +56,14 @@ def create_app() -> FastAPI:
             current = access["matched_profile"] or (selectable[0] if selectable else "")
         current_config = Config(app_name=current) if current else config
         from asc import __version__ as asset_version
+        lang = getattr(request.state, "lang", None) or resolve_lang(
+            cookie=request.cookies.get(COOKIE_NAME),
+            accept_language=request.headers.get("accept-language"),
+        )
+
+        def _t(key: str, **kwargs: object) -> str:
+            return translate(key, lang=lang, **kwargs)
+
         return {
             "profiles": profiles,
             "profile_access": options,
@@ -49,6 +73,10 @@ def create_app() -> FastAPI:
             "profile_screenshots": current_config.screenshots_path,
             "profile_iap_file": current_config.iap_path or "data/iap_packages.json",
             "asset_version": asset_version,
+            "lang": lang,
+            "html_lang": map_html_lang(lang),
+            "t": _t,
+            "i18n_catalog": load_catalog(lang),
         }
 
     def _render(request: Request, template: str, ctx: dict):

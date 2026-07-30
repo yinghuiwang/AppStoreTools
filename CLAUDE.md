@@ -116,7 +116,8 @@ Source lives in `src/asc/`. Key modules:
 - **`config.py`** (194 lines) — `Config` class with 4-level priority chain: CLI args > local `.asc/config.toml` > global `~/.config/asc/profiles/<name>.toml` > env vars.
 - **`guard.py`** (168 lines) — `Guard` security system with machine/IP/credential binding. Prevents credential abuse. Storage: `~/.config/asc/guard.json`. Default enabled, disable via `asc guard disable` or `ASC_GUARD_DISABLE=1`.
 - **`utils.py`** — `parse_csv()`, `resolve_locale()`, `make_api_from_config()`, `md5_of_file()`.
-- **`i18n.py`** (376 lines) — Internationalization support (Chinese/English). `t()` translation function, `get_system_language()`.
+- **`i18n.py`** (376 lines) — CLI internationalization (Chinese/English). `t()` translation function, `get_system_language()`. Driven by `ASC_LANG`.
+- **`web/i18n.py`** — Web UI i18n (separate from CLI). Catalogs in `web/locales/`; resolve order Cookie `asc_lang` → Accept-Language → `ASC_LANG` → `en`. Language switch sets both Cookie and `ASC_LANG`.
 - **`constants.py`** — `DISPLAY_TYPE_BY_SIZE`, `SCREENSHOT_FOLDER_TO_LOCALE`, `CSV_LOCALE_TO_ASC`, `normalize_locale_code()`.
 
 ### Command Layer (`commands/`)

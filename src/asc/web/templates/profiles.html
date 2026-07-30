@@ -7,14 +7,14 @@
       <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: var(--accent-glow);">
         <svg class="w-4.5 h-4.5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z"/></svg>
       </div>
-      App 管理
+      {{ t("profiles.title") }}
     </h1>
     <button @click="openDrawer(null)"
             :disabled="!canCreate"
-            :title="canCreate ? '新增 App Profile' : '当前机器已有匹配的 App Profile'"
+            :title="canCreate ? window.t('profiles.add_title') : window.t('profiles.cannot_create')"
             class="btn-primary flex items-center gap-1.5">
       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
-      新增
+      {{ t("profiles.add") }}
     </button>
   </div>
 
@@ -26,14 +26,14 @@
         <div class="flex items-start justify-between gap-4">
           <div class="min-w-0 flex-1">
             <div class="flex items-center gap-3">
-              <button @click="setDefault(p)" class="cursor-pointer transition-colors duration-150 shrink-0" :title="p === defaultProfile ? '默认' : '设为默认'">
+              <button @click="setDefault(p)" class="cursor-pointer transition-colors duration-150 shrink-0" :title="p === defaultProfile ? window.t('common.default') : window.t('common.set_default')">
                 <span x-text="p === defaultProfile ? '★' : '○'"
                       :class="p === defaultProfile ? 'text-amber-500 text-lg' : 'text-obsidian-600 text-sm group-hover:text-obsidian-400'"></span>
               </button>
               <span class="text-sm font-medium text-obsidian-100 font-mono truncate" x-text="p"></span>
               <span x-show="p === defaultProfile" class="badge badge-info text-[10px]">DEFAULT</span>
-              <span x-show="detailFor(p).machine_access && detailFor(p).machine_access.current" class="badge badge-success text-[10px]">当前机器</span>
-              <span x-show="detailFor(p).machine_access && !detailFor(p).machine_access.enabled" class="badge badge-error text-[10px]">其他机器</span>
+              <span x-show="detailFor(p).machine_access && detailFor(p).machine_access.current" class="badge badge-success text-[10px]">{{ t("profiles.this_machine") }}</span>
+              <span x-show="detailFor(p).machine_access && !detailFor(p).machine_access.enabled" class="badge badge-error text-[10px]">{{ t("profiles.other_machine") }}</span>
             </div>
             <div class="mt-3 ml-7 grid grid-cols-2 xl:grid-cols-3 gap-x-6 gap-y-2">
               <div>
@@ -49,7 +49,7 @@
                 <span class="text-xs text-obsidian-200 font-mono break-all" x-text="detailFor(p).key_id || '-'"></span>
               </div>
               <div>
-                <span class="text-[10px] uppercase tracking-widest text-obsidian-500 block mb-0.5">私钥文件</span>
+                <span class="text-[10px] uppercase tracking-widest text-obsidian-500 block mb-0.5">{{ t("profiles.key_file") }}</span>
                 <span class="text-xs text-obsidian-300 font-mono break-all" x-text="detailFor(p).key_file_name || '-'"></span>
               </div>
               <div>
@@ -57,7 +57,7 @@
                 <span class="text-xs text-obsidian-300 font-mono break-all" x-text="detailFor(p).csv || '-'"></span>
               </div>
               <div>
-                <span class="text-[10px] uppercase tracking-widest text-obsidian-500 block mb-0.5">截图目录</span>
+                <span class="text-[10px] uppercase tracking-widest text-obsidian-500 block mb-0.5">{{ t("profiles.shots_dir") }}</span>
                 <span class="text-xs text-obsidian-300 font-mono break-all" x-text="detailFor(p).screenshots || '-'"></span>
               </div>
               <div class="col-span-2 xl:col-span-3">
@@ -67,16 +67,16 @@
             </div>
           </div>
           <div class="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-150 shrink-0 pt-0.5">
-            <button @click="openDrawer(p)" class="text-xs text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium">编辑</button>
-            <button @click="deleteProfile(p)" class="text-xs text-red-500 hover:text-red-400 cursor-pointer transition-colors duration-150 font-medium">删除</button>
+            <button @click="openDrawer(p)" class="text-xs text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium">{{ t("common.edit") }}</button>
+            <button @click="deleteProfile(p)" class="text-xs text-red-500 hover:text-red-400 cursor-pointer transition-colors duration-150 font-medium">{{ t("common.delete") }}</button>
           </div>
         </div>
       </div>
     </template>
     <div x-show="profiles.length === 0" class="card-body py-12 text-center">
       <svg class="w-10 h-10 text-obsidian-600 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke-width="1" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z"/></svg>
-      <p class="text-sm text-obsidian-400">暂无 App Profile</p>
-      <p class="text-xs text-obsidian-600 mt-1">点击「新增」添加第一个 App</p>
+      <p class="text-sm text-obsidian-400">{{ t("profiles.empty") }}</p>
+      <p class="text-xs text-obsidian-600 mt-1">{{ t("profiles.empty_hint") }}</p>
     </div>
   </div>
 
@@ -95,7 +95,7 @@
        x-transition:leave-end="translate-x-full">
     <div class="p-6">
       <div class="flex items-center justify-between mb-6">
-        <h2 class="font-semibold text-obsidian-50" x-text="editingProfile ? '编辑 App Profile' : '新增 App Profile'"></h2>
+        <h2 class="font-semibold text-obsidian-50" x-text="editingProfile ? window.t('profiles.edit_title') : window.t('profiles.add_title')"></h2>
         <button @click="drawerOpen = false" class="text-obsidian-500 hover:text-obsidian-300 cursor-pointer transition-colors duration-150 p-1 rounded focus-ring">
           <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
         </button>
@@ -104,7 +104,7 @@
       <form @submit.prevent="saveProfile" class="space-y-5">
         <!-- Profile name -->
         <div>
-          <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">Profile 名称</label>
+          <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">{{ t("profiles.name") }}</label>
           <input type="text" x-model="form.name"
                  required
                  class="field-input w-full"
@@ -119,7 +119,7 @@
                    class="field-input w-full pr-16">
             <button type="button" @click="showIssuer = !showIssuer"
                     class="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-obsidian-500 hover:text-obsidian-300 uppercase tracking-wider font-medium cursor-pointer transition-colors duration-150">
-              <span x-text="showIssuer ? '隐藏' : '显示'"></span>
+              <span x-text="showIssuer ? window.t('profiles.hide') : window.t('profiles.show')"></span>
             </button>
           </div>
         </div>
@@ -132,22 +132,22 @@
                    class="field-input w-full pr-16">
             <button type="button" @click="showKeyId = !showKeyId"
                     class="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-obsidian-500 hover:text-obsidian-300 uppercase tracking-wider font-medium cursor-pointer transition-colors duration-150">
-              <span x-text="showKeyId ? '隐藏' : '显示'"></span>
+              <span x-text="showKeyId ? window.t('profiles.hide') : window.t('profiles.show')"></span>
             </button>
           </div>
         </div>
 
         <!-- .p8 key file -->
         <div>
-          <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">.p8 私钥文件</label>
+          <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">{{ t("profiles.p8") }}</label>
           <input type="file" accept=".p8" x-ref="keyFileInput"
                  class="w-full text-sm text-obsidian-400 file:mr-3 file:py-1.5 file:px-4 file:rounded-md file:border-0 file:text-xs file:font-medium file:uppercase file:tracking-wider file:cursor-pointer" style="color: var(--text-muted); --tw-file-bg: var(--bg-overlay); --tw-file-text: var(--text-secondary);">
-          <p x-show="editingProfile" class="text-[11px] text-obsidian-500 mt-1.5">留空则保留原有密钥文件</p>
+          <p x-show="editingProfile" class="text-[11px] text-obsidian-500 mt-1.5">{{ t("profiles.keep_key") }}</p>
         </div>
 
         <!-- App ID -->
         <div>
-          <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">App ID（数字）</label>
+          <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">{{ t("profiles.app_id") }}</label>
           <input type="text" x-model="form.app_id" required
                  class="field-input w-full"
                  placeholder="1234567890">
@@ -156,19 +156,19 @@
         <!-- CSV path -->
         <div>
           <div class="flex items-center gap-1.5 mb-2">
-            <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">默认 CSV 路径（可选）</label>
+            <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">{{ t("profiles.csv_optional") }}</label>
             <button type="button" @click="showCsvHelp = !showCsvHelp"
                     class="w-4 h-4 inline-flex items-center justify-center rounded-full border border-obsidian-600 text-obsidian-500 hover:text-amber-500 hover:border-amber-550 cursor-pointer transition-colors duration-150 focus-ring text-[9px]"
-                    title="CSV 格式说明">?</button>
+                    title="{{ t('common.csv_help_btn') }}">?</button>
           </div>
           <div x-show="showCsvHelp" x-transition class="mb-2 p-4 rounded-lg text-xs space-y-2" style="background: var(--accent-glow); border: 1px solid rgba(232,161,37,0.2);">
-            <p class="font-medium text-amber-500">CSV 格式要求</p>
-            <p class="text-obsidian-200"><span class="font-mono text-amber-550">UTF-8</span> 编码，首行为表头，支持 BOM。</p>
-            <p class="text-obsidian-200"><span class="font-medium text-obsidian-100">必填列：</span><code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">locale</code> <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">name</code> <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">subtitle</code> <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">description</code> <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">keywords</code></p>
-            <p class="text-obsidian-200 text-xs">仍兼容中文表头（语言、应用名称、副标题、长描述、关键字等）。</p>
+            <p class="font-medium text-amber-500">{{ t("common.csv_help_title") }}</p>
+            <p class="text-obsidian-200">{{ t("profiles.csv_help_utf8") }}</p>
+            <p class="text-obsidian-200"><span class="font-medium text-obsidian-100">{{ t("profiles.required_cols") }}</span><code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">locale</code> <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">name</code> <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">subtitle</code> <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">description</code> <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">keywords</code></p>
+            <p class="text-obsidian-200 text-xs">{{ t("profiles.csv_zh_compat") }}</p>
             <a href="/api/examples/csv" download
                class="inline-flex items-center gap-1.5 text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium">
-              下载示例 CSV
+              {{ t("common.download_sample_csv") }}
             </a>
           </div>
           <div class="flex gap-2">
@@ -176,20 +176,20 @@
                    class="field-input flex-1">
             <button type="button"
                     class="btn-ghost whitespace-nowrap"
-                    onclick="openFileBrowser('profile-csv-input', 'file', '.csv')">浏览</button>
+                    onclick="openFileBrowser('profile-csv-input', 'file', '.csv')">{{ t("filebrowser.browse") }}</button>
           </div>
         </div>
 
         <!-- Screenshots dir -->
         <div>
           <div class="flex items-center gap-1.5 mb-2">
-            <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">默认截图目录（可选）</label>
+            <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">{{ t("profiles.shots_optional") }}</label>
             <button type="button" @click="showScreenshotsHelp = !showScreenshotsHelp"
                     class="w-4 h-4 inline-flex items-center justify-center rounded-full border border-obsidian-600 text-obsidian-500 hover:text-amber-500 hover:border-amber-550 cursor-pointer transition-colors duration-150 focus-ring text-[9px]"
-                    title="截图目录说明">?</button>
+                    title="{{ t('common.shots_help_btn') }}">?</button>
           </div>
           <div x-show="showScreenshotsHelp" x-transition class="mb-2 p-4 rounded-lg text-xs space-y-2" style="background: var(--accent-glow); border: 1px solid rgba(232,161,37,0.2);">
-            <p class="font-medium text-amber-500">截图目录结构</p>
+            <p class="font-medium text-amber-500">{{ t("common.shots_help_title") }}</p>
             <pre class="bg-obsidian-800 rounded px-3 py-2 text-[11px] leading-relaxed font-mono text-obsidian-200">screenshots/
 ├── zh-Hans/
 │   ├── 01_home.png
@@ -198,7 +198,7 @@
     └── 01_home.png</pre>
             <a href="/api/examples/screenshots" download
                class="inline-flex items-center gap-1.5 text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium">
-              下载示例截图目录
+              {{ t("common.download_sample_shots") }}
             </a>
           </div>
           <div class="flex gap-2">
@@ -206,7 +206,7 @@
                    class="field-input flex-1">
             <button type="button"
                     class="btn-ghost whitespace-nowrap"
-                    onclick="openFileBrowser('profile-screenshots-input', 'dir', '')">浏览</button>
+                    onclick="openFileBrowser('profile-screenshots-input', 'dir', '')">{{ t("filebrowser.browse") }}</button>
           </div>
         </div>
 
@@ -215,8 +215,8 @@
 
         <!-- Actions -->
         <div class="flex gap-3 pt-4 border-t border-obsidian-700">
-          <button type="submit" class="btn-primary" x-text="editingProfile ? '保存' : '创建'"></button>
-          <button type="button" @click="drawerOpen = false" class="btn-ghost">取消</button>
+          <button type="submit" class="btn-primary" x-text="editingProfile ? window.t('common.save') : window.t('profiles.create')"></button>
+          <button type="button" @click="drawerOpen = false" class="btn-ghost">{{ t("common.cancel") }}</button>
         </div>
       </form>
     </div>
@@ -227,14 +227,14 @@
 <div id="filebrowser-modal" class="hidden fixed inset-0 flex items-center justify-center z-50" style="background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);">
   <div class="card w-[420px]">
     <div class="card-header flex items-center justify-between">
-      <h3 class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">选择路径</h3>
+      <h3 class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">{{ t("filebrowser.title") }}</h3>
       <button onclick="closeFileBrowser()" class="text-obsidian-500 hover:text-obsidian-300 cursor-pointer transition-colors duration-150 p-1 rounded focus-ring">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
       </button>
     </div>
     <div id="filebrowser-content" class="card-body"></div>
     <div class="px-5 py-3 border-t border-obsidian-700 flex justify-end">
-      <button onclick="closeFileBrowser()" class="btn-ghost">取消</button>
+      <button onclick="closeFileBrowser()" class="btn-ghost">{{ t("common.cancel") }}</button>
     </div>
   </div>
 </div>
@@ -353,12 +353,12 @@ function profilesApp() {
         this.drawerOpen = false;
         await this.loadProfiles();
       } else {
-        this.formError = d.detail || '保存失败';
+        this.formError = d.detail || window.t('profiles.save_failed');
       }
     },
 
     async deleteProfile(name) {
-      if (!confirm(`确认删除 ${name}？`)) return;
+      if (!confirm(window.t('profiles.confirm_delete', { name: name }))) return;
       await fetch(`/api/profiles/${name}`, { method: 'DELETE' });
       await this.loadProfiles();
     },

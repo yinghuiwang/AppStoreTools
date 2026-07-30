@@ -7,7 +7,7 @@
       <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: var(--accent-glow);">
         <svg class="w-4.5 h-4.5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"/></svg>
       </div>
-      元数据上传
+      {{ t("metadata.title") }}
     </h1>
   </div>
 
@@ -35,23 +35,23 @@
             <!-- CSV path -->
             <div>
               <div class="flex items-center gap-1.5 mb-2">
-                <label for="csv-path-input" class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">CSV 文件路径</label>
+                <label for="csv-path-input" class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">{{ t("metadata.csv_path") }}</label>
                 <button type="button" @click="showCsvHelp = !showCsvHelp"
                         class="w-4 h-4 inline-flex items-center justify-center rounded-full border border-obsidian-600 text-obsidian-500 hover:text-amber-500 hover:border-amber-550 cursor-pointer transition-colors duration-150 focus-ring text-[9px]"
-                        title="CSV 格式说明">?</button>
+                        title="{{ t('common.csv_help_btn') }}">?</button>
               </div>
               <div x-show="showCsvHelp" x-transition class="mb-3 p-4 rounded-lg text-xs space-y-2" style="background: var(--accent-glow); border: 1px solid rgba(232,161,37,0.2);">
-                <p class="font-medium text-amber-500">CSV 格式要求</p>
-                <p class="text-obsidian-200"><span class="font-mono text-amber-550">UTF-8</span> 编码，首行为表头，支持 BOM。</p>
-                <p class="text-obsidian-200"><span class="font-medium text-obsidian-100">必填列：</span><code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">locale</code> <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">name</code> <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">subtitle</code> <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">description</code> <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">keywords</code></p>
-                <p class="text-obsidian-200"><span class="font-medium text-obsidian-100">可选列：</span><code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">supportUrl</code> <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">marketingUrl</code> <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">privacyPolicyUrl</code></p>
-                <p class="text-obsidian-200"><span class="font-medium text-obsidian-100">locale 格式：</span><code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">简体中文(zh-Hans)</code> 或 <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">en-US</code></p>
-                <p class="text-obsidian-200 text-xs">仍兼容中文表头（语言、应用名称、副标题、长描述、关键字等）。</p>
-                <p class="text-obsidian-500">空值字段不会覆盖线上已有内容。</p>
+                <p class="font-medium text-amber-500">{{ t("common.csv_help_title") }}</p>
+                <p class="text-obsidian-200">{{ t("metadata.csv_help_utf8") }}</p>
+                <p class="text-obsidian-200"><span class="font-medium text-obsidian-100">{{ t("metadata.required_cols") }}</span><code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">locale</code> <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">name</code> <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">subtitle</code> <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">description</code> <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">keywords</code></p>
+                <p class="text-obsidian-200"><span class="font-medium text-obsidian-100">{{ t("metadata.optional_cols") }}</span><code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">supportUrl</code> <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">marketingUrl</code> <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">privacyPolicyUrl</code></p>
+                <p class="text-obsidian-200"><span class="font-medium text-obsidian-100">{{ t("metadata.locale_format") }}</span><code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">简体中文(zh-Hans)</code> {{ t("metadata.or") }} <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">en-US</code></p>
+                <p class="text-obsidian-200 text-xs">{{ t("metadata.csv_zh_compat") }}</p>
+                <p class="text-obsidian-500">{{ t("metadata.empty_skip") }}</p>
                 <a href="/api/examples/csv" download
                    class="inline-flex items-center gap-1.5 text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium">
                   <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
-                  下载示例 CSV
+                  {{ t("common.download_sample_csv") }}
                 </a>
               </div>
               <div class="flex gap-2">
@@ -60,33 +60,33 @@
                        class="field-input flex-1">
                 <button type="button"
                         class="btn-ghost whitespace-nowrap"
-                        onclick="openFileBrowser('csv-path-input', 'file', '.csv')">浏览</button>
+                        onclick="openFileBrowser('csv-path-input', 'file', '.csv')">{{ t("filebrowser.browse") }}</button>
               </div>
             </div>
 
             <!-- Screenshots dir -->
             <div>
               <div class="flex items-center gap-1.5 mb-2">
-                <label for="screenshots-dir-input" class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">截图目录</label>
+                <label for="screenshots-dir-input" class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">{{ t("metadata.shots_dir") }}</label>
                 <button type="button" @click="showScreenshotsHelp = !showScreenshotsHelp"
                         class="w-4 h-4 inline-flex items-center justify-center rounded-full border border-obsidian-600 text-obsidian-500 hover:text-amber-500 hover:border-amber-550 cursor-pointer transition-colors duration-150 focus-ring text-[9px]"
-                        title="截图目录说明">?</button>
+                        title="{{ t('common.shots_help_btn') }}">?</button>
               </div>
               <div x-show="showScreenshotsHelp" x-transition class="mb-3 p-4 rounded-lg text-xs space-y-2" style="background: var(--accent-glow); border: 1px solid rgba(232,161,37,0.2);">
-                <p class="font-medium text-amber-500">截图目录结构</p>
+                <p class="font-medium text-amber-500">{{ t("common.shots_help_title") }}</p>
                 <pre class="bg-obsidian-800 rounded px-3 py-2 text-[11px] leading-relaxed font-mono text-obsidian-200">screenshots/
-├── zh-Hans/     ← 语言目录
+├── zh-Hans/     ← {{ t("metadata.locale_dir_hint") }}
 │   ├── 01_home.png
 │   └── 02_detail.png
 └── en-US/
     └── 01_home.png</pre>
-                <p class="text-obsidian-200"><span class="font-medium text-obsidian-100">语言目录名：</span><code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">zh-Hans</code>、<code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">en-US</code>、<code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">ja</code> 等</p>
-                <p class="text-obsidian-200"><span class="font-medium text-obsidian-100">图片格式：</span>PNG / JPG，按文件名中的数字排序</p>
-                <p class="text-obsidian-200"><span class="font-medium text-obsidian-100">设备类型：</span>根据首张图片分辨率自动识别</p>
+                <p class="text-obsidian-200"><span class="font-medium text-obsidian-100">{{ t("metadata.locale_dirs") }}</span><code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">zh-Hans</code>、<code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">en-US</code>、<code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">ja</code> {{ t("metadata.etc") }}</p>
+                <p class="text-obsidian-200"><span class="font-medium text-obsidian-100">{{ t("metadata.image_format") }}</span>{{ t("metadata.image_format_desc") }}</p>
+                <p class="text-obsidian-200"><span class="font-medium text-obsidian-100">{{ t("metadata.device_type") }}</span>{{ t("metadata.device_type_desc") }}</p>
                 <a href="/api/examples/screenshots" download
                    class="inline-flex items-center gap-1.5 text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium">
                   <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
-                  下载示例截图目录
+                  {{ t("common.download_sample_shots") }}
                 </a>
               </div>
               <div class="flex gap-2">
@@ -95,19 +95,19 @@
                        class="field-input flex-1">
                 <button type="button"
                         class="btn-ghost whitespace-nowrap"
-                        onclick="openFileBrowser('screenshots-dir-input', 'dir', '')">浏览</button>
+                        onclick="openFileBrowser('screenshots-dir-input', 'dir', '')">{{ t("filebrowser.browse") }}</button>
               </div>
             </div>
 
             <!-- Upload scope -->
             <div>
-              <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">上传范围</label>
+              <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">{{ t("metadata.scope") }}</label>
               <div class="flex gap-6">
                 <label class="flex items-center gap-2.5 text-sm text-obsidian-200 cursor-pointer">
-                  <input type="checkbox" name="include_metadata" value="on" checked class="w-4 h-4"> 元数据
+                  <input type="checkbox" name="include_metadata" value="on" checked class="w-4 h-4">{{ t("metadata.scope_metadata") }}
                 </label>
                 <label class="flex items-center gap-2.5 text-sm text-obsidian-200 cursor-pointer">
-                  <input type="checkbox" name="include_screenshots" value="on" checked class="w-4 h-4"> 截图
+                  <input type="checkbox" name="include_screenshots" value="on" checked class="w-4 h-4">{{ t("metadata.scope_screenshots") }}
                 </label>
               </div>
             </div>
@@ -115,7 +115,7 @@
             <!-- Dry run -->
             <div>
               <label class="flex items-center gap-2.5 text-sm text-obsidian-300 cursor-pointer">
-                <input type="checkbox" name="dry_run" value="on" class="w-4 h-4"> Dry Run（预览，不实际上传）
+                <input type="checkbox" name="dry_run" value="on" class="w-4 h-4">{{ t("common.dry_run") }}
               </label>
             </div>
 
@@ -124,10 +124,10 @@
               <button type="submit"
                       class="btn-primary"
                       :disabled="submitting">
-                <span x-show="!submitting">开始上传</span>
+                <span x-show="!submitting">{{ t("common.submit") }}</span>
                 <span x-show="submitting" class="flex items-center gap-1.5">
                   <svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-                  提交中...
+                  {{ t("common.submitting") }}
                 </span>
               </button>
               <button type="button"
@@ -137,9 +137,9 @@
                         fetch('/api/metadata/check', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}})
                           .then(r => r.json())
                           .then(data => { checkResult = data; })
-                          .catch(() => { checkResult = {ok: false, level: 'error', message: '请求失败'}; })
+                          .catch(() => { checkResult = {ok: false, level: 'error', message: window.t('common.request_failed')}; })
                       ">
-                验证环境
+                {{ t("common.check_env") }}
               </button>
             </div>
 
@@ -154,7 +154,7 @@
                 <p class="font-medium" x-text="checkResult.message"></p>
                 <template x-if="checkResult.detail && checkResult.detail.version">
                   <p class="text-xs mt-1 opacity-80"
-                     x-text="'版本 ' + checkResult.detail.version + ' · 状态 ' + checkResult.detail.state"></p>
+                     x-text="window.t('metadata.version_state', { version: checkResult.detail.version, state: checkResult.detail.state })"></p>
                 </template>
               </div>
             </template>
@@ -168,7 +168,7 @@
       <div class="card">
         <div class="card-body">
           <div class="flex items-center justify-between mb-5">
-            <h2 class="font-semibold text-obsidian-100 flex items-center gap-2.5" x-text="status === 'done' ? '上传完成' : status === 'error' ? '上传失败' : status === 'canceled' ? '已终止' : '上传中...'">
+            <h2 class="font-semibold text-obsidian-100 flex items-center gap-2.5" x-text="status === 'done' ? window.t('metadata.done') : status === 'error' ? window.t('metadata.failed') : status === 'canceled' ? window.t('metadata.canceled') : window.t('metadata.running')">
             </h2>
             <div class="flex items-center gap-3">
               <template x-if="status === 'done'">
@@ -189,14 +189,14 @@
               <button type="button"
                       data-task-log-open
                       class="text-xs text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium"
-                      @click="TaskLogDrawer.open(taskId, metadataLogOptions())">日志</button>
+                      @click="TaskLogDrawer.open(taskId, metadataLogOptions())">{{ t("common.logs") }}</button>
               <button type="button"
                       x-show="status === 'running'"
                       class="text-xs text-red-400 hover:text-red-300 cursor-pointer transition-colors duration-150 font-medium"
                       :disabled="canceling"
-                      @click="cancelTask(taskId, () => { canceling = true; progressMsg = '正在终止上传...'; })"
-                      x-text="canceling ? '终止中...' : '终止上传'"></button>
-              <button type="button" class="text-xs text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium" @click="step=1; status='idle'">重新运行</button>
+                      @click="cancelTask(taskId, () => { canceling = true; progressMsg = window.t('metadata.canceling_msg'); })"
+                      x-text="canceling ? window.t('common.canceling') : window.t('common.cancel_upload')"></button>
+              <button type="button" class="text-xs text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium" @click="step=1; status='idle'">{{ t("common.retry") }}</button>
             </div>
           </div>
 
@@ -220,14 +220,14 @@
 <div id="filebrowser-modal" class="hidden fixed inset-0 flex items-center justify-center z-50" style="background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);">
   <div class="card w-[420px]">
     <div class="card-header flex items-center justify-between">
-      <h3 class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">选择路径</h3>
+      <h3 class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">{{ t("filebrowser.title") }}</h3>
       <button onclick="closeFileBrowser()" class="text-obsidian-500 hover:text-obsidian-300 cursor-pointer transition-colors duration-150 p-1 rounded focus-ring">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
       </button>
     </div>
     <div id="filebrowser-content" class="card-body"></div>
     <div class="px-5 py-3 border-t border-obsidian-700 flex justify-end">
-      <button onclick="closeFileBrowser()" class="btn-ghost">取消</button>
+      <button onclick="closeFileBrowser()" class="btn-ghost">{{ t("filebrowser.cancel") }}</button>
     </div>
   </div>
 </div>
@@ -341,7 +341,7 @@ function selectFile(path) {
 
 function cancelTask(taskId, beforeCancel) {
   if (!taskId) return;
-  if (!confirm('确定要终止当前上传吗？已完成的 App Store Connect 操作不会自动回滚。')) return;
+  if (!confirm(window.t('metadata.confirm_cancel'))) return;
   if (beforeCancel) beforeCancel();
   fetch(`/api/task/${taskId}/cancel`, {method: 'POST'})
     .catch(() => {
@@ -355,14 +355,14 @@ function metadataLogOptions() {
   const root = document.querySelector('[x-data]');
   const d = Alpine.$data(root);
   return {
-    title: '元数据上传日志',
+    title: window.t('metadata.log_title'),
     onProgress: (pct, msg) => {
       if (pct != null) d.progress = pct;
       d.progressMsg = msg || '';
     },
     onDone: () => { d.status = 'done'; d.progress = 100; },
     onError: () => { d.status = 'error'; },
-    onCanceled: () => { d.status = 'canceled'; d.progressMsg = '上传已终止'; d.canceling = false; }
+    onCanceled: () => { d.status = 'canceled'; d.progressMsg = window.t('metadata.canceled_msg'); d.canceling = false; }
   };
 }
 

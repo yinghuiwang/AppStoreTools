@@ -7,7 +7,7 @@
       <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: var(--accent-glow);">
         <svg class="w-4.5 h-4.5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></svg>
       </div>
-      设置
+      {{ t("settings.title") }}
     </h1>
   </div>
 
@@ -42,9 +42,9 @@
      ">
   <div class="card-header flex items-center gap-2">
     <svg class="w-4 h-4 text-amber-500" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456Z"/></svg>
-    <h2 class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">LLM 翻译配置</h2>
+    <h2 class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">{{ t("settings.llm_title") }}</h2>
     <button @click="showForm = true; isEditing = false; editName = ''; editBaseUrl = 'https://api.openai.com/v1'; editApiKey = ''; editModel = 'gpt-4o'"
-            class="ml-auto text-xs btn-secondary py-1 px-2">+ 新增配置</button>
+            class="ml-auto text-xs btn-secondary py-1 px-2">{{ t("settings.add_config") }}</button>
   </div>
   <div class="card-body space-y-4">
 
@@ -52,12 +52,12 @@
     <template x-if="showForm">
       <div class="space-y-3 p-3 border border-obsidian-600 rounded-lg bg-obsidian-800/30">
         <div class="flex items-center gap-2">
-          <span class="text-xs text-amber-400" x-show="!editName">新增配置</span>
-          <span class="text-xs text-amber-400" x-show="editName">编辑配置</span>
+          <span class="text-xs text-amber-400" x-show="!editName">{{ t("settings.new_config") }}</span>
+          <span class="text-xs text-amber-400" x-show="editName">{{ t("settings.edit_config") }}</span>
         </div>
         <div>
-          <label class="text-xs text-obsidian-500 mb-1 block">配置名称</label>
-          <input type="text" x-model="editName" placeholder="例如: openai, claude"
+          <label class="text-xs text-obsidian-500 mb-1 block">{{ t("settings.config_name") }}</label>
+          <input type="text" x-model="editName" placeholder="{{ t('settings.config_name_ph') }}"
                  class="field-input w-full text-xs" :disabled="isEditing">
         </div>
         <div>
@@ -106,24 +106,24 @@
             .catch(err => {
                 saving = false;
                 if (err.message && err.message.includes('HTTP')) {
-                    saveError = '保存失败：' + err.message;
+                    saveError = window.t('settings.save_failed_prefix') + err.message;
                 } else {
-                    saveError = '保存失败，请重试';
+                    saveError = window.t('settings.save_failed');
                 }
                 console.error('LLM config save error:', err);
             })
           " :disabled="saving" class="btn-primary text-xs px-3 py-1.5">
-            <span x-show="!saving">保存</span>
-            <span x-show="saving">保存中...</span>
+            <span x-show="!saving">{{ t("common.save") }}</span>
+            <span x-show="saving">{{ t("common.saving") }}</span>
           </button>
-          <button @click="showForm = false" class="btn-secondary text-xs px-3 py-1.5">取消</button>
+          <button @click="showForm = false" class="btn-secondary text-xs px-3 py-1.5">{{ t("common.cancel") }}</button>
         </div>
       </div>
     </template>
 
     <!-- Config List -->
     <template x-if="!loading && Object.keys(configs).length === 0">
-      <div class="text-sm text-obsidian-500 py-2">暂无配置，请点击「新增配置」添加</div>
+      <div class="text-sm text-obsidian-500 py-2">{{ t("settings.empty_configs") }}</div>
     </template>
     <template x-if="!loading && Object.keys(configs).length > 0">
       <div class="space-y-2">
@@ -134,7 +134,7 @@
               <div class="flex items-center gap-2">
                 <span class="text-xs font-medium" :class="name === activeName ? 'text-amber-400' : 'text-obsidian-300'"
                       x-text="name"></span>
-                <span x-show="name === defaultName" class="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400">默认</span>
+                <span x-show="name === defaultName" class="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400">{{ t("common.default") }}</span>
               </div>
               <div class="text-[10px] text-obsidian-500 truncate" x-text="cfg.base_url + ' / ' + cfg.model"></div>
             </div>
@@ -149,7 +149,7 @@
                   activeName = name;
                 })"
                       x-show="name !== defaultName"
-                      class="text-[10px] btn-secondary py-1 px-2">设为默认</button>
+                      class="text-[10px] btn-secondary py-1 px-2">{{ t("common.set_default") }}</button>
               <button @click="
                 isEditing = true;
                 editName = name;
@@ -157,7 +157,7 @@
                 editApiKey = cfg.api_key || '';
                 editModel = cfg.model;
                 showForm = true"
-                      class="text-[10px] btn-secondary py-1 px-2">编辑</button>
+                      class="text-[10px] btn-secondary py-1 px-2">{{ t("common.edit") }}</button>
               <button @click="
                 fetch('/api/settings/llm?name=' + encodeURIComponent(name), {method: 'DELETE'})
                   .then(() => fetch('/api/settings/llm'))
@@ -167,7 +167,7 @@
                     defaultName = d.default;
                     activeName = d.default || Object.keys(configs)[0] || '';
                   })"
-                      class="text-[10px] px-2 py-1 rounded border border-red-500/30 text-red-400 hover:bg-red-500/10">删除</button>
+                      class="text-[10px] px-2 py-1 rounded border border-red-500/30 text-red-400 hover:bg-red-500/10">{{ t("common.delete") }}</button>
             </div>
           </div>
         </template>
@@ -175,7 +175,7 @@
     </template>
 
     <template x-if="saved">
-      <div class="text-xs text-emerald-400">已保存</div>
+      <div class="text-xs text-emerald-400">{{ t("settings.saved") }}</div>
     </template>
   </div>
 </div>
@@ -199,23 +199,23 @@
            error: '',
            testResults: [],
            taskKinds: [
-             ['metadata', '元数据上传'],
-             ['build', '构建上传'],
-             ['whats-new', '更新说明上传'],
-             ['iap', '内购上传'],
-             ['iap-review-screenshots', 'IAP 审核截图上传'],
-             ['urls', 'URL 更新'],
-             ['update', '工具更新']
+             ['metadata', window.t('settings.task_metadata')],
+             ['build', window.t('settings.task_build')],
+             ['whats-new', window.t('settings.task_whats_new')],
+             ['iap', window.t('settings.task_iap_alt')],
+             ['iap-review-screenshots', window.t('settings.task_iap_review')],
+             ['urls', window.t('settings.task_urls_alt')],
+             ['update', window.t('settings.task_update')]
            ],
            statuses: [
-             ['done', '成功'],
-             ['error', '失败'],
-             ['canceled', '已取消']
+             ['done', window.t('settings.status_done')],
+             ['error', window.t('settings.status_error')],
+             ['canceled', window.t('settings.status_canceled')]
            ],
            providers: [
-             ['feishu', '飞书/Lark'],
-             ['wecom', '企业微信'],
-             ['dingtalk', '钉钉']
+             ['feishu', window.t('settings.provider_feishu')],
+             ['wecom', window.t('settings.provider_wecom')],
+             ['dingtalk', window.t('settings.provider_dingtalk')]
            ],
            applyConfig(data) {
              this.config = {
@@ -231,7 +231,7 @@
              fetch('/api/settings/webhooks')
                .then(r => r.json())
                .then(d => { this.applyConfig(d); })
-               .catch(() => { this.error = '加载失败'; })
+               .catch(() => { this.error = window.t('settings.load_failed'); })
                .finally(() => { this.loading = false; });
            },
            toggleList(listName, value, checked) {
@@ -253,7 +253,7 @@
              })
              .then(r => r.json().then(d => ({ok: r.ok, data: d})))
              .then(({ok, data}) => {
-               if (!ok || data.error) throw new Error(data.error || '保存失败');
+               if (!ok || data.error) throw new Error(data.error || window.t('settings.save_failed_short'));
                if (showSaved) this.saved = true;
                return fetch('/api/settings/webhooks');
              })
@@ -263,7 +263,7 @@
                if (showSaved) setTimeout(() => { this.saved = false; }, 2000);
              })
              .catch(err => {
-               this.error = err.message || '保存失败';
+               this.error = err.message || window.t('settings.save_failed_short');
                throw err;
              })
              .finally(() => { this.saving = false; });
@@ -276,36 +276,36 @@
                body: JSON.stringify({provider})
              }))
              .then(r => r.json())
-             .then(d => { this.testResults = d.results || [{provider, ok: false, error: d.error || '测试失败'}]; })
-             .catch(err => { this.testResults = [{provider, ok: false, error: err.message || '测试失败'}]; });
+             .then(d => { this.testResults = d.results || [{provider, ok: false, error: d.error || window.t('settings.test_failed')}]; })
+             .catch(err => { this.testResults = [{provider, ok: false, error: err.message || window.t('settings.test_failed')}]; });
            }
          }"
          x-init="load()">
       <div class="card-header flex items-center gap-2">
-        <h2 class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">群通知 / Webhook</h2>
+        <h2 class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">{{ t("settings.webhook_title") }}</h2>
         <button @click="save()" :disabled="saving || !config" class="ml-auto btn-primary text-xs px-3 py-1.5">
-          <span x-show="!saving">保存</span>
-          <span x-show="saving">保存中...</span>
+          <span x-show="!saving">{{ t("common.save") }}</span>
+          <span x-show="saving">{{ t("common.saving") }}</span>
         </button>
       </div>
       <div class="card-body space-y-4">
-        <div x-show="loading && !error" class="text-sm text-obsidian-500 py-2">加载中...</div>
+        <div x-show="loading && !error" class="text-sm text-obsidian-500 py-2">{{ t("common.loading") }}</div>
         <template x-if="error">
           <div class="text-xs text-red-400" x-text="error"></div>
         </template>
         <template x-if="saved">
-          <div class="text-xs text-emerald-400">已保存</div>
+          <div class="text-xs text-emerald-400">{{ t("settings.saved") }}</div>
         </template>
 
         <div class="space-y-4" x-show="config">
           <label class="flex items-center gap-2 text-sm text-obsidian-300">
             <input type="checkbox" x-model="config.enabled" class="rounded border-obsidian-600 bg-obsidian-800">
-            启用任务结果群通知
+            {{ t("settings.webhook_enable") }}
           </label>
 
           <div class="grid gap-4 md:grid-cols-2">
             <div>
-              <div class="text-xs text-obsidian-500 mb-2">通知任务</div>
+              <div class="text-xs text-obsidian-500 mb-2">{{ t("settings.webhook_tasks") }}</div>
               <div class="grid gap-2 sm:grid-cols-2">
                 <template x-for="kind in taskKinds" :key="kind[0]">
                   <label class="flex items-center gap-2 text-xs text-obsidian-300">
@@ -320,7 +320,7 @@
             </div>
 
             <div>
-              <div class="text-xs text-obsidian-500 mb-2">通知状态</div>
+              <div class="text-xs text-obsidian-500 mb-2">{{ t("settings.webhook_status") }}</div>
               <div class="grid gap-2 sm:grid-cols-3">
                 <template x-for="status in statuses" :key="status[0]">
                   <label class="flex items-center gap-2 text-xs text-obsidian-300">
@@ -345,7 +345,7 @@
                            class="rounded border-obsidian-600 bg-obsidian-800">
                     <span x-text="provider[1]"></span>
                   </label>
-                  <button @click="test(provider[0])" type="button" :disabled="saving" class="ml-auto btn-secondary text-xs px-3 py-1.5">保存并测试</button>
+                  <button @click="test(provider[0])" type="button" :disabled="saving" class="ml-auto btn-secondary text-xs px-3 py-1.5">{{ t("settings.save_test") }}</button>
                 </div>
                 <div class="grid gap-3 md:grid-cols-2">
                   <div>
@@ -359,9 +359,9 @@
                     <label class="text-xs text-obsidian-500 mb-1 block">Secret / Signing Key</label>
                     <input type="password"
                            x-model="config.providers[provider[0]].secret"
-                           :placeholder="config.providers[provider[0]].has_secret ? '已保存 Secret，留空将保留原值' : 'Secret / 签名密钥（可选）'"
+                           :placeholder="config.providers[provider[0]].has_secret ? window.t('settings.secret_kept') : window.t('settings.secret_ph')"
                            class="field-input w-full text-xs">
-                    <div x-show="config.providers[provider[0]].has_secret" class="mt-1 text-[10px] text-obsidian-500">已保存 Secret，留空将保留原值</div>
+                    <div x-show="config.providers[provider[0]].has_secret" class="mt-1 text-[10px] text-obsidian-500">{{ t("settings.secret_kept") }}</div>
                   </div>
                 </div>
               </div>
@@ -373,7 +373,7 @@
               <template x-for="result in testResults" :key="result.provider">
                 <div class="text-xs" :class="result.ok ? 'text-emerald-400' : 'text-red-400'">
                   <span x-text="providers.find(p => p[0] === result.provider)?.[1] || result.provider"></span>
-                  <span x-text="result.ok ? '测试发送成功' : (result.error || '测试失败')"></span>
+                  <span x-text="result.ok ? window.t('settings.test_ok') : (result.error || window.t('settings.test_failed'))"></span>
                 </div>
               </template>
             </div>
@@ -385,16 +385,14 @@
     <!-- Language -->
     <div class="card">
       <div class="card-header">
-        <h2 class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">语言</h2>
+        <h2 class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">{{ t("settings.language") }}</h2>
       </div>
       <div class="card-body">
-        <select class="field-select"
-                hx-post="/api/settings/lang"
-                hx-trigger="change"
-                hx-include="this"
-                name="lang">
-          <option value="zh">中文</option>
-          <option value="en">English</option>
+        <select id="settings-lang-switcher" class="field-select"
+                name="lang"
+                onchange="window.__ascSetLang(this.value)">
+          <option value="zh" {% if lang == 'zh' %}selected{% endif %}>{{ t("settings.lang_zh") }}</option>
+          <option value="en" {% if lang == 'en' %}selected{% endif %}>{{ t("settings.lang_en") }}</option>
         </select>
       </div>
     </div>

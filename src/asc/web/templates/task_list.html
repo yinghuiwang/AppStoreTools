@@ -15,19 +15,19 @@
   }
 </script>
 {% endif %}
-{% for t in tasks %}
-<div class="px-5 py-3.5 border-b border-obsidian-700 last:border-0 hover:bg-obsidian-800/50 transition-colors duration-150" data-task-id="{{ t.id }}">
+{% for task in tasks %}
+<div class="px-5 py-3.5 border-b border-obsidian-700 last:border-0 hover:bg-obsidian-800/50 transition-colors duration-150" data-task-id="{{ task.id }}">
   <div class="flex items-center justify-between">
     <div class="flex items-center gap-3">
-      {% if t.status == 'done' %}
+      {% if task.status == 'done' %}
       <div class="w-6 h-6 rounded-full flex items-center justify-center" style="background: rgba(52,211,153,0.12);">
         <svg class="w-3.5 h-3.5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>
       </div>
-      {% elif t.status == 'error' %}
+      {% elif task.status == 'error' %}
       <div class="w-6 h-6 rounded-full flex items-center justify-center" style="background: rgba(248,113,113,0.12);">
         <svg class="w-3.5 h-3.5 text-red-400" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"/></svg>
       </div>
-      {% elif t.status == 'running' %}
+      {% elif task.status == 'running' %}
       <div class="w-6 h-6 rounded-full flex items-center justify-center" style="background: rgba(232,161,37,0.15);">
         <svg class="w-3.5 h-3.5 text-amber-500 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
       </div>
@@ -37,24 +37,24 @@
       </div>
       {% endif %}
       <div>
-        <span class="text-sm text-obsidian-100">{{ t.title }}</span>
-        <span class="text-xs text-obsidian-500 font-mono ml-2">{{ t.profile or '' }}</span>
+        <span class="text-sm text-obsidian-100">{{ task.title }}</span>
+        <span class="text-xs text-obsidian-500 font-mono ml-2">{{ task.profile or '' }}</span>
       </div>
     </div>
     <div class="flex items-center gap-3">
-      <span class="text-[11px] text-obsidian-500 font-mono tabular-nums">{{ t.created_at[:16] }}</span>
-      <span class="text-[11px] text-obsidian-500 font-mono tabular-nums">用时 {{ t.duration_label }}</span>
+      <span class="text-[11px] text-obsidian-500 font-mono tabular-nums">{{ task.created_at[:16] }}</span>
+      <span class="text-[11px] text-obsidian-500 font-mono tabular-nums">{{ t("tasks.duration", duration=task.duration_label) }}</span>
       <button type="button" class="text-[11px] text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium uppercase tracking-wider"
-              onclick="toggleTaskLogs('{{ t.id }}')">
-        LOGS
+              onclick="toggleTaskLogs('{{ task.id }}')">
+        {{ t("common.logs") }}
       </button>
-      {% if t.status == 'error' and t.retry_path %}
-      <a href="{{ t.retry_path }}" class="badge badge-error text-[10px] cursor-pointer hover:bg-red-500/20 transition-colors duration-150">重试</a>
+      {% if task.status == 'error' and task.retry_path %}
+      <a href="{{ task.retry_path }}" class="badge badge-error text-[10px] cursor-pointer hover:bg-red-500/20 transition-colors duration-150">{{ t("tasks.retry") }}</a>
       {% endif %}
     </div>
   </div>
-  <div class="hidden mt-3 log-panel max-h-48" data-task-log-panel="{{ t.id }}">
-    {% for line in t.logs %}
+  <div class="hidden mt-3 log-panel max-h-48" data-task-log-panel="{{ task.id }}">
+    {% for line in task.logs %}
     <div>{{ line }}</div>
     {% endfor %}
   </div>

@@ -1,6 +1,11 @@
 (function () {
   "use strict";
 
+  function tt(key, vars) {
+    if (typeof window.t === "function") return window.t(key, vars);
+    return key;
+  }
+
   var root = document.getElementById("dashboard-root");
   if (!root) return;
 
@@ -24,13 +29,11 @@
   var refreshRequest = 0;
   var pollTimer = null;
 
-  var STATUS_LABELS = {
-    done: "成功",
-    error: "失败",
-    canceled: "已取消",
-    running: "运行中",
-    pending: "等待中"
-  };
+  function statusLabel(status) {
+    var key = "index.status." + status;
+    var label = tt(key);
+    return label === key ? String(status || "--") : label;
+  }
 
   function textElement(tag, className, value) {
     var node = document.createElement(tag);
@@ -41,30 +44,30 @@
 
   function humanDuration(seconds) {
     var total = Math.max(0, Math.floor(Number(seconds) || 0));
-    if (total < 60) return total + " 秒";
-    if (total < 3600) return Math.floor(total / 60) + " 分钟";
+    if (total < 60) return tt("index.duration.seconds", { n: total });
+    if (total < 3600) return tt("index.duration.minutes", { n: Math.floor(total / 60) });
     var hours = Math.floor(total / 3600);
     var minutes = Math.floor((total % 3600) / 60);
-    return hours + " 小时" + (minutes ? " " + minutes + " 分钟" : "");
+    return minutes ? tt("index.duration.hours_minutes", { h: hours, m: minutes }) : tt("index.duration.hours", { n: hours });
   }
 
   function taskTitle(task) {
-    return task.title || task.kind || "未命名任务";
+    return task.title || task.kind || tt("dashboard.unnamed_task");
   }
 
   function makeLogButton(task) {
-    var button = textElement("button", "dashboard-log-button", "日志");
+    var button = textElement("button", "dashboard-log-button", tt("index.log"));
     button.type = "button";
     button.dataset.dashboardLogTask = String(task.id || "");
-    button.setAttribute("aria-label", "查看" + taskTitle(task) + "日志");
+    button.setAttribute("aria-label", tt("index.view_log_aria", { title: taskTitle(task) }));
     return button;
   }
 
   function makeCancelButton(task) {
-    var button = textElement("button", "dashboard-cancel-button", "终止");
+    var button = textElement("button", "dashboard-cancel-button", tt("index.cancel"));
     button.type = "button";
     button.dataset.dashboardCancelTask = String(task.id || "");
-    button.setAttribute("aria-label", "终止" + taskTitle(task));
+    button.setAttribute("aria-label", tt("index.cancel_aria", { title: taskTitle(task) }));
     return button;
   }
 
@@ -77,10 +80,10 @@
 
   async function cancelRunningTask(taskId, button) {
     if (!taskId) return;
-    if (!window.confirm("确定要终止该任务吗？已完成的 App Store Connect 操作不会自动回滚。")) return;
+    if (!window.confirm(tt("dashboard.confirm_cancel"))) return;
     if (button) {
       button.disabled = true;
-      button.textContent = "终止中...";
+      button.textContent = tt("dashboard.canceling");
     }
     try {
       var response = await fetch("/api/task/" + encodeURIComponent(taskId) + "/cancel", { method: "POST" });
@@ -88,9 +91,9 @@
     } catch (error) {
       if (button) {
         button.disabled = false;
-        button.textContent = "终止";
+        button.textContent = tt("index.cancel");
       }
-      window.alert("终止请求发送失败，请稍后重试");
+      window.alert(tt("dashboard.cancel_failed"));
       return;
     }
     refreshDashboard();
@@ -98,10 +101,10 @@
 
   function renderMetrics(metrics) {
     var cards = [
-      ["dashboard-stat dashboard-stat--accent", "预计节省时间", humanDuration(metrics.saved_seconds), "相对手动操作基准"],
-      ["dashboard-stat dashboard-stat--success", "任务成功率", metrics.success_rate == null ? "--" : metrics.success_rate + "%", (metrics.completed_count || 0) + " 个已结束任务"],
-      ["dashboard-stat dashboard-stat--error", "失败投入时间", humanDuration(metrics.failed_seconds), "失败与取消任务耗时"],
-      ["dashboard-stat dashboard-stat--info", "正在执行", metrics.running_count || 0, "运行中与等待中任务"]
+      ["dashboard-stat dashboard-stat--accent", tt("index.metric_saved"), humanDuration(metrics.saved_seconds), tt("index.metric_saved_hint")],
+      ["dashboard-stat dashboard-stat--success", tt("index.metric_success"), metrics.success_rate == null ? "--" : metrics.success_rate + "%", tt("index.metric_completed", { n: metrics.completed_count || 0 })],
+      ["dashboard-stat dashboard-stat--error", tt("index.metric_failed"), humanDuration(metrics.failed_seconds), tt("index.metric_failed_hint")],
+      ["dashboard-stat dashboard-stat--info", tt("index.metric_running"), metrics.running_count || 0, tt("index.metric_running_hint")]
     ];
     summary.replaceChildren();
     cards.forEach(function (card) {
@@ -127,7 +130,7 @@
       var mark = document.createElement("span");
       mark.className = "dashboard-empty-state__mark";
       mark.setAttribute("aria-hidden", "true");
-      container.append(mark, textElement("p", "", "当前没有执行中的任务"));
+      container.append(mark, textElement("p", "", tt("index.empty_running")));
     } else {
       container.className = "dashboard-running-list";
       running.forEach(function (task) {
@@ -144,12 +147,12 @@
         main.className = "dashboard-running-task__main";
         var heading = document.createElement("div");
         heading.append(textElement("strong", "", taskTitle(task)));
-        heading.append(textElement("span", "", task.profile || "未指定 App"));
+        heading.append(textElement("span", "", task.profile || tt("index.no_profile")));
         var progress = document.createElement("div");
         var pct = Math.max(0, Math.min(100, Number(task.progress && task.progress.pct) || 0));
         progress.className = "dashboard-progress";
         progress.setAttribute("role", "progressbar");
-        progress.setAttribute("aria-label", taskTitle(task) + "进度");
+        progress.setAttribute("aria-label", tt("index.progress_aria", { title: taskTitle(task) }));
         progress.setAttribute("aria-valuemin", "0");
         progress.setAttribute("aria-valuemax", "100");
         progress.setAttribute("aria-valuenow", String(pct));
@@ -157,7 +160,7 @@
         progressBar.style.width = pct + "%";
         progress.append(progressBar);
         var progressMessage = task.progress && task.progress.msg;
-        main.append(heading, progress, textElement("small", "", progressMessage || (task.status === "pending" ? "等待执行" : "正在执行")));
+        main.append(heading, progress, textElement("small", "", progressMessage || (task.status === "pending" ? tt("index.waiting") : tt("index.executing"))));
         article.append(indicator, main, makeRunningActions(task));
         container.append(article);
       });
@@ -177,12 +180,13 @@
       identity.append(textElement("small", "", task.kind || ""));
 
       var statusCell = document.createElement("td");
-      var safeStatus = Object.prototype.hasOwnProperty.call(STATUS_LABELS, task.status) ? task.status : "unknown";
+      var known = ["done", "error", "canceled", "running", "pending"];
+      var safeStatus = known.indexOf(task.status) !== -1 ? task.status : "unknown";
       var badge = document.createElement("span");
       badge.className = "dashboard-status dashboard-status--" + safeStatus;
       var dot = document.createElement("i");
       dot.setAttribute("aria-hidden", "true");
-      badge.append(dot, document.createTextNode(STATUS_LABELS[task.status] || String(task.status || "--")));
+      badge.append(dot, document.createTextNode(statusLabel(task.status)));
       statusCell.append(badge);
 
       var profile = textElement("td", "dashboard-table__mono", task.profile || "--");
@@ -194,7 +198,7 @@
       actions.append(makeLogButton(task));
       var retryPaths = ["/metadata", "/build", "/whats-new", "/iap", "/urls", "/update"];
       if (task.status === "error" && retryPaths.indexOf(task.retry_path) !== -1) {
-        var retry = textElement("a", "dashboard-retry-link", "重试");
+        var retry = textElement("a", "dashboard-retry-link", tt("index.retry"));
         retry.href = task.retry_path;
         actions.append(retry);
       }
@@ -203,7 +207,7 @@
     });
     if (!tasks.length) {
       var emptyRow = document.createElement("tr");
-      var emptyCell = textElement("td", "dashboard-table__empty", "所选范围内暂无任务记录");
+      var emptyCell = textElement("td", "dashboard-table__empty", tt("index.empty_history"));
       emptyCell.colSpan = 6;
       emptyRow.append(emptyCell);
       taskList.append(emptyRow);
@@ -284,7 +288,7 @@
     var requestId = ++refreshRequest;
     refreshController = controller;
     root.setAttribute("aria-busy", "true");
-    if (refreshStatus) refreshStatus.textContent = "正在刷新…";
+    if (refreshStatus) refreshStatus.textContent = tt("dashboard.refreshing");
     var query = new URLSearchParams(filters);
     try {
       var response = await fetch("/api/dashboard/summary?" + query.toString(), {
@@ -298,7 +302,7 @@
       if (refreshStatus) refreshStatus.textContent = "";
     } catch (error) {
       if (requestId === refreshRequest && error.name !== "AbortError") {
-        if (refreshStatus) refreshStatus.textContent = "刷新失败，保留上次结果";
+        if (refreshStatus) refreshStatus.textContent = tt("dashboard.refresh_failed");
         schedulePoll();
       }
     } finally {
@@ -336,7 +340,7 @@
     var titleNode = taskContainer && taskContainer.querySelector("strong");
     var titleText = titleNode ? titleNode.textContent : "";
     TaskLogDrawer.open(taskId, {
-      title: (titleText || "任务") + " 日志",
+      title: tt("dashboard.task_log_title", { title: titleText || tt("dashboard.task_fallback") }),
       onProgress: function (pct, msg) {
         updateTaskProgress(taskId, { pct: pct, msg: msg });
       },

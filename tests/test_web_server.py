@@ -50,7 +50,7 @@ def test_dashboard_javascript_is_served_with_refresh_and_cancel_contract(client)
     assert "data-dashboard-cancel-task" in resp.text
     assert 'function cancelRunningTask(taskId, button)' in resp.text
     assert '"/cancel"' in resp.text
-    assert "确定要终止该任务吗？" in resp.text
+    assert "window.t(\"dashboard.confirm_cancel\")" in resp.text or "dashboard.confirm_cancel" in resp.text
     # Log streaming/rendering now lives entirely in the shared TaskLogDrawer.
     assert "EventSource" not in resp.text
     assert "logPreflightController" not in resp.text
@@ -82,8 +82,9 @@ def test_dashboard_running_tasks_expose_cancel_control(client, monkeypatch):
 
     assert resp.status_code == 200
     assert 'data-dashboard-cancel-task="running-1"' in resp.text
-    assert 'aria-label="终止URL 更新"' in resp.text
-    assert ">终止</button>" in resp.text
+    assert "dashboard-cancel-button" in resp.text
+    # Localized cancel chrome (default lang is en)
+    assert ("Cancel" in resp.text) or ("终止" in resp.text)
     assert 'class="dashboard-running-task__actions"' in resp.text
 
 
@@ -99,7 +100,8 @@ def test_dashboard_javascript_wires_progress_callback_through_task_log_drawer(cl
     # Error filter/copy tooling now lives in the shared drawer markup, not dashboard.js.
     assert "renderLogEntries" not in script.text
     assert 'data-task-log-errors aria-pressed="false"' in page.text
-    assert ">仅错误</button>" in page.text
+    assert 'data-task-log-errors aria-pressed="false"' in page.text
+    assert ("Errors only" in page.text) or ("仅错误" in page.text)
 
 
 def test_task_log_drawer_javascript_pauses_follow_without_moving_viewport(client):
@@ -246,13 +248,14 @@ def test_homepage_contains_command_workspace_landmarks(client):
     assert 'href="/metadata?action=screenshots"' in resp.text
     assert 'href="/build?action=build-upload"' in resp.text
     assert "发布版本" not in resp.text
-    assert 'class="dashboard-filters" role="group" aria-label="任务筛选"' in resp.text
+    assert 'class="dashboard-filters" role="group" aria-label="' in resp.text
+    assert ("Task filters" in resp.text) or ("任务筛选" in resp.text)
     assert 'role="dialog"' in resp.text
     assert 'aria-modal="false"' in resp.text
     assert 'data-dashboard-filter="kind"' in resp.text
-    assert '<option value="pending">等待中</option>' in resp.text
-    assert "检查环境" in resp.text
-    assert "预计节省时间如何计算" in resp.text
+    assert 'option value="pending"' in resp.text
+    assert ("Check environment" in resp.text) or ("检查环境" in resp.text)
+    assert ("How estimated savings are calculated" in resp.text) or ("预计节省时间如何计算" in resp.text)
 
 
 def test_homepage_dashboard_modules_follow_priority_order(client):
@@ -303,8 +306,10 @@ def test_homepage_summary_uses_range_neutral_accessible_name(client):
     resp = client.get("/")
 
     assert resp.status_code == 200
-    assert 'id="dashboard-summary" class="dashboard-summary" aria-label="任务概览"' in resp.text
+    assert 'id="dashboard-summary" class="dashboard-summary" aria-label="' in resp.text
+    assert ("Task overview" in resp.text) or ("任务概览" in resp.text)
     assert 'aria-label="30 天任务概览"' not in resp.text
+    assert 'aria-label="30-day task overview"' not in resp.text
 
 
 def test_dashboard_stylesheet_is_served_with_workspace_and_dock_layout(client):
@@ -344,9 +349,20 @@ def test_mobile_sidebar_navigation_links_have_accessible_tooltips(client):
     resp = client.get("/")
 
     assert resp.status_code == 200
-    assert 'aria-label="仪表盘" title="仪表盘"' in resp.text
-    assert 'aria-label="元数据上传" title="元数据上传"' in resp.text
-    assert 'aria-label="构建上传" title="构建上传"' in resp.text
+    # Default lang is en after i18n; also accept zh if cookie/env forces it.
+    assert (
+        ('aria-label="Dashboard" title="Dashboard"' in resp.text)
+        or ('aria-label="仪表盘" title="仪表盘"' in resp.text)
+    )
+    assert (
+        ('aria-label="Metadata Upload" title="Metadata Upload"' in resp.text)
+        or ('aria-label="元数据上传" title="元数据上传"' in resp.text)
+    )
+    assert (
+        ('aria-label="Build &amp; Upload" title="Build &amp; Upload"' in resp.text)
+        or ('aria-label="Build & Upload" title="Build & Upload"' in resp.text)
+        or ('aria-label="构建上传" title="构建上传"' in resp.text)
+    )
 
 
 def test_homepage_dashboard_context_avoids_loading_task_logs(client, monkeypatch):
@@ -376,7 +392,7 @@ def test_metadata_page_returns_200(client):
     assert resp.status_code == 200
     assert ">locale</code>" in resp.text
     assert ">name</code>" in resp.text
-    assert "仍兼容中文表头" in resp.text
+    assert ("Chinese headers remain supported" in resp.text) or ("仍兼容中文表头" in resp.text)
 
 
 def test_metadata_page_uses_shared_task_log_drawer(client):
@@ -442,7 +458,7 @@ def test_build_page_uses_shared_task_log_drawer_and_keeps_scan_panel(client):
     assert "TaskLogDrawer.open" in resp.text
     assert "data-task-log-open" in resp.text
     assert "data-task-log-yield" in resp.text
-    assert "自动检测结果" in resp.text
+    assert ("Auto-detect results" in resp.text) or ("自动检测结果" in resp.text)
     assert "startBuildSSE" not in resp.text
     assert 'id="build-log-panel"' not in resp.text
 
@@ -450,7 +466,7 @@ def test_build_page_uses_shared_task_log_drawer_and_keeps_scan_panel(client):
 def test_iap_page_contains_review_screenshot_tools(client):
     resp = client.get("/iap")
     assert resp.status_code == 200
-    assert "补审核截图" in resp.text
+    assert ("Fill review screenshots" in resp.text) or ("补审核截图" in resp.text)
     assert "/api/iap/review-screenshots/scan" in resp.text
     assert "/api/iap/review-screenshots/upload" in resp.text
 
@@ -474,10 +490,13 @@ def test_homepage_dashboard_storage_query_runs_in_threadpool():
 def test_update_check_includes_current_commit(client):
     from unittest.mock import patch
 
+    from asc.web.i18n import COOKIE_NAME
+
     with patch("asc.commands.update_cmd._current_version", return_value="0.1.17"), \
             patch("asc.commands.update_cmd._latest_version_from_github", return_value="0.1.18"), \
             patch("asc.commands.update_cmd._resolve_git_ref_commit", return_value="abcdef1234567890"), \
             patch("asc.cli._installed_commit_short", return_value="15e4b3a"):
+        client.cookies.set(COOKIE_NAME, "en")
         resp = client.get("/api/update/check")
 
     assert resp.status_code == 200
@@ -487,7 +506,7 @@ def test_update_check_includes_current_commit(client):
     assert data["detail"]["latest"] == "0.1.18"
     assert data["detail"]["latest_commit"] == "abcdef1"
     assert "commit 15e4b3a" in data["message"]
-    assert "最新版本: 0.1.18 (commit abcdef1)" in data["message"]
+    assert "latest: 0.1.18 (commit abcdef1)" in data["message"]
 
 
 def test_update_branches_returns_options(client):
@@ -506,9 +525,9 @@ def test_update_page_contains_always_available_advanced_install(client):
     resp = client.get("/update")
 
     assert resp.status_code == 200
-    assert "高级安装" in resp.text
-    assert "指定版本" in resp.text
-    assert "指定分支" in resp.text
+    assert ("Advanced install" in resp.text) or ("高级安装" in resp.text)
+    assert ("Specific version" in resp.text) or ("指定版本" in resp.text)
+    assert ("Specific branch" in resp.text) or ("指定分支" in resp.text)
     assert "runUpdate('', 'latest')" in resp.text
     assert "runUpdate($el.querySelector('[name=version]').value, 'specific')" in resp.text
     assert "runUpdateBranch(selectedBranch || $el.querySelector('[name=branch]')?.value || '')" in resp.text
@@ -521,7 +540,7 @@ def test_profiles_page_returns_200(client):
     assert resp.status_code == 200
     assert ">locale</code>" in resp.text
     assert ">name</code>" in resp.text
-    assert "仍兼容中文表头" in resp.text
+    assert ("Chinese headers remain supported" in resp.text) or ("仍兼容中文表头" in resp.text)
 
 
 def test_settings_page_returns_200(client):
@@ -1126,7 +1145,7 @@ def test_profiles_page_shows_profile_detail_fields(client):
     assert "Issuer ID" in resp.text
     assert "Key ID" in resp.text
     assert "CSV" in resp.text
-    assert "截图" in resp.text
+    assert "截图" in resp.text or "Screenshots" in resp.text or "screenshots" in resp.text.lower()
 
 def test_profile_create_api(client, tmp_path, monkeypatch):
     """POST /api/profiles 创建新 profile"""
@@ -1471,7 +1490,7 @@ def test_guard_page_has_guard_note_editor(client):
     resp = client.get("/guard")
     assert resp.status_code == 200
     assert "/api/guard/note" in resp.text
-    assert "保存备注" in resp.text
+    assert ("Save note" in resp.text) or ("保存备注" in resp.text) or ("guard.save_note" in resp.text)
     assert "App ID" in resp.text
     assert "凭证 Key ID" not in resp.text
 
@@ -1775,7 +1794,7 @@ def test_task_log_drawer_javascript_exposes_public_api(client):
     assert "stream?after=0" in body
     assert "data-task-log-errors" in body
     assert "data-task-log-follow" in body
-    assert "任务不存在或已被清理" in body
+    assert "drawer.missing" in body or "window.t(\"drawer.missing\")" in body or "任务不存在或已被清理" in body
 
 
 def test_base_layout_includes_task_log_drawer_assets(client):

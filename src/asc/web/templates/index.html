@@ -8,11 +8,17 @@
 {% macro human_duration(seconds) -%}
   {%- set total = seconds | int -%}
   {%- if total < 60 -%}
-    {{ total }} 秒
+    {{ t("index.duration.seconds", n=total) }}
   {%- elif total < 3600 -%}
-    {{ (total / 60) | int }} 分钟
+    {{ t("index.duration.minutes", n=((total / 60) | int)) }}
   {%- else -%}
-    {{ (total / 3600) | int }} 小时{% if total % 3600 >= 60 %} {{ ((total % 3600) / 60) | int }} 分钟{% endif %}
+    {%- set hours = (total / 3600) | int -%}
+    {%- set minutes = ((total % 3600) / 60) | int -%}
+    {%- if minutes >= 1 -%}
+      {{ t("index.duration.hours_minutes", h=hours, m=minutes) }}
+    {%- else -%}
+      {{ t("index.duration.hours", n=hours) }}
+    {%- endif -%}
   {%- endif -%}
 {%- endmacro %}
 
@@ -24,29 +30,29 @@
     <div class="dashboard-toolbar__identity">
       <p class="dashboard-kicker">COMMAND WORKSPACE</p>
       <div class="dashboard-title-row">
-        <h1>发布控制台</h1>
+        <h1>{{ t("index.title") }}</h1>
         <span class="dashboard-profile-indicator">
           <span class="dashboard-profile-indicator__dot" aria-hidden="true"></span>
-          {{ current_profile or "未选择 App" }}
+          {{ current_profile or t("index.no_app") }}
         </span>
       </div>
       <p class="dashboard-kicker" data-dashboard-refresh-status role="status" aria-live="polite"></p>
     </div>
 
-    <div class="dashboard-filters" role="group" aria-label="任务筛选">
+    <div class="dashboard-filters" role="group" aria-label="{{ t('index.filter_aria') }}">
       <fieldset class="dashboard-filter-group dashboard-range-filter">
-        <legend>时间范围</legend>
+        <legend>{{ t("index.range") }}</legend>
         <div class="dashboard-segments" data-dashboard-filter="range">
-          <button type="button" data-value="7d" aria-pressed="false">7 天</button>
-          <button type="button" data-value="30d" aria-pressed="true">30 天</button>
-          <button type="button" data-value="90d" aria-pressed="false">90 天</button>
+          <button type="button" data-value="7d" aria-pressed="false">{{ t("index.range_7d") }}</button>
+          <button type="button" data-value="30d" aria-pressed="true">{{ t("index.range_30d") }}</button>
+          <button type="button" data-value="90d" aria-pressed="false">{{ t("index.range_90d") }}</button>
         </div>
       </fieldset>
 
       <label class="dashboard-filter-control">
         <span>App</span>
         <select data-dashboard-filter="profile">
-          <option value="">全部 App</option>
+          <option value="">{{ t("index.all_apps") }}</option>
           {% for profile in profiles %}
           <option value="{{ profile }}" {% if profile == current_profile %}selected{% endif %}>{{ profile }}</option>
           {% endfor %}
@@ -54,22 +60,27 @@
       </label>
 
       <label class="dashboard-filter-control">
-        <span>状态</span>
+        <span>{{ t("index.status") }}</span>
         <select data-dashboard-filter="status">
-          <option value="">全部状态</option>
-          <option value="pending">等待中</option>
-          <option value="running">运行中</option>
-          <option value="done">成功</option>
-          <option value="error">失败</option>
-          <option value="canceled">已取消</option>
+          <option value="">{{ t("index.all_statuses") }}</option>
+          <option value="pending">{{ t("index.status.pending") }}</option>
+          <option value="running">{{ t("index.status.running") }}</option>
+          <option value="done">{{ t("index.status.done") }}</option>
+          <option value="error">{{ t("index.status.error") }}</option>
+          <option value="canceled">{{ t("index.status.canceled") }}</option>
         </select>
       </label>
       <label class="dashboard-filter-control">
-        <span>任务类型</span>
+        <span>{{ t("index.kind") }}</span>
         <select data-dashboard-filter="kind">
-          <option value="">全部类型</option><option value="metadata">元数据</option><option value="build">构建</option>
-          <option value="whats-new">更新说明</option><option value="iap">内购</option><option value="iap-review-screenshots">内购审核截图</option>
-          <option value="urls">URL</option><option value="update">工具更新</option>
+          <option value="">{{ t("index.all_kinds") }}</option>
+          <option value="metadata">{{ t("index.kind_metadata") }}</option>
+          <option value="build">{{ t("index.kind_build") }}</option>
+          <option value="whats-new">{{ t("index.kind_whats_new") }}</option>
+          <option value="iap">{{ t("index.kind_iap") }}</option>
+          <option value="iap-review-screenshots">{{ t("index.kind_iap_review") }}</option>
+          <option value="urls">{{ t("index.kind_urls") }}</option>
+          <option value="update">{{ t("index.kind_update") }}</option>
         </select>
       </label>
     </div>
@@ -80,7 +91,7 @@
     <div class="dashboard-section-heading">
       <div>
         <p class="dashboard-kicker">ACTIVE QUEUE</p>
-        <h2 id="running-tasks-title">运行中的任务</h2>
+        <h2 id="running-tasks-title">{{ t("index.running_title") }}</h2>
       </div>
       <span class="dashboard-count">{{ running_tasks | length }}</span>
     </div>
@@ -90,15 +101,15 @@
       <article class="dashboard-running-task" data-task-id="{{ task.id }}">
         <div class="dashboard-running-task__status" aria-hidden="true"><span></span></div>
         <div class="dashboard-running-task__main">
-          <div><strong>{{ task.title }}</strong><span>{{ task.profile or "未指定 App" }}</span></div>
-          <div class="dashboard-progress" role="progressbar" aria-label="{{ task.title }}进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ task.progress.pct or 0 }}">
+          <div><strong>{{ task.title }}</strong><span>{{ task.profile or t("index.no_profile") }}</span></div>
+          <div class="dashboard-progress" role="progressbar" aria-label="{{ t('index.progress_aria', title=task.title) }}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ task.progress.pct or 0 }}">
             <span style="width: {{ task.progress.pct or 0 }}%"></span>
           </div>
-          <small>{{ task.progress.msg or ("等待执行" if task.status == "pending" else "正在执行") }}</small>
+          <small>{{ task.progress.msg or (t("index.waiting") if task.status == "pending" else t("index.executing")) }}</small>
         </div>
         <div class="dashboard-running-task__actions">
-          <button type="button" class="dashboard-log-button" data-dashboard-log-task="{{ task.id }}" aria-label="查看{{ task.title }}日志">日志</button>
-          <button type="button" class="dashboard-cancel-button" data-dashboard-cancel-task="{{ task.id }}" aria-label="终止{{ task.title }}">终止</button>
+          <button type="button" class="dashboard-log-button" data-dashboard-log-task="{{ task.id }}" aria-label="{{ t('index.view_log_aria', title=task.title) }}">{{ t("index.log") }}</button>
+          <button type="button" class="dashboard-cancel-button" data-dashboard-cancel-task="{{ task.id }}" aria-label="{{ t('index.cancel_aria', title=task.title) }}">{{ t("index.cancel") }}</button>
         </div>
       </article>
       {% endfor %}
@@ -106,7 +117,7 @@
     {% else %}
     <div class="dashboard-empty-state">
       <span class="dashboard-empty-state__mark" aria-hidden="true"></span>
-      <p>当前没有执行中的任务</p>
+      <p>{{ t("index.empty_running") }}</p>
     </div>
     {% endif %}
   </section>
@@ -115,39 +126,45 @@
     <div class="dashboard-section-heading">
       <div>
         <p class="dashboard-kicker">TASK LEDGER</p>
-        <h2 id="task-history-title">任务历史</h2>
+        <h2 id="task-history-title">{{ t("index.history_title") }}</h2>
       </div>
-      <span>最近 {{ dashboard.tasks | length }} 条</span>
+      <span>{{ t("index.recent_n", n=(dashboard.tasks | length)) }}</span>
     </div>
     <div class="dashboard-table-wrap">
       <table class="dashboard-table">
         <thead>
           <tr>
-            <th scope="col">任务</th>
-            <th scope="col">状态</th>
-            <th scope="col">App</th>
-            <th scope="col">开始时间</th>
-            <th scope="col">耗时</th>
-            <th scope="col">操作</th>
+            <th scope="col">{{ t("index.col_task") }}</th>
+            <th scope="col">{{ t("index.col_status") }}</th>
+            <th scope="col">{{ t("index.col_app") }}</th>
+            <th scope="col">{{ t("index.col_started") }}</th>
+            <th scope="col">{{ t("index.col_duration") }}</th>
+            <th scope="col">{{ t("index.col_actions") }}</th>
           </tr>
         </thead>
         <tbody id="dashboard-task-list">
           {% for task in dashboard.tasks[:20] %}
           <tr data-task-id="{{ task.id }}">
             <td><strong>{{ task.title }}</strong><small>{{ task.kind }}</small></td>
-            <td><span class="dashboard-status dashboard-status--{{ task.status }}"><i aria-hidden="true"></i>{{ {'done': '成功', 'error': '失败', 'canceled': '已取消', 'running': '运行中', 'pending': '等待中'}.get(task.status, task.status) }}</span></td>
+            <td><span class="dashboard-status dashboard-status--{{ task.status }}"><i aria-hidden="true"></i>{{ {
+              'done': t('index.status.done'),
+              'error': t('index.status.error'),
+              'canceled': t('index.status.canceled'),
+              'running': t('index.status.running'),
+              'pending': t('index.status.pending')
+            }.get(task.status, task.status) }}</span></td>
             <td class="dashboard-table__mono">{{ task.profile or "--" }}</td>
             <td class="dashboard-table__mono">{{ task.created_at[:16] | replace('T', ' ') }}</td>
             <td class="dashboard-table__mono">{{ task.duration_label }}</td>
             <td class="dashboard-table__actions">
-              <button type="button" class="dashboard-log-button" data-dashboard-log-task="{{ task.id }}" aria-label="查看{{ task.title }}日志">日志</button>
+              <button type="button" class="dashboard-log-button" data-dashboard-log-task="{{ task.id }}" aria-label="{{ t('index.view_log_aria', title=task.title) }}">{{ t("index.log") }}</button>
               {% if task.status == 'error' and task.retry_path in ['/metadata', '/build', '/whats-new', '/iap', '/urls', '/update'] %}
-              <a href="{{ task.retry_path }}" class="dashboard-retry-link">重试</a>
+              <a href="{{ task.retry_path }}" class="dashboard-retry-link">{{ t("index.retry") }}</a>
               {% endif %}
             </td>
           </tr>
           {% else %}
-          <tr><td colspan="6" class="dashboard-table__empty">所选范围内暂无任务记录</td></tr>
+          <tr><td colspan="6" class="dashboard-table__empty">{{ t("index.empty_history") }}</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -158,62 +175,62 @@
     <div class="dashboard-section-heading">
       <div>
         <p class="dashboard-kicker">RUNBOOK</p>
-        <h2 id="quick-actions-title">快速执行</h2>
+        <h2 id="quick-actions-title">{{ t("index.quick_title") }}</h2>
       </div>
-      <span>选择工作流后确认参数</span>
+      <span>{{ t("index.quick_hint") }}</span>
     </div>
-    <nav class="dashboard-actions" aria-label="常用发布操作">
-      <a href="/metadata?action=check" data-quick-action="/metadata?action=check"><span class="dashboard-action__icon" aria-hidden="true">&#9673;</span><span><strong>检查环境</strong><small>验证配置与发布条件</small></span><span class="dashboard-action__arrow" aria-hidden="true">&#8250;</span></a>
+    <nav class="dashboard-actions" aria-label="{{ t('index.quick_aria') }}">
+      <a href="/metadata?action=check" data-quick-action="/metadata?action=check"><span class="dashboard-action__icon" aria-hidden="true">&#9673;</span><span><strong>{{ t("index.action_check") }}</strong><small>{{ t("index.action_check_desc") }}</small></span><span class="dashboard-action__arrow" aria-hidden="true">&#8250;</span></a>
       <a href="/metadata?action=all" data-quick-action="/metadata?action=all">
         <span class="dashboard-action__icon" aria-hidden="true">&#8593;</span>
-        <span><strong>上传全部</strong><small>元数据 + 截图</small></span>
+        <span><strong>{{ t("index.action_all") }}</strong><small>{{ t("index.action_all_desc") }}</small></span>
         <span class="dashboard-action__arrow" aria-hidden="true">&#8250;</span>
       </a>
       <a href="/metadata?action=metadata" data-quick-action="/metadata?action=metadata">
         <span class="dashboard-action__icon" aria-hidden="true">&#8801;</span>
-        <span><strong>上传元数据</strong><small>描述、关键词与版本信息</small></span>
+        <span><strong>{{ t("index.action_metadata") }}</strong><small>{{ t("index.action_metadata_desc") }}</small></span>
         <span class="dashboard-action__arrow" aria-hidden="true">&#8250;</span>
       </a>
       <a href="/metadata?action=screenshots" data-quick-action="/metadata?action=screenshots">
         <span class="dashboard-action__icon" aria-hidden="true">&#9638;</span>
-        <span><strong>上传截图</strong><small>按设备与语言同步</small></span>
+        <span><strong>{{ t("index.action_screenshots") }}</strong><small>{{ t("index.action_screenshots_desc") }}</small></span>
         <span class="dashboard-action__arrow" aria-hidden="true">&#8250;</span>
       </a>
       <a href="/build?action=build-upload" data-quick-action="/build?action=build-upload">
         <span class="dashboard-action__icon" aria-hidden="true">&#9654;</span>
-        <span><strong>构建上传</strong><small>Archive 与 TestFlight</small></span>
+        <span><strong>{{ t("index.action_build") }}</strong><small>{{ t("index.action_build_desc") }}</small></span>
         <span class="dashboard-action__arrow" aria-hidden="true">&#8250;</span>
       </a>
     </nav>
   </section>
 
-  <aside class="dashboard-metrics-rail" aria-label="效率指标">
-    <section id="dashboard-summary" class="dashboard-summary" aria-label="任务概览">
+  <aside class="dashboard-metrics-rail" aria-label="{{ t('index.metrics_aria') }}">
+    <section id="dashboard-summary" class="dashboard-summary" aria-label="{{ t('index.summary_aria') }}">
       <article class="dashboard-stat dashboard-stat--accent">
-        <span class="dashboard-stat__label">预计节省时间</span>
+        <span class="dashboard-stat__label">{{ t("index.metric_saved") }}</span>
         <strong>{{ human_duration(dashboard.metrics.saved_seconds) }}</strong>
-        <small>相对手动操作基准</small>
+        <small>{{ t("index.metric_saved_hint") }}</small>
       </article>
       <article class="dashboard-stat dashboard-stat--success">
-        <span class="dashboard-stat__label">任务成功率</span>
+        <span class="dashboard-stat__label">{{ t("index.metric_success") }}</span>
         <strong>{% if dashboard.metrics.success_rate is none %}--{% else %}{{ dashboard.metrics.success_rate }}%{% endif %}</strong>
-        <small>{{ dashboard.metrics.completed_count }} 个已结束任务</small>
+        <small>{{ t("index.metric_completed", n=dashboard.metrics.completed_count) }}</small>
       </article>
       <article class="dashboard-stat dashboard-stat--error">
-        <span class="dashboard-stat__label">失败投入时间</span>
+        <span class="dashboard-stat__label">{{ t("index.metric_failed") }}</span>
         <strong>{{ human_duration(dashboard.metrics.failed_seconds) }}</strong>
-        <small>失败与取消任务耗时</small>
+        <small>{{ t("index.metric_failed_hint") }}</small>
       </article>
       <article class="dashboard-stat dashboard-stat--info">
-        <span class="dashboard-stat__label">正在执行</span>
+        <span class="dashboard-stat__label">{{ t("index.metric_running") }}</span>
         <strong>{{ dashboard.metrics.running_count }}</strong>
-        <small>运行中与等待中任务</small>
+        <small>{{ t("index.metric_running_hint") }}</small>
       </article>
     </section>
     <details class="dashboard-estimate-details">
-      <summary>预计节省时间如何计算</summary>
-      <p><strong>人工基准 - 工具实际耗时</strong>，仅统计成功任务；失败与取消任务不计入节省时间，另计为失败投入时间。</p>
-      <p>固定人工基准（分钟）：元数据 30、构建 45、更新说明 10、内购 25、内购审核截图 20、URL 8、工具更新 5。</p>
+      <summary>{{ t("index.estimate_summary") }}</summary>
+      <p><strong>{{ t("index.estimate_p1") }}</strong></p>
+      <p>{{ t("index.estimate_p2") }}</p>
     </details>
   </aside>
 </div>

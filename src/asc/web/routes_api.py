@@ -25,6 +25,7 @@ from asc.guard import enforce_bundle_guard, enforce_config_guard, read_ipa_bundl
 from asc.utils import make_api_from_config
 from asc.web import notifications
 from asc.web.dashboard import MANUAL_BASELINE_MINUTES, build_dashboard_summary
+from asc.web.i18n import t
 
 router = APIRouter()
 
@@ -34,6 +35,31 @@ _TMPDIR = Path(tempfile.gettempdir()).resolve()
 _ALLOWED_ROOTS = (_HOME, _TMPDIR)
 _DATA_DIR = Path(__file__).resolve().parents[3] / "data"
 _TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates"
+
+
+def _lang(request: Request) -> str:
+    from asc.web.i18n import COOKIE_NAME, resolve_lang
+
+    return getattr(request.state, "lang", None) or resolve_lang(
+        cookie=request.cookies.get(COOKIE_NAME),
+        accept_language=request.headers.get("accept-language"),
+    )
+
+
+def _i18n_template_ctx(request: Request) -> dict:
+    from asc.web.i18n import html_lang, load_catalog, t as translate
+
+    lang = _lang(request)
+
+    def _t(key: str, **kwargs: object) -> str:
+        return translate(key, lang=lang, **kwargs)
+
+    return {
+        "lang": lang,
+        "html_lang": html_lang(lang),
+        "t": _t,
+        "i18n_catalog": load_catalog(lang),
+    }
 
 
 def _validate_webhook_config_payload(data: object) -> str | None:
@@ -175,6 +201,7 @@ async def browse(request: Request, path: str = ".", mode: str = "dir", ext: str 
         "entries": entries,
         "mode": mode,
         "ext": ext,
+        **_i18n_template_ctx(request),
     })
 
 
@@ -223,7 +250,7 @@ def _enforce_web_profile_guard(
         raise HTTPException(status_code=409, detail=str(e)) from e
 
 
-def _run_metadata_check(profile: str) -> dict:
+def _run_metadata_check(profile: str, lang: str = "en") -> dict:
     """Run connectivity check for the given profile and return structured result."""
     from asc.config import Config
     from asc.utils import make_api_from_config
@@ -235,7 +262,7 @@ def _run_metadata_check(profile: str) -> dict:
             return {
                 "ok": False,
                 "level": "warning",
-                "message": "无可编辑版本，请在 App Store Connect 创建版本",
+                "message": t("api.no_editable_version_create", lang=lang),
                 "detail": {},
             }
         vs = version["attributes"].get("versionString", "?")
@@ -248,10 +275,10 @@ def _run_metadata_check(profile: str) -> dict:
         }
         if state in editable_states:
             level = "success"
-            message = f"环境正常，版本 {vs} 可编辑"
+            message = t("api.env_ok_version_editable", lang=lang, version=vs)
         else:
             level = "warning"
-            message = f"版本 {vs} 存在但状态为 {state}，不可编辑"
+            message = t("api.version_not_editable", lang=lang, version=vs, state=state)
         return {
             "ok": level == "success",
             "level": level,
@@ -363,7 +390,7 @@ def _start_metadata_task(
 @router.post("/metadata/check")
 async def metadata_check(request: Request):
     profile = request.cookies.get("asc_profile", "")
-    result = _run_metadata_check(profile)
+    result = _run_metadata_check(profile, lang=_lang(request))
     return result
 
 
@@ -1023,7 +1050,11 @@ async def guard_note(
 async def tasks_recent_html(request: Request):
     """Return HTML fragment of recent tasks for HTMX polling."""
     tasks = _task_store.list_recent(limit=20)
-    return _templates.TemplateResponse(request, "task_list.html", {"tasks": tasks})
+    return _templates.TemplateResponse(
+        request,
+        "task_list.html",
+        {"tasks": tasks, **_i18n_template_ctx(request)},
+    )
 
 
 @router.get("/dashboard/summary")
@@ -1057,13 +1088,32 @@ def dashboard_summary(
 
 
 @router.post("/settings/lang")
-async def set_lang(lang: str = _Form("zh")):
+async def set_lang(request: Request, lang: str = _Form("zh")):
     import os
-    if lang not in ("zh", "en"):
-        from fastapi import HTTPException
-        raise HTTPException(status_code=400, detail="Invalid language")
-    os.environ["ASC_LANG"] = lang
-    return {"ok": True, "lang": lang}
+
+    from asc.web.i18n import (
+        COOKIE_MAX_AGE,
+        COOKIE_NAME,
+        SUPPORTED_LANGS,
+        normalize_lang,
+    )
+
+    code = normalize_lang(lang)
+    if code not in SUPPORTED_LANGS:
+        raise HTTPException(
+            status_code=400,
+            detail=t("api.invalid_lang", lang=_lang(request)),
+        )
+    os.environ["ASC_LANG"] = code
+    resp = JSONResponse({"ok": True, "lang": code})
+    resp.set_cookie(
+        COOKIE_NAME,
+        code,
+        max_age=COOKIE_MAX_AGE,
+        path="/",
+        samesite="lax",
+    )
+    return resp
 
 
 @router.get("/examples/csv")
@@ -1123,9 +1173,15 @@ async def download_example_iap():
 @router.get("/whats-new/check")
 def whats_new_check(request: Request):
     """Check environment and return available locales for the current app version."""
+    lang = _lang(request)
     profile = request.cookies.get("asc_profile", "")
     if not profile:
-        return {"ok": False, "level": "error", "message": "No profile selected", "detail": {}}
+        return {
+            "ok": False,
+            "level": "error",
+            "message": t("api.no_profile", lang=lang),
+            "detail": {},
+        }
     try:
         from asc.config import Config
         config = Config(app_name=profile)
@@ -1135,7 +1191,7 @@ def whats_new_check(request: Request):
             return {
                 "ok": False,
                 "level": "warning",
-                "message": "无可编辑版本",
+                "message": t("api.no_editable_version", lang=lang),
                 "detail": {},
             }
         version_string = version["attributes"].get("versionString", "?")
@@ -1143,7 +1199,12 @@ def whats_new_check(request: Request):
         return {
             "ok": True,
             "level": "success",
-            "message": f"版本 {version_string}，找到 {len(locales)} 个语言",
+            "message": t(
+                "api.version_locales",
+                lang=lang,
+                version=version_string,
+                count=len(locales),
+            ),
             "detail": {
                 "version": version_string,
                 "locales": [l["locale"] for l in locales],
@@ -1156,9 +1217,10 @@ def whats_new_check(request: Request):
 @router.post("/whats-new/translate")
 async def whats_new_translate(request: Request):
     """Translate text to all available locales using LLM."""
+    lang = _lang(request)
     profile = request.cookies.get("asc_profile", "")
     if not profile:
-        return JSONResponse({"error": "No profile selected"}, status_code=400)
+        return JSONResponse({"error": t("api.no_profile", lang=lang)}, status_code=400)
     try:
         if request.headers.get("content-type", "").startswith("application/json"):
             data = await request.json()
@@ -1175,6 +1237,7 @@ async def whats_new_translate(request: Request):
                 config=config,
                 text=text,
                 source_locale=source_locale,
+                lang=lang,
             )
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
@@ -1198,6 +1261,7 @@ def _translate_whats_new_text(
     config: Config,
     text: str,
     source_locale: str,
+    lang: str = "en",
 ) -> tuple[dict[str, str], list[str]]:
     """Translate What's New text to all version locales except the source locale."""
     if not config.llm_api_key:
@@ -1216,7 +1280,7 @@ def _translate_whats_new_text(
     api, app_id = make_api_from_config(config)
     version = api.get_editable_version(app_id)
     if not version:
-        raise ValueError("无可编辑版本")
+        raise ValueError(t("api.no_editable_version", lang=lang))
     version_id = version["id"]
     ver_locs = api.get_version_localizations(version_id)
     all_locales = [loc["attributes"]["locale"] for loc in ver_locs]
@@ -1374,9 +1438,10 @@ async def whats_new_run(
 ):
     """Run whats-new upload. Supports translated dicts, translate mode, and direct text mode."""
     import json
+    lang = _lang(request)
     profile = request.cookies.get("asc_profile", "")
     if not profile:
-        return JSONResponse({"error": "No profile selected"}, status_code=400)
+        return JSONResponse({"error": t("api.no_profile", lang=lang)}, status_code=400)
 
     def _as_bool(value) -> bool:
         if isinstance(value, bool):
@@ -1424,6 +1489,7 @@ async def whats_new_run(
                 config=config,
                 text=text.strip(),
                 source_locale=source_locale,
+                lang=lang,
             )
         except Exception as e:
             return JSONResponse({"error": str(e)}, status_code=400)
@@ -1696,6 +1762,7 @@ async def iap_run(
 
 @router.post("/iap/check")
 async def iap_check(request: Request):
+    lang = _lang(request)
     profile = request.cookies.get("asc_profile", "")
     try:
         from pathlib import Path
@@ -1705,7 +1772,7 @@ async def iap_check(request: Request):
             return {
                 "ok": False,
                 "level": "error",
-                "message": f"IAP 配置文件未找到: {iap_path}",
+                "message": t("api.iap_file_missing", lang=lang, path=iap_path),
                 "detail": {},
             }
         items, groups = _load_iap_config(str(iap_path))
@@ -1713,7 +1780,12 @@ async def iap_check(request: Request):
         return {
             "ok": True,
             "level": "success",
-            "message": f"配置有效：{len(items)} 个 IAP 项，{len(groups)} 个订阅组",
+            "message": t(
+                "api.iap_config_valid",
+                lang=lang,
+                items=len(items),
+                groups=len(groups),
+            ),
             "detail": {"items": len(items), "groups": len(groups), "total": total},
         }
     except Exception as e:
@@ -1821,6 +1893,7 @@ def _get_available_locales(api, app_id: str) -> list[dict]:
 @router.get("/urls/check")
 async def urls_check(request: Request):
     """Check environment for URL settings."""
+    lang = _lang(request)
     profile = request.cookies.get("asc_profile", "")
     try:
         config = Config(app_name=profile)
@@ -1830,14 +1903,14 @@ async def urls_check(request: Request):
             return {
                 "ok": False,
                 "level": "warning",
-                "message": "无可编辑版本",
+                "message": t("api.no_editable_version", lang=lang),
                 "detail": {},
             }
         locales = _get_available_locales(api, app_id)
         return {
             "ok": True,
             "level": "success",
-            "message": f"环境正常，找到 {len(locales)} 个语言版本",
+            "message": t("api.env_ok_locales", lang=lang, count=len(locales)),
             "detail": {"locales": [l["locale"] for l in locales]},
         }
     except Exception as e:
@@ -1918,7 +1991,7 @@ async def urls_set(
 # ---------- Update API ----------
 
 @router.get("/update/check")
-async def update_check():
+async def update_check(request: Request):
     """Check for updates."""
     from asc.commands.update_cmd import (
         _current_version,
@@ -1928,6 +2001,7 @@ async def update_check():
     )
     from asc.cli import _installed_commit_short
 
+    lang = _lang(request)
     current = _current_version()
     current_commit = _installed_commit_short() or "unknown"
     latest = _latest_version_from_github()
@@ -1935,16 +2009,31 @@ async def update_check():
         return {
             "ok": False,
             "level": "warning",
-            "message": "无法连接到 GitHub",
+            "message": t("api.github_unreachable", lang=lang),
             "detail": {"current": current, "current_commit": current_commit},
         }
     latest_commit = (_resolve_git_ref_commit(f"v{latest}") or "unknown")[:7]
     is_latest = _parse_version(latest) <= _parse_version(current)
     latest_label = f"{latest} (commit {latest_commit})"
+    if is_latest:
+        message = t(
+            "api.update_up_to_date",
+            lang=lang,
+            current=current,
+            current_commit=current_commit,
+        )
+    else:
+        message = t(
+            "api.update_available",
+            lang=lang,
+            current=current,
+            current_commit=current_commit,
+            latest_label=latest_label,
+        )
     return {
         "ok": True,
         "level": "success" if is_latest else "info",
-        "message": f"当前版本: {current} (commit {current_commit})" + (" (已是最新)" if is_latest else f" → 最新版本: {latest_label}"),
+        "message": message,
         "detail": {
             "current": current,
             "current_commit": current_commit,
@@ -1956,22 +2045,23 @@ async def update_check():
 
 
 @router.get("/update/branches")
-async def update_branches():
+async def update_branches(request: Request):
     """List installable branches."""
     from asc.commands.update_cmd import _branches_from_github
 
+    lang = _lang(request)
     branches = _branches_from_github()
     if branches is None:
         return {
             "ok": False,
             "level": "warning",
-            "message": "无法获取分支列表",
+            "message": t("api.branches_unavailable", lang=lang),
             "branches": [],
         }
     return {
         "ok": True,
         "level": "success",
-        "message": f"找到 {len(branches)} 个分支",
+        "message": t("api.branches_found", lang=lang, count=len(branches)),
         "branches": branches,
     }
 

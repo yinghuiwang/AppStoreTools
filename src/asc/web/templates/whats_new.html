@@ -7,7 +7,7 @@
       <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: var(--accent-glow);">
         <svg class="w-[18px] h-[18px] shrink-0 text-amber-500" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 0 1 .865-.501 48.172 48.172 0 0 0 3.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z"/></svg>
       </div>
-      更新说明（What's New）
+      {{ t("whats_new.title") }}
     </h1>
   </div>
 
@@ -20,7 +20,7 @@
     progressMsg: '',
     submitting: false,
     checkLoading: true,
-    checkStatusMessage: '正在连接 App Store Connect，检查可编辑版本和语言列表...',
+    checkStatusMessage: window.t('whats_new.checking_detail'),
     checkResult: null,
     translateMode: false,
     sourceLocale: 'auto',
@@ -42,7 +42,7 @@
         <div class="flex items-start gap-2.5">
           <svg class="w-4 h-4 mt-0.5 animate-spin shrink-0" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
           <div>
-            <p class="font-medium">正在检查发布环境</p>
+            <p class="font-medium">{{ t("whats_new.checking") }}</p>
             <p class="text-xs mt-1 opacity-80" x-text="checkStatusMessage"></p>
           </div>
         </div>
@@ -59,13 +59,13 @@
         <p class="font-medium" x-text="checkResult.message"></p>
         <template x-if="checkResult.detail && checkResult.detail.version">
           <p class="text-xs mt-1 opacity-80"
-             x-text="'版本 ' + checkResult.detail.version + ' · ' + ((checkResult.detail.locales || []).length) + ' 个语言：' + ((checkResult.detail.locales || []).join(' / ') || '未检测到')"></p>
+             x-text="window.t('whats_new.version_locales', { version: checkResult.detail.version, n: ((checkResult.detail.locales || []).length), locales: ((checkResult.detail.locales || []).join(', ')) })"></p>
         </template>
         <template x-if="checkResult.level === 'error'">
           <button type="button"
                   class="mt-3 text-xs px-2.5 py-1.5 rounded border border-red-400/30 text-red-300 hover:text-red-100 hover:border-red-300/60 transition-colors duration-150"
                   @click="runWhatsNewCheck()">
-            重新检查
+            {{ t("whats_new.recheck") }}
           </button>
         </template>
       </div>
@@ -78,11 +78,11 @@
 
           <!-- Source locale -->
           <div>
-            <label for="source-locale-select" class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">源语言</label>
+            <label for="source-locale-select" class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">{{ t("whats_new.source_lang") }}</label>
             <select id="source-locale-select"
                     x-model="sourceLocale"
                     class="field-select w-full">
-              <option value="auto">自动检测</option>
+              <option value="auto">{{ t("whats_new.auto_detect") }}</option>
               <template x-for="locale in availableLocales" :key="locale">
                 <option :value="locale" x-text="locale"></option>
               </template>
@@ -91,19 +91,19 @@
 
           <!-- Update notes textarea -->
           <div>
-            <label for="update-text" class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">更新说明</label>
+            <label for="update-text" class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">{{ t("whats_new.text") }}</label>
             <textarea id="update-text"
                       x-model="text"
                       rows="5"
                       class="field-input w-full resize-y"
-                      placeholder="输入本次更新的说明文字..."></textarea>
+                      placeholder="{{ t('whats_new.placeholder') }}"></textarea>
           </div>
 
           <!-- Translate mode checkbox -->
           <div>
             <label class="flex items-center gap-2.5 text-sm text-obsidian-300 cursor-pointer">
               <input type="checkbox" x-model="translateMode" class="w-4 h-4">
-              <span>翻译模式：自动翻译到所有语言</span>
+              <span>{{ t("whats_new.translate_mode") }}</span>
             </label>
           </div>
 
@@ -127,24 +127,24 @@
                         body: JSON.stringify({source_locale: sourceLocale, text: text})
                       })
                         .then(r => r.json().then(data => {
-                          if (!r.ok || data.error) throw new Error(data.error || '翻译失败');
+                          if (!r.ok || data.error) throw new Error(data.error || window.t('whats_new.translate_failed'));
                           return data;
                         }))
                         .then(data => {
                           translations = data.translations || {};
-                          if (!Object.keys(translations).length) throw new Error('没有生成任何翻译结果');
+                          if (!Object.keys(translations).length) throw new Error(window.t('whats_new.no_results'));
                           step = 2;
                           submitting = false;
                         })
                         .catch(err => {
-                          translateError = err.message || '翻译失败';
+                          translateError = err.message || window.t('whats_new.translate_failed');
                           submitting = false;
                         });
                     ">
-              <span x-show="!submitting">预览翻译</span>
+              <span x-show="!submitting">{{ t("whats_new.preview_translate") }}</span>
               <span x-show="submitting" class="flex items-center gap-1.5">
                 <svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-                处理中...
+                {{ t("whats_new.processing") }}
               </span>
             </button>
             <!-- Translate and upload in one step -->
@@ -161,7 +161,7 @@
                         body: JSON.stringify({text: text, source_locale: sourceLocale, translate: true, dry_run: 0})
                       })
                         .then(r => r.json().then(data => {
-                          if (!r.ok || data.error) throw new Error(data.error || '上传失败');
+                          if (!r.ok || data.error) throw new Error(data.error || window.t('whats_new.upload_failed'));
                           return data;
                         }))
                         .then(data => {
@@ -171,14 +171,14 @@
                           startWhatsNewTask(taskId);
                         })
                         .catch(err => {
-                          translateError = err.message || '上传失败';
+                          translateError = err.message || window.t('whats_new.upload_failed');
                           submitting = false;
                         });
                     ">
-              <span x-show="!submitting">翻译并上传</span>
+              <span x-show="!submitting">{{ t("whats_new.translate_upload") }}</span>
               <span x-show="submitting" class="flex items-center gap-1.5">
                 <svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-                处理中...
+                {{ t("whats_new.processing") }}
               </span>
             </button>
             <!-- Direct upload (no translate) -->
@@ -203,7 +203,7 @@
                         })
                         .catch(() => { submitting = false; });
                     ">
-              直接上传（不翻译）
+              {{ t("whats_new.upload_direct") }}
             </button>
           </div>
         </div>
@@ -217,9 +217,9 @@
                 class="btn-ghost flex items-center gap-1.5"
                 @click="step = 1; translations = {}">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18"/></svg>
-          返回
+          {{ t("whats_new.back") }}
         </button>
-        <h2 class="text-lg font-semibold text-obsidian-100">翻译预览</h2>
+        <h2 class="text-lg font-semibold text-obsidian-100">{{ t("whats_new.preview_title") }}</h2>
       </div>
 
       <div class="space-y-4 mb-6">
@@ -230,7 +230,7 @@
               <button type="button"
                       class="text-xs text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium"
                       @click="editingLocale = locale; editText = transText">
-                编辑
+                {{ t("common.edit") }}
               </button>
             </div>
             <div class="card-body">
@@ -245,7 +245,7 @@
         <button type="button"
                 class="btn-ghost"
                 @click="step = 1; translations = {}">
-          取消
+          {{ t("common.cancel") }}
         </button>
         <button type="button"
                 class="btn-ghost"
@@ -258,7 +258,7 @@
                     .then(r => r.json())
                     .then(data => { taskId = data.task_id; step = 3; startWhatsNewTask(taskId); });
                 ">
-          预览（Dry Run）
+          {{ t("whats_new.preview_dry") }}
         </button>
         <button type="button"
                 class="btn-primary"
@@ -271,7 +271,7 @@
                     .then(r => r.json())
                     .then(data => { taskId = data.task_id; step = 3; startWhatsNewTask(taskId); });
                 ">
-          确认并上传
+          {{ t("whats_new.confirm_upload") }}
         </button>
       </div>
     </div>
@@ -281,7 +281,7 @@
       <div class="card">
         <div class="card-body">
           <div class="flex items-center justify-between mb-5">
-            <h2 class="font-semibold text-obsidian-100 flex items-center gap-2.5" x-text="status === 'done' ? '上传完成' : status === 'error' ? '上传失败' : status === 'canceled' ? '已终止' : '上传中...'">
+            <h2 class="font-semibold text-obsidian-100 flex items-center gap-2.5" x-text="status === 'done' ? window.t('whats_new.done') : status === 'error' ? window.t('whats_new.failed') : status === 'canceled' ? window.t('whats_new.canceled') : window.t('whats_new.running')">
             </h2>
             <div class="flex items-center gap-3">
               <template x-if="status === 'done'">
@@ -302,14 +302,14 @@
               <button type="button"
                       data-task-log-open
                       class="text-xs text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium"
-                      @click="TaskLogDrawer.open(taskId, whatsNewLogOptions())">日志</button>
+                      @click="TaskLogDrawer.open(taskId, whatsNewLogOptions())">{{ t("common.logs") }}</button>
               <button type="button"
                       x-show="status === 'running'"
                       class="text-xs text-red-400 hover:text-red-300 cursor-pointer transition-colors duration-150 font-medium"
                       :disabled="canceling"
-                      @click="cancelTask(taskId, () => { canceling = true; progressMsg = '正在终止上传...'; })"
-                      x-text="canceling ? '终止中...' : '终止上传'"></button>
-              <button type="button" class="text-xs text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium" @click="step=1; status='idle'; taskId=null">重新运行</button>
+                      @click="cancelTask(taskId, () => { canceling = true; progressMsg = window.t('whats_new.canceling_msg'); })"
+                      x-text="canceling ? window.t('common.canceling') : window.t('common.cancel_upload')"></button>
+              <button type="button" class="text-xs text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium" @click="step=1; status='idle'; taskId=null">{{ t("common.retry") }}</button>
             </div>
           </div>
 
@@ -332,7 +332,7 @@
          @click.self="editingLocale = null">
       <div class="card w-[500px]">
         <div class="card-header flex items-center justify-between">
-          <h3 class="text-xs uppercase tracking-widest text-obsidian-400 font-medium" x-text="'编辑: ' + (editingLocale || '')"></h3>
+          <h3 class="text-xs uppercase tracking-widest text-obsidian-400 font-medium" x-text="window.t('whats_new.edit_locale', { locale: editingLocale || '' })"></h3>
           <button @click="editingLocale = null" class="text-obsidian-500 hover:text-obsidian-300 cursor-pointer transition-colors duration-150 p-1 rounded focus-ring">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
           </button>
@@ -343,13 +343,13 @@
                     class="field-input w-full resize-y"></textarea>
         </div>
         <div class="px-5 py-3 border-t border-obsidian-700 flex justify-end gap-2">
-          <button @click="editingLocale = null" class="btn-ghost">取消</button>
+          <button @click="editingLocale = null" class="btn-ghost">{{ t("common.cancel") }}</button>
           <button @click="
             if (editingLocale) {
               translations[editingLocale] = editText;
             }
             editingLocale = null;
-          " class="btn-primary">保存</button>
+          " class="btn-primary">{{ t("common.save") }}</button>
         </div>
       </div>
     </div>
@@ -363,7 +363,7 @@ function runWhatsNewCheck() {
   if (d) {
     d.checkLoading = true;
     d.checkResult = null;
-    d.checkStatusMessage = '正在连接 App Store Connect，检查可编辑版本和语言列表...';
+    d.checkStatusMessage = window.t('whats_new.checking_detail');
   }
   fetch('/api/whats-new/check')
     .then(r => r.json())
@@ -372,7 +372,7 @@ function runWhatsNewCheck() {
       if (!d) return;
       const locales = data.detail?.available_locales || data.detail?.locales || [];
       d.checkLoading = false;
-      d.checkStatusMessage = data.message || '检查完成';
+      d.checkStatusMessage = data.message || window.t('whats_new.check_done');
       if (locales.length) {
         d.availableLocales = locales;
       }
@@ -386,7 +386,7 @@ function runWhatsNewCheck() {
       d.checkResult = {
         ok: false,
         level: 'error',
-        message: `检查失败: ${e.message}`,
+        message: window.t('whats_new.check_failed_prefix') + e.message,
         detail: {},
       };
     });
@@ -398,7 +398,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function cancelTask(taskId, beforeCancel) {
   if (!taskId) return;
-  if (!confirm('确定要终止当前上传吗？已完成的 App Store Connect 操作不会自动回滚。')) return;
+  if (!confirm(window.t('whats_new.confirm_cancel'))) return;
   if (beforeCancel) beforeCancel();
   fetch(`/api/task/${taskId}/cancel`, {method: 'POST'})
     .catch(() => {
@@ -412,14 +412,14 @@ function whatsNewLogOptions() {
   const root = document.getElementById('whats-new-state');
   const d = Alpine.$data(root);
   return {
-    title: '更新说明上传日志',
+    title: window.t('whats_new.log_title_upload'),
     onProgress: (pct, msg) => {
       if (pct != null) d.progress = pct;
       d.progressMsg = msg || '';
     },
     onDone: () => { d.status = 'done'; d.progress = 100; },
     onError: () => { d.status = 'error'; },
-    onCanceled: () => { d.status = 'canceled'; d.progressMsg = '上传已终止'; d.canceling = false; }
+    onCanceled: () => { d.status = 'canceled'; d.progressMsg = window.t('whats_new.canceled_msg'); d.canceling = false; }
   };
 }
 

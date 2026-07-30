@@ -621,6 +621,17 @@ AppStoreTools/
 - [CLAUDE.md](CLAUDE.md) - 项目开发指南
 - [App Store Connect API 文档](https://developer.apple.com/documentation/appstoreconnectapi)
 
+## Web i18n (vs CLI i18n)
+
+CLI UI strings use `src/asc/i18n.py` (driven by `ASC_LANG` / system locale).
+Web UI strings use a separate stack:
+
+- Catalogs: `src/asc/web/locales/{zh,en}.json` via `src/asc/web/i18n.py`
+- Per-request resolve order: Cookie `asc_lang` → `Accept-Language` → env `ASC_LANG` → default `en`
+- Jinja `t()` + `window.__I18N` for Alpine; user-facing API `message`/`detail` use the same catalogs
+- Language switch (`POST /api/settings/lang`) sets Cookie `asc_lang` and `ASC_LANG` (plus client localStorage); first paint from Accept-Language does **not** auto-write Cookie
+- Task/subprocess logs and raw third-party errors stay unlocalized
+
 ## Web task state and event delivery
 
 Web and CLI task execution uses a local SQLite store at `~/.config/asc/tasks.db` (or

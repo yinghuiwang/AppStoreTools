@@ -273,7 +273,7 @@ def test_whats_new_template_has_translate_and_upload_action():
     from pathlib import Path
 
     template = Path("src/asc/web/templates/whats_new.html").read_text(encoding="utf-8")
-    assert "翻译并上传" in template
+    assert ("翻译并上传" in template) or ('whats_new.translate_upload' in template)
     assert "translate: true" in template
 
 

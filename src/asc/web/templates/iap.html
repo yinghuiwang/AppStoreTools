@@ -7,7 +7,7 @@
       <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: var(--accent-glow);">
         <svg class="w-4.5 h-4.5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M20.25 7.5v-.085a2.25 2.25 0 0 0-.329-.985l-7.877-3.51a2.25 2.25 0 0 0-1.278 0l-7.877 3.51c-.128.058-.245.132-.329.21ZM16.5 19.125a2.25 2.25 0 0 0-2.475 2.25H5.475a2.25 2.25 0 0 0-2.475-2.25V6.375a2.25 2.25 0 0 0 2.475-2.25H10.5m3.75 0h3.75m-9 8.25h.008v.008H12v-.008Zm.375 0a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm-.375 3.75h.008v.008h-.008v-.008Zm.375 0a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm1.125-3.75h.008v.008h-.008v-.008Z"/></svg>
       </div>
-      IAP 管理
+      {{ t("iap.title") }}
     </h1>
   </div>
 
@@ -50,15 +50,15 @@
             <!-- IAP config file -->
             <div>
               <div class="flex items-center gap-1.5 mb-2">
-                <label for="iap-file-input" class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">IAP 配置文件</label>
+                <label for="iap-file-input" class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">{{ t("iap.file") }}</label>
                 <button type="button" @click="showIapHelp = !showIapHelp"
                         class="w-4 h-4 inline-flex items-center justify-center rounded-full border border-obsidian-600 text-obsidian-500 hover:text-amber-500 hover:border-amber-550 cursor-pointer transition-colors duration-150 focus-ring text-[9px]"
-                        title="IAP JSON 格式说明">?</button>
+                        title="{{ t('iap.json_help') }}">?</button>
               </div>
               <div x-show="showIapHelp" x-transition class="mb-3 p-4 rounded-lg text-xs space-y-2" style="background: var(--accent-glow); border: 1px solid rgba(232,161,37,0.2);">
-                <p class="font-medium text-amber-500">IAP JSON 格式要求</p>
-                <p class="text-obsidian-200">顶层支持 <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">items</code> 和 <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">subscriptionGroups</code>，可只填写其中一种，也可同时上传。</p>
-                <p class="text-obsidian-200"><span class="font-medium text-obsidian-100">一次性消耗品：</span>放在 <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">items</code> 数组中，使用 <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">inAppPurchaseType: "CONSUMABLE"</code>。</p>
+                <p class="font-medium text-amber-500">{{ t("iap.json_title") }}</p>
+                <p class="text-obsidian-200">{{ t("iap.help_top") }}</p>
+                <p class="text-obsidian-200"><span class="font-medium text-obsidian-100">{{ t("iap.help_consumable") }}</span>{{ t("iap.help_consumable_body") }}</p>
                 <pre class="bg-obsidian-800 rounded px-3 py-2 text-[11px] leading-relaxed font-mono text-obsidian-200 overflow-x-auto">{
   "items": [
     {
@@ -79,7 +79,7 @@
     }
   ]
 }</pre>
-                <p class="text-obsidian-200"><span class="font-medium text-obsidian-100">订阅：</span>放在 <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">subscriptionGroups</code> 中，可配置订阅周期、价格、试用优惠和促销优惠。</p>
+                <p class="text-obsidian-200"><span class="font-medium text-obsidian-100">{{ t("iap.help_sub") }}</span>{{ t("iap.help_sub_body") }}</p>
                 <pre class="bg-obsidian-800 rounded px-3 py-2 text-[11px] leading-relaxed font-mono text-obsidian-200 overflow-x-auto">{
   "subscriptionGroups": [
     {
@@ -118,30 +118,30 @@
     }
   ]
 }</pre>
-                <p class="text-obsidian-500">审核截图路径会相对当前 JSON 文件所在目录解析，例如 <code class="bg-obsidian-800 px-1.5 py-0.5 rounded text-amber-550">./iap_review/coins.png</code>。</p>
+                <p class="text-obsidian-500">{{ t("iap.help_review_path") }}</p>
                 <a href="/api/examples/iap.json" download="iap_packages_example.json"
                    class="inline-flex items-center gap-1.5 text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium">
                   <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
-                  下载示例 JSON
+                  {{ t("iap.download_sample") }}
                 </a>
               </div>
               <div class="flex gap-2">
                 <input type="text" name="iap_file" value="{{ profile_iap_file }}" id="iap-file-input" class="field-input flex-1">
-                <button type="button" class="btn-ghost whitespace-nowrap" onclick="openFileBrowser('iap-file-input', 'file', '.json')">浏览</button>
+                <button type="button" class="btn-ghost whitespace-nowrap" onclick="openFileBrowser('iap-file-input', 'file', '.json')">{{ t("filebrowser.browse") }}</button>
               </div>
             </div>
 
             <!-- Upload scope -->
             <div>
-              <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2.5 block">上传范围</label>
+              <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2.5 block">{{ t("iap.scope") }}</label>
               <div class="space-y-2">
                 <label class="flex items-center gap-2.5 text-sm text-obsidian-200 cursor-pointer group">
                   <input type="checkbox" name="include_items" value="on" checked class="w-4 h-4">
-                  <span class="group-hover:text-obsidian-50 transition-colors duration-150">IAP 项目</span>
+                  <span class="group-hover:text-obsidian-50 transition-colors duration-150">{{ t("iap.scope_items") }}</span>
                 </label>
                 <label class="flex items-center gap-2.5 text-sm text-obsidian-200 cursor-pointer group">
                   <input type="checkbox" name="include_groups" value="on" checked class="w-4 h-4">
-                  <span class="group-hover:text-obsidian-50 transition-colors duration-150">订阅组</span>
+                  <span class="group-hover:text-obsidian-50 transition-colors duration-150">{{ t("iap.scope_groups") }}</span>
                 </label>
               </div>
             </div>
@@ -150,11 +150,11 @@
             <div class="space-y-2">
               <label class="flex items-center gap-2.5 text-sm text-obsidian-300 cursor-pointer">
                 <input type="checkbox" name="dry_run" value="on" class="w-4 h-4">
-                预览模式（不实际上传）
+                {{ t("iap.dry_run") }}
               </label>
               <label class="flex items-center gap-2.5 text-sm text-obsidian-300 cursor-pointer">
                 <input type="checkbox" name="update_existing" value="on" class="w-4 h-4">
-                更新已存在的项目
+                {{ t("iap.update_existing") }}
               </label>
             </div>
 
@@ -163,10 +163,10 @@
               <button type="submit"
                       class="btn-primary"
                       :disabled="submitting">
-                <span x-show="!submitting">开始上传</span>
+                <span x-show="!submitting">{{ t("common.submit") }}</span>
                 <span x-show="submitting" class="flex items-center gap-1.5">
                   <svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 0 1 8-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-                  提交中...
+                  {{ t("common.submitting") }}
                 </span>
               </button>
               <button type="button"
@@ -175,9 +175,9 @@
                         fetch('/api/iap/check', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}})
                           .then(r => r.json())
                           .then(data => { checkResult = data; })
-                          .catch(() => { checkResult = {ok: false, level: 'error', message: '请求失败'}; })
+                          .catch(() => { checkResult = {ok: false, level: 'error', message: window.t('common.request_failed')}; })
                       ">
-                验证配置
+                {{ t("iap.check_config") }}
               </button>
             </div>
 
@@ -192,7 +192,7 @@
                 <p class="font-medium" x-text="checkResult.message"></p>
                 <template x-if="checkResult.detail && checkResult.detail.total">
                   <p class="text-xs mt-1 opacity-80"
-                     x-text="'共 ' + checkResult.detail.items + ' 个 IAP，' + checkResult.detail.groups + ' 个订阅组'"></p>
+                     x-text="window.t('iap.check_summary', { items: checkResult.detail.items, groups: checkResult.detail.groups })"></p>
                 </template>
               </div>
             </template>
@@ -204,15 +204,15 @@
       <div class="card max-w-5xl mt-6">
         <div class="card-body space-y-4">
           <div class="flex items-center justify-between gap-3">
-            <h2 class="font-semibold text-obsidian-100">补审核截图</h2>
+            <h2 class="font-semibold text-obsidian-100">{{ t("iap.review_title") }}</h2>
             <button type="button"
                     class="btn-ghost"
                     :disabled="reviewScanLoading"
                     @click="scanReviewScreenshots()">
-              <span x-show="!reviewScanLoading">扫描缺失</span>
+              <span x-show="!reviewScanLoading">{{ t("iap.scan_missing") }}</span>
               <span x-show="reviewScanLoading" class="flex items-center gap-1.5">
                 <svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 0 1 8-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-                扫描中...
+                {{ t("iap.scanning") }}
               </span>
             </button>
           </div>
@@ -233,16 +233,16 @@
             <table class="w-full text-sm">
               <thead>
                 <tr class="text-left text-xs uppercase tracking-widest text-obsidian-500 border-b border-obsidian-700">
-                  <th class="py-2 pr-3 font-medium">类型</th>
+                  <th class="py-2 pr-3 font-medium">{{ t("iap.col_type") }}</th>
                   <th class="py-2 pr-3 font-medium">Product ID</th>
-                  <th class="py-2 pr-3 font-medium">名称</th>
-                  <th class="py-2 font-medium">路径</th>
+                  <th class="py-2 pr-3 font-medium">{{ t("iap.col_name") }}</th>
+                  <th class="py-2 font-medium">{{ t("iap.col_path") }}</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-obsidian-700">
                 <template x-for="(target, idx) in reviewTargets" :key="target.kind + '-' + target.id + '-' + idx">
                   <tr>
-                    <td class="py-3 pr-3 text-obsidian-300 whitespace-nowrap" x-text="target.kind === 'subscription' ? '订阅' : 'IAP'"></td>
+                    <td class="py-3 pr-3 text-obsidian-300 whitespace-nowrap" x-text="target.kind === 'subscription' ? window.t('iap.kind_sub') : 'IAP'"></td>
                     <td class="py-3 pr-3 text-obsidian-200 font-mono text-xs" x-text="target.productId"></td>
                     <td class="py-3 pr-3 text-obsidian-300" x-text="target.name || target.groupName || '-'"></td>
                     <td class="py-3">
@@ -253,7 +253,7 @@
                                class="field-input flex-1">
                         <button type="button"
                                 class="btn-ghost whitespace-nowrap"
-                                @click="openFileBrowser('review-shot-path-' + idx, 'file', '.png,.jpg,.jpeg')">浏览</button>
+                                @click="openFileBrowser('review-shot-path-' + idx, 'file', '.png,.jpg,.jpeg')">{{ t("filebrowser.browse") }}</button>
                       </div>
                     </td>
                   </tr>
@@ -265,16 +265,16 @@
           <div x-show="reviewTargets.length" class="flex items-center gap-3 pt-3 border-t border-obsidian-700">
             <label class="flex items-center gap-2.5 text-sm text-obsidian-300 cursor-pointer">
               <input type="checkbox" x-model="reviewDryRun" class="w-4 h-4">
-              预览模式
+              {{ t("iap.preview") }}
             </label>
             <button type="button"
                     class="btn-primary"
                     :disabled="reviewUploadSubmitting"
                     @click="uploadReviewScreenshots()">
-              <span x-show="!reviewUploadSubmitting">上传截图</span>
+              <span x-show="!reviewUploadSubmitting">{{ t("iap.upload_shots") }}</span>
               <span x-show="reviewUploadSubmitting" class="flex items-center gap-1.5">
                 <svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 0 1 8-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-                提交中...
+                {{ t("common.submitting") }}
               </span>
             </button>
           </div>
@@ -287,19 +287,19 @@
       <div class="card">
         <div class="card-body">
           <div class="flex items-center justify-between mb-5">
-            <h2 class="font-semibold text-obsidian-100" x-text="status === 'done' ? '上传完成' : status === 'error' ? '上传失败' : status === 'canceled' ? '已终止' : '上传中...'"></h2>
+            <h2 class="font-semibold text-obsidian-100" x-text="status === 'done' ? window.t('iap.done') : status === 'error' ? window.t('iap.failed') : status === 'canceled' ? window.t('iap.canceled') : window.t('iap.running')"></h2>
             <div class="flex items-center gap-3">
               <button type="button"
                       data-task-log-open
                       class="text-xs text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium"
-                      @click="TaskLogDrawer.open(taskId, iapLogOptions())">日志</button>
+                      @click="TaskLogDrawer.open(taskId, iapLogOptions())">{{ t("common.logs") }}</button>
               <button type="button"
                       x-show="status === 'running'"
                       class="text-xs text-red-400 hover:text-red-300 cursor-pointer transition-colors duration-150 font-medium"
                       :disabled="canceling"
                       @click="cancelTask(taskId, () => { canceling = true; })"
-                      x-text="canceling ? '终止中...' : '终止上传'"></button>
-              <button type="button" class="text-xs text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium" @click="step=1; status='idle'">重新运行</button>
+                      x-text="canceling ? window.t('common.canceling') : window.t('common.cancel_upload')"></button>
+              <button type="button" class="text-xs text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium" @click="step=1; status='idle'">{{ t("iap.retry") }}</button>
             </div>
           </div>
 
@@ -324,14 +324,14 @@
 <div id="filebrowser-modal" class="hidden fixed inset-0 flex items-center justify-center z-50" style="background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);">
   <div class="card w-[420px]">
     <div class="card-header flex items-center justify-between">
-      <h3 class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">选择路径</h3>
+      <h3 class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">{{ t("filebrowser.title") }}</h3>
       <button onclick="closeFileBrowser()" class="text-obsidian-500 hover:text-obsidian-300 cursor-pointer transition-colors duration-150 p-1 rounded focus-ring">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
       </button>
     </div>
     <div id="filebrowser-content" class="card-body"></div>
     <div class="px-5 py-3 border-t border-obsidian-700 flex justify-end">
-      <button onclick="closeFileBrowser()" class="btn-ghost">取消</button>
+      <button onclick="closeFileBrowser()" class="btn-ghost">{{ t("filebrowser.cancel") }}</button>
     </div>
   </div>
 </div>
@@ -442,7 +442,7 @@ function scanReviewScreenshots() {
   })
     .then(async r => {
       const data = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(data.detail || '扫描失败');
+      if (!r.ok) throw new Error(data.detail || window.t('iap.scan_failed'));
       return data;
     })
     .then(data => {
@@ -451,11 +451,11 @@ function scanReviewScreenshots() {
         path: target.path || target.defaultPath || ''
       }));
       d.reviewErrors = data.errors || [];
-      d.reviewMessage = data.count ? `发现 ${data.count} 个缺失审核截图` : '没有缺失审核截图';
+      d.reviewMessage = data.count ? window.t('iap.found_missing', { n: data.count }) : window.t('iap.no_missing');
     })
     .catch(e => {
       d.reviewTargets = [];
-      d.reviewErrors = [e.message || '扫描失败'];
+      d.reviewErrors = [e.message || window.t('iap.scan_failed')];
       d.reviewMessage = '';
     })
     .finally(() => {
@@ -475,7 +475,7 @@ function uploadReviewScreenshots() {
       path: target.path.trim()
     }));
   if (!items.length) {
-    d.reviewMessage = '请选择截图路径';
+    d.reviewMessage = window.t('iap.pick_path');
     return;
   }
   d.reviewUploadSubmitting = true;
@@ -488,7 +488,7 @@ function uploadReviewScreenshots() {
   })
     .then(async r => {
       const data = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(data.detail || '提交失败');
+      if (!r.ok) throw new Error(data.detail || window.t('iap.submit_failed'));
       return data;
     })
     .then(data => {
@@ -499,7 +499,7 @@ function uploadReviewScreenshots() {
       startIapTask(data.task_id);
     })
     .catch(e => {
-      d.reviewErrors = [e.message || '提交失败'];
+      d.reviewErrors = [e.message || window.t('iap.submit_failed')];
     })
     .finally(() => {
       d.reviewUploadSubmitting = false;
@@ -508,7 +508,7 @@ function uploadReviewScreenshots() {
 
 function cancelTask(taskId, beforeCancel) {
   if (!taskId) return;
-  if (!confirm('确定要终止当前任务吗？已完成的 App Store Connect 操作不会自动回滚。')) return;
+  if (!confirm(window.t('iap.confirm_cancel'))) return;
   if (beforeCancel) beforeCancel();
   fetch(`/api/task/${taskId}/cancel`, {method: 'POST'})
     .catch(() => {
@@ -522,7 +522,7 @@ function iapLogOptions() {
   const root = document.querySelector('[x-data]');
   const d = Alpine.$data(root);
   return {
-    title: 'IAP 上传日志',
+    title: window.t('iap.log_title'),
     onProgress: (pct, msg) => {
       if (pct != null) d.progress = pct;
       d.progressMsg = msg || '';
