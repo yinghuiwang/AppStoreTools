@@ -12,13 +12,31 @@
     <p class="text-sm text-obsidian-400 mt-1">{{ t("update.subtitle") }}</p>
   </div>
 
-  <div x-data="{ checkResult: null, checking: false, step: 1, taskId: null, status: 'idle', canceling: false, selectedTab: 'specific', branchOptions: [], branchesLoading: false, branchError: '', selectedBranch: '' }">
+  <div x-data="{ checkResult: null, checking: false, step: 1, taskId: null, status: 'idle', canceling: false, selectedTab: 'specific', branchOptions: [], branchesLoading: false, branchError: '', selectedBranch: '', versionOptions: [], versionsLoading: false, versionError: '', selectedVersion: '', currentVersion: {{ tool_version|tojson }}, currentCommit: {{ tool_commit|tojson }}, isEditable: {{ is_editable|tojson }} }">
+
+    <!-- Editable mode warning (shown immediately when detected) -->
+    <template x-if="isEditable">
+      <div class="card mb-6 border border-amber-500/40" style="background: rgba(245, 158, 11, 0.08);">
+        <div class="card-body space-y-2">
+          <div class="flex items-start gap-3">
+            <div class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-amber-500/15">
+              <svg class="w-4.5 h-4.5 text-amber-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/></svg>
+            </div>
+            <div class="min-w-0 space-y-1">
+              <h2 class="font-semibold text-amber-300">{{ t("update.editable_title") }}</h2>
+              <p class="text-sm text-obsidian-200">{{ t("update.editable_body") }}</p>
+              <p class="text-sm text-obsidian-400">{{ t("update.editable_hint") }}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
 
     <!-- Check status card -->
     <div class="card mb-6">
       <div class="card-body">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-4">
+        <div class="flex items-center justify-between gap-4 flex-wrap">
+          <div class="flex items-center gap-4 flex-wrap">
             <button @click="checkUpdate()" :disabled="checking" class="btn-ghost flex items-center gap-2">
               <svg class="w-4 h-4" :class="checking ? 'animate-spin' : ''" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"/></svg>
               <span x-text="checking ? window.t('update.checking') : window.t('update.title')"></span>
@@ -55,14 +73,13 @@
             </template>
           </div>
 
-          <template x-if="checkResult && checkResult.detail">
-            <div class="text-xs text-obsidian-500">
-              {{ t("update.current") }} <span class="font-mono text-obsidian-400" x-text="checkResult.detail.current"></span>
-              <template x-if="checkResult.detail.current_commit">
-                <span class="font-mono text-obsidian-400" x-text="`(commit ${checkResult.detail.current_commit})`"></span>
-              </template>
-            </div>
-          </template>
+          <div class="text-xs text-obsidian-500">
+            {{ t("update.current") }}
+            <span class="font-mono text-obsidian-400" x-text="(checkResult && checkResult.detail && checkResult.detail.current) || currentVersion"></span>
+            <template x-if="(checkResult && checkResult.detail && checkResult.detail.current_commit) || currentCommit">
+              <span class="font-mono text-obsidian-400" x-text="`(commit ${(checkResult && checkResult.detail && checkResult.detail.current_commit) || currentCommit})`"></span>
+            </template>
+          </div>
         </div>
       </div>
     </div>
@@ -80,21 +97,28 @@
               </template>
             </span>
           </div>
-          <form @submit.prevent="runUpdate('', 'latest')">
-            <p class="text-sm text-obsidian-400 mb-3">
-              {{ t("update.install_latest") }} <span class="text-amber-400 font-medium" x-text="checkResult.detail.latest"></span>
-              <template x-if="checkResult.detail.latest_commit">
-                <span class="text-amber-400 font-mono" x-text="`(commit ${checkResult.detail.latest_commit})`"></span>
-              </template>
-            </p>
-            <button type="submit" class="btn-primary">
-              {{ t("update.install_now") }}
-            </button>
-          </form>
+          <template x-if="isEditable">
+            <div class="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-3 space-y-2">
+              <p class="text-sm text-amber-300 font-medium">{{ t("update.editable_latest_blocked") }}</p>
+              <p class="text-sm text-obsidian-400">{{ t("update.editable_hint") }}</p>
+            </div>
+          </template>
+          <template x-if="!isEditable">
+            <form @submit.prevent="runUpdate('', 'latest')">
+              <p class="text-sm text-obsidian-400 mb-3">
+                {{ t("update.install_latest") }} <span class="text-amber-400 font-medium" x-text="checkResult.detail.latest"></span>
+                <template x-if="checkResult.detail.latest_commit">
+                  <span class="text-amber-400 font-mono" x-text="`(commit ${checkResult.detail.latest_commit})`"></span>
+                </template>
+              </p>
+              <button type="submit" class="btn-primary">
+                {{ t("update.install_now") }}
+              </button>
+            </form>
+          </template>
         </div>
       </div>
     </template>
-
     <!-- Already up to date -->
     <template x-if="checkResult && checkResult.detail && checkResult.detail.is_latest">
       <div class="card mb-6">
@@ -114,64 +138,77 @@
       </div>
     </template>
 
-    <!-- Advanced install -->
-    <template x-if="checkResult && checkResult.detail">
-      <div class="card">
-        <div class="card-body space-y-4">
-          <div>
-            <h2 class="font-semibold text-obsidian-100">{{ t("update.advanced") }}</h2>
-          </div>
-
-          <div class="flex gap-1 p-1 rounded-lg" style="background: var(--accent-glow);">
-            <button @click="selectedTab = 'specific'" type="button"
-                    class="flex-1 py-2 px-3 rounded-md text-sm font-medium transition-all duration-150"
-                    :class="selectedTab === 'specific' ? 'bg-amber-500 text-obsidian-900' : 'text-obsidian-300 hover:text-obsidian-100'">
-              {{ t("update.pin_version") }}
-            </button>
-            <button @click="selectedTab = 'branch'; loadBranches()" type="button"
-                    class="flex-1 py-2 px-3 rounded-md text-sm font-medium transition-all duration-150"
-                    :class="selectedTab === 'branch' ? 'bg-amber-500 text-obsidian-900' : 'text-obsidian-300 hover:text-obsidian-100'">
-              {{ t("update.pin_branch") }}
-            </button>
-          </div>
-
-          <form x-show="selectedTab === 'specific'" @submit.prevent="runUpdate($el.querySelector('[name=version]').value, 'specific')">
-            <div class="flex gap-3 items-end">
-              <div class="flex-1">
-                <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">{{ t("update.version_label") }}</label>
-                <input type="text" name="version" class="field-input w-full" placeholder="{{ t('update.version_ph') }}">
-              </div>
-              <button type="submit" class="btn-primary">{{ t("update.install_version") }}</button>
-            </div>
-          </form>
-
-          <form x-show="selectedTab === 'branch'" @submit.prevent="runUpdateBranch(selectedBranch || $el.querySelector('[name=branch]')?.value || '')">
-            <div class="flex items-center justify-between mb-2">
-              <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium block">{{ t("update.branch_label") }}</label>
-              <button type="button" class="text-xs text-amber-500 hover:text-amber-400" @click="loadBranches(true)" x-text="branchesLoading ? window.t('common.loading') : window.t('update.refresh_branches')"></button>
-            </div>
-            <div class="flex gap-3 items-start">
-              <div class="flex-1 min-w-0">
-                <template x-if="branchOptions.length > 0">
-                  <select name="branch" class="field-input w-full" x-model="selectedBranch">
-                    <template x-for="branch in branchOptions" :key="branch">
-                      <option :value="branch" x-text="branch"></option>
-                    </template>
-                  </select>
-                </template>
-                <template x-if="branchOptions.length === 0">
-                  <input type="text" name="branch" class="field-input w-full" placeholder="{{ t('update.branch_ph') }}" x-model="selectedBranch">
-                </template>
-                <template x-if="branchError">
-                  <p class="text-xs text-amber-400 mt-2" x-text="branchError"></p>
-                </template>
-              </div>
-              <button type="submit" class="btn-primary whitespace-nowrap">{{ t("update.install_branch") }}</button>
-            </div>
-          </form>
+    <!-- Advanced install (always available) -->
+    <div class="card">
+      <div class="card-body space-y-4">
+        <div>
+          <h2 class="font-semibold text-obsidian-100">{{ t("update.advanced") }}</h2>
         </div>
+
+        <div class="flex gap-1 p-1 rounded-lg" style="background: var(--accent-glow);">
+          <button @click="selectedTab = 'specific'; loadVersions()" type="button"
+                  class="flex-1 py-2 px-3 rounded-md text-sm font-medium transition-all duration-150"
+                  :class="selectedTab === 'specific' ? 'bg-amber-500 text-obsidian-900' : 'text-obsidian-300 hover:text-obsidian-100'">
+            {{ t("update.pin_version") }}
+          </button>
+          <button @click="selectedTab = 'branch'; loadBranches()" type="button"
+                  class="flex-1 py-2 px-3 rounded-md text-sm font-medium transition-all duration-150"
+                  :class="selectedTab === 'branch' ? 'bg-amber-500 text-obsidian-900' : 'text-obsidian-300 hover:text-obsidian-100'">
+            {{ t("update.pin_branch") }}
+          </button>
+        </div>
+
+        <form x-show="selectedTab === 'specific'" @submit.prevent="runUpdate(selectedVersion || $el.querySelector('[name=version]')?.value || '', 'specific')">
+          <div class="flex items-center justify-between mb-2">
+            <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium block">{{ t("update.version_label") }}</label>
+            <button type="button" class="text-xs text-amber-500 hover:text-amber-400" @click="loadVersions(true)" x-text="versionsLoading ? window.t('common.loading') : window.t('update.refresh_versions')"></button>
+          </div>
+          <div class="flex gap-3 items-start">
+            <div class="flex-1 min-w-0">
+              <template x-if="versionOptions.length > 0">
+                <select name="version" class="field-input w-full" x-model="selectedVersion">
+                  <template x-for="ver in versionOptions" :key="ver">
+                    <option :value="ver" x-text="ver"></option>
+                  </template>
+                </select>
+              </template>
+              <template x-if="versionOptions.length === 0">
+                <input type="text" name="version" class="field-input w-full" placeholder="{{ t('update.version_ph') }}" x-model="selectedVersion">
+              </template>
+              <template x-if="versionError">
+                <p class="text-xs text-amber-400 mt-2" x-text="versionError"></p>
+              </template>
+            </div>
+            <button type="submit" class="btn-primary whitespace-nowrap">{{ t("update.install_version") }}</button>
+          </div>
+        </form>
+
+        <form x-show="selectedTab === 'branch'" @submit.prevent="runUpdateBranch(selectedBranch || $el.querySelector('[name=branch]')?.value || '')">
+          <div class="flex items-center justify-between mb-2">
+            <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium block">{{ t("update.branch_label") }}</label>
+            <button type="button" class="text-xs text-amber-500 hover:text-amber-400" @click="loadBranches(true)" x-text="branchesLoading ? window.t('common.loading') : window.t('update.refresh_branches')"></button>
+          </div>
+          <div class="flex gap-3 items-start">
+            <div class="flex-1 min-w-0">
+              <template x-if="branchOptions.length > 0">
+                <select name="branch" class="field-input w-full" x-model="selectedBranch">
+                  <template x-for="branch in branchOptions" :key="branch">
+                    <option :value="branch" x-text="branch"></option>
+                  </template>
+                </select>
+              </template>
+              <template x-if="branchOptions.length === 0">
+                <input type="text" name="branch" class="field-input w-full" placeholder="{{ t('update.branch_ph') }}" x-model="selectedBranch">
+              </template>
+              <template x-if="branchError">
+                <p class="text-xs text-amber-400 mt-2" x-text="branchError"></p>
+              </template>
+            </div>
+            <button type="submit" class="btn-primary whitespace-nowrap">{{ t("update.install_branch") }}</button>
+          </div>
+        </form>
       </div>
-    </template>
+    </div>
 
     <!-- Progress card -->
     <div x-show="step === 2" class="card mt-6">
@@ -199,7 +236,7 @@
     </div>
 
     <!-- Note -->
-    <div class="mt-6 text-xs text-obsidian-500">
+    <div class="mt-6 rounded-lg border border-obsidian-700/80 bg-obsidian-900/40 px-4 py-3 text-sm text-obsidian-300">
       <p>{{ t("update.note") }}</p>
     </div>
   </div>
@@ -233,11 +270,44 @@ function checkUpdate() {
     .then(r => r.json())
     .then(data => {
       d.checkResult = data;
+      if (data.detail && data.detail.current) {
+        d.currentVersion = data.detail.current;
+      }
+      if (data.detail && data.detail.current_commit) {
+        d.currentCommit = data.detail.current_commit;
+      }
+      if (data.detail && typeof data.detail.is_editable === 'boolean') {
+        d.isEditable = data.detail.is_editable;
+      }
       d.checking = false;
     })
     .catch(() => {
       d.checkResult = {ok: false, level: 'error', message: window.t('update.check_failed')};
       d.checking = false;
+    });
+}
+
+function loadVersions(force = false) {
+  const root = document.querySelector('[x-data]');
+  const d = Alpine.$data(root);
+  if (d.versionsLoading || (!force && d.versionOptions.length > 0)) return;
+
+  d.versionsLoading = true;
+  d.versionError = '';
+  fetch('/api/update/versions')
+    .then(r => r.json())
+    .then(data => {
+      d.versionOptions = data.versions || [];
+      if (!d.versionOptions.includes(d.selectedVersion)) {
+        d.selectedVersion = d.versionOptions[0] || d.selectedVersion || '';
+      }
+      d.versionError = data.ok ? '' : (data.message || window.t('update.version_list_failed'));
+      d.versionsLoading = false;
+    })
+    .catch(() => {
+      d.versionOptions = [];
+      d.versionError = window.t('update.version_list_failed');
+      d.versionsLoading = false;
     });
 }
 
@@ -270,12 +340,7 @@ function runUpdate(version, mode = 'specific') {
   const d = Alpine.$data(root);
   const selectedVersion = (version || '').trim();
   if (mode === 'specific' && !selectedVersion) {
-    d.checkResult = {
-      ...(d.checkResult || {}),
-      level: 'warning',
-      message: window.t('update.version_required'),
-      detail: d.checkResult ? d.checkResult.detail : null
-    };
+    d.versionError = window.t('update.version_required');
     return;
   }
   fetch('/api/update/run', {
@@ -312,9 +377,12 @@ function runUpdateBranch(branch) {
   });
 }
 
-// Auto check on load
+// Auto check + load versions on load
 document.addEventListener('DOMContentLoaded', () => {
-  setTimeout(checkUpdate, 500);
+  setTimeout(() => {
+    checkUpdate();
+    loadVersions();
+  }, 500);
 });
 </script>
 {% endblock %}

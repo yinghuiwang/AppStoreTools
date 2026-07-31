@@ -1981,6 +1981,7 @@ async def update_check(request: Request):
     """Check for updates."""
     from asc.commands.update_cmd import (
         _current_version,
+        _is_editable,
         _latest_version_from_github,
         _parse_version,
         _resolve_git_ref_commit,
@@ -1988,15 +1989,21 @@ async def update_check(request: Request):
     from asc.cli import _installed_commit_short
 
     lang = _lang(request)
+
     current = _current_version()
     current_commit = _installed_commit_short() or "unknown"
+    is_editable = _is_editable()
     latest = _latest_version_from_github()
     if not latest:
         return {
             "ok": False,
             "level": "warning",
             "message": t("api.github_unreachable", lang=lang),
-            "detail": {"current": current, "current_commit": current_commit},
+            "detail": {
+                "current": current,
+                "current_commit": current_commit,
+                "is_editable": is_editable,
+            },
         }
     latest_commit = (_resolve_git_ref_commit(f"v{latest}") or "unknown")[:7]
     is_latest = _parse_version(latest) <= _parse_version(current)
@@ -2026,7 +2033,30 @@ async def update_check(request: Request):
             "latest": latest,
             "latest_commit": latest_commit,
             "is_latest": is_latest,
+            "is_editable": is_editable,
         },
+    }
+
+
+@router.get("/update/versions")
+async def update_versions(request: Request):
+    """List installable release versions."""
+    from asc.commands.update_cmd import _all_versions_from_github
+
+    lang = _lang(request)
+    versions = _all_versions_from_github()
+    if versions is None:
+        return {
+            "ok": False,
+            "level": "warning",
+            "message": t("api.versions_unavailable", lang=lang),
+            "versions": [],
+        }
+    return {
+        "ok": True,
+        "level": "success",
+        "message": t("api.versions_found", lang=lang, count=len(versions)),
+        "versions": versions,
     }
 
 

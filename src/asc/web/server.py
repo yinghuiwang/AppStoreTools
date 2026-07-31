@@ -157,6 +157,15 @@ def create_app() -> FastAPI:
     @app.get("/update", response_class=HTMLResponse)
     async def update_page(request: Request):
         ctx = _get_profile_context(request)
+        from asc.commands.update_cmd import _current_version, _is_editable
+        from asc.cli import _installed_commit_short
+        try:
+            tool_version = _current_version()
+        except Exception:
+            tool_version = ctx.get("asset_version", "?")
+        ctx["tool_version"] = tool_version
+        ctx["tool_commit"] = _installed_commit_short() or ""
+        ctx["is_editable"] = _is_editable()
         return _render(request, "update.html", ctx)
 
     from asc.web import routes_api

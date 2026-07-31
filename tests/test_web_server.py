@@ -498,6 +498,7 @@ def test_update_check_includes_current_commit(client):
     with patch("asc.commands.update_cmd._current_version", return_value="0.1.17"), \
             patch("asc.commands.update_cmd._latest_version_from_github", return_value="0.1.18"), \
             patch("asc.commands.update_cmd._resolve_git_ref_commit", return_value="abcdef1234567890"), \
+            patch("asc.commands.update_cmd._is_editable", return_value=False), \
             patch("asc.cli._installed_commit_short", return_value="15e4b3a"):
         client.cookies.set(COOKIE_NAME, "en")
         resp = client.get("/api/update/check")
@@ -508,8 +509,24 @@ def test_update_check_includes_current_commit(client):
     assert data["detail"]["current_commit"] == "15e4b3a"
     assert data["detail"]["latest"] == "0.1.18"
     assert data["detail"]["latest_commit"] == "abcdef1"
+    assert data["detail"]["is_editable"] is False
     assert "commit 15e4b3a" in data["message"]
     assert "latest: 0.1.18 (commit abcdef1)" in data["message"]
+
+
+def test_update_page_shows_editable_warning(client):
+    from unittest.mock import patch
+
+    with patch("asc.commands.update_cmd._current_version", return_value="0.1.25"), \
+            patch("asc.commands.update_cmd._is_editable", return_value=True), \
+            patch("asc.cli._installed_commit_short", return_value="abc1234"):
+        resp = client.get("/update")
+
+    assert resp.status_code == 200
+    assert "isEditable: true" in resp.text
+    assert ("当前为 editable 开发模式" in resp.text) or ("Running in editable development mode" in resp.text)
+    assert ("pip install -e" in resp.text)
+    assert ("editable 模式下无法自动安装最新稳定版" in resp.text) or ("Latest stable auto-update is unavailable in editable mode" in resp.text)
 
 
 def test_update_branches_returns_options(client):
@@ -524,6 +541,31 @@ def test_update_branches_returns_options(client):
     assert data["branches"] == ["develop", "main"]
 
 
+def test_update_versions_returns_options(client):
+    from unittest.mock import patch
+
+    with patch("asc.commands.update_cmd._all_versions_from_github", return_value=["0.1.18", "0.1.17"]):
+        resp = client.get("/api/update/versions")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["versions"] == ["0.1.18", "0.1.17"]
+
+
+def test_update_page_shows_current_version_immediately(client):
+    from unittest.mock import patch
+
+    with patch("asc.commands.update_cmd._current_version", return_value="0.1.25"), \
+            patch("asc.cli._installed_commit_short", return_value="abc1234"):
+        resp = client.get("/update")
+
+    assert resp.status_code == 200
+    assert 'currentVersion: "0.1.25"' in resp.text
+    assert 'currentCommit: "abc1234"' in resp.text
+    assert ("当前版本:" in resp.text) or ("Current version:" in resp.text)
+
+
 def test_update_page_contains_always_available_advanced_install(client):
     resp = client.get("/update")
 
@@ -532,11 +574,16 @@ def test_update_page_contains_always_available_advanced_install(client):
     assert ("Specific version" in resp.text) or ("指定版本" in resp.text)
     assert ("Specific branch" in resp.text) or ("指定分支" in resp.text)
     assert "runUpdate('', 'latest')" in resp.text
-    assert "runUpdate($el.querySelector('[name=version]').value, 'specific')" in resp.text
+    assert "runUpdate(selectedVersion || $el.querySelector('[name=version]')?.value || '', 'specific')" in resp.text
     assert "runUpdateBranch(selectedBranch || $el.querySelector('[name=branch]')?.value || '')" in resp.text
     assert "/api/update/run" in resp.text
     assert "/api/update/branches" in resp.text
-
+    assert "/api/update/versions" in resp.text
+    assert "loadVersions()" in resp.text
+    assert "versionOptions" in resp.text
+    # Advanced install card is always rendered (not gated on checkResult)
+    assert '<!-- Advanced install (always available) -->' in resp.text
+    assert resp.text.index('<!-- Advanced install (always available) -->') < resp.text.index('x-show="selectedTab === \'specific\'"')
 
 def test_profiles_page_returns_200(client):
     resp = client.get("/profiles")
