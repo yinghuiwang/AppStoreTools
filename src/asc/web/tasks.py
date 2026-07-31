@@ -127,6 +127,12 @@ class TaskStore:
             return self._public_task(task)
 
     def append_log(self, task_id: str, line: str) -> None:
+        self.append_logs(task_id, [line])
+
+    def append_logs(self, task_id: str, lines: list[str]) -> None:
+        """Append multiple log lines atomically, assigning contiguous sequences."""
+        if not lines:
+            return
         with self._lock:
             if self._db_path is not None:
                 now = self._now()
@@ -139,16 +145,19 @@ class TaskStore:
                     seq = conn.execute(
                         "SELECT COALESCE(MAX(seq), 0) + 1 FROM task_logs WHERE task_id = ?", (task_id,)
                     ).fetchone()[0]
-                    conn.execute(
+                    conn.executemany(
                         "INSERT INTO task_logs (task_id, seq, message, created_at) VALUES (?, ?, ?, ?)",
-                        (task_id, seq, line, now),
+                        [
+                            (task_id, seq + index, str(line), now)
+                            for index, line in enumerate(lines)
+                        ],
                     )
                     conn.execute("UPDATE task_runs SET updated_at = ? WHERE id = ?", (now, task_id))
                     conn.commit()
                 return
             self._refresh_db()
             if task_id in self._tasks:
-                self._tasks[task_id]["logs"].append(line)
+                self._tasks[task_id]["logs"].extend(str(line) for line in lines)
                 self._tasks[task_id]["updated_at"] = self._now()
                 self._save()
 

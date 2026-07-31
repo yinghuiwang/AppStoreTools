@@ -23,10 +23,15 @@ class RecordingSink:
 class MockTaskStore:
     def __init__(self):
         self.logs = []
+        self.log_batches = []
         self.progress_calls = []
 
     def append_log(self, task_id, line):
         self.logs.append((task_id, line))
+
+    def append_logs(self, task_id, lines):
+        self.log_batches.append((task_id, list(lines)))
+        self.logs.extend((task_id, line) for line in lines)
 
     def set_progress(
         self,
@@ -165,6 +170,7 @@ def test_task_store_sink_via_make_web_reporter():
     r.phase("locales")
     r.progress(1, 2, msg="en-US")
     r.log("hello")
+    r.flush()
     assert ("task-1", "hello") in store.logs
     last = store.progress_calls[-1]
     assert last["task_id"] == "task-1"
@@ -174,6 +180,22 @@ def test_task_store_sink_via_make_web_reporter():
     assert last["phase_label"] == "上传"
     assert last["phase_index"] == 2
     assert last["phase_total"] == 2
+
+
+def test_task_store_sink_batches_high_volume_logs_until_flush():
+    store = MockTaskStore()
+    reporter = make_web_reporter(store, "task-1")
+
+    for index in range(99):
+        reporter.log(f"line {index}")
+    assert store.log_batches == []
+
+    reporter.log("line 99")
+    assert store.log_batches == [("task-1", [f"line {index}" for index in range(100)])]
+
+    reporter.log("tail")
+    reporter.flush()
+    assert store.log_batches[-1] == ("task-1", ["tail"])
 
 
 def test_fail_sets_failed_flag():

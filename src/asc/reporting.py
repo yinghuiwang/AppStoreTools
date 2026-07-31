@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any, Protocol, Sequence
 
 
@@ -46,12 +47,23 @@ class CliSink:
 class TaskStoreSink:
     """Fan-out progress/log events into a TaskStore (Task 2 extended signature)."""
 
+    _LOG_BATCH_INTERVAL_SEC = 0.25
+    _MAX_PENDING_LOGS = 100
+
     def __init__(self, store: Any, task_id: str) -> None:
         self._store = store
         self._task_id = task_id
+        self._pending_logs: list[str] = []
+        self._last_log_flush = time.monotonic()
 
     def on_log(self, message: str, *, level: str = "info") -> None:
-        self._store.append_log(self._task_id, message)
+        self._pending_logs.append(message)
+        now = time.monotonic()
+        if (
+            len(self._pending_logs) >= self._MAX_PENDING_LOGS
+            or now - self._last_log_flush >= self._LOG_BATCH_INTERVAL_SEC
+        ):
+            self.flush()
 
     def on_progress(
         self,
@@ -63,6 +75,7 @@ class TaskStoreSink:
         phase_index: int,
         phase_total: int,
     ) -> None:
+        self.flush()
         self._store.set_progress(
             self._task_id,
             pct,
@@ -72,6 +85,20 @@ class TaskStoreSink:
             phase_index=phase_index,
             phase_total=phase_total,
         )
+
+    def flush(self) -> None:
+        """Persist accumulated subprocess output in one database transaction."""
+        if not self._pending_logs:
+            return
+        messages = self._pending_logs
+        self._pending_logs = []
+        self._last_log_flush = time.monotonic()
+        append_logs = getattr(self._store, "append_logs", None)
+        if callable(append_logs):
+            append_logs(self._task_id, messages)
+        else:  # Compatibility with third-party TaskStore-like sinks.
+            for message in messages:
+                self._store.append_log(self._task_id, message)
 
 
 class TaskReporter:
@@ -158,6 +185,13 @@ class TaskReporter:
         self.log(message, level="error")
         if detail:
             self.log(detail, level="error")
+
+    def flush(self) -> None:
+        """Flush buffered sinks before a task reaches a terminal state."""
+        for sink in self._sinks:
+            flush = getattr(sink, "flush", None)
+            if callable(flush):
+                flush()
 
     def _apply_pct(self, candidate: float) -> None:
         value = int(candidate)

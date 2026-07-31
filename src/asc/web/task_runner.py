@@ -69,6 +69,8 @@ def start_background_task(
             if _is_terminal(store, task_id):
                 return
             store.set_status(task_id, TaskStatus.ERROR)
+        finally:
+            reporter.flush()
 
     threading.Thread(target=_worker, daemon=True).start()
     return task_id

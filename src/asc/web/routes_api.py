@@ -719,7 +719,7 @@ async def task_stream(
     last_event_id: str | None = Header(None, alias="Last-Event-ID"),
 ):
     """SSE stream: replay sequenced logs after a cursor until task completes."""
-    task = _task_store.get_state(task_id)
+    task = await _asyncio.to_thread(_task_store.get_state, task_id)
     if task is None:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Task not found")
@@ -735,11 +735,11 @@ async def task_stream(
         polls = 0
         started = time.monotonic()
         while True:
-            current = _task_store.get_state(task_id)
+            current = await _asyncio.to_thread(_task_store.get_state, task_id)
             if current is None:
                 yield _fmt_sse("error_event", "task not found")
                 break
-            logs = _task_store.get_logs_after(task_id, sent)
+            logs = await _asyncio.to_thread(_task_store.get_logs_after, task_id, sent)
             for log in logs:
                 yield _fmt_sse("log", log["message"], event_id=log["seq"])
                 sent = log["seq"]

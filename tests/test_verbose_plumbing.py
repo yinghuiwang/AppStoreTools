@@ -131,4 +131,5 @@ def test_make_web_reporter_debug_gated_by_verbose():
 
     noisy = make_web_reporter(store, "t2", verbose=True)
     noisy.debug("shown")
-    store.append_log.assert_called_once_with("t2", "shown")
+    noisy.flush()
+    store.append_logs.assert_called_once_with("t2", ["shown"])

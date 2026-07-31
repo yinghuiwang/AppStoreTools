@@ -23,6 +23,19 @@ def test_append_log():
     assert task["logs"] == ["step 1 done", "step 2 done"]
 
 
+def test_append_logs_assigns_contiguous_sequences_in_one_batch(tmp_path):
+    store = TaskStore(tmp_path / "tasks.db")
+    task_id = store.create("build")
+
+    store.append_logs(task_id, ["one", "two", "three"])
+
+    assert store.get_logs_after(task_id) == [
+        {"seq": 1, "message": "one"},
+        {"seq": 2, "message": "two"},
+        {"seq": 3, "message": "three"},
+    ]
+
+
 def test_set_status():
     store = TaskStore()
     task_id = store.create("metadata")
@@ -338,4 +351,3 @@ def test_legacy_progress_defaults_phase_fields(tmp_path):
     assert task["progress"]["phase"] == ""
     assert task["progress"]["phase_index"] == 0
     assert task["progress"]["phase_total"] == 0
-
