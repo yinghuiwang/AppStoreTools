@@ -28,7 +28,7 @@
         <svg class="w-3.5 h-3.5 text-red-400" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"/></svg>
       </div>
       {% elif task.status == 'running' %}
-      <div class="w-6 h-6 rounded-full flex items-center justify-center" style="background: rgba(232,161,37,0.15);">
+      <div class="w-6 h-6 rounded-full flex items-center justify-center" style="background: var(--accent-glow);">
         <svg class="w-3.5 h-3.5 text-amber-500 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
       </div>
       {% else %}
