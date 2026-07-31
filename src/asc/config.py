@@ -221,6 +221,7 @@ class Config:
         api_key: str,
         model: str,
         set_default: bool = True,
+        preserve_blank_api_key: bool = False,
     ) -> None:
         """Save an LLM config to the global llm.toml file."""
         llm_path = self._llm_config_path()
@@ -235,6 +236,9 @@ class Config:
 
         # Update llm_configs
         llm_configs = dict(data.get("llm_configs", {}))
+        existing = llm_configs.get(name, {})
+        if preserve_blank_api_key and not api_key and isinstance(existing, dict):
+            api_key = str(existing.get("api_key", ""))
         llm_configs[name] = {
             "base_url": base_url,
             "api_key": api_key,
@@ -249,6 +253,7 @@ class Config:
         # Write back
         content = toml.dumps(data)
         llm_path.write_text(content)
+        llm_path.chmod(0o600)
 
     def delete_llm_config(self, name: str) -> None:
         """Delete an LLM config from the global llm.toml file."""
@@ -271,6 +276,7 @@ class Config:
 
         content = toml.dumps(data)
         llm_path.write_text(content)
+        llm_path.chmod(0o600)
 
     def set_llm_default(self, name: str) -> None:
         """Set the default LLM config in global llm.toml."""
@@ -287,6 +293,7 @@ class Config:
 
         content = toml.dumps(data)
         llm_path.write_text(content)
+        llm_path.chmod(0o600)
 
     @property
     def build_project(self) -> Optional[str]:
@@ -342,17 +349,17 @@ class Config:
         profiles_dir.mkdir(parents=True, exist_ok=True)
 
         profile_path = profiles_dir / f"{app_name}.toml"
-        content = f"""[credentials]
-issuer_id = "{issuer_id}"
-key_id = "{key_id}"
-key_file = "{key_file}"
-app_id = "{app_id}"
-
-[defaults]
-csv = "{csv}"
-screenshots = "{screenshots}"
-"""
+        content = toml.dumps({
+            "credentials": {
+                "issuer_id": issuer_id,
+                "key_id": key_id,
+                "key_file": key_file,
+                "app_id": app_id,
+            },
+            "defaults": {"csv": csv, "screenshots": screenshots},
+        })
         profile_path.write_text(content)
+        profile_path.chmod(0o600)
 
     def update_local_build_section(self, updates: dict) -> None:
         """Merge `updates` into [build] of ./.asc/config.toml; create if missing.

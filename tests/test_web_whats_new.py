@@ -362,8 +362,8 @@ def test_whats_new_template_preview_waits_on_task_result():
     assert "TaskLogDrawer.open" in template
 
 
-def test_settings_llm_get_returns_config(client):
-    """GET /api/settings/llm returns configs dict and default name."""
+def test_settings_llm_get_redacts_api_key(client):
+    """GET /api/settings/llm exposes config metadata, never the secret."""
     mock_config = MagicMock()
     mock_config.llm_configs = {
         "openai": {"base_url": "https://api.openai.com/v1", "api_key": "secret-key-123", "model": "gpt-4o-mini"}
@@ -376,7 +376,8 @@ def test_settings_llm_get_returns_config(client):
     assert response.status_code == 200
     data = response.json()
     assert data["configs"]["openai"]["base_url"] == "https://api.openai.com/v1"
-    assert data["configs"]["openai"]["api_key"] == "secret-key-123"
+    assert "api_key" not in data["configs"]["openai"]
+    assert data["configs"]["openai"]["has_api_key"] is True
     assert data["configs"]["openai"]["model"] == "gpt-4o-mini"
     assert data["default"] == "openai"
 
@@ -395,4 +396,7 @@ def test_settings_llm_post_saves_config(client):
     assert response.status_code == 200
     data = response.json()
     assert data["ok"] is True
-    mock_config.save_llm_config.assert_called_once_with("openai", "https://api.new.com/v1", "new-key", "gpt-4o", set_default=True)
+    mock_config.save_llm_config.assert_called_once_with(
+        "openai", "https://api.new.com/v1", "new-key", "gpt-4o",
+        set_default=True, preserve_blank_api_key=True,
+    )

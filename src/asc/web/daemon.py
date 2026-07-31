@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import ipaddress
 import os
 import signal
 import subprocess
@@ -13,6 +14,16 @@ from typing import Any
 _STATE_DIR = Path.home() / ".config" / "asc"
 STATE_FILE = _STATE_DIR / "web.json"
 LOG_FILE = _STATE_DIR / "web.log"
+
+
+def is_loopback_host(host: str) -> bool:
+    """Return whether *host* is a loopback address accepted by the local UI."""
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 def _open_url(host: str, port: int) -> str:
@@ -92,6 +103,11 @@ def _uvicorn_cmd(host: str, port: int) -> list[str]:
 
 
 def start_background(host: str, port: int) -> dict[str, Any]:
+    if not is_loopback_host(host):
+        return {
+            "status": "error",
+            "message": "Web UI only supports loopback hosts (127.0.0.1, ::1, or localhost)",
+        }
     current = get_status()
     if current.get("running"):
         return {

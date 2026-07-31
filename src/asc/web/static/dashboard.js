@@ -68,6 +68,10 @@
     button.type = "button";
     button.dataset.dashboardCancelTask = String(task.id || "");
     button.setAttribute("aria-label", tt("index.cancel_aria", { title: taskTitle(task) }));
+    if (task.cancel_requested) {
+      button.disabled = true;
+      button.textContent = tt("dashboard.canceling");
+    }
     return button;
   }
 

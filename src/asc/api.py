@@ -12,6 +12,9 @@ import requests
 
 from asc.constants import BASE_URL
 
+API_TIMEOUT = (10, 60)
+UPLOAD_TIMEOUT = (10, 300)
+
 
 class AppStoreConnectAPI:
     """App Store Connect API 客户端"""
@@ -56,6 +59,7 @@ class AppStoreConnectAPI:
             headers.update(kwargs.pop("headers"))
 
         for attempt in range(3):
+            kwargs.setdefault("timeout", API_TIMEOUT)
             resp = requests.request(method, url, headers=headers, **kwargs)
 
             if resp.status_code == 429:
@@ -277,7 +281,7 @@ class AppStoreConnectAPI:
             length = op["length"]
             req_headers = {h["name"]: h["value"] for h in op["requestHeaders"]}
             chunk = file_data[offset : offset + length]
-            resp = requests.put(url, headers=req_headers, data=chunk)
+            resp = requests.put(url, headers=req_headers, data=chunk, timeout=UPLOAD_TIMEOUT)
             if resp.status_code not in (200, 201):
                 raise Exception(
                     f"截图上传失败 [{resp.status_code}]: {resp.text[:200]}"
@@ -560,7 +564,7 @@ class AppStoreConnectAPI:
             length = op["length"]
             req_headers = {h["name"]: h["value"] for h in op["requestHeaders"]}
             chunk = file_bytes[offset : offset + length]
-            resp = requests.put(url, headers=req_headers, data=chunk)
+            resp = requests.put(url, headers=req_headers, data=chunk, timeout=UPLOAD_TIMEOUT)
             if resp.status_code not in (200, 201):
                 raise Exception(
                     f"IAP 审核截图上传失败 [{resp.status_code}]: {resp.text[:200]}"
@@ -1041,7 +1045,7 @@ class AppStoreConnectAPI:
             length = op["length"]
             req_headers = {h["name"]: h["value"] for h in op["requestHeaders"]}
             chunk = file_bytes[offset : offset + length]
-            resp = requests.put(url, headers=req_headers, data=chunk)
+            resp = requests.put(url, headers=req_headers, data=chunk, timeout=UPLOAD_TIMEOUT)
             if resp.status_code not in (200, 201):
                 raise Exception(
                     f"审核截图上传失败 [{resp.status_code}]: {resp.text[:200]}"

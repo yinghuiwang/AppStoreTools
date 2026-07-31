@@ -1064,15 +1064,15 @@ def test_task_cancel_endpoint(client):
     data = resp.json()
     assert data["task_id"] == task_id
     assert data["cancel_requested"] is True
-    assert data["status"] == "canceled"
+    assert data["status"] == "running"
     task = task_store.get(task_id)
     assert task["cancel_requested"] is True
-    assert task["status"] == TaskStatus.CANCELED
+    assert task["status"] == TaskStatus.RUNNING
     assert any("已请求终止" in line for line in task["logs"])
-    assert any("任务已终止" in line for line in task["logs"])
+    assert not any("任务已终止" in line for line in task["logs"])
 
 
-def test_task_cancel_endpoint_force_finishes_stuck_urls_task(client):
+def test_task_cancel_endpoint_keeps_stuck_task_running_until_worker_exits(client):
     from asc.web.tasks import task_store, TaskStatus
 
     task_id = task_store.create("urls", profile="test")
@@ -1082,10 +1082,10 @@ def test_task_cancel_endpoint_force_finishes_stuck_urls_task(client):
     resp = client.post(f"/api/task/{task_id}/cancel")
 
     assert resp.status_code == 200
-    assert resp.json()["status"] == "canceled"
+    assert resp.json()["status"] == "running"
     task = task_store.get(task_id)
-    assert task["status"] == TaskStatus.CANCELED
-    assert task["result"] == {"success": False, "canceled": True}
+    assert task["status"] == TaskStatus.RUNNING
+    assert task["result"] is None
     assert task_store.cancel_event(task_id).is_set()
 
 
@@ -1170,6 +1170,31 @@ def test_profile_create_api(client, tmp_path, monkeypatch):
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
         mock_save.assert_called_once()
+
+
+def test_profile_key_upload_uses_content_addressed_path(client, tmp_path, monkeypatch):
+    """Same upload filename with different contents must not overwrite another key."""
+    from unittest.mock import MagicMock, patch
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    guard = MagicMock()
+    guard.is_enabled.return_value = False
+    contents = [b"first-key", b"second-key"]
+    with patch("asc.config.Config.save_app_profile") as mock_save, \
+         patch("asc.guard.Guard", return_value=guard):
+        for index, content in enumerate(contents):
+            response = client.post(
+                "/api/profiles",
+                data={"name": f"app{index}", "issuer_id": "issuer", "key_id": "key", "app_id": str(index)},
+                files={"key_file": ("AuthKey_SHARED.p8", content, "application/octet-stream")},
+            )
+            assert response.status_code == 200
+
+    paths = [Path(call.args[3]) for call in mock_save.call_args_list]
+    assert paths[0] != paths[1]
+    assert paths[0].read_bytes() == contents[0]
+    assert paths[1].read_bytes() == contents[1]
+    assert all(path.stat().st_mode & 0o777 == 0o600 for path in paths)
 
 
 def test_profile_create_guard_conflict_has_no_file_side_effects(

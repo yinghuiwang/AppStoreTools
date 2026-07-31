@@ -192,6 +192,7 @@ def save_webhook_config(
     path = webhook_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(toml.dumps(normalized), encoding="utf-8")
+    path.chmod(0o600)
     return normalized
 
 

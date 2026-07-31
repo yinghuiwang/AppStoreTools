@@ -52,6 +52,10 @@ def start_background_task(
             result = run(reporter, cancel_event)
             if _is_terminal(store, task_id):
                 return
+            if cancel_event.is_set():
+                store.set_result(task_id, {"success": False, "canceled": True})
+                store.set_status(task_id, TaskStatus.CANCELED)
+                return
             if isinstance(result, dict):
                 store.set_result(task_id, result)
             store.set_status(task_id, TaskStatus.DONE)

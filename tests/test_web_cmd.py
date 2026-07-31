@@ -55,6 +55,14 @@ def test_web_cmd_foreground_runs_uvicorn():
         assert mock_run.call_args[1]["port"] == 9999
 
 
+def test_web_cmd_rejects_non_loopback_host():
+    with patch("asc.commands.web_cmd.start_background") as mock_start:
+        result = runner.invoke(app, ["web", "--no-open", "--host", "0.0.0.0"])
+    assert result.exit_code != 0
+    assert "loopback" in result.output
+    mock_start.assert_not_called()
+
+
 def test_web_cmd_no_open_skips_browser_on_foreground():
     """--foreground --no-open 时不应调用 webbrowser.open"""
     mock_app = MagicMock()

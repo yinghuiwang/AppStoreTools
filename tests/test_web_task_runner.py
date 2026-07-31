@@ -71,6 +71,27 @@ def test_cancel_then_worker_completes_stays_canceled(tmp_path):
     assert task["result"] == {"success": False, "canceled": True}
 
 
+def test_cancel_request_waits_for_worker_then_marks_canceled(tmp_path):
+    store = TaskStore(tmp_path / "cooperative-cancel.db")
+    started = Event()
+    release = Event()
+
+    def run(reporter, cancel_event: Event):
+        started.set()
+        release.wait(timeout=2.0)
+        return {"success": True}
+
+    task_id = start_background_task(store, kind="metadata", profile="demo", verbose=False, run=run)
+    assert started.wait(timeout=2.0)
+    assert store.request_cancel(task_id)
+    assert store.get(task_id)["status"] == TaskStatus.RUNNING
+    release.set()
+
+    task = _wait_terminal(store, task_id)
+    assert task["status"] == TaskStatus.CANCELED
+    assert task["result"] == {"success": False, "canceled": True}
+
+
 def test_cancel_before_start_skips_running(tmp_path):
     store = TaskStore(tmp_path / "pre-cancel.db")
     task_id = store.create("metadata", profile="demo")

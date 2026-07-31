@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import re
 import tempfile
@@ -789,7 +790,7 @@ def task_status(task_id: str):
 
 @router.post("/task/{task_id}/cancel")
 async def task_cancel(task_id: str):
-    """Request cancellation for a running task and mark it canceled immediately."""
+    """Request cooperative cancellation; the worker sets the terminal status."""
     from fastapi import HTTPException
 
     task = _task_store.get(task_id)
@@ -805,15 +806,28 @@ async def task_cancel(task_id: str):
 
     _task_store.request_cancel(task_id)
     _task_store.append_log(task_id, "⏹ 已请求终止，正在停止当前步骤...")
-    # Force-finish so dashboard/zombie tasks clear even when a worker is hung
-    # inside a network call and cannot observe cancel_event promptly.
-    _task_store.append_log(task_id, "⏹ 任务已终止")
-    _finish_task(task_id, _TaskStatus.CANCELED, {"success": False, "canceled": True})
-    return {"task_id": task_id, "cancel_requested": True, "status": "canceled"}
+    return {"task_id": task_id, "cancel_requested": True, "status": status_value}
 
 
 import shutil as _shutil
 from fastapi import UploadFile as _UploadFile, File as _File
+
+
+async def _save_uploaded_key(key_file: _UploadFile) -> Path:
+    """Store an uploaded key by content hash so another profile cannot overwrite it."""
+    content = await key_file.read()
+    if not content or len(content) > 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Invalid key file")
+    global_keys_dir = Path.home() / ".config" / "asc" / "keys"
+    global_keys_dir.mkdir(parents=True, exist_ok=True)
+    dest_key = global_keys_dir / f"{hashlib.sha256(content).hexdigest()}.p8"
+    if not dest_key.exists():
+        temp_key = global_keys_dir / f".{dest_key.name}.tmp"
+        temp_key.write_bytes(content)
+        temp_key.chmod(0o600)
+        temp_key.replace(dest_key)
+    dest_key.chmod(0o600)
+    return dest_key
 
 
 @router.get("/profiles")
@@ -874,19 +888,9 @@ async def create_profile(
     config = Config()
     _enforce_web_profile_guard(app_id, name, key_id, issuer_id)
 
-    # Fix 1: Sanitize key filename (path traversal protection)
-    safe_filename = os.path.basename(key_file.filename)
-    if not safe_filename or safe_filename.startswith("."):
+    if not key_file.filename or not key_file.filename.lower().endswith(".p8"):
         raise HTTPException(status_code=400, detail="Invalid key filename")
-
-    global_keys_dir = Path.home() / ".config" / "asc" / "keys"
-    global_keys_dir.mkdir(parents=True, exist_ok=True)
-    dest_key = global_keys_dir / safe_filename
-
-    content = await key_file.read()
-    dest_key.write_bytes(content)
-    # Fix 3: Set key file permissions
-    dest_key.chmod(0o600)
+    dest_key = await _save_uploaded_key(key_file)
 
     config.save_app_profile(name, issuer_id, key_id, str(dest_key), app_id, csv, screenshots)
     return {"ok": True, "name": name}
@@ -926,18 +930,9 @@ async def update_profile(
 
     key_file_path = existing["key_file"]
     if key_file and key_file.filename:
-        # Fix 1: Sanitize key filename
-        safe_filename = os.path.basename(key_file.filename)
-        if not safe_filename or safe_filename.startswith("."):
+        if not key_file.filename.lower().endswith(".p8"):
             raise HTTPException(status_code=400, detail="Invalid key filename")
-
-        global_keys_dir = Path.home() / ".config" / "asc" / "keys"
-        global_keys_dir.mkdir(parents=True, exist_ok=True)
-        dest_key = global_keys_dir / safe_filename
-        content = await key_file.read()
-        dest_key.write_bytes(content)
-        # Fix 3: Set key file permissions
-        dest_key.chmod(0o600)
+        dest_key = await _save_uploaded_key(key_file)
         key_file_path = str(dest_key)
 
     config.save_app_profile(new_name, issuer_id, key_id, key_file_path, app_id, csv, screenshots)
@@ -2133,11 +2128,20 @@ def _start_update_task(
 
 @router.get("/settings/llm")
 async def get_llm_config(request: Request):
-    """Returns all LLM configs and the default config name."""
+    """Return LLM config metadata without exposing stored API keys."""
     from asc.config import Config
     config = Config()
+    configs = {
+        name: {
+            "base_url": values.get("base_url", ""),
+            "model": values.get("model", ""),
+            "has_api_key": bool(values.get("api_key")),
+        }
+        for name, values in config.llm_configs.items()
+        if isinstance(values, dict)
+    }
     return {
-        "configs": config.llm_configs,
+        "configs": configs,
         "default": config.llm_default,
     }
 
@@ -2201,7 +2205,9 @@ async def save_llm_config(request: Request):
 
     try:
         config = Config()
-        config.save_llm_config(name, base_url, api_key, model, set_default=set_default)
+        config.save_llm_config(
+            name, base_url, api_key, model, set_default=set_default, preserve_blank_api_key=True
+        )
         return {"ok": True}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)

@@ -85,3 +85,28 @@ def test_llm_api_key_toml_overrides_env(tmp_path, monkeypatch):
     )
     cfg = Config()
     assert cfg.llm_api_key == "sk-toml-key"
+
+
+def test_save_llm_config_keeps_secret_private_and_preserves_blank_key(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    cfg = Config()
+    cfg.save_llm_config("main", "https://api.example.com/v1", "secret", "model")
+    cfg.save_llm_config(
+        "main", "https://api.example.com/v1", "", "new-model", preserve_blank_api_key=True
+    )
+    path = tmp_path / ".config" / "asc" / "llm.toml"
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert cfg.get_llm_config("main")["api_key"] == "secret"
+    assert cfg.get_llm_config("main")["model"] == "new-model"
+
+
+def test_save_app_profile_escapes_toml_values_and_keeps_profile_private(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    cfg = Config()
+    issuer = 'issuer"\n[unexpected]\nvalue = "injected'
+    cfg.save_app_profile("demo", issuer, "key", "/tmp/key.p8", "app", "data.csv", "shots")
+    path = tmp_path / ".config" / "asc" / "profiles" / "demo.toml"
+    assert path.stat().st_mode & 0o777 == 0o600
+    profile = cfg.get_app_profile("demo")
+    assert profile is not None
+    assert profile["issuer_id"] == issuer

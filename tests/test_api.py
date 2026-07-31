@@ -93,6 +93,7 @@ def test_request_retries_on_429(api):
 
     assert result == {"data": "ok"}
     assert mock_req.call_count == 2
+    assert mock_req.call_args.kwargs["timeout"] == (10, 60)
 
 
 # ── _request: 4xx 抛出异常 ──

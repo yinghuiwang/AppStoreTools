@@ -6,7 +6,7 @@ import webbrowser
 
 import typer
 
-from asc.web.daemon import get_status, start_background, stop
+from asc.web.daemon import get_status, is_loopback_host, start_background, stop
 
 web_app = typer.Typer(help="本地 Web UI", invoke_without_command=True)
 
@@ -16,6 +16,11 @@ def _open_browser(url: str) -> None:
 
 
 def _run_foreground(host: str, port: int, no_open: bool) -> None:
+    if not is_loopback_host(host):
+        raise typer.BadParameter(
+            "Web UI only supports loopback hosts (127.0.0.1, ::1, or localhost)",
+            param_hint="--host",
+        )
     import uvicorn
     from asc.web.server import create_app
 
@@ -55,6 +60,12 @@ def cmd_web(
     """
     if ctx.invoked_subcommand is not None:
         return
+
+    if not is_loopback_host(host):
+        raise typer.BadParameter(
+            "Web UI only supports loopback hosts (127.0.0.1, ::1, or localhost)",
+            param_hint="--host",
+        )
 
     if foreground:
         _run_foreground(host, port, no_open)
