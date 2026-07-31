@@ -50,6 +50,8 @@
   var connectionStatus = tt("drawer.waiting");
   var closeTransitionHandler = null;
   var closeFallbackTimer = null;
+  var reconnectTimer = null;
+  var reconnectAttempts = 0;
   var backgroundInertEntries = null;
   var previouslyFocused = null;
   var suppressNextOutsideClick = false;
@@ -277,7 +279,15 @@
     updatePosition();
   }
 
+  function clearReconnectTimer() {
+    if (reconnectTimer != null) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+  }
+
   function closeSource() {
+    clearReconnectTimer();
     if (eventSource) eventSource.close();
     eventSource = null;
   }
@@ -293,6 +303,7 @@
     newLogCount = 0;
     logEntries = [];
     onlyErrors = false;
+    reconnectAttempts = 0;
     if (errorsControl) errorsControl.setAttribute("aria-pressed", "false");
     followPaused = false;
     if (followControl) followControl.checked = true;
@@ -309,15 +320,44 @@
     }
   }
 
+  function scheduleReconnect(taskId, reasonStatus) {
+    if (!isDrawerOpen() || activeTaskId !== String(taskId)) return;
+    clearReconnectTimer();
+    setConnectionStatus(reasonStatus || tt("drawer.reconnecting"));
+    // Close the dead EventSource so the browser does not also auto-retry it.
+    if (eventSource) {
+      eventSource.close();
+      eventSource = null;
+    }
+    var delay = Math.min(8000, 500 * Math.pow(2, Math.min(reconnectAttempts, 4)));
+    reconnectAttempts += 1;
+    reconnectTimer = setTimeout(function () {
+      reconnectTimer = null;
+      if (!isDrawerOpen() || activeTaskId !== String(taskId)) return;
+      startStream(taskId);
+    }, delay);
+  }
+
   function startStream(taskId) {
-    var source = new EventSource("/api/task/" + encodeURIComponent(taskId) + "/stream?after=0");
+    clearReconnectTimer();
+    var after = Number.isFinite(lastSeq) && lastSeq > 0 ? lastSeq : 0;
+    var source = new EventSource(
+      "/api/task/" + encodeURIComponent(taskId) + "/stream?after=" + encodeURIComponent(String(after))
+    );
     eventSource = source;
-    // EventSource automatically sends Last-Event-ID when it reconnects.
     source.onopen = function () {
-      if (eventSource === source) setConnectionStatus(tt("drawer.connected"), true);
+      if (eventSource !== source) return;
+      reconnectAttempts = 0;
+      setConnectionStatus(tt("drawer.connected"), true);
     };
     source.onerror = function () {
-      if (eventSource === source) setConnectionStatus(tt("drawer.reconnecting"));
+      if (eventSource !== source) return;
+      // CONNECTING: browser may still auto-retry; CLOSED: we must restart manually.
+      if (source.readyState === EventSource.CLOSED) {
+        scheduleReconnect(taskId, tt("drawer.reconnecting"));
+      } else {
+        setConnectionStatus(tt("drawer.reconnecting"));
+      }
     };
     source.addEventListener("log", function (event) {
       if (eventSource !== source) return;
@@ -352,7 +392,8 @@
     source.addEventListener("error_event", function (event) {
       if (eventSource !== source) return;
       if (event.data === "timeout") {
-        setConnectionStatus(tt("drawer.timeout"));
+        // Server ends the stream after SSE_ABSOLUTE_TIMEOUT_SEC; resume from lastSeq.
+        scheduleReconnect(taskId, tt("drawer.timeout"));
         return;
       }
       finishStream(source, tt("drawer.failed"), "onError", event.data);

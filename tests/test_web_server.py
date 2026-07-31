@@ -2,6 +2,9 @@
 from __future__ import annotations
 from datetime import datetime
 import inspect
+from pathlib import Path
+import shutil
+import subprocess
 import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import patch
@@ -1798,11 +1801,114 @@ def test_task_log_drawer_javascript_exposes_public_api(client):
     assert "data-task-log-yield" in body
     assert "/api/task/" in body
     assert '"/status"' in body or "/status" in body
-    assert "stream?after=0" in body
+    assert "stream?after=" in body
+    assert "scheduleReconnect" in body
+    assert "EventSource.CLOSED" in body
     assert "data-task-log-errors" in body
     assert "data-task-log-follow" in body
     assert "drawer.missing" in body or "window.t(\"drawer.missing\")" in body or "任务不存在或已被清理" in body
 
+
+def test_task_log_drawer_reconnects_after_timeout(client):
+    """Timeout must explicitly reopen the stream from lastSeq (not just update status)."""
+    body = client.get("/static/task-log-drawer.js").text
+    assert "drawer.timeout" in body
+    assert "scheduleReconnect" in body
+    # after= cursor must advance with lastSeq so a fresh EventSource does not rely
+    # solely on Last-Event-ID (which resets when constructing a new EventSource).
+    assert "lastSeq" in body
+    assert '"/stream?after="' in body or "/stream?after=" in body
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="requires Node.js to exercise browser JavaScript")
+def test_task_log_drawer_timeout_reconnect_resumes_from_last_sequence():
+    """A timeout must reopen EventSource using the last delivered log sequence."""
+    script_path = Path(__file__).parents[1] / "src/asc/web/static/task-log-drawer.js"
+    harness = r'''
+const fs = require("fs");
+const source = fs.readFileSync(process.argv[1], "utf8");
+
+const timers = [];
+global.setTimeout = (fn, delay) => {
+  const timer = { fn, delay, cancelled: false };
+  timers.push(timer);
+  return timer;
+};
+global.clearTimeout = (timer) => { if (timer) timer.cancelled = true; };
+
+function classList() {
+  const values = new Set();
+  return {
+    add: (value) => values.add(value),
+    remove: (value) => values.delete(value),
+    contains: (value) => values.has(value),
+    toggle: (value, enabled) => enabled ? values.add(value) : values.delete(value)
+  };
+}
+const parent = { children: [] };
+const drawer = {
+  classList: classList(), parentElement: parent, nextSibling: null, hidden: true,
+  setAttribute() {}, getAttribute() { return null; }, hasAttribute() { return false; },
+  removeAttribute() {}, addEventListener() {}, removeEventListener() {},
+  querySelector() { return null; }, querySelectorAll() { return []; }, contains() { return false; },
+  get offsetWidth() { return 1; }
+};
+parent.children = [drawer];
+global.document = {
+  activeElement: null,
+  getElementById: (id) => id === "task-log-drawer" ? drawer : null,
+  querySelector: () => null,
+  querySelectorAll: () => [],
+  addEventListener() {}, getSelection: () => null
+};
+global.window = {
+  t: (key) => key,
+  matchMedia: () => ({ matches: true, addEventListener() {} })
+};
+global.fetch = () => Promise.resolve({ status: 200, ok: true });
+
+class FakeEventSource {
+  static CLOSED = 2;
+  static instances = [];
+  constructor(url) {
+    this.url = url;
+    this.readyState = 1;
+    this.listeners = {};
+    this.closed = false;
+    FakeEventSource.instances.push(this);
+  }
+  addEventListener(type, handler) { this.listeners[type] = handler; }
+  close() { this.closed = true; this.readyState = FakeEventSource.CLOSED; }
+  emit(type, data, lastEventId) {
+    this.listeners[type]({ data, lastEventId: lastEventId || "" });
+  }
+}
+global.EventSource = FakeEventSource;
+
+eval(source);
+(async () => {
+  window.TaskLogDrawer.open("task-1");
+  await Promise.resolve();
+  await Promise.resolve();
+  const first = FakeEventSource.instances[0];
+  if (!first || !first.url.endsWith("/stream?after=0")) throw new Error("initial EventSource cursor is wrong");
+  first.emit("log", "line 7", "7");
+  first.emit("error_event", "timeout");
+  if (!first.closed) throw new Error("timed-out EventSource was not closed");
+  const reconnect = timers.find((timer) => timer.delay === 500 && !timer.cancelled);
+  if (!reconnect) throw new Error("timeout did not schedule reconnect");
+  reconnect.fn();
+  const second = FakeEventSource.instances[1];
+  if (!second || !second.url.endsWith("/stream?after=7")) throw new Error("reconnect did not resume from last sequence");
+})().catch((error) => { console.error(error.stack || error); process.exitCode = 1; });
+'''
+    result = subprocess.run(
+        ["node", "-e", harness, str(script_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
 def test_task_log_drawer_forwards_phase_fields(client):
     body = client.get("/static/task-log-drawer.js").text

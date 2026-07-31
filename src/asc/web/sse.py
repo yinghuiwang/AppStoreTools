@@ -9,9 +9,16 @@ from typing import Generator
 
 
 def format_sse_event(event: str, data: str, event_id: int | str | None = None) -> str:
-    """Format a single SSE message frame."""
+    """Format a single SSE message frame.
+
+    Multiline ``data`` is emitted as multiple ``data:`` lines per the SSE spec so
+    embedded newlines cannot prematurely terminate or corrupt the event stream.
+    """
     prefix = f"id: {event_id}\n" if event_id is not None else ""
-    return f"{prefix}event: {event}\ndata: {data}\n\n"
+    # Normalize newlines; each logical line becomes its own data: field.
+    normalized = str(data).replace("\r\n", "\n").replace("\r", "\n")
+    data_block = "".join(f"data: {line}\n" for line in normalized.split("\n"))
+    return f"{prefix}event: {event}\n{data_block}\n"
 
 
 class _QueueWriter(io.TextIOBase):

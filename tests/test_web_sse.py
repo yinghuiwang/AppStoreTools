@@ -26,6 +26,28 @@ def test_format_sse_event_includes_optional_id():
     assert result == "id: 3\nevent: log\ndata: hello\n\n"
 
 
+def test_format_sse_event_escapes_multiline_data():
+    """Embedded newlines must not terminate the SSE event early."""
+    result = format_sse_event("log", "line1\nline2\n\nline4", event_id=7)
+    assert result == (
+        "id: 7\n"
+        "event: log\n"
+        "data: line1\n"
+        "data: line2\n"
+        "data: \n"
+        "data: line4\n"
+        "\n"
+    )
+    # Following event stays intact after a multiline payload.
+    follow = format_sse_event("log", "next", event_id=8)
+    assert follow.startswith("id: 8\nevent: log\ndata: next\n")
+
+
+def test_format_sse_event_normalizes_crlf():
+    result = format_sse_event("log", "a\r\nb\rc")
+    assert result == "event: log\ndata: a\ndata: b\ndata: c\n\n"
+
+
 def test_capture_stdout_to_queue():
     import queue
     q = queue.Queue()
