@@ -304,6 +304,49 @@ def test_update_web_starter_schedules_restart_after_install(tmp_path, monkeypatc
     assert task["result"]["restarting"] is True
 
 
+def test_update_web_starter_continues_restart_when_finish_db_fails(tmp_path, monkeypatch):
+    """Install success must not be aborted by TaskStore finalize failures."""
+    from unittest.mock import MagicMock, patch
+
+    from asc.web import routes_api
+    from asc.web.tasks import TaskStore
+
+    store = TaskStore(tmp_path / "tasks.db")
+    monkeypatch.setattr(routes_api, "_task_store", store)
+    order: list[str] = []
+
+    def fake_run(store_arg, *, task_id=None, run=None, **kwargs):
+        reporter = MagicMock()
+        reporter.failed = False
+        result = run(reporter, MagicMock(is_set=MagicMock(return_value=False)))
+        assert result["success"] is True
+        assert "db_finalize_error" in result
+        return task_id
+
+    def boom_finish(*args, **kwargs):
+        order.append("finish")
+        raise RuntimeError("unable to open database file")
+
+    def tracked_restart(**kwargs):
+        order.append("restart")
+        return {"status": "scheduled", "delay": 1.5, "url": "http://127.0.0.1:8080"}
+
+    def tracked_marker(task_id, **kwargs):
+        order.append("marker")
+        return tmp_path / "update_restart.json"
+
+    with patch("asc.web.routes_api.start_background_task", side_effect=fake_run), \
+            patch("asc.commands.update_cmd._update_core", return_value=True), \
+            patch.object(routes_api, "_finish_task", side_effect=boom_finish), \
+            patch("asc.web.daemon.schedule_restart", side_effect=tracked_restart) as restart, \
+            patch("asc.web.daemon.write_update_restart_marker", side_effect=tracked_marker), \
+            patch("time.sleep"):
+        routes_api._start_update_task(version="0.1.25")
+
+    restart.assert_called_once_with(delay=1.5)
+    assert order == ["finish", "marker", "restart"]
+
+
 def test_update_web_starter_skips_restart_when_not_installed(tmp_path, monkeypatch):
     from unittest.mock import MagicMock, patch
 

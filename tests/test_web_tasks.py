@@ -406,3 +406,59 @@ def test_legacy_progress_defaults_phase_fields(tmp_path):
     assert task["progress"]["phase"] == ""
     assert task["progress"]["phase_index"] == 0
     assert task["progress"]["phase_total"] == 0
+
+
+def test_task_store_creates_missing_parent_directory(tmp_path):
+    db_path = tmp_path / "nested" / "state" / "tasks.db"
+    assert not db_path.parent.exists()
+
+    store = TaskStore(db_path)
+    task_id = store.create("update")
+    store.append_log(task_id, "hello")
+
+    assert db_path.exists()
+    assert db_path.parent.is_dir()
+    assert store.get(task_id)["logs"] == ["hello"]
+
+
+def test_append_logs_soft_fails_when_connect_broken(tmp_path, monkeypatch):
+    import sqlite3
+
+    store = TaskStore(tmp_path / "tasks.db")
+    task_id = store.create("update")
+
+    def boom():
+        raise sqlite3.OperationalError("unable to open database file")
+
+    monkeypatch.setattr(store, "_connect", boom)
+
+    assert store.append_logs(task_id, ["pip line"]) is False
+    assert store._db_write_failures >= 1
+
+
+def test_set_progress_soft_fails_when_connect_broken(tmp_path, monkeypatch):
+    import sqlite3
+
+    store = TaskStore(tmp_path / "tasks.db")
+    task_id = store.create("update")
+
+    def boom():
+        raise sqlite3.OperationalError("unable to open database file")
+
+    monkeypatch.setattr(store, "_connect", boom)
+
+    assert store.set_progress(task_id, 10, "downloading") is False
+
+
+def test_connect_rejects_directory_path_as_database(tmp_path):
+    import sqlite3
+
+    db_path = tmp_path / "tasks.db"
+    db_path.mkdir()
+    store = TaskStore.__new__(TaskStore)
+    store._db_path = db_path
+    store._last_db_error = ""
+    store._db_write_failures = 0
+
+    with pytest.raises(sqlite3.OperationalError, match="directory"):
+        store._connect()

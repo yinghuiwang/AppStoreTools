@@ -5,6 +5,7 @@ import copy
 import hashlib
 import json
 import re
+import sys
 import tempfile
 import time
 import uuid
@@ -249,8 +250,23 @@ def _finish_task(task_id: str, status: _TaskStatus, result: dict) -> None:
         current_value = getattr(current_status, "value", current_status)
         if current_value in {"done", "error", "canceled"}:
             return
-    _task_store.set_status(task_id, status)
-    _task_store.set_result(task_id, result)
+    try:
+        _task_store.set_status(task_id, status)
+        _task_store.set_result(task_id, result)
+    except Exception as exc:  # noqa: BLE001 — surface DB path; avoid silent hang
+        print(
+            f"⚠️  Failed to finalize task {task_id} in TaskStore: {exc}",
+            file=sys.stderr,
+        )
+        # Best-effort breadcrumb; may also fail if DB is down.
+        try:
+            _task_store.append_log(
+                task_id,
+                f"⚠️  任务状态写入失败（{exc}），请检查 ~/.config/asc/ 下的 tasks 数据库",
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        raise
     try:
         notifications.notify_task_finished(task_id, task_store=_task_store)
     except Exception as exc:
@@ -2430,7 +2446,17 @@ def _start_update_task(
             # Flush + persist DONE *before* scheduling kill so SSE clients receive
             # the terminal event, and recover-on-boot will not mark this task ERROR.
             reporter.flush()
-            _finish_task(task_id, _TaskStatus.DONE, result)
+            try:
+                _finish_task(task_id, _TaskStatus.DONE, result)
+            except Exception as finish_exc:  # noqa: BLE001
+                # Install already succeeded; keep going so restart can still load
+                # the new package. Post-restart recover may finalize the task.
+                result["db_finalize_error"] = str(finish_exc)
+                reporter.log(
+                    f"⚠️  更新已安装，但任务状态写入失败：{finish_exc}",
+                    level="error",
+                )
+                reporter.flush()
 
             if installed:
                 from asc.web.daemon import write_update_restart_marker
@@ -2454,7 +2480,10 @@ def _start_update_task(
                 reporter.log(msg)
                 reporter.flush()
                 # DONE already set; only refresh result/logs for clients that poll.
-                _task_store.set_result(task_id, result)
+                try:
+                    _task_store.set_result(task_id, result)
+                except Exception as exc:  # noqa: BLE001
+                    reporter.log(f"⚠️  无法刷新更新结果到任务库：{exc}", level="error")
             return result
         except ProcessCanceled:
             reporter.log("⏹ 用户已终止更新")

@@ -205,3 +205,29 @@ def test_fail_sets_failed_flag():
     r.fail("boom")
     assert r.failed is True
     assert ("error", "boom") in sink.logs
+
+
+def test_task_store_sink_flush_degrades_without_raising():
+    class FailingStore(MockTaskStore):
+        def append_logs(self, task_id, lines):
+            raise RuntimeError("unable to open database file")
+
+    store = FailingStore()
+    reporter = make_web_reporter(store, "task-db")
+    reporter.log("Collecting annotated-types")
+    # Must not raise into the update/pip streaming loop.
+    reporter.flush()
+    reporter.log("still going")
+    reporter.flush()
+
+
+def test_task_store_sink_progress_degrades_without_raising():
+    class FailingStore(MockTaskStore):
+        def set_progress(self, *args, **kwargs):
+            raise RuntimeError("unable to open database file")
+
+    store = FailingStore()
+    reporter = make_web_reporter(store, "task-db")
+    reporter.set_phases([("download", 100, "下载")])
+    reporter.phase("download")
+    reporter.progress(50, 100, msg="half")

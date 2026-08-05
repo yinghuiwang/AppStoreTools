@@ -4,12 +4,14 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import sys
+import time
 import uuid
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from threading import Event, Lock
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 
 class TaskStatus(str, Enum):
@@ -55,6 +57,8 @@ class TaskStore:
         self._lock = Lock()
         self._storage_path = storage_path
         self._db_path = self._resolve_db_path(storage_path)
+        self._last_db_error: str = ""
+        self._db_write_failures: int = 0
         if self._storage_path is not None:
             self._load()
         if self._db_path is not None:
@@ -91,7 +95,8 @@ class TaskStore:
         }
         with self._lock:
             if self._db_path is not None:
-                with self._connect() as conn:
+
+                def _write(conn: sqlite3.Connection) -> None:
                     conn.execute(
                         """INSERT INTO task_runs
                         (id, kind, profile, status, created_at, updated_at,
@@ -101,6 +106,8 @@ class TaskStore:
                         (task_id, kind, profile, TaskStatus.PENDING.value, now, now),
                     )
                     conn.execute("INSERT INTO task_order (task_id) VALUES (?)", (task_id,))
+
+                self._db_write(_write, critical=True)
                 self._cancel_events[task_id] = Event()
                 return task_id
             self._refresh_db()
@@ -131,21 +138,29 @@ class TaskStore:
     def append_log(self, task_id: str, line: str) -> None:
         self.append_logs(task_id, [line])
 
-    def append_logs(self, task_id: str, lines: list[str]) -> None:
-        """Append multiple log lines atomically, assigning contiguous sequences."""
+    def append_logs(self, task_id: str, lines: list[str]) -> bool:
+        """Append multiple log lines atomically, assigning contiguous sequences.
+
+        Returns False when the SQLite write fails after retries (degraded mode)
+        so callers such as pip progress streaming can keep running.
+        """
         if not lines:
-            return
+            return True
         with self._lock:
             if self._db_path is not None:
                 now = self._now()
-                with self._connect() as conn:
+
+                def _write(conn: sqlite3.Connection) -> None:
                     conn.execute("BEGIN IMMEDIATE")
-                    exists = conn.execute("SELECT 1 FROM task_runs WHERE id = ?", (task_id,)).fetchone()
+                    exists = conn.execute(
+                        "SELECT 1 FROM task_runs WHERE id = ?", (task_id,)
+                    ).fetchone()
                     if exists is None:
                         conn.rollback()
                         return
                     seq = conn.execute(
-                        "SELECT COALESCE(MAX(seq), 0) + 1 FROM task_logs WHERE task_id = ?", (task_id,)
+                        "SELECT COALESCE(MAX(seq), 0) + 1 FROM task_logs WHERE task_id = ?",
+                        (task_id,),
                     ).fetchone()[0]
                     conn.executemany(
                         "INSERT INTO task_logs (task_id, seq, message, created_at) VALUES (?, ?, ?, ?)",
@@ -154,14 +169,18 @@ class TaskStore:
                             for index, line in enumerate(lines)
                         ],
                     )
-                    conn.execute("UPDATE task_runs SET updated_at = ? WHERE id = ?", (now, task_id))
+                    conn.execute(
+                        "UPDATE task_runs SET updated_at = ? WHERE id = ?", (now, task_id)
+                    )
                     conn.commit()
-                return
+
+                return self._db_write(_write, critical=False)
             self._refresh_db()
             if task_id in self._tasks:
                 self._tasks[task_id]["logs"].extend(str(line) for line in lines)
                 self._tasks[task_id]["updated_at"] = self._now()
                 self._save()
+            return True
 
     def get_logs_after(self, task_id: str, seq: int = 0) -> list[dict[str, Any]]:
         """Return sequenced task logs after the supplied cursor."""
@@ -182,18 +201,21 @@ class TaskStore:
             ]
         return []
 
-    def set_status(self, task_id: str, status: TaskStatus) -> None:
+    def set_status(self, task_id: str, status: TaskStatus) -> bool:
         with self._lock:
             if self._db_path is not None:
                 normalized = self._normalize_status(status)
                 now = self._now()
                 completed_at = now if normalized in TERMINAL_STATUSES else None
-                with self._connect() as conn:
+
+                def _write(conn: sqlite3.Connection) -> None:
                     conn.execute(
-                        "UPDATE task_runs SET status = ?, updated_at = ?, completed_at = COALESCE(?, completed_at) WHERE id = ?",
+                        "UPDATE task_runs SET status = ?, updated_at = ?, "
+                        "completed_at = COALESCE(?, completed_at) WHERE id = ?",
                         (normalized.value, now, completed_at, task_id),
                     )
-                return
+
+                return self._db_write(_write, critical=True)
             self._refresh_db()
             if task_id in self._tasks:
                 normalized = self._normalize_status(status)
@@ -203,6 +225,7 @@ class TaskStore:
                 if normalized in TERMINAL_STATUSES:
                     self._tasks[task_id]["completed_at"] = now
                 self._save()
+            return True
 
     def request_cancel(self, task_id: str) -> bool:
         with self._lock:
@@ -255,21 +278,25 @@ class TaskStore:
                 self._cancel_events[task_id] = event
             return event
 
-    def set_result(self, task_id: str, result: Any) -> None:
+    def set_result(self, task_id: str, result: Any) -> bool:
         with self._lock:
             if self._db_path is not None:
                 now = self._now()
-                with self._connect() as conn:
+                payload = json.dumps(result, ensure_ascii=False)
+
+                def _write(conn: sqlite3.Connection) -> None:
                     conn.execute(
                         "UPDATE task_runs SET result_json = ?, updated_at = ? WHERE id = ?",
-                        (json.dumps(result, ensure_ascii=False), now, task_id),
+                        (payload, now, task_id),
                     )
-                return
+
+                return self._db_write(_write, critical=True)
             self._refresh_db()
             if task_id in self._tasks:
                 self._tasks[task_id]["result"] = result
                 self._tasks[task_id]["updated_at"] = self._now()
                 self._save()
+            return True
 
     def set_progress(
         self,
@@ -281,7 +308,7 @@ class TaskStore:
         phase_label: str = "",
         phase_index: int = 0,
         phase_total: int = 0,
-    ) -> None:
+    ) -> bool:
         progress = {
             "pct": int(pct),
             "msg": msg,
@@ -293,7 +320,8 @@ class TaskStore:
         with self._lock:
             if self._db_path is not None:
                 now = self._now()
-                with self._connect() as conn:
+
+                def _write(conn: sqlite3.Connection) -> None:
                     conn.execute(
                         """UPDATE task_runs SET progress_pct = ?, progress_msg = ?,
                            progress_phase = ?, progress_phase_label = ?,
@@ -310,12 +338,14 @@ class TaskStore:
                             task_id,
                         ),
                     )
-                return
+
+                return self._db_write(_write, critical=False)
             self._refresh_db()
             if task_id in self._tasks:
                 self._tasks[task_id]["progress"] = progress
                 self._tasks[task_id]["updated_at"] = self._now()
                 self._save()
+            return True
 
     def list_recent(self, limit: int = 20) -> list[dict]:
         with self._lock:
@@ -596,13 +626,78 @@ class TaskStore:
         if storage_path is None:
             return None
         if storage_path.suffix.lower() == ".json":
-            return storage_path.with_suffix(".db")
-        return storage_path
+            path = storage_path.with_suffix(".db")
+        else:
+            path = storage_path
+        path = path.expanduser()
+        if not path.is_absolute():
+            path = Path.cwd() / path
+        # strict=False so missing parent dirs do not raise; we create them in _connect.
+        return path.resolve(strict=False)
+
+    def _ensure_db_dir(self) -> Path:
+        assert self._db_path is not None
+        parent = self._db_path.parent
+        try:
+            parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise sqlite3.OperationalError(
+                f"unable to create database directory {parent}: {exc}"
+            ) from exc
+        if parent.exists() and not os.access(parent, os.W_OK | os.X_OK):
+            raise sqlite3.OperationalError(
+                f"unable to open database file: {self._db_path} "
+                f"(directory not writable: {parent})"
+            )
+        if self._db_path.exists() and self._db_path.is_dir():
+            raise sqlite3.OperationalError(
+                f"unable to open database file: {self._db_path} (path is a directory)"
+            )
+        return parent
+
+    def _format_db_error(self, exc: BaseException) -> str:
+        return f"TaskStore DB error ({self._db_path}): {exc}"
+
+    def _note_db_error(self, exc: BaseException) -> None:
+        self._db_write_failures += 1
+        msg = self._format_db_error(exc)
+        if msg == self._last_db_error:
+            return
+        self._last_db_error = msg
+        print(f"⚠️  {msg}", file=sys.stderr)
+
+    def _db_write(self, writer: Callable[[sqlite3.Connection], None], *, critical: bool) -> bool:
+        """Run *writer* with retries. Soft-fail (return False) unless *critical*."""
+        attempts = 3 if critical else 2
+        last_exc: BaseException | None = None
+        for attempt in range(attempts):
+            try:
+                with self._connect() as conn:
+                    writer(conn)
+                return True
+            except (OSError, sqlite3.Error) as exc:
+                last_exc = exc
+                if attempt + 1 < attempts:
+                    time.sleep(0.05 * (attempt + 1))
+                    continue
+                self._note_db_error(exc)
+                if critical:
+                    # Keep a clear path-bearing message for callers / task fail logs.
+                    raise sqlite3.OperationalError(self._format_db_error(exc)) from exc
+                return False
+        if last_exc is not None and critical:
+            raise sqlite3.OperationalError(self._format_db_error(last_exc)) from last_exc
+        return False
 
     def _connect(self) -> sqlite3.Connection:
         assert self._db_path is not None
-        self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(str(self._db_path), timeout=30)
+        self._ensure_db_dir()
+        try:
+            conn = sqlite3.connect(str(self._db_path), timeout=30)
+        except sqlite3.Error as exc:
+            raise sqlite3.OperationalError(
+                f"unable to open database file: {self._db_path} ({exc})"
+            ) from exc
         conn.row_factory = sqlite3.Row
         return conn
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import time
 from typing import Any, Protocol, Sequence
 
@@ -55,6 +56,7 @@ class TaskStoreSink:
         self._task_id = task_id
         self._pending_logs: list[str] = []
         self._last_log_flush = time.monotonic()
+        self._flush_failures = 0
 
     def on_log(self, message: str, *, level: str = "info") -> None:
         self._pending_logs.append(message)
@@ -75,16 +77,21 @@ class TaskStoreSink:
         phase_index: int,
         phase_total: int,
     ) -> None:
-        self.flush()
-        self._store.set_progress(
-            self._task_id,
-            pct,
-            msg,
-            phase=phase,
-            phase_label=phase_label,
-            phase_index=phase_index,
-            phase_total=phase_total,
-        )
+        # Never let a progress DB write abort a long-running job (e.g. pip update).
+        try:
+            self.flush()
+            self._store.set_progress(
+                self._task_id,
+                pct,
+                msg,
+                phase=phase,
+                phase_label=phase_label,
+                phase_index=phase_index,
+                phase_total=phase_total,
+            )
+        except Exception as exc:  # noqa: BLE001 — sink must not raise into workers
+            self._flush_failures += 1
+            print(f"⚠️  Task progress update failed: {exc}", file=sys.stderr)
 
     def flush(self) -> None:
         """Persist accumulated subprocess output in one database transaction."""
@@ -93,12 +100,30 @@ class TaskStoreSink:
         messages = self._pending_logs
         self._pending_logs = []
         self._last_log_flush = time.monotonic()
-        append_logs = getattr(self._store, "append_logs", None)
-        if callable(append_logs):
-            append_logs(self._task_id, messages)
-        else:  # Compatibility with third-party TaskStore-like sinks.
-            for message in messages:
-                self._store.append_log(self._task_id, message)
+        try:
+            append_logs = getattr(self._store, "append_logs", None)
+            if callable(append_logs):
+                ok = append_logs(self._task_id, messages)
+                # Soft-fail stores return False; re-queue a bounded batch for retry.
+                if ok is False:
+                    self._requeue_logs(messages)
+                    self._flush_failures += 1
+                    print(
+                        f"⚠️  Task log flush degraded for {self._task_id}",
+                        file=sys.stderr,
+                    )
+            else:  # Compatibility with third-party TaskStore-like sinks.
+                for message in messages:
+                    self._store.append_log(self._task_id, message)
+        except Exception as exc:  # noqa: BLE001 — keep install/update running
+            self._requeue_logs(messages)
+            self._flush_failures += 1
+            print(f"⚠️  Task log flush failed: {exc}", file=sys.stderr)
+
+    def _requeue_logs(self, messages: list[str]) -> None:
+        # Prefer newest context; avoid unbounded growth if DB stays down.
+        merged = messages + self._pending_logs
+        self._pending_logs = merged[-self._MAX_PENDING_LOGS :]
 
 
 class TaskReporter:

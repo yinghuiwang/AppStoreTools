@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import threading
 from threading import Event
 from typing import Any, Callable
@@ -45,7 +46,10 @@ def start_background_task(
         # Cancel (or other terminal finish) may win the race before the worker starts.
         if _is_terminal(store, task_id):
             return
-        store.set_status(task_id, TaskStatus.RUNNING)
+        try:
+            store.set_status(task_id, TaskStatus.RUNNING)
+        except Exception as exc:  # noqa: BLE001
+            print(f"⚠️  Failed to mark task {task_id} running: {exc}", file=sys.stderr)
         reporter = make_web_reporter(store, task_id, verbose=verbose)
         cancel_event = store.cancel_event(task_id)
         try:
@@ -62,15 +66,27 @@ def start_background_task(
         except ProcessCanceled:
             if _is_terminal(store, task_id):
                 return
-            store.set_status(task_id, TaskStatus.CANCELED)
+            try:
+                store.set_status(task_id, TaskStatus.CANCELED)
+            except Exception as exc:  # noqa: BLE001
+                print(f"⚠️  Failed to mark task {task_id} canceled: {exc}", file=sys.stderr)
         except Exception as exc:
             if not reporter.failed:
                 reporter.fail(str(exc))
             if _is_terminal(store, task_id):
                 return
-            store.set_status(task_id, TaskStatus.ERROR)
+            try:
+                store.set_status(task_id, TaskStatus.ERROR)
+            except Exception as status_exc:  # noqa: BLE001
+                print(
+                    f"⚠️  Failed to mark task {task_id} error after {exc}: {status_exc}",
+                    file=sys.stderr,
+                )
         finally:
-            reporter.flush()
+            try:
+                reporter.flush()
+            except Exception as flush_exc:  # noqa: BLE001
+                print(f"⚠️  Task reporter flush failed: {flush_exc}", file=sys.stderr)
 
     threading.Thread(target=_worker, daemon=True).start()
     return task_id
