@@ -183,6 +183,61 @@ def test_task_store_marks_interrupted_tasks_after_restart(tmp_path):
     assert "Task interrupted" in task["result"]["error"]
 
 
+def test_task_store_recovers_even_when_legacy_json_exists(tmp_path):
+    """Legacy web_tasks.json must not skip SQLite recover-on-boot."""
+    storage_path = tmp_path / "web_tasks.json"
+    storage_path.write_text(
+        '{"version": 1, "order": ["legacy"], "tasks": {'
+        '"legacy": {"id": "legacy", "kind": "build", "status": "done", '
+        '"logs": ["old"], "progress": {"pct": 100, "msg": "done"}}}}',
+        encoding="utf-8",
+    )
+    store = TaskStore(storage_path)
+    stuck_id = store.create("update", profile="system")
+    store.set_status(stuck_id, TaskStatus.RUNNING)
+    store.set_result(stuck_id, None)
+
+    restored = TaskStore(storage_path)
+    task = restored.get(stuck_id)
+    assert task["status"] == TaskStatus.ERROR
+    assert "Task interrupted" in task["result"]["error"]
+    assert restored.get("legacy")["status"] == TaskStatus.DONE
+
+
+def test_task_store_keeps_successful_update_done_after_restart(tmp_path):
+    storage_path = tmp_path / "tasks.db"
+    store = TaskStore(storage_path)
+    task_id = store.create("update", profile="system")
+    store.set_status(task_id, TaskStatus.DONE)
+    store.set_result(
+        task_id,
+        {"success": True, "installed": True, "restarting": True},
+    )
+
+    restored = TaskStore(storage_path)
+    task = restored.get(task_id)
+    assert task["status"] == TaskStatus.DONE
+    assert task["result"]["success"] is True
+    assert task["result"]["restarting"] is False
+    assert task["result"]["restarted"] is True
+    assert any("重启" in line for line in task["logs"])
+
+
+def test_task_store_finalizes_running_update_with_success_result(tmp_path):
+    storage_path = tmp_path / "tasks.db"
+    store = TaskStore(storage_path)
+    task_id = store.create("update", profile="system")
+    store.set_status(task_id, TaskStatus.RUNNING)
+    store.set_result(task_id, {"success": True, "installed": True, "restarting": True})
+
+    restored = TaskStore(storage_path)
+    task = restored.get(task_id)
+    assert task["status"] == TaskStatus.DONE
+    assert task["result"]["success"] is True
+    assert task["result"]["restarted"] is True
+    assert task["result"]["restarting"] is False
+
+
 def test_task_store_ignores_invalid_storage_file(tmp_path):
     storage_path = tmp_path / "web_tasks.json"
     storage_path.write_text("{not-json", encoding="utf-8")

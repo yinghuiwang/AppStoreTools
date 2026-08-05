@@ -624,12 +624,76 @@ def test_update_page_mentions_auto_restart(client):
     assert "waitForWebRestart" in resp.text
     assert "restoreUpdateCompletionIfNeeded" in resp.text
     assert "sawDown" in resp.text
+    assert "boot_id" in resp.text
+    assert "/api/update/post-restart" in resp.text
+    assert "showUpdateCompletion" in resp.text
+    assert "old_pid" in resp.text
+    assert "isNewProcess" in resp.text
     assert ("update.restarting" in resp.text) or ("正在重启" in resp.text) or ("Restarting Web UI" in resp.text)
     # Done status takes priority over restarting in the title expression
     assert "status === 'done' ? window.t('update.done')" in resp.text
     assert "onProgress:" in resp.text
     assert "progress-track" in resp.text
     assert "d.progress = 100" in resp.text
+
+
+def test_update_post_restart_finalizes_done_task(tmp_path, monkeypatch, client):
+    from asc.web import daemon, routes_api
+    from asc.web.tasks import TaskStatus, TaskStore
+
+    store = TaskStore(tmp_path / "tasks.db")
+    monkeypatch.setattr(routes_api, "_task_store", store)
+    monkeypatch.setattr(daemon, "_STATE_DIR", tmp_path)
+
+    task_id = store.create("update", profile="system")
+    store.set_status(task_id, TaskStatus.DONE)
+    store.set_result(task_id, {"success": True, "installed": True, "restarting": True})
+    daemon.write_update_restart_marker(task_id, installed=True)
+
+    resp = client.get("/api/update/post-restart")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ready"] is True
+    assert data["pending"] is True
+    assert data["task_id"] == task_id
+    assert data["status"] == "done"
+    assert data["boot_id"]
+    assert data["result"]["restarting"] is False
+    assert data["result"]["restarted"] is True
+    assert data["pid"]
+    assert data["marker"]["old_pid"]
+
+    task = store.get(task_id)
+    assert task["status"] == TaskStatus.DONE
+    assert task["result"]["restarting"] is False
+
+    ack = client.post("/api/update/post-restart/ack")
+    assert ack.status_code == 200
+    assert ack.json()["cleared"] is True
+    assert daemon.read_update_restart_marker() is None
+
+
+def test_update_post_restart_recovers_running_success(tmp_path, monkeypatch, client):
+    from asc.web import daemon, routes_api
+    from asc.web.tasks import TaskStatus, TaskStore
+
+    store = TaskStore(tmp_path / "tasks.db")
+    monkeypatch.setattr(daemon, "_STATE_DIR", tmp_path)
+
+    task_id = store.create("update", profile="system")
+    store.set_status(task_id, TaskStatus.RUNNING)
+    store.set_result(task_id, {"success": True, "installed": True, "restarting": True})
+    daemon.write_update_restart_marker(task_id)
+
+    # Simulate a brand-new process: reload store with recover, then serve it.
+    recovered = TaskStore(tmp_path / "tasks.db")
+    monkeypatch.setattr(routes_api, "_task_store", recovered)
+
+    resp = client.get("/api/update/post-restart")
+    data = resp.json()
+    assert data["pending"] is True
+    assert data["status"] == "done"
+    assert recovered.get(task_id)["status"] == TaskStatus.DONE
 
 def test_profiles_page_returns_200(client):
     resp = client.get("/profiles")

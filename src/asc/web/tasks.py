@@ -59,10 +59,12 @@ class TaskStore:
             self._load()
         if self._db_path is not None:
             self._init_db()
-            if not self._tasks:
-                self._load_db(recover=True)
-            elif self._db_is_empty():
+            # Legacy JSON may populate ``_tasks`` while SQLite is already the live
+            # store. Always migrate-then-reload from DB so recover cannot be skipped
+            # (otherwise RUNNING update tasks survive process restarts forever).
+            if self._db_is_empty() and self._tasks:
                 self._save()
+            self._load_db(recover=True)
 
     def create(self, kind: str, *, profile: str = "") -> str:
         task_id = str(uuid.uuid4())
@@ -470,20 +472,30 @@ class TaskStore:
         status = self._normalize_status(task.get("status"))
         result = task.get("result")
         logs = task.get("logs") if isinstance(task.get("logs"), list) else []
+        kind = str(task.get("kind") or "unknown")
         if status in {TaskStatus.PENDING, TaskStatus.RUNNING}:
             now = self._now()
-            status = TaskStatus.ERROR
-            logs = list(logs)
-            logs.append("⚠️ 服务重启，任务已中断")
-            result = {"success": False, "error": "Task interrupted by server restart"}
-            task["updated_at"] = now
-            task["completed_at"] = now
+            recovered = self._recover_non_terminal_task(
+                {
+                    "kind": kind,
+                    "status": status,
+                    "result": result if isinstance(result, dict) else None,
+                    "logs": list(logs),
+                    "updated_at": now,
+                    "completed_at": now,
+                }
+            )
+            status = recovered["status"]
+            result = recovered["result"]
+            logs = recovered["logs"]
+            task["updated_at"] = recovered["updated_at"]
+            task["completed_at"] = recovered["completed_at"]
 
         now = self._now()
 
         return {
             "id": task.get("id") or task_id,
-            "kind": task.get("kind") or "unknown",
+            "kind": kind,
             "profile": task.get("profile") or "",
             "status": status,
             "logs": logs,
@@ -493,6 +505,45 @@ class TaskStore:
             "completed_at": task.get("completed_at"),
             "progress": self._normalize_progress(task.get("progress")),
             "cancel_requested": bool(task.get("cancel_requested")),
+        }
+
+    @staticmethod
+    def _update_result_looks_successful(result: Any) -> bool:
+        if not isinstance(result, dict):
+            return False
+        return bool(
+            result.get("success") is True
+            or result.get("restarting") is True
+            or result.get("installed") is True
+            or result.get("restarted") is True
+        )
+
+    def _recover_non_terminal_task(self, task: dict) -> dict:
+        """Finalize or interrupt a PENDING/RUNNING task after process restart."""
+        now = self._now()
+        kind = str(task.get("kind") or "")
+        result = task.get("result") if isinstance(task.get("result"), dict) else None
+        logs = list(task.get("logs") or [])
+        if kind == "update" and self._update_result_looks_successful(result):
+            merged = dict(result or {})
+            merged["success"] = True
+            merged["restarting"] = False
+            merged["restarted"] = True
+            logs.append("✅ 服务已重启，更新任务已收尾")
+            return {
+                "status": TaskStatus.DONE,
+                "result": merged,
+                "logs": logs,
+                "updated_at": now,
+                "completed_at": task.get("completed_at") or now,
+            }
+        logs.append("⚠️ 服务重启，任务已中断")
+        return {
+            "status": TaskStatus.ERROR,
+            "result": {"success": False, "error": "Task interrupted by server restart"},
+            "logs": logs,
+            "updated_at": now,
+            "completed_at": now,
         }
 
     def _normalize_status(self, value: Any) -> TaskStatus:
@@ -640,13 +691,33 @@ class TaskStore:
         changed = False
         for task_id in list(self._order):
             task = self._tasks[task_id]
-            if self._normalize_status(task["status"]) in {TaskStatus.PENDING, TaskStatus.RUNNING}:
-                task["status"] = TaskStatus.ERROR
-                task["completed_at"] = self._now()
-                task["updated_at"] = task["completed_at"]
-                task["result"] = {"success": False, "error": "Task interrupted by server restart"}
-                task["logs"].append("⚠️ 服务重启，任务已中断")
-                changed = True
+            if self._normalize_status(task["status"]) not in {
+                TaskStatus.PENDING,
+                TaskStatus.RUNNING,
+            }:
+                # Successful update may still advertise restarting=true after the
+                # new process boots; clear that flag so clients see a finished task.
+                if (
+                    str(task.get("kind") or "") == "update"
+                    and self._normalize_status(task["status"]) == TaskStatus.DONE
+                    and isinstance(task.get("result"), dict)
+                    and task["result"].get("restarting") is True
+                ):
+                    result = dict(task["result"])
+                    result["restarting"] = False
+                    result["restarted"] = True
+                    task["result"] = result
+                    task["updated_at"] = self._now()
+                    task["logs"].append("✅ Web UI 已重启，更新完成")
+                    changed = True
+                continue
+            recovered = self._recover_non_terminal_task(task)
+            task["status"] = recovered["status"]
+            task["result"] = recovered["result"]
+            task["logs"] = recovered["logs"]
+            task["updated_at"] = recovered["updated_at"]
+            task["completed_at"] = recovered["completed_at"]
+            changed = True
         if changed:
             self._save()
 

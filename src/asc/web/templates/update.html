@@ -264,6 +264,7 @@
 <script>
 const ASC_UPDATE_TASK_KEY = 'asc_update_task';
 const ASC_UPDATE_DONE_KEY = 'asc_update_done';
+const ASC_UPDATE_BOOT_KEY = 'asc_update_boot';
 
 function updateLogOptions() {
   const root = document.querySelector('[x-data]');
@@ -285,6 +286,7 @@ function clearUpdateSession() {
   try {
     sessionStorage.removeItem(ASC_UPDATE_TASK_KEY);
     sessionStorage.removeItem(ASC_UPDATE_DONE_KEY);
+    sessionStorage.removeItem(ASC_UPDATE_BOOT_KEY);
   } catch (e) { /* ignore */ }
 }
 
@@ -299,34 +301,86 @@ function rememberUpdateDone(taskId, restarting) {
   } catch (e) { /* ignore */ }
 }
 
+function ackPostRestart() {
+  return fetch('/api/update/post-restart/ack', { method: 'POST', cache: 'no-store' })
+    .catch(() => null);
+}
+
+function showUpdateCompletion(d, taskId) {
+  d.taskId = taskId;
+  d.step = 2;
+  d.status = 'done';
+  d.progress = 100;
+  d.restarting = false;
+  d.progressMsg = window.t('update.done');
+  clearUpdateSession();
+  ackPostRestart();
+  checkUpdate();
+}
+
 /**
- * Wait until the Web UI has actually gone down and come back.
- * A plain 200 is not enough — that would succeed against the still-running old process.
+ * Wait until the Web UI process has actually been replaced.
+ * Prefer boot_id / pid change; fall back to observing downtime then recovery.
+ * A plain 200 alone is not enough — that succeeds against the still-running old process.
  */
 function waitForWebRestart(maxMs = 120000) {
   const started = Date.now();
   let sawDown = false;
+  let initialBootId = null;
+
+  const probe = () => fetch('/api/update/post-restart', { cache: 'no-store' })
+    .then((r) => {
+      if (!r.ok) throw new Error('not ready');
+      return r.json();
+    });
+
+  const isNewProcess = (data) => {
+    if (!data) return false;
+    if (initialBootId && data.boot_id && data.boot_id !== initialBootId) return true;
+    const oldPid = data.marker && data.marker.old_pid;
+    if (data.pending && oldPid && data.pid && Number(data.pid) !== Number(oldPid)) {
+      return true;
+    }
+    return false;
+  };
+
   return new Promise((resolve) => {
     const tick = () => {
       if (Date.now() - started > maxMs) {
         resolve(sawDown);
         return;
       }
-      fetch('/api/update/check', { cache: 'no-store' })
-        .then((r) => {
-          if (!r.ok) throw new Error('not ready');
-          return r.json();
-        })
-        .then(() => {
-          if (sawDown) resolve(true);
-          else setTimeout(tick, 700);
+      probe()
+        .then((data) => {
+          if (!initialBootId && data.boot_id) initialBootId = data.boot_id;
+          if (sawDown || isNewProcess(data)) {
+            resolve(true);
+            return;
+          }
+          setTimeout(tick, 700);
         })
         .catch(() => {
           sawDown = true;
           setTimeout(tick, 700);
         });
     };
-    setTimeout(tick, 400);
+    probe()
+      .then((data) => {
+        initialBootId = data.boot_id || null;
+        try {
+          if (initialBootId) sessionStorage.setItem(ASC_UPDATE_BOOT_KEY, initialBootId);
+        } catch (e) { /* ignore */ }
+        // Already talking to the replacement process (SSE done arrived late).
+        if (isNewProcess(data)) {
+          resolve(true);
+          return;
+        }
+        setTimeout(tick, 400);
+      })
+      .catch(() => {
+        sawDown = true;
+        setTimeout(tick, 400);
+      });
   });
 }
 
@@ -351,7 +405,7 @@ function handleUpdateDone(d) {
           if (ok) location.reload();
           else {
             d.restarting = false;
-            checkUpdate();
+            showUpdateCompletion(d, taskId);
           }
         });
       }
@@ -366,7 +420,7 @@ function handleUpdateDone(d) {
         if (ok) location.reload();
         else {
           d.restarting = false;
-          checkUpdate();
+          showUpdateCompletion(d, taskId);
         }
       });
     });
@@ -384,28 +438,55 @@ function startUpdateTask(taskId) {
   TaskLogDrawer.open(taskId, updateLogOptions());
 }
 
-/** After a hot-restart reload, restore the completion card from sessionStorage. */
+/** After a hot-restart reload, restore the completion card from sessionStorage / handshake. */
 function restoreUpdateCompletionIfNeeded() {
   const root = document.querySelector('[x-data]');
   if (!root || !window.Alpine) return;
+  const d = Alpine.$data(root);
+
   let saved = null;
   try {
     saved = JSON.parse(sessionStorage.getItem(ASC_UPDATE_DONE_KEY) || 'null');
   } catch (e) {
     saved = null;
   }
-  if (!saved || !saved.taskId || !saved.at || (Date.now() - saved.at) > 15 * 60 * 1000) {
+  if (saved && saved.taskId && saved.at && (Date.now() - saved.at) <= 15 * 60 * 1000) {
+    showUpdateCompletion(d, saved.taskId);
     return;
   }
-  const d = Alpine.$data(root);
-  d.taskId = saved.taskId;
-  d.step = 2;
-  d.status = 'done';
-  d.progress = 100;
-  d.restarting = false;
-  d.progressMsg = window.t('update.done');
-  clearUpdateSession();
-  checkUpdate();
+
+  let taskId = null;
+  try { taskId = sessionStorage.getItem(ASC_UPDATE_TASK_KEY); } catch (e) { taskId = null; }
+
+  fetch('/api/update/post-restart', { cache: 'no-store' })
+    .then((r) => r.ok ? r.json() : null)
+    .then((data) => {
+      if (!data) return;
+      const id = data.task_id || taskId;
+      if (!id) return;
+      const status = data.status || '';
+      const result = data.result || {};
+      const done = status === 'done' || result.success === true || result.restarted === true;
+      if (data.pending || done) {
+        if (done || status === 'done') {
+          showUpdateCompletion(d, id);
+          return;
+        }
+        return fetch(`/api/task/${encodeURIComponent(id)}/status`, { cache: 'no-store' })
+          .then((r) => r.ok ? r.json() : null)
+          .then((st) => {
+            if (!st) return;
+            if (st.status === 'done' || (st.result && st.result.success)) {
+              showUpdateCompletion(d, id);
+            } else if (st.status === 'running' || st.status === 'pending') {
+              d.taskId = id;
+              d.step = 2;
+              startUpdateTask(id);
+            }
+          });
+      }
+    })
+    .catch(() => { /* ignore */ });
 }
 
 function checkUpdate() {

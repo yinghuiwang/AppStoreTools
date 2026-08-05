@@ -16,6 +16,10 @@ STATE_FILE = _STATE_DIR / "web.json"
 LOG_FILE = _STATE_DIR / "web.log"
 
 
+def _update_restart_path() -> Path:
+    return _STATE_DIR / "update_restart.json"
+
+
 def is_loopback_host(host: str) -> bool:
     """Return whether *host* is a loopback address accepted by the local UI."""
     if host.lower() == "localhost":
@@ -61,6 +65,42 @@ def write_state(state: dict[str, Any]) -> None:
 def clear_state() -> None:
     if STATE_FILE.exists():
         STATE_FILE.unlink()
+
+
+def write_update_restart_marker(task_id: str, **extra: Any) -> Path:
+    """Persist pending update completion across the Web UI process restart."""
+    _STATE_DIR.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "task_id": str(task_id),
+        "scheduled_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "old_pid": os.getpid(),
+        **{key: value for key, value in extra.items() if value is not None},
+    }
+    path = _update_restart_path()
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return path
+
+
+def read_update_restart_marker() -> dict[str, Any] | None:
+    path = _update_restart_path()
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict) or not data.get("task_id"):
+        return None
+    return data
+
+
+def clear_update_restart_marker() -> None:
+    path = _update_restart_path()
+    if path.exists():
+        try:
+            path.unlink()
+        except OSError:
+            pass
 
 
 def get_status() -> dict[str, Any]:

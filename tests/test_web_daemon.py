@@ -197,3 +197,14 @@ def test_wait_port_free_when_connect_fails(isolated_state):
         sock = sock_cls.return_value
         sock.connect_ex.return_value = 1
         assert daemon._wait_port_free("127.0.0.1", 65530, timeout=0.5) is True
+
+
+def test_update_restart_marker_roundtrip(isolated_state):
+    path = daemon.write_update_restart_marker("task-123", installed=True)
+    assert path.exists()
+    data = daemon.read_update_restart_marker()
+    assert data is not None
+    assert data["task_id"] == "task-123"
+    assert data["installed"] is True
+    daemon.clear_update_restart_marker()
+    assert daemon.read_update_restart_marker() is None

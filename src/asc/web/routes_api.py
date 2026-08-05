@@ -7,6 +7,7 @@ import json
 import re
 import tempfile
 import time
+import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -31,6 +32,9 @@ from asc.web.i18n import t
 from asc.web.task_runner import SSE_ABSOLUTE_TIMEOUT_SEC, start_background_task
 
 router = APIRouter()
+
+# Unique per process — frontend uses this to detect stop/start across update restart.
+WEB_BOOT_ID = uuid.uuid4().hex
 
 _templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 _HOME = Path.home().resolve()
@@ -2234,7 +2238,103 @@ async def update_check(request: Request):
             "is_latest": is_latest,
             "is_editable": is_editable,
         },
+        "boot_id": WEB_BOOT_ID,
     }
+
+
+def _public_task_status(task: dict | None) -> str | None:
+    if task is None:
+        return None
+    status = task.get("status")
+    return getattr(status, "value", status)
+
+
+def _finalize_update_task_after_restart(task_id: str) -> dict | None:
+    """Ensure a post-restart update task is terminal DONE and clear restarting flag."""
+    task = _task_store.get(task_id)
+    if task is None:
+        return None
+    status_value = _public_task_status(task)
+    result = task.get("result") if isinstance(task.get("result"), dict) else {}
+    kind = str(task.get("kind") or "")
+    if kind != "update":
+        return task
+    looks_ok = (
+        result.get("success") is True
+        or result.get("restarting") is True
+        or result.get("installed") is True
+        or result.get("restarted") is True
+    )
+    if status_value in {"pending", "running"} and looks_ok:
+        merged = dict(result)
+        merged["success"] = True
+        merged["restarting"] = False
+        merged["restarted"] = True
+        _task_store.set_status(task_id, _TaskStatus.DONE)
+        _task_store.set_result(task_id, merged)
+        _task_store.append_log(task_id, "✅ 服务已重启，更新任务已收尾")
+        return _task_store.get(task_id)
+    if status_value == "done" and result.get("restarting") is True:
+        merged = dict(result)
+        merged["restarting"] = False
+        merged["restarted"] = True
+        _task_store.set_result(task_id, merged)
+        _task_store.append_log(task_id, "✅ Web UI 已重启，更新完成")
+        return _task_store.get(task_id)
+    return task
+
+
+@router.get("/update/post-restart")
+async def update_post_restart():
+    """Handshake after Web UI hot-restart following a package update.
+
+    Frontend waits for ``boot_id`` to change (or downtime then recovery) and uses
+    this payload to restore the completion UI without depending on SSE survival.
+    """
+    import os
+
+    from asc.web.daemon import read_update_restart_marker
+
+    marker = read_update_restart_marker()
+    payload: dict = {
+        "boot_id": WEB_BOOT_ID,
+        "pid": os.getpid(),
+        "ready": True,
+        "pending": False,
+        "task_id": None,
+        "status": None,
+        "result": None,
+    }
+    if not marker:
+        return payload
+    task_id = str(marker.get("task_id") or "")
+    task = _finalize_update_task_after_restart(task_id) if task_id else None
+    payload.update(
+        {
+            "pending": True,
+            "task_id": task_id or None,
+            "status": _public_task_status(task),
+            "result": (task or {}).get("result"),
+            "marker": {
+                "scheduled_at": marker.get("scheduled_at"),
+                "old_pid": marker.get("old_pid"),
+            },
+        }
+    )
+    return payload
+
+
+@router.post("/update/post-restart/ack")
+async def update_post_restart_ack():
+    """Clear the pending restart marker after the UI has restored completion."""
+    from asc.web.daemon import clear_update_restart_marker, read_update_restart_marker
+
+    marker = read_update_restart_marker()
+    task_id = str((marker or {}).get("task_id") or "")
+    if task_id:
+        _finalize_update_task_after_restart(task_id)
+    clear_update_restart_marker()
+    return {"ok": True, "boot_id": WEB_BOOT_ID, "cleared": True}
 
 
 @router.get("/update/versions")
@@ -2333,6 +2433,9 @@ def _start_update_task(
             _finish_task(task_id, _TaskStatus.DONE, result)
 
             if installed:
+                from asc.web.daemon import write_update_restart_marker
+
+                write_update_restart_marker(task_id, installed=True)
                 # Give the event loop a beat to push the SSE "done" frame.
                 _time.sleep(0.8)
                 restart_info = schedule_restart(delay=1.5)
