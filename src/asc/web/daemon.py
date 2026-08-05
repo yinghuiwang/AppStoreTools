@@ -162,35 +162,81 @@ def start_background(host: str, port: int) -> dict[str, Any]:
     }
 
 
-def stop(timeout: float = 5.0) -> dict[str, Any]:
-    current = get_status()
-    if not current.get("running"):
-        clear_state()
-        return {"status": "not_running"}
+def _signal_pid(pid: int, sig: signal.Signals) -> None:
+    """Send *sig* to *pid*, preferring the process group when *pid* is the leader.
 
-    pid = int(current["pid"])
+    Background Web UI processes are started with ``start_new_session=True``, so
+    their PID equals the process-group ID. Only then is ``killpg`` safe; for a
+    foreground server that shares the shell's process group we signal the PID
+    alone so we do not tear down the user's terminal.
+    """
     try:
-        os.kill(pid, signal.SIGTERM)
+        pgid = os.getpgid(pid)
+    except OSError:
+        pgid = None
+    if pgid is not None and pgid == pid:
+        os.killpg(pid, sig)
+        return
+    os.kill(pid, sig)
+
+
+def stop(timeout: float = 5.0, *, pid: int | None = None) -> dict[str, Any]:
+    """Stop the Web UI process recorded in state (or an explicit *pid*)."""
+    if pid is not None:
+        target_pid = int(pid)
+        if not is_process_alive(target_pid):
+            clear_state()
+            return {"status": "not_running"}
+    else:
+        current = get_status()
+        if not current.get("running"):
+            clear_state()
+            return {"status": "not_running"}
+        target_pid = int(current["pid"])
+
+    try:
+        _signal_pid(target_pid, signal.SIGTERM)
     except OSError as exc:
         clear_state()
         return {"status": "error", "message": str(exc)}
 
     deadline = time.time() + timeout
     while time.time() < deadline:
-        if not is_process_alive(pid):
+        if not is_process_alive(target_pid):
             clear_state()
-            return {"status": "stopped", "pid": pid}
+            return {"status": "stopped", "pid": target_pid}
         time.sleep(0.1)
 
     try:
-        os.kill(pid, signal.SIGKILL)
+        _signal_pid(target_pid, signal.SIGKILL)
     except OSError:
         pass
 
     clear_state()
-    if is_process_alive(pid):
-        return {"status": "error", "message": f"无法停止进程 {pid}"}
-    return {"status": "stopped", "pid": pid, "forced": True}
+    if is_process_alive(target_pid):
+        return {"status": "error", "message": f"无法停止进程 {target_pid}"}
+    return {"status": "stopped", "pid": target_pid, "forced": True}
+
+
+def _wait_port_free(host: str, port: int, timeout: float = 10.0) -> bool:
+    """Return True once *host*:*port* accepts no listener (or timeout)."""
+    import socket
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(0.3)
+        try:
+            # Empty host / 0.0.0.0 → probe loopback where clients connect.
+            probe_host = "127.0.0.1" if host in {"0.0.0.0", "", "::"} else host
+            if sock.connect_ex((probe_host, int(port))) != 0:
+                return True
+        except OSError:
+            return True
+        finally:
+            sock.close()
+        time.sleep(0.15)
+    return False
 
 
 def schedule_restart(*, delay: float = 2.0) -> dict[str, Any]:
@@ -199,6 +245,9 @@ def schedule_restart(*, delay: float = 2.0) -> dict[str, Any]:
     Used after a successful ``asc`` package update so the running server loads
     the newly installed code. The helper is a separate process and survives
     the current uvicorn shutdown.
+
+    Always pins ``os.getpid()`` (this server process) as the stop target so a
+    stale ``web.json`` cannot leave the old UI running after an update.
     """
     current = get_status()
     if current.get("running"):
@@ -206,34 +255,56 @@ def schedule_restart(*, delay: float = 2.0) -> dict[str, Any]:
         port = int(current["port"])
         cwd = str(current.get("cwd") or os.getcwd())
     else:
-        # Foreground / unmanaged server: register this process so stop() can find it.
         host = os.environ.get("ASC_WEB_HOST", "127.0.0.1")
         port = int(os.environ.get("ASC_WEB_PORT", "8080"))
         cwd = os.getcwd()
-        write_state(
-            {
-                "pid": os.getpid(),
-                "host": host,
-                "port": port,
-                "cwd": cwd,
-                "log": str(LOG_FILE),
-                "url": _open_url(host, port),
-            }
-        )
+    target_pid = os.getpid()
 
+    # Refresh state so stop() / the helper always aim at this live process.
+    write_state(
+        {
+            "pid": target_pid,
+            "host": host,
+            "port": port,
+            "cwd": cwd,
+            "log": str(LOG_FILE),
+            "url": _open_url(host, port),
+        }
+    )
+
+    # Explicit pid + port-wait + retry start: survives stale state and TIME_WAIT.
     helper_code = (
         "import os, time\n"
         f"time.sleep({float(delay)!r})\n"
         "from asc.web import daemon\n"
-        "print(daemon.stop(timeout=8.0))\n"
-        f"os.chdir({cwd!r})\n"
-        f"print(daemon.start_background({host!r}, {int(port)}))\n"
+        f"target_pid = {int(target_pid)}\n"
+        f"host = {host!r}\n"
+        f"port = {int(port)}\n"
+        f"cwd = {cwd!r}\n"
+        "daemon.write_state({\n"
+        "    'pid': target_pid, 'host': host, 'port': port, 'cwd': cwd,\n"
+        "    'log': str(daemon.LOG_FILE), 'url': daemon._open_url(host, port),\n"
+        "})\n"
+        "print(daemon.stop(timeout=10.0, pid=target_pid))\n"
+        "daemon._wait_port_free(host, port, timeout=15.0)\n"
+        "os.chdir(cwd)\n"
+        "result = None\n"
+        "for attempt in range(8):\n"
+        "    result = daemon.start_background(host, port)\n"
+        "    print(result)\n"
+        "    status = result.get('status')\n"
+        "    if status == 'started':\n"
+        "        break\n"
+        "    if status == 'already_running' and result.get('pid') != target_pid:\n"
+        "        break\n"
+        "    time.sleep(0.5)\n"
+        "print(result)\n"
     )
     _STATE_DIR.mkdir(parents=True, exist_ok=True)
     log_handle = open(LOG_FILE, "a", encoding="utf-8")
     log_handle.write(
         f"\n--- asc web restart scheduled at {time.strftime('%Y-%m-%d %H:%M:%S')} "
-        f"(delay={delay}s, {host}:{port}) ---\n"
+        f"(delay={delay}s, pid={target_pid}, {host}:{port}) ---\n"
     )
     log_handle.flush()
     try:
@@ -253,6 +324,7 @@ def schedule_restart(*, delay: float = 2.0) -> dict[str, Any]:
     return {
         "status": "scheduled",
         "helper_pid": proc.pid,
+        "target_pid": target_pid,
         "host": host,
         "port": port,
         "delay": delay,

@@ -262,6 +262,9 @@
 </div>
 
 <script>
+const ASC_UPDATE_TASK_KEY = 'asc_update_task';
+const ASC_UPDATE_DONE_KEY = 'asc_update_done';
+
 function updateLogOptions() {
   const root = document.querySelector('[x-data]');
   const d = Alpine.$data(root);
@@ -273,27 +276,57 @@ function updateLogOptions() {
       d.progressMsg = progress.msg || '';
     },
     onDone: () => { d.status = 'done'; d.progress = 100; handleUpdateDone(d); },
-    onError: () => { d.status = 'error'; d.restarting = false; },
-    onCanceled: () => { d.status = 'canceled'; d.canceling = false; d.restarting = false; }
+    onError: () => { d.status = 'error'; d.restarting = false; clearUpdateSession(); },
+    onCanceled: () => { d.status = 'canceled'; d.canceling = false; d.restarting = false; clearUpdateSession(); }
   };
 }
 
-function waitForWebRestart(maxMs = 90000) {
+function clearUpdateSession() {
+  try {
+    sessionStorage.removeItem(ASC_UPDATE_TASK_KEY);
+    sessionStorage.removeItem(ASC_UPDATE_DONE_KEY);
+  } catch (e) { /* ignore */ }
+}
+
+function rememberUpdateDone(taskId, restarting) {
+  try {
+    sessionStorage.setItem(ASC_UPDATE_TASK_KEY, String(taskId || ''));
+    sessionStorage.setItem(ASC_UPDATE_DONE_KEY, JSON.stringify({
+      taskId: String(taskId || ''),
+      restarting: !!restarting,
+      at: Date.now(),
+    }));
+  } catch (e) { /* ignore */ }
+}
+
+/**
+ * Wait until the Web UI has actually gone down and come back.
+ * A plain 200 is not enough — that would succeed against the still-running old process.
+ */
+function waitForWebRestart(maxMs = 120000) {
   const started = Date.now();
+  let sawDown = false;
   return new Promise((resolve) => {
     const tick = () => {
+      if (Date.now() - started > maxMs) {
+        resolve(sawDown);
+        return;
+      }
       fetch('/api/update/check', { cache: 'no-store' })
         .then((r) => {
           if (!r.ok) throw new Error('not ready');
           return r.json();
         })
-        .then(() => resolve(true))
+        .then(() => {
+          if (sawDown) resolve(true);
+          else setTimeout(tick, 700);
+        })
         .catch(() => {
-          if (Date.now() - started > maxMs) resolve(false);
-          else setTimeout(tick, 1000);
+          sawDown = true;
+          setTimeout(tick, 700);
         });
     };
-    setTimeout(tick, 1500);
+    setTimeout(tick, 400);
   });
 }
 
@@ -303,13 +336,16 @@ function handleUpdateDone(d) {
   if (!taskId) {
     return;
   }
+  rememberUpdateDone(taskId, true);
   fetch(`/api/task/${taskId}/status`, { cache: 'no-store' })
     .then((r) => {
       if (!r.ok) throw new Error('status unavailable');
       return r.json();
     })
     .then((st) => {
-      if (st.result && st.result.restarting) {
+      const needsRestart = !!(st.result && (st.result.restarting || st.result.installed));
+      rememberUpdateDone(taskId, needsRestart);
+      if (needsRestart) {
         d.restarting = true;
         return waitForWebRestart().then((ok) => {
           if (ok) location.reload();
@@ -319,11 +355,13 @@ function handleUpdateDone(d) {
           }
         });
       }
+      clearUpdateSession();
       checkUpdate();
     })
     .catch(() => {
       // Server may already be restarting; wait then reload.
       d.restarting = true;
+      rememberUpdateDone(taskId, true);
       return waitForWebRestart().then((ok) => {
         if (ok) location.reload();
         else {
@@ -342,7 +380,32 @@ function startUpdateTask(taskId) {
   d.progressMsg = '';
   d.canceling = false;
   d.restarting = false;
+  try { sessionStorage.setItem(ASC_UPDATE_TASK_KEY, String(taskId)); } catch (e) { /* ignore */ }
   TaskLogDrawer.open(taskId, updateLogOptions());
+}
+
+/** After a hot-restart reload, restore the completion card from sessionStorage. */
+function restoreUpdateCompletionIfNeeded() {
+  const root = document.querySelector('[x-data]');
+  if (!root || !window.Alpine) return;
+  let saved = null;
+  try {
+    saved = JSON.parse(sessionStorage.getItem(ASC_UPDATE_DONE_KEY) || 'null');
+  } catch (e) {
+    saved = null;
+  }
+  if (!saved || !saved.taskId || !saved.at || (Date.now() - saved.at) > 15 * 60 * 1000) {
+    return;
+  }
+  const d = Alpine.$data(root);
+  d.taskId = saved.taskId;
+  d.step = 2;
+  d.status = 'done';
+  d.progress = 100;
+  d.restarting = false;
+  d.progressMsg = window.t('update.done');
+  clearUpdateSession();
+  checkUpdate();
 }
 
 function checkUpdate() {
@@ -460,9 +523,10 @@ function runUpdateBranch(branch) {
   });
 }
 
-// Auto check + load versions on load
+// Auto check + load versions on load; restore completion after hot restart.
 document.addEventListener('DOMContentLoaded', () => {
   setTimeout(() => {
+    restoreUpdateCompletionIfNeeded();
     checkUpdate();
     loadVersions();
   }, 500);

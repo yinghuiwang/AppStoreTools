@@ -90,13 +90,51 @@ def test_stop_sends_sigterm(isolated_state):
     state_file.write_text(json.dumps({"pid": 777, "host": "127.0.0.1", "port": 8080}), encoding="utf-8")
 
     with patch.object(daemon, "is_process_alive", side_effect=[True, False]), \
-         patch("asc.web.daemon.os.kill") as mock_kill:
+         patch.object(daemon, "_signal_pid") as mock_signal:
         result = daemon.stop(timeout=0.2)
 
     assert result["status"] == "stopped"
     assert result["pid"] == 777
-    mock_kill.assert_called_once()
+    mock_signal.assert_called_once()
     assert not state_file.exists()
+
+
+def test_stop_with_explicit_pid(isolated_state):
+    state_file, _ = isolated_state
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    state_file.write_text(json.dumps({"pid": 111, "host": "127.0.0.1", "port": 8080}), encoding="utf-8")
+
+    with patch.object(daemon, "is_process_alive", side_effect=[True, False]), \
+         patch.object(daemon, "_signal_pid") as mock_signal:
+        result = daemon.stop(timeout=0.2, pid=999)
+
+    assert result["status"] == "stopped"
+    assert result["pid"] == 999
+    assert mock_signal.call_args.args[0] == 999
+
+
+def test_signal_pid_uses_killpg_for_session_leader():
+    import signal as signal_mod
+
+    with patch("asc.web.daemon.os.getpgid", return_value=4242), \
+         patch("asc.web.daemon.os.killpg") as killpg, \
+         patch("asc.web.daemon.os.kill") as kill:
+        daemon._signal_pid(4242, signal_mod.SIGTERM)
+
+    killpg.assert_called_once_with(4242, signal_mod.SIGTERM)
+    kill.assert_not_called()
+
+
+def test_signal_pid_uses_kill_when_not_group_leader():
+    import signal as signal_mod
+
+    with patch("asc.web.daemon.os.getpgid", return_value=1), \
+         patch("asc.web.daemon.os.killpg") as killpg, \
+         patch("asc.web.daemon.os.kill") as kill:
+        daemon._signal_pid(4242, signal_mod.SIGTERM)
+
+    kill.assert_called_once_with(4242, signal_mod.SIGTERM)
+    killpg.assert_not_called()
 
 
 def test_schedule_restart_spawns_helper(isolated_state):
@@ -112,11 +150,13 @@ def test_schedule_restart_spawns_helper(isolated_state):
     mock_proc.pid = 99999
 
     with patch.object(daemon, "is_process_alive", return_value=True), \
+         patch("asc.web.daemon.os.getpid", return_value=555), \
          patch("asc.web.daemon.subprocess.Popen", return_value=mock_proc) as mock_popen:
         result = daemon.schedule_restart(delay=1.5)
 
     assert result["status"] == "scheduled"
     assert result["helper_pid"] == 99999
+    assert result["target_pid"] == 555
     assert result["port"] == 9090
     assert result["delay"] == 1.5
     mock_popen.assert_called_once()
@@ -126,8 +166,12 @@ def test_schedule_restart_spawns_helper(isolated_state):
     helper_code = args.args[0][2]
     assert "time.sleep(1.5)" in helper_code
     assert "daemon.stop" in helper_code
-    assert "start_background('127.0.0.1', 9090)" in helper_code
+    assert "pid=target_pid" in helper_code
+    assert "_wait_port_free" in helper_code
+    assert "start_background(host, port)" in helper_code
     assert log_file.exists()
+    saved = json.loads(state_file.read_text(encoding="utf-8"))
+    assert saved["pid"] == 555
 
 
 def test_schedule_restart_registers_unmanaged_process(isolated_state):
@@ -142,6 +186,14 @@ def test_schedule_restart_registers_unmanaged_process(isolated_state):
         result = daemon.schedule_restart(delay=0.5)
 
     assert result["status"] == "scheduled"
+    assert result["target_pid"] == 321
     saved = json.loads(state_file.read_text(encoding="utf-8"))
     assert saved["pid"] == 321
     assert saved["port"] == 8080
+
+
+def test_wait_port_free_when_connect_fails(isolated_state):
+    with patch("socket.socket") as sock_cls:
+        sock = sock_cls.return_value
+        sock.connect_ex.return_value = 1
+        assert daemon._wait_port_free("127.0.0.1", 65530, timeout=0.5) is True

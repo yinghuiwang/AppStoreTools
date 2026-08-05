@@ -257,6 +257,7 @@ def test_update_web_starter_schedules_restart_after_install(tmp_path, monkeypatc
 
     store = TaskStore(tmp_path / "tasks.db")
     monkeypatch.setattr(routes_api, "_task_store", store)
+    order: list[str] = []
 
     def fake_run(store_arg, *, task_id=None, run=None, **kwargs):
         reporter = MagicMock()
@@ -264,17 +265,30 @@ def test_update_web_starter_schedules_restart_after_install(tmp_path, monkeypatc
         run(reporter, MagicMock(is_set=MagicMock(return_value=False)))
         return task_id
 
+    original_finish = routes_api._finish_task
+
+    def tracked_finish(tid, status, result):
+        order.append("finish")
+        return original_finish(tid, status, result)
+
+    def tracked_restart(**kwargs):
+        order.append("restart")
+        return {
+            "status": "scheduled",
+            "delay": kwargs.get("delay", 1.5),
+            "url": "http://127.0.0.1:8080",
+        }
+
     with patch("asc.web.routes_api.start_background_task", side_effect=fake_run), \
             patch("asc.commands.update_cmd._update_core", return_value=True) as update_core, \
-            patch("asc.web.daemon.schedule_restart", return_value={
-                "status": "scheduled",
-                "delay": 2.0,
-                "url": "http://127.0.0.1:8080",
-            }) as restart:
+            patch.object(routes_api, "_finish_task", side_effect=tracked_finish), \
+            patch("asc.web.daemon.schedule_restart", side_effect=tracked_restart) as restart, \
+            patch("time.sleep"):
         task_id = routes_api._start_update_task(version="0.1.25")
 
     update_core.assert_called_once()
-    restart.assert_called_once_with(delay=2.0)
+    restart.assert_called_once_with(delay=1.5)
+    assert order == ["finish", "restart"]
     task = store.get(task_id)
     assert task["status"] == TaskStatus.DONE
     assert task["result"]["success"] is True

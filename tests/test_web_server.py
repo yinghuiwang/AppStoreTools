@@ -622,6 +622,8 @@ def test_update_page_mentions_auto_restart(client):
     assert resp.status_code == 200
     assert "handleUpdateDone" in resp.text
     assert "waitForWebRestart" in resp.text
+    assert "restoreUpdateCompletionIfNeeded" in resp.text
+    assert "sawDown" in resp.text
     assert ("update.restarting" in resp.text) or ("正在重启" in resp.text) or ("Restarting Web UI" in resp.text)
     # Done status takes priority over restarting in the title expression
     assert "status === 'done' ? window.t('update.done')" in resp.text

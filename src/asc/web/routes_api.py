@@ -2303,6 +2303,8 @@ def _start_update_task(
     branch: str | None = None,
     verbose: bool = False,
 ) -> str:
+    import time as _time
+
     from asc.commands.update_cmd import UpdateError, _update_core
     from asc.web.daemon import schedule_restart
 
@@ -2321,23 +2323,35 @@ def _start_update_task(
                 raise ProcessCanceled("update canceled")
             result: dict = {"success": True, "installed": bool(installed)}
             if installed:
+                # Mark restart intent before DONE so the UI can show completion
+                # while the detached helper later stops/starts the process.
                 reporter.log("🔄 即将重启 Web UI 以加载新版本...")
-                restart_info = schedule_restart(delay=2.0)
+                result["restarting"] = True
+            # Flush + persist DONE *before* scheduling kill so SSE clients receive
+            # the terminal event, and recover-on-boot will not mark this task ERROR.
+            reporter.flush()
+            _finish_task(task_id, _TaskStatus.DONE, result)
+
+            if installed:
+                # Give the event loop a beat to push the SSE "done" frame.
+                _time.sleep(0.8)
+                restart_info = schedule_restart(delay=1.5)
                 result["restart"] = restart_info
                 result["restarting"] = restart_info.get("status") == "scheduled"
                 if result["restarting"]:
-                    reporter.log(
-                        f"Web UI 将在约 {restart_info.get('delay', 2)} 秒后自动重启"
+                    msg = (
+                        f"Web UI 将在约 {restart_info.get('delay', 1.5)} 秒后自动重启"
                         f"（{restart_info.get('url', '')}）"
                     )
                 else:
-                    reporter.log(
-                        f"⚠️  自动重启未安排：{restart_info.get('message', restart_info.get('status'))}"
+                    msg = (
+                        f"⚠️  自动重启未安排："
+                        f"{restart_info.get('message', restart_info.get('status'))}"
                     )
-            # Flush buffered logs before marking DONE so SSE clients see the full log
-            # (including restart notes) before the "done" event.
-            reporter.flush()
-            _finish_task(task_id, _TaskStatus.DONE, result)
+                reporter.log(msg)
+                reporter.flush()
+                # DONE already set; only refresh result/logs for clients that poll.
+                _task_store.set_result(task_id, result)
             return result
         except ProcessCanceled:
             reporter.log("⏹ 用户已终止更新")
