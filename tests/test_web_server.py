@@ -623,6 +623,12 @@ def test_update_page_mentions_auto_restart(client):
     assert "handleUpdateDone" in resp.text
     assert "waitForWebRestart" in resp.text
     assert ("update.restarting" in resp.text) or ("正在重启" in resp.text) or ("Restarting Web UI" in resp.text)
+    # Done status takes priority over restarting in the title expression
+    assert "status === 'done' ? window.t('update.done')" in resp.text
+    assert "onProgress:" in resp.text
+    assert "progress-track" in resp.text
+    assert "d.progress = 100" in resp.text
+
 def test_profiles_page_returns_200(client):
     resp = client.get("/profiles")
     assert resp.status_code == 200

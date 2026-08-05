@@ -1,6 +1,7 @@
 """asc update — check for and install the latest version from GitHub."""
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from typing import Optional
@@ -13,6 +14,15 @@ from asc.reporting import TaskReporter, make_cli_reporter
 GITHUB_API = "https://api.github.com/repos/yinghuiwang/AppStoreTools/releases/latest"
 INSTALL_URL = "https://github.com/yinghuiwang/AppStoreTools.git"
 PACKAGE_NAME = "asc-appstore-tools"
+
+# pip / git clone progress hints
+_PIP_PCT_RE = re.compile(r"(?<![.\d])(\d{1,3})%(?!\d)")
+_PIP_DOWNLOAD_RE = re.compile(
+    r"(?i)\b(Downloading|Download complete|Cloning|Obtaining|Collecting|Fetching)\b"
+)
+_PIP_INSTALL_RE = re.compile(
+    r"(?i)\b(Installing|Building wheel|Prepared|Successfully installed|Installing collected)\b"
+)
 
 
 def _current_version() -> str:
@@ -122,12 +132,95 @@ def _resolve_git_ref_commit(ref: str) -> Optional[str]:
     return None
 
 
-def _install_git_ref(ref: str, commit: Optional[str] = None) -> None:
-    install_ref = commit or ref
-    subprocess.check_call([
-        sys.executable, "-m", "pip", "install", "--quiet", "--force-reinstall",
+def _pip_install_cmd(install_ref: str) -> list[str]:
+    """Build the pip install command (no --quiet so progress/logs are visible)."""
+    return [
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--progress-bar",
+        "on",
+        "--force-reinstall",
         f"git+{INSTALL_URL}@{install_ref}",
-    ])
+    ]
+
+
+def _extract_pip_percent(line: str) -> Optional[int]:
+    """Return 0–100 if *line* contains a progress percentage."""
+    matches = _PIP_PCT_RE.findall(line)
+    if not matches:
+        return None
+    value = int(matches[-1])
+    if 0 <= value <= 100:
+        return value
+    return None
+
+
+def _install_git_ref(
+    ref: str,
+    commit: Optional[str] = None,
+    *,
+    reporter: TaskReporter | None = None,
+) -> None:
+    """Install from git ref, streaming pip output into *reporter* when provided."""
+    install_ref = commit or ref
+    cmd = _pip_install_cmd(install_ref)
+    if reporter is None:
+        subprocess.check_call(cmd)
+        return
+
+    reporter.log(f"$ {' '.join(cmd)}")
+    reporter.log("Downloading / installing package (pip)...")
+
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    assert proc.stdout is not None
+
+    in_install_phase = False
+    last_reported_pct = -1
+    download_floor = 5  # keep bar moving when pip has no percent yet
+
+    try:
+        for raw in proc.stdout:
+            line = raw.rstrip("\n\r")
+            if not line.strip():
+                continue
+            reporter.log(line)
+
+            if not in_install_phase and _PIP_INSTALL_RE.search(line):
+                reporter.phase("install")
+                in_install_phase = True
+                last_reported_pct = -1
+
+            pct = _extract_pip_percent(line)
+            if pct is not None:
+                if pct == last_reported_pct:
+                    continue
+                last_reported_pct = pct
+                label = "Downloading" if not in_install_phase else "Installing"
+                reporter.progress(pct, 100, msg=f"{label} {pct}%")
+                continue
+
+            if not in_install_phase and _PIP_DOWNLOAD_RE.search(line):
+                download_floor = min(95, download_floor + 8)
+                if download_floor > last_reported_pct:
+                    last_reported_pct = download_floor
+                    reporter.progress(download_floor, 100, msg="downloading")
+    finally:
+        returncode = proc.wait()
+
+    if returncode != 0:
+        raise subprocess.CalledProcessError(returncode, cmd)
+
+    if not in_install_phase:
+        reporter.phase("install")
+    reporter.progress(1, 1, msg="installed")
 
 
 def _similar_versions(target: str, all_versions: list[str], limit: int = 3) -> list[str]:
@@ -168,13 +261,16 @@ def _install_with_reporter(
     success_message: str,
     fail_hint: str,
 ) -> None:
-    reporter.phase("install")
+    # Stay on "download" until pip output signals install; stream all pip logs.
+    reporter.log(f"Starting install from git ref '{install_ref}'...")
     try:
-        _install_git_ref(install_ref, commit)
+        _install_git_ref(install_ref, commit, reporter=reporter)
     except subprocess.CalledProcessError as exc:
         reporter.fail("Update failed. Try manually:")
         reporter.log(f"  {fail_hint}", level="error")
         raise UpdateError("install failed") from exc
+    # Ensure install phase is marked complete (streaming install usually already did this).
+    reporter.phase("install")
     reporter.progress(1, 1, msg="installed")
     reporter.done(success_message)
 

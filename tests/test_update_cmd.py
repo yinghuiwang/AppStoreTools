@@ -57,15 +57,16 @@ class TestCmdUpdateValidation:
         commit = "a" * 40
         runner = CliRunner()
         with patch("asc.commands.update_cmd._resolve_git_ref_commit", return_value=commit), \
-                patch("asc.commands.update_cmd.subprocess.check_call") as check_call:
+                patch("asc.commands.update_cmd._install_git_ref") as install:
             result = runner.invoke(app, ["update", "--branch", "main"])
 
         assert result.exit_code == 0
         assert f"Install commit : {commit}" in result.output
         assert f"commit {commit}" in result.output
-        install_args = check_call.call_args.args[0]
-        assert "--force-reinstall" in install_args
-        assert install_args[-1].endswith(f"@{commit}")
+        install.assert_called_once()
+        assert install.call_args.args[0] == "main"
+        assert install.call_args.args[1] == commit
+        assert install.call_args.kwargs.get("reporter") is not None
 
     def test_version_install_prints_and_installs_resolved_commit(self):
         """Should print the resolved commit when installing a specific version."""
@@ -76,15 +77,89 @@ class TestCmdUpdateValidation:
         runner = CliRunner()
         with patch("asc.commands.update_cmd._all_versions_from_github", return_value=["0.1.5"]), \
                 patch("asc.commands.update_cmd._resolve_git_ref_commit", return_value=commit), \
-                patch("asc.commands.update_cmd.subprocess.check_call") as check_call:
+                patch("asc.commands.update_cmd._install_git_ref") as install:
             result = runner.invoke(app, ["update", "--version", "0.1.5"])
 
         assert result.exit_code == 0
         assert f"Install commit : {commit}" in result.output
         assert f"Done. asc updated to v0.1.5 (commit {commit})." in result.output
-        install_args = check_call.call_args.args[0]
-        assert "--force-reinstall" in install_args
-        assert install_args[-1].endswith(f"@{commit}")
+        install.assert_called_once()
+        assert install.call_args.args[0] == "v0.1.5"
+        assert install.call_args.args[1] == commit
+        assert install.call_args.kwargs.get("reporter") is not None
+
+
+class TestPipInstallStreaming:
+    """Tests for pip command / progress parsing / streamed install."""
+
+    def test_pip_install_cmd_has_progress_no_quiet(self):
+        from asc.commands.update_cmd import _pip_install_cmd
+
+        cmd = _pip_install_cmd("abc123")
+        assert "--quiet" not in cmd
+        assert "--progress-bar" in cmd
+        assert "--force-reinstall" in cmd
+        assert cmd[-1].endswith("@abc123")
+
+    def test_extract_pip_percent(self):
+        from asc.commands.update_cmd import _extract_pip_percent
+
+        assert _extract_pip_percent("Downloading foo (50%)") == 50
+        assert _extract_pip_percent("  ━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100%") == 100
+        assert _extract_pip_percent("no percent here") is None
+        assert _extract_pip_percent("version 1.2.3%") is None  # guarded by lookbehind? 3% might match
+        assert _extract_pip_percent("Collecting package") is None
+
+    def test_install_git_ref_streams_output_and_progress(self):
+        from unittest.mock import MagicMock, patch
+
+        from asc.commands.update_cmd import _install_git_ref, _update_phase_plan
+        from asc.reporting import TaskReporter
+
+        class RecordingSink:
+            def __init__(self):
+                self.logs = []
+                self.progress_events = []
+
+            def on_log(self, message, *, level="info"):
+                self.logs.append(message)
+
+            def on_progress(self, *, pct, msg, phase, phase_label, phase_index, phase_total):
+                self.progress_events.append({"pct": pct, "msg": msg, "phase": phase})
+
+        sink = RecordingSink()
+        reporter = TaskReporter(sinks=[sink])
+        reporter.set_phases(_update_phase_plan())
+        reporter.phase("download")
+
+        lines = [
+            "Collecting git+https://github.com/yinghuiwang/AppStoreTools.git@main\n",
+            "  Cloning to /tmp/pip-req...\n",
+            "  Downloading package (40%)\n",
+            "  Downloading package (80%)\n",
+            "Building wheels for collected packages: asc-appstore-tools\n",
+            "Installing collected packages: asc-appstore-tools\n",
+            "Successfully installed asc-appstore-tools-0.1.26\n",
+        ]
+
+        mock_proc = MagicMock()
+        mock_proc.stdout = iter(lines)
+        mock_proc.wait.return_value = 0
+
+        with patch("asc.commands.update_cmd.subprocess.Popen", return_value=mock_proc) as popen:
+            _install_git_ref("main", "a" * 40, reporter=reporter)
+
+        popen.assert_called_once()
+        cmd = popen.call_args.args[0]
+        assert "--quiet" not in cmd
+        assert "--progress-bar" in cmd
+        joined = "\n".join(sink.logs)
+        assert "Cloning" in joined
+        assert "Successfully installed" in joined
+        assert any(e["phase"] == "download" and e["pct"] > 0 for e in sink.progress_events)
+        assert any(e["phase"] == "install" for e in sink.progress_events)
+        assert sink.progress_events[-1]["pct"] == 100
+        assert sink.progress_events[-1]["phase"] == "install"
 
 
 class TestResolveGitRefCommit:

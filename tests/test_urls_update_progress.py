@@ -205,11 +205,48 @@ def test_update_web_starter_uses_start_background_task():
     assert "start_background_task" in starter
     assert "schedule_restart" in starter
     assert "restarting" in starter
+    assert "reporter.flush()" in starter
     assert "_PROGRESS_RE" not in starter
     assert "io.StringIO" not in starter
     assert "reporter" in starter
     route = inspect.getsource(routes_api.update_run)
     assert "_start_update_task" in route
+
+
+def test_update_web_starter_flushes_before_finish(tmp_path, monkeypatch):
+    """Buffered logs must flush before DONE so SSE clients see the full log."""
+    from unittest.mock import MagicMock, patch
+
+    from asc.web import routes_api
+    from asc.web.tasks import TaskStatus, TaskStore
+
+    store = TaskStore(tmp_path / "tasks.db")
+    monkeypatch.setattr(routes_api, "_task_store", store)
+    flush_order: list[str] = []
+
+    def fake_run(store_arg, *, task_id=None, run=None, **kwargs):
+        reporter = MagicMock()
+        reporter.failed = False
+
+        def flush():
+            flush_order.append("flush")
+
+        reporter.flush.side_effect = flush
+        original_finish = routes_api._finish_task
+
+        def finish_wrapper(tid, status, result):
+            flush_order.append("finish")
+            return original_finish(tid, status, result)
+
+        with patch.object(routes_api, "_finish_task", side_effect=finish_wrapper):
+            run(reporter, MagicMock(is_set=MagicMock(return_value=False)))
+        return task_id
+
+    with patch("asc.web.routes_api.start_background_task", side_effect=fake_run), \
+            patch("asc.commands.update_cmd._update_core", return_value=False):
+        routes_api._start_update_task()
+
+    assert flush_order == ["flush", "finish"]
 
 
 def test_update_web_starter_schedules_restart_after_install(tmp_path, monkeypatch):
