@@ -41,11 +41,11 @@
              return this.profiles.filter(p => !(this.profileDetails[p] || {}).already_bound);
            },
            appLabel(entry) {
-             if (!entry || !entry.bound) return '';
+             if (!entry || !entry.bound) return window.t('guard.no_bound_app');
              const name = entry.profile_name || entry.app_name || '';
              const id = entry.app_id || '';
              if (name && id) return `${name} (${id})`;
-             return name || id || '';
+             return name || id || window.t('guard.no_bound_app');
            },
            saveNote(row) {
              const token = row.app_id;
@@ -136,12 +136,10 @@
                             :class="guard.current_environment.machine.bound ? 'text-emerald-400' : 'text-obsidian-400'"
                             x-text="guard.current_environment.machine.bound ? window.t('guard.status_bound') : window.t('guard.status_unbound')"></span>
                     </div>
-                    <template x-if="guard.current_environment.machine.bound">
-                      <div class="text-xs text-obsidian-300">
-                        <span class="text-obsidian-500">{{ t("guard.bound_app") }}:</span>
-                        <span class="font-mono text-obsidian-200 ml-1" x-text="appLabel(guard.current_environment.machine)"></span>
-                      </div>
-                    </template>
+                    <div class="text-xs text-obsidian-300">
+                      <span class="text-obsidian-500">{{ t("guard.bound_app") }}:</span>
+                      <span class="font-mono text-obsidian-200 ml-1" x-text="appLabel(guard.current_environment.machine)"></span>
+                    </div>
                     <template x-if="guard.current_environment.machine.bound && guard.current_environment.machine.note">
                       <div class="text-xs text-obsidian-400">
                         <span class="text-obsidian-500">{{ t("guard.note") }}:</span>
@@ -166,12 +164,10 @@
                                 :class="guard.current_environment.ip.bound ? 'text-emerald-400' : 'text-obsidian-400'"
                                 x-text="guard.current_environment.ip.bound ? window.t('guard.status_bound') : window.t('guard.status_unbound')"></span>
                         </div>
-                        <template x-if="guard.current_environment.ip.bound">
-                          <div class="text-xs text-obsidian-300">
-                            <span class="text-obsidian-500">{{ t("guard.bound_app") }}:</span>
-                            <span class="font-mono text-obsidian-200 ml-1" x-text="appLabel(guard.current_environment.ip)"></span>
-                          </div>
-                        </template>
+                        <div class="text-xs text-obsidian-300">
+                          <span class="text-obsidian-500">{{ t("guard.bound_app") }}:</span>
+                          <span class="font-mono text-obsidian-200 ml-1" x-text="appLabel(guard.current_environment.ip)"></span>
+                        </div>
                         <template x-if="guard.current_environment.ip.bound && guard.current_environment.ip.note">
                           <div class="text-xs text-obsidian-400">
                             <span class="text-obsidian-500">{{ t("guard.note") }}:</span>

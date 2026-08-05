@@ -1935,6 +1935,17 @@ def test_guard_page_shows_current_environment_section(client):
     assert ("guard.bound_app" in resp.text) or ("绑定 App" in resp.text) or ("Bound app" in resp.text)
 
 
+def test_guard_page_shows_none_fallback_for_unbound_current_app(client):
+    """当本机指纹/IP 未匹配到任何 App 时，"绑定 App" 行仍应渲染并显示「无」/"None"."""
+    resp = client.get("/guard")
+    assert resp.status_code == 200
+    assert "guard.no_bound_app" in resp.text
+    # The "Bound app" row must not be gated behind a bound-only conditional -
+    # appLabel() itself resolves the "None" fallback so the row always shows.
+    assert 'x-text="appLabel(guard.current_environment.machine)"' in resp.text
+    assert 'x-text="appLabel(guard.current_environment.ip)"' in resp.text
+
+
 def test_task_store_create_with_profile_and_progress():
     from asc.web.tasks import TaskStore
     store = TaskStore()

@@ -371,6 +371,7 @@
   "guard.status_bound": "Bound",
   "guard.status_unbound": "Not bound",
   "guard.bound_app": "Bound app",
+  "guard.no_bound_app": "None",
   "guard.ip_unavailable": "Unavailable; IP binding check skipped",
   "guard.bound_at": "Bound at",
   "guard.note": "Note",

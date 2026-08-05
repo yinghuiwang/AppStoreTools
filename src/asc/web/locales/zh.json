@@ -371,6 +371,7 @@
   "guard.status_bound": "已绑定",
   "guard.status_unbound": "未绑定",
   "guard.bound_app": "绑定 App",
+  "guard.no_bound_app": "无",
   "guard.ip_unavailable": "无法获取，跳过 IP 绑定检查",
   "guard.bound_at": "绑定时间",
   "guard.note": "备注",
