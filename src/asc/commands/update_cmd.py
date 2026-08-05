@@ -187,11 +187,13 @@ def _update_core(
     reporter: TaskReporter | None = None,
     confirm: bool = False,
     verbose: bool = False,
-) -> None:
+) -> bool:
     """Shared update logic for CLI and Web.
 
     ``confirm``: when True and ``yes`` is False, prompt before installing the
     latest release (CLI interactive path only).
+
+    Returns True when a package install was performed.
     """
     if reporter is None:
         reporter = make_cli_reporter(verbose=verbose)
@@ -206,7 +208,7 @@ def _update_core(
         reporter.log("Running in development mode (editable install). Skipping auto-update.")
         reporter.log("To update manually: git pull && pip install -e .")
         reporter.done()
-        return
+        return False
 
     reporter.set_phases(_update_phase_plan())
     reporter.phase("download")
@@ -227,7 +229,7 @@ def _update_core(
             success_message=f"Done. asc installed from branch '{branch}'{suffix}.",
             fail_hint=f"pip install git+https://github.com/yinghuiwang/AppStoreTools.git@{branch}",
         )
-        return
+        return True
 
     if version:
         target_version = version.lstrip("v")
@@ -260,7 +262,7 @@ def _update_core(
                 f"{install_version}"
             ),
         )
-        return
+        return True
 
     current = _current_version()
     reporter.log("Checking for updates...")
@@ -276,14 +278,14 @@ def _update_core(
     if _parse_version(latest) <= _parse_version(current):
         reporter.log(f"\nasc is already up to date ({current}).")
         reporter.done()
-        return
+        return False
 
     reporter.log(f"\nUpdate available: {current} → {latest}")
     if confirm and not yes:
         if not typer.confirm("Install now?", default=True):
             reporter.log("Update cancelled.")
             reporter.done()
-            return
+            return False
 
     reporter.log(f"Updating asc to {latest}...")
     install_version = f"v{latest}"
@@ -302,6 +304,7 @@ def _update_core(
         fail_hint=f"pip install git+https://github.com/yinghuiwang/AppStoreTools.git@v{latest}",
     )
     reporter.log("Restart your shell or re-run asc for the new version.")
+    return True
 
 
 def cmd_update(

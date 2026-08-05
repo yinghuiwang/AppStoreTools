@@ -529,6 +529,37 @@ def test_update_page_shows_editable_warning(client):
     assert ("editable 模式下无法自动安装最新稳定版" in resp.text) or ("Latest stable auto-update is unavailable in editable mode" in resp.text)
 
 
+def test_update_page_x_data_attribute_is_not_truncated(client):
+    """Regression: Jinja tojson must not break Alpine x-data HTML attribute quoting."""
+    from html.parser import HTMLParser
+    from unittest.mock import patch
+
+    class _XDataFinder(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.x_data = None
+
+        def handle_starttag(self, tag, attrs):
+            for name, value in attrs:
+                if name == "x-data" and value and "currentVersion" in value:
+                    self.x_data = value
+
+    with patch("asc.commands.update_cmd._current_version", return_value="0.1.25"), \
+            patch("asc.commands.update_cmd._is_editable", return_value=True), \
+            patch("asc.cli._installed_commit_short", return_value="abc1234"):
+        resp = client.get("/update")
+
+    assert resp.status_code == 200
+    finder = _XDataFinder()
+    finder.feed(resp.text)
+    assert finder.x_data is not None, "x-data with currentVersion was truncated by HTML parsing"
+    # All server-injected fields must live in the same intact attribute value.
+    assert '"0.1.25"' in finder.x_data
+    assert '"abc1234"' in finder.x_data
+    assert "isEditable: true" in finder.x_data
+    assert finder.x_data.rstrip().endswith("}")
+
+
 def test_update_branches_returns_options(client):
     from unittest.mock import patch
 
@@ -585,6 +616,13 @@ def test_update_page_contains_always_available_advanced_install(client):
     assert '<!-- Advanced install (always available) -->' in resp.text
     assert resp.text.index('<!-- Advanced install (always available) -->') < resp.text.index('x-show="selectedTab === \'specific\'"')
 
+
+def test_update_page_mentions_auto_restart(client):
+    resp = client.get("/update")
+    assert resp.status_code == 200
+    assert "handleUpdateDone" in resp.text
+    assert "waitForWebRestart" in resp.text
+    assert ("update.restarting" in resp.text) or ("正在重启" in resp.text) or ("Restarting Web UI" in resp.text)
 def test_profiles_page_returns_200(client):
     resp = client.get("/profiles")
     assert resp.status_code == 200

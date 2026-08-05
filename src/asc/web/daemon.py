@@ -126,6 +126,10 @@ def start_background(host: str, port: int) -> dict[str, Any]:
     )
     log_handle.flush()
 
+    env = os.environ.copy()
+    env["ASC_WEB_HOST"] = host
+    env["ASC_WEB_PORT"] = str(port)
+
     try:
         proc = subprocess.Popen(
             _uvicorn_cmd(host, port),
@@ -134,6 +138,7 @@ def start_background(host: str, port: int) -> dict[str, Any]:
             stdin=subprocess.DEVNULL,
             cwd=os.getcwd(),
             start_new_session=True,
+            env=env,
         )
     except OSError as exc:
         log_handle.close()
@@ -186,3 +191,70 @@ def stop(timeout: float = 5.0) -> dict[str, Any]:
     if is_process_alive(pid):
         return {"status": "error", "message": f"无法停止进程 {pid}"}
     return {"status": "stopped", "pid": pid, "forced": True}
+
+
+def schedule_restart(*, delay: float = 2.0) -> dict[str, Any]:
+    """Detach a helper that stops then restarts the Web UI after ``delay`` seconds.
+
+    Used after a successful ``asc`` package update so the running server loads
+    the newly installed code. The helper is a separate process and survives
+    the current uvicorn shutdown.
+    """
+    current = get_status()
+    if current.get("running"):
+        host = str(current["host"])
+        port = int(current["port"])
+        cwd = str(current.get("cwd") or os.getcwd())
+    else:
+        # Foreground / unmanaged server: register this process so stop() can find it.
+        host = os.environ.get("ASC_WEB_HOST", "127.0.0.1")
+        port = int(os.environ.get("ASC_WEB_PORT", "8080"))
+        cwd = os.getcwd()
+        write_state(
+            {
+                "pid": os.getpid(),
+                "host": host,
+                "port": port,
+                "cwd": cwd,
+                "log": str(LOG_FILE),
+                "url": _open_url(host, port),
+            }
+        )
+
+    helper_code = (
+        "import os, time\n"
+        f"time.sleep({float(delay)!r})\n"
+        "from asc.web import daemon\n"
+        "print(daemon.stop(timeout=8.0))\n"
+        f"os.chdir({cwd!r})\n"
+        f"print(daemon.start_background({host!r}, {int(port)}))\n"
+    )
+    _STATE_DIR.mkdir(parents=True, exist_ok=True)
+    log_handle = open(LOG_FILE, "a", encoding="utf-8")
+    log_handle.write(
+        f"\n--- asc web restart scheduled at {time.strftime('%Y-%m-%d %H:%M:%S')} "
+        f"(delay={delay}s, {host}:{port}) ---\n"
+    )
+    log_handle.flush()
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, "-c", helper_code],
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            cwd=cwd,
+            start_new_session=True,
+            close_fds=True,
+        )
+    except OSError as exc:
+        log_handle.close()
+        return {"status": "error", "message": str(exc)}
+
+    return {
+        "status": "scheduled",
+        "helper_pid": proc.pid,
+        "host": host,
+        "port": port,
+        "delay": delay,
+        "url": _open_url(host, port),
+    }

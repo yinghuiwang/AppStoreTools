@@ -1,6 +1,7 @@
 """asc web command — start local Web UI server."""
 from __future__ import annotations
 
+import os
 import threading
 import webbrowser
 
@@ -23,6 +24,9 @@ def _run_foreground(host: str, port: int, no_open: bool) -> None:
         )
     import uvicorn
     from asc.web.server import create_app
+
+    os.environ["ASC_WEB_HOST"] = host
+    os.environ["ASC_WEB_PORT"] = str(port)
 
     open_host = "127.0.0.1" if host == "0.0.0.0" else host
     url = f"http://{open_host}:{port}"

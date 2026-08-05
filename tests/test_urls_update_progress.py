@@ -179,8 +179,9 @@ def test_update_core_maps_download_install_pct():
             patch("asc.commands.update_cmd._latest_version_from_github", return_value="0.1.1"), \
             patch("asc.commands.update_cmd._resolve_git_ref_commit", return_value=commit), \
             patch("asc.commands.update_cmd._install_git_ref") as install:
-        _update_core(version=None, branch=None, yes=True, reporter=reporter)
+        installed = _update_core(version=None, branch=None, yes=True, reporter=reporter)
 
+    assert installed is True
     install.assert_called_once()
     pcts = [e["pct"] for e in sink.progress_events]
     assert pcts == sorted(pcts)
@@ -202,11 +203,73 @@ def test_update_web_starter_uses_start_background_task():
 
     starter = inspect.getsource(routes_api._start_update_task)
     assert "start_background_task" in starter
+    assert "schedule_restart" in starter
+    assert "restarting" in starter
     assert "_PROGRESS_RE" not in starter
     assert "io.StringIO" not in starter
     assert "reporter" in starter
     route = inspect.getsource(routes_api.update_run)
     assert "_start_update_task" in route
+
+
+def test_update_web_starter_schedules_restart_after_install(tmp_path, monkeypatch):
+    from unittest.mock import MagicMock, patch
+
+    from asc.web import routes_api
+    from asc.web.tasks import TaskStatus, TaskStore
+
+    store = TaskStore(tmp_path / "tasks.db")
+    monkeypatch.setattr(routes_api, "_task_store", store)
+
+    def fake_run(store_arg, *, task_id=None, run=None, **kwargs):
+        reporter = MagicMock()
+        reporter.failed = False
+        run(reporter, MagicMock(is_set=MagicMock(return_value=False)))
+        return task_id
+
+    with patch("asc.web.routes_api.start_background_task", side_effect=fake_run), \
+            patch("asc.commands.update_cmd._update_core", return_value=True) as update_core, \
+            patch("asc.web.daemon.schedule_restart", return_value={
+                "status": "scheduled",
+                "delay": 2.0,
+                "url": "http://127.0.0.1:8080",
+            }) as restart:
+        task_id = routes_api._start_update_task(version="0.1.25")
+
+    update_core.assert_called_once()
+    restart.assert_called_once_with(delay=2.0)
+    task = store.get(task_id)
+    assert task["status"] == TaskStatus.DONE
+    assert task["result"]["success"] is True
+    assert task["result"]["installed"] is True
+    assert task["result"]["restarting"] is True
+
+
+def test_update_web_starter_skips_restart_when_not_installed(tmp_path, monkeypatch):
+    from unittest.mock import MagicMock, patch
+
+    from asc.web import routes_api
+    from asc.web.tasks import TaskStatus, TaskStore
+
+    store = TaskStore(tmp_path / "tasks.db")
+    monkeypatch.setattr(routes_api, "_task_store", store)
+
+    def fake_run(store_arg, *, task_id=None, run=None, **kwargs):
+        reporter = MagicMock()
+        reporter.failed = False
+        run(reporter, MagicMock(is_set=MagicMock(return_value=False)))
+        return task_id
+
+    with patch("asc.web.routes_api.start_background_task", side_effect=fake_run), \
+            patch("asc.commands.update_cmd._update_core", return_value=False), \
+            patch("asc.web.daemon.schedule_restart") as restart:
+        task_id = routes_api._start_update_task()
+
+    restart.assert_not_called()
+    task = store.get(task_id)
+    assert task["status"] == TaskStatus.DONE
+    assert task["result"]["installed"] is False
+    assert task["result"].get("restarting") is not True
 
 
 def test_url_core_fail_raises_runtime_error():
@@ -238,8 +301,9 @@ def test_update_already_latest_calls_done():
             patch("asc.commands.update_cmd._current_version", return_value="0.1.1"), \
             patch("asc.commands.update_cmd._latest_version_from_github", return_value="0.1.1"), \
             patch("asc.commands.update_cmd._install_git_ref") as install:
-        _update_core(version=None, branch=None, yes=True, reporter=reporter)
+        installed = _update_core(version=None, branch=None, yes=True, reporter=reporter)
 
+    assert installed is False
     install.assert_not_called()
     assert sink.progress_events[-1]["pct"] == 100
     joined = "\n".join(msg for _, msg in sink.logs)
@@ -255,10 +319,11 @@ def test_update_cancelled_confirm_calls_done():
             patch("asc.commands.update_cmd._latest_version_from_github", return_value="0.1.1"), \
             patch("asc.commands.update_cmd.typer.confirm", return_value=False), \
             patch("asc.commands.update_cmd._install_git_ref") as install:
-        _update_core(
+        installed = _update_core(
             version=None, branch=None, yes=False, reporter=reporter, confirm=True
         )
 
+    assert installed is False
     install.assert_not_called()
     assert sink.progress_events[-1]["pct"] == 100
     joined = "\n".join(msg for _, msg in sink.logs)

@@ -2140,12 +2140,13 @@ def _start_update_task(
     verbose: bool = False,
 ) -> str:
     from asc.commands.update_cmd import UpdateError, _update_core
+    from asc.web.daemon import schedule_restart
 
     task_id = _task_store.create("update", profile="system")
 
     def run(reporter, cancel_event):
         try:
-            _update_core(
+            installed = _update_core(
                 version=version or None,
                 branch=branch or None,
                 yes=True,
@@ -2154,7 +2155,21 @@ def _start_update_task(
             )
             if cancel_event.is_set():
                 raise ProcessCanceled("update canceled")
-            result = {"success": True}
+            result: dict = {"success": True, "installed": bool(installed)}
+            if installed:
+                reporter.log("🔄 即将重启 Web UI 以加载新版本...")
+                restart_info = schedule_restart(delay=2.0)
+                result["restart"] = restart_info
+                result["restarting"] = restart_info.get("status") == "scheduled"
+                if result["restarting"]:
+                    reporter.log(
+                        f"Web UI 将在约 {restart_info.get('delay', 2)} 秒后自动重启"
+                        f"（{restart_info.get('url', '')}）"
+                    )
+                else:
+                    reporter.log(
+                        f"⚠️  自动重启未安排：{restart_info.get('message', restart_info.get('status'))}"
+                    )
             _finish_task(task_id, _TaskStatus.DONE, result)
             return result
         except ProcessCanceled:

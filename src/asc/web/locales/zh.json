@@ -413,6 +413,8 @@
   "update.failed": "更新失败",
   "update.canceled": "已终止",
   "update.running": "更新中...",
+  "update.restarting": "正在重启 Web UI...",
+  "update.restarting_hint": "安装已完成，正在自动重启服务以加载新版本，页面将在就绪后刷新。",
   "update.log_title": "工具更新日志",
   "update.confirm_cancel": "确定要终止当前更新吗？",
   "update.check_failed": "检查更新失败",

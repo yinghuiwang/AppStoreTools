@@ -97,3 +97,51 @@ def test_stop_sends_sigterm(isolated_state):
     assert result["pid"] == 777
     mock_kill.assert_called_once()
     assert not state_file.exists()
+
+
+def test_schedule_restart_spawns_helper(isolated_state):
+    import sys
+
+    state_file, log_file = isolated_state
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    state_file.write_text(
+        json.dumps({"pid": 4242, "host": "127.0.0.1", "port": 9090, "cwd": "/tmp"}),
+        encoding="utf-8",
+    )
+    mock_proc = MagicMock()
+    mock_proc.pid = 99999
+
+    with patch.object(daemon, "is_process_alive", return_value=True), \
+         patch("asc.web.daemon.subprocess.Popen", return_value=mock_proc) as mock_popen:
+        result = daemon.schedule_restart(delay=1.5)
+
+    assert result["status"] == "scheduled"
+    assert result["helper_pid"] == 99999
+    assert result["port"] == 9090
+    assert result["delay"] == 1.5
+    mock_popen.assert_called_once()
+    args = mock_popen.call_args
+    assert args.args[0][0] == sys.executable
+    assert args.args[0][1] == "-c"
+    helper_code = args.args[0][2]
+    assert "time.sleep(1.5)" in helper_code
+    assert "daemon.stop" in helper_code
+    assert "start_background('127.0.0.1', 9090)" in helper_code
+    assert log_file.exists()
+
+
+def test_schedule_restart_registers_unmanaged_process(isolated_state):
+    state_file, _ = isolated_state
+    mock_proc = MagicMock()
+    mock_proc.pid = 88888
+
+    with patch.object(daemon, "get_status", return_value={"running": False}), \
+         patch("asc.web.daemon.subprocess.Popen", return_value=mock_proc), \
+         patch("asc.web.daemon.os.getpid", return_value=321), \
+         patch.dict("os.environ", {"ASC_WEB_HOST": "127.0.0.1", "ASC_WEB_PORT": "8080"}, clear=False):
+        result = daemon.schedule_restart(delay=0.5)
+
+    assert result["status"] == "scheduled"
+    saved = json.loads(state_file.read_text(encoding="utf-8"))
+    assert saved["pid"] == 321
+    assert saved["port"] == 8080

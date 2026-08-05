@@ -12,7 +12,7 @@
     <p class="text-sm text-obsidian-400 mt-1">{{ t("update.subtitle") }}</p>
   </div>
 
-  <div x-data="{ checkResult: null, checking: false, step: 1, taskId: null, status: 'idle', canceling: false, selectedTab: 'specific', branchOptions: [], branchesLoading: false, branchError: '', selectedBranch: '', versionOptions: [], versionsLoading: false, versionError: '', selectedVersion: '', currentVersion: {{ tool_version|tojson }}, currentCommit: {{ tool_commit|tojson }}, isEditable: {{ is_editable|tojson }} }">
+  <div x-data='{ checkResult: null, checking: false, step: 1, taskId: null, status: "idle", canceling: false, restarting: false, selectedTab: "specific", branchOptions: [], branchesLoading: false, branchError: "", selectedBranch: "", versionOptions: [], versionsLoading: false, versionError: "", selectedVersion: "", currentVersion: {{ tool_version|tojson }}, currentCommit: {{ tool_commit|tojson }}, isEditable: {{ is_editable|tojson }} }'>
 
     <!-- Editable mode warning (shown immediately when detected) -->
     <template x-if="isEditable">
@@ -214,9 +214,15 @@
     <div x-show="step === 2" class="card mt-6">
       <div class="card-body">
         <div class="flex items-center justify-between mb-5">
-          <h2 class="font-semibold text-obsidian-100" x-text="status === 'done' ? window.t('update.done') : status === 'error' ? window.t('update.failed') : status === 'canceled' ? window.t('update.canceled') : window.t('update.running')"></h2>
+          <h2 class="font-semibold text-obsidian-100"
+              x-text="restarting ? window.t('update.restarting') : status === 'done' ? window.t('update.done') : status === 'error' ? window.t('update.failed') : status === 'canceled' ? window.t('update.canceled') : window.t('update.running')"></h2>
           <div class="flex items-center gap-3">
-            <template x-if="status === 'done'">
+            <template x-if="restarting">
+              <div class="w-7 h-7 rounded-full flex items-center justify-center bg-amber-500/15">
+                <svg class="w-4 h-4 text-amber-400 animate-spin" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"/></svg>
+              </div>
+            </template>
+            <template x-if="!restarting && status === 'done'">
               <div class="w-7 h-7 rounded-full flex items-center justify-center bg-emerald-500/15">
                 <svg class="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>
               </div>
@@ -232,6 +238,9 @@
                     @click="TaskLogDrawer.open(taskId, updateLogOptions())">{{ t("common.logs") }}</button>
           </div>
         </div>
+        <template x-if="restarting">
+          <p class="text-sm text-obsidian-400">{{ t("update.restarting_hint") }}</p>
+        </template>
       </div>
     </div>
 
@@ -248,10 +257,66 @@ function updateLogOptions() {
   const d = Alpine.$data(root);
   return {
     title: window.t('update.log_title'),
-    onDone: () => { d.status = 'done'; checkUpdate(); },
-    onError: () => { d.status = 'error'; },
-    onCanceled: () => { d.status = 'canceled'; d.canceling = false; }
+    onDone: () => { d.status = 'done'; handleUpdateDone(d); },
+    onError: () => { d.status = 'error'; d.restarting = false; },
+    onCanceled: () => { d.status = 'canceled'; d.canceling = false; d.restarting = false; }
   };
+}
+
+function waitForWebRestart(maxMs = 90000) {
+  const started = Date.now();
+  return new Promise((resolve) => {
+    const tick = () => {
+      fetch('/api/update/check', { cache: 'no-store' })
+        .then((r) => {
+          if (!r.ok) throw new Error('not ready');
+          return r.json();
+        })
+        .then(() => resolve(true))
+        .catch(() => {
+          if (Date.now() - started > maxMs) resolve(false);
+          else setTimeout(tick, 1000);
+        });
+    };
+    setTimeout(tick, 1500);
+  });
+}
+
+function handleUpdateDone(d) {
+  const taskId = d.taskId;
+  if (!taskId) {
+    checkUpdate();
+    return;
+  }
+  fetch(`/api/task/${taskId}/status`, { cache: 'no-store' })
+    .then((r) => {
+      if (!r.ok) throw new Error('status unavailable');
+      return r.json();
+    })
+    .then((st) => {
+      if (st.result && st.result.restarting) {
+        d.restarting = true;
+        return waitForWebRestart().then((ok) => {
+          if (ok) location.reload();
+          else {
+            d.restarting = false;
+            checkUpdate();
+          }
+        });
+      }
+      checkUpdate();
+    })
+    .catch(() => {
+      // Server may already be restarting; wait then reload.
+      d.restarting = true;
+      return waitForWebRestart().then((ok) => {
+        if (ok) location.reload();
+        else {
+          d.restarting = false;
+          checkUpdate();
+        }
+      });
+    });
 }
 
 function startUpdateTask(taskId) {
@@ -259,6 +324,7 @@ function startUpdateTask(taskId) {
   const d = Alpine.$data(root);
   d.status = 'running';
   d.canceling = false;
+  d.restarting = false;
   TaskLogDrawer.open(taskId, updateLogOptions());
 }
 

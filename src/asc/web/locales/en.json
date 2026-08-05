@@ -413,6 +413,8 @@
   "update.failed": "Update failed",
   "update.canceled": "Canceled",
   "update.running": "Updating...",
+  "update.restarting": "Restarting Web UI...",
+  "update.restarting_hint": "Install finished. Restarting the service to load the new version; this page will refresh when ready.",
   "update.log_title": "Tool update logs",
   "update.confirm_cancel": "Cancel the current update?",
   "update.check_failed": "Failed to check for updates",
