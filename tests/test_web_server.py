@@ -637,6 +637,68 @@ def test_update_page_mentions_auto_restart(client):
     assert "d.progress = 100" in resp.text
 
 
+def test_update_post_restart_finalizes_pending_install(tmp_path, monkeypatch, client):
+    from asc.web import daemon, routes_api
+    from asc.web.tasks import TaskStatus, TaskStore
+
+    store = TaskStore(tmp_path / "tasks.db")
+    monkeypatch.setattr(routes_api, "_task_store", store)
+    monkeypatch.setattr(daemon, "_STATE_DIR", tmp_path)
+
+    task_id = store.create("update", profile="system")
+    store.set_status(task_id, TaskStatus.DONE)
+    store.set_result(
+        task_id,
+        {
+            "success": True,
+            "installed": False,
+            "pending_install": True,
+            "restarting": True,
+        },
+    )
+    daemon.write_update_restart_marker(
+        task_id, installed=True, pending_install=False
+    )
+
+    resp = client.get("/api/update/post-restart")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "done"
+    assert data["result"]["installed"] is True
+    assert data["result"]["pending_install"] is False
+    assert data["result"]["restarting"] is False
+    assert data["result"]["restarted"] is True
+
+
+def test_update_post_restart_marks_install_error(tmp_path, monkeypatch, client):
+    from asc.web import daemon, routes_api
+    from asc.web.tasks import TaskStatus, TaskStore
+
+    store = TaskStore(tmp_path / "tasks.db")
+    monkeypatch.setattr(routes_api, "_task_store", store)
+    monkeypatch.setattr(daemon, "_STATE_DIR", tmp_path)
+
+    task_id = store.create("update", profile="system")
+    store.set_status(task_id, TaskStatus.DONE)
+    store.set_result(
+        task_id,
+        {"success": True, "pending_install": True, "restarting": True},
+    )
+    daemon.write_update_restart_marker(
+        task_id,
+        installed=False,
+        pending_install=True,
+        install_error="CalledProcessError: pip failed",
+    )
+
+    resp = client.get("/api/update/post-restart")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "error"
+    assert data["result"]["success"] is False
+    assert "pip failed" in data["result"]["error"]
+
+
 def test_update_post_restart_finalizes_done_task(tmp_path, monkeypatch, client):
     from asc.web import daemon, routes_api
     from asc.web.tasks import TaskStatus, TaskStore

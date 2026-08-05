@@ -2266,7 +2266,9 @@ def _public_task_status(task: dict | None) -> str | None:
 
 
 def _finalize_update_task_after_restart(task_id: str) -> dict | None:
-    """Ensure a post-restart update task is terminal DONE and clear restarting flag."""
+    """Ensure a post-restart update task is terminal DONE/ERROR and clear restarting flag."""
+    from asc.web.daemon import read_update_restart_marker
+
     task = _task_store.get(task_id)
     if task is None:
         return None
@@ -2275,25 +2277,59 @@ def _finalize_update_task_after_restart(task_id: str) -> dict | None:
     kind = str(task.get("kind") or "")
     if kind != "update":
         return task
+
+    marker = read_update_restart_marker() or {}
+    marker_for_task = str(marker.get("task_id") or "") == str(task_id)
+    install_error = marker.get("install_error") if marker_for_task else None
+    marker_installed = bool(marker.get("installed")) if marker_for_task else False
+
+    if install_error:
+        merged = dict(result)
+        merged["success"] = False
+        merged["installed"] = False
+        merged["pending_install"] = False
+        merged["restarting"] = False
+        merged["restarted"] = True
+        merged["error"] = str(install_error)
+        if status_value != "error":
+            _task_store.set_status(task_id, _TaskStatus.ERROR)
+        _task_store.set_result(task_id, merged)
+        _task_store.append_log(
+            task_id,
+            f"❌ 重启后安装失败：{install_error}",
+        )
+        return _task_store.get(task_id)
+
     looks_ok = (
         result.get("success") is True
         or result.get("restarting") is True
         or result.get("installed") is True
+        or result.get("pending_install") is True
         or result.get("restarted") is True
+        or marker_installed
     )
     if status_value in {"pending", "running"} and looks_ok:
         merged = dict(result)
         merged["success"] = True
         merged["restarting"] = False
         merged["restarted"] = True
+        if marker_installed or result.get("pending_install"):
+            merged["installed"] = True
+            merged["pending_install"] = False
         _task_store.set_status(task_id, _TaskStatus.DONE)
         _task_store.set_result(task_id, merged)
         _task_store.append_log(task_id, "✅ 服务已重启，更新任务已收尾")
         return _task_store.get(task_id)
-    if status_value == "done" and result.get("restarting") is True:
+    if status_value == "done" and (
+        result.get("restarting") is True or result.get("pending_install") is True
+    ):
         merged = dict(result)
         merged["restarting"] = False
         merged["restarted"] = True
+        if marker_installed or result.get("pending_install"):
+            merged["installed"] = True
+            merged["pending_install"] = False
+        merged["success"] = True
         _task_store.set_result(task_id, merged)
         _task_store.append_log(task_id, "✅ Web UI 已重启，更新完成")
         return _task_store.get(task_id)
@@ -2334,6 +2370,9 @@ async def update_post_restart():
             "marker": {
                 "scheduled_at": marker.get("scheduled_at"),
                 "old_pid": marker.get("old_pid"),
+                "installed": marker.get("installed"),
+                "install_error": marker.get("install_error"),
+                "pending_install": marker.get("pending_install"),
             },
         }
     )
@@ -2421,57 +2460,100 @@ def _start_update_task(
 ) -> str:
     import time as _time
 
-    from asc.commands.update_cmd import UpdateError, _update_core
+    from asc.commands.update_cmd import UpdateError, UpdateResult, _update_core
     from asc.web.daemon import schedule_restart
 
     task_id = _task_store.create("update", profile="system")
 
     def run(reporter, cancel_event):
         try:
-            installed = _update_core(
+            outcome = _update_core(
                 version=version or None,
                 branch=branch or None,
                 yes=True,
                 reporter=reporter,
                 confirm=False,
+                defer_install=True,
             )
+            if not isinstance(outcome, UpdateResult):
+                # Tests may mock a bare bool.
+                outcome = UpdateResult(changed=bool(outcome), deferred=bool(outcome))
             if cancel_event.is_set():
                 raise ProcessCanceled("update canceled")
-            result: dict = {"success": True, "installed": bool(installed)}
-            if installed:
+
+            result: dict = {
+                "success": True,
+                "installed": bool(outcome.changed) and not outcome.deferred,
+                "pending_install": bool(outcome.deferred),
+            }
+            if outcome.install_ref:
+                result["install_ref"] = outcome.install_ref
+            if outcome.commit:
+                result["commit"] = outcome.commit
+
+            if outcome.changed:
                 # Mark restart intent before DONE so the UI can show completion
-                # while the detached helper later stops/starts the process.
-                reporter.log("🔄 即将重启 Web UI 以加载新版本...")
+                # while the detached helper later stops / installs / starts.
+                if outcome.deferred:
+                    reporter.log(
+                        "🔄 即将停止 Web UI，在停服后执行 pip 安装，再自动重启..."
+                    )
+                else:
+                    reporter.log("🔄 即将重启 Web UI 以加载新版本...")
                 result["restarting"] = True
+
             # Flush + persist DONE *before* scheduling kill so SSE clients receive
             # the terminal event, and recover-on-boot will not mark this task ERROR.
             reporter.flush()
             try:
                 _finish_task(task_id, _TaskStatus.DONE, result)
             except Exception as finish_exc:  # noqa: BLE001
-                # Install already succeeded; keep going so restart can still load
-                # the new package. Post-restart recover may finalize the task.
+                # Plan already prepared; keep going so restart/install can proceed.
+                # Post-restart recover may finalize the task.
                 result["db_finalize_error"] = str(finish_exc)
                 reporter.log(
-                    f"⚠️  更新已安装，但任务状态写入失败：{finish_exc}",
+                    f"⚠️  更新已准备，但任务状态写入失败：{finish_exc}",
                     level="error",
                 )
                 reporter.flush()
 
-            if installed:
+            if outcome.changed:
                 from asc.web.daemon import write_update_restart_marker
 
-                write_update_restart_marker(task_id, installed=True)
+                write_update_restart_marker(
+                    task_id,
+                    installed=not outcome.deferred,
+                    pending_install=bool(outcome.deferred),
+                    install_ref=outcome.install_ref,
+                    commit=outcome.commit,
+                )
                 # Give the event loop a beat to push the SSE "done" frame.
                 _time.sleep(0.8)
-                restart_info = schedule_restart(delay=1.5)
+                restart_kwargs: dict = {"delay": 1.5}
+                if outcome.deferred and outcome.install_ref:
+                    restart_kwargs.update(
+                        {
+                            "install_ref": outcome.install_ref,
+                            "commit": outcome.commit,
+                            "task_id": task_id,
+                        }
+                    )
+                restart_info = schedule_restart(**restart_kwargs)
                 result["restart"] = restart_info
                 result["restarting"] = restart_info.get("status") == "scheduled"
                 if result["restarting"]:
-                    msg = (
-                        f"Web UI 将在约 {restart_info.get('delay', 1.5)} 秒后自动重启"
-                        f"（{restart_info.get('url', '')}）"
-                    )
+                    if outcome.deferred:
+                        msg = (
+                            f"Web UI 将先停止，再安装 "
+                            f"{outcome.install_ref or ''}，约 "
+                            f"{restart_info.get('delay', 1.5)} 秒后自动重启"
+                            f"（{restart_info.get('url', '')}）"
+                        )
+                    else:
+                        msg = (
+                            f"Web UI 将在约 {restart_info.get('delay', 1.5)} 秒后自动重启"
+                            f"（{restart_info.get('url', '')}）"
+                        )
                 else:
                     msg = (
                         f"⚠️  自动重启未安排："

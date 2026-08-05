@@ -181,7 +181,8 @@ def test_update_core_maps_download_install_pct():
             patch("asc.commands.update_cmd._install_git_ref") as install:
         installed = _update_core(version=None, branch=None, yes=True, reporter=reporter)
 
-    assert installed is True
+    assert installed
+    assert installed.changed is True
     install.assert_called_once()
     pcts = [e["pct"] for e in sink.progress_events]
     assert pcts == sorted(pcts)
@@ -205,6 +206,7 @@ def test_update_web_starter_uses_start_background_task():
     assert "start_background_task" in starter
     assert "schedule_restart" in starter
     assert "restarting" in starter
+    assert "defer_install=True" in starter
     assert "reporter.flush()" in starter
     assert "_PROGRESS_RE" not in starter
     assert "io.StringIO" not in starter
@@ -217,8 +219,9 @@ def test_update_web_starter_flushes_before_finish(tmp_path, monkeypatch):
     """Buffered logs must flush before DONE so SSE clients see the full log."""
     from unittest.mock import MagicMock, patch
 
+    from asc.commands.update_cmd import UpdateResult
     from asc.web import routes_api
-    from asc.web.tasks import TaskStatus, TaskStore
+    from asc.web.tasks import TaskStore
 
     store = TaskStore(tmp_path / "tasks.db")
     monkeypatch.setattr(routes_api, "_task_store", store)
@@ -243,7 +246,10 @@ def test_update_web_starter_flushes_before_finish(tmp_path, monkeypatch):
         return task_id
 
     with patch("asc.web.routes_api.start_background_task", side_effect=fake_run), \
-            patch("asc.commands.update_cmd._update_core", return_value=False):
+            patch(
+                "asc.commands.update_cmd._update_core",
+                return_value=UpdateResult(changed=False),
+            ):
         routes_api._start_update_task()
 
     assert flush_order == ["flush", "finish"]
@@ -252,6 +258,7 @@ def test_update_web_starter_flushes_before_finish(tmp_path, monkeypatch):
 def test_update_web_starter_schedules_restart_after_install(tmp_path, monkeypatch):
     from unittest.mock import MagicMock, patch
 
+    from asc.commands.update_cmd import UpdateResult
     from asc.web import routes_api
     from asc.web.tasks import TaskStatus, TaskStore
 
@@ -259,6 +266,7 @@ def test_update_web_starter_schedules_restart_after_install(tmp_path, monkeypatc
     monkeypatch.setattr(routes_api, "_task_store", store)
     order: list[str] = []
     marker_calls: list[str] = []
+    marker_kwargs: list[dict] = []
 
     def fake_run(store_arg, *, task_id=None, run=None, **kwargs):
         reporter = MagicMock()
@@ -283,10 +291,17 @@ def test_update_web_starter_schedules_restart_after_install(tmp_path, monkeypatc
     def tracked_marker(task_id, **kwargs):
         order.append("marker")
         marker_calls.append(task_id)
+        marker_kwargs.append(kwargs)
         return tmp_path / "update_restart.json"
 
+    outcome = UpdateResult(
+        changed=True,
+        deferred=True,
+        install_ref="v0.1.25",
+        commit="a" * 40,
+    )
     with patch("asc.web.routes_api.start_background_task", side_effect=fake_run), \
-            patch("asc.commands.update_cmd._update_core", return_value=True) as update_core, \
+            patch("asc.commands.update_cmd._update_core", return_value=outcome) as update_core, \
             patch.object(routes_api, "_finish_task", side_effect=tracked_finish), \
             patch("asc.web.daemon.schedule_restart", side_effect=tracked_restart) as restart, \
             patch("asc.web.daemon.write_update_restart_marker", side_effect=tracked_marker), \
@@ -294,13 +309,22 @@ def test_update_web_starter_schedules_restart_after_install(tmp_path, monkeypatc
         task_id = routes_api._start_update_task(version="0.1.25")
 
     update_core.assert_called_once()
-    restart.assert_called_once_with(delay=1.5)
+    assert update_core.call_args.kwargs.get("defer_install") is True
+    restart.assert_called_once_with(
+        delay=1.5,
+        install_ref="v0.1.25",
+        commit="a" * 40,
+        task_id=task_id,
+    )
     assert order == ["finish", "marker", "restart"]
     assert marker_calls == [task_id]
+    assert marker_kwargs[0]["pending_install"] is True
+    assert marker_kwargs[0]["installed"] is False
     task = store.get(task_id)
     assert task["status"] == TaskStatus.DONE
     assert task["result"]["success"] is True
-    assert task["result"]["installed"] is True
+    assert task["result"]["installed"] is False
+    assert task["result"]["pending_install"] is True
     assert task["result"]["restarting"] is True
 
 
@@ -308,6 +332,7 @@ def test_update_web_starter_continues_restart_when_finish_db_fails(tmp_path, mon
     """Install success must not be aborted by TaskStore finalize failures."""
     from unittest.mock import MagicMock, patch
 
+    from asc.commands.update_cmd import UpdateResult
     from asc.web import routes_api
     from asc.web.tasks import TaskStore
 
@@ -335,21 +360,33 @@ def test_update_web_starter_continues_restart_when_finish_db_fails(tmp_path, mon
         order.append("marker")
         return tmp_path / "update_restart.json"
 
+    outcome = UpdateResult(
+        changed=True,
+        deferred=True,
+        install_ref="v0.1.25",
+        commit="b" * 40,
+    )
     with patch("asc.web.routes_api.start_background_task", side_effect=fake_run), \
-            patch("asc.commands.update_cmd._update_core", return_value=True), \
+            patch("asc.commands.update_cmd._update_core", return_value=outcome), \
             patch.object(routes_api, "_finish_task", side_effect=boom_finish), \
             patch("asc.web.daemon.schedule_restart", side_effect=tracked_restart) as restart, \
             patch("asc.web.daemon.write_update_restart_marker", side_effect=tracked_marker), \
             patch("time.sleep"):
-        routes_api._start_update_task(version="0.1.25")
+        task_id = routes_api._start_update_task(version="0.1.25")
 
-    restart.assert_called_once_with(delay=1.5)
+    restart.assert_called_once_with(
+        delay=1.5,
+        install_ref="v0.1.25",
+        commit="b" * 40,
+        task_id=task_id,
+    )
     assert order == ["finish", "marker", "restart"]
 
 
 def test_update_web_starter_skips_restart_when_not_installed(tmp_path, monkeypatch):
     from unittest.mock import MagicMock, patch
 
+    from asc.commands.update_cmd import UpdateResult
     from asc.web import routes_api
     from asc.web.tasks import TaskStatus, TaskStore
 
@@ -363,7 +400,10 @@ def test_update_web_starter_skips_restart_when_not_installed(tmp_path, monkeypat
         return task_id
 
     with patch("asc.web.routes_api.start_background_task", side_effect=fake_run), \
-            patch("asc.commands.update_cmd._update_core", return_value=False), \
+            patch(
+                "asc.commands.update_cmd._update_core",
+                return_value=UpdateResult(changed=False),
+            ), \
             patch("asc.web.daemon.schedule_restart") as restart:
         task_id = routes_api._start_update_task()
 
@@ -405,7 +445,8 @@ def test_update_already_latest_calls_done():
             patch("asc.commands.update_cmd._install_git_ref") as install:
         installed = _update_core(version=None, branch=None, yes=True, reporter=reporter)
 
-    assert installed is False
+    assert not installed
+    assert installed.changed is False
     install.assert_not_called()
     assert sink.progress_events[-1]["pct"] == 100
     joined = "\n".join(msg for _, msg in sink.logs)
@@ -425,7 +466,8 @@ def test_update_cancelled_confirm_calls_done():
             version=None, branch=None, yes=False, reporter=reporter, confirm=True
         )
 
-    assert installed is False
+    assert not installed
+    assert installed.changed is False
     install.assert_not_called()
     assert sink.progress_events[-1]["pct"] == 100
     joined = "\n".join(msg for _, msg in sink.logs)

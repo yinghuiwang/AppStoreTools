@@ -99,7 +99,22 @@ class TestPipInstallStreaming:
         assert "--quiet" not in cmd
         assert "--progress-bar" in cmd
         assert "--force-reinstall" in cmd
+        assert "--upgrade" in cmd
+        assert "-u" in cmd
+        assert "--no-deps" not in cmd
         assert cmd[-1].endswith("@abc123")
+
+    def test_pip_install_cmd_no_deps(self):
+        from asc.commands.update_cmd import _pip_install_cmd
+
+        cmd = _pip_install_cmd("abc123", no_deps=True)
+        assert "--no-deps" in cmd
+
+    def test_pip_install_env_unbuffered(self):
+        from asc.commands.update_cmd import _pip_install_env
+
+        env = _pip_install_env()
+        assert env["PYTHONUNBUFFERED"] == "1"
 
     def test_extract_pip_percent(self):
         from asc.commands.update_cmd import _extract_pip_percent
@@ -144,6 +159,7 @@ class TestPipInstallStreaming:
 
         mock_proc = MagicMock()
         mock_proc.stdout = iter(lines)
+        mock_proc.poll.return_value = 0
         mock_proc.wait.return_value = 0
 
         with patch("asc.commands.update_cmd.subprocess.Popen", return_value=mock_proc) as popen:
@@ -153,6 +169,9 @@ class TestPipInstallStreaming:
         cmd = popen.call_args.args[0]
         assert "--quiet" not in cmd
         assert "--progress-bar" in cmd
+        assert "-u" in cmd
+        env = popen.call_args.kwargs.get("env") or {}
+        assert env.get("PYTHONUNBUFFERED") == "1"
         joined = "\n".join(sink.logs)
         assert "Cloning" in joined
         assert "Successfully installed" in joined
@@ -160,6 +179,41 @@ class TestPipInstallStreaming:
         assert any(e["phase"] == "install" for e in sink.progress_events)
         assert sink.progress_events[-1]["pct"] == 100
         assert sink.progress_events[-1]["phase"] == "install"
+
+    def test_update_core_defer_install_skips_pip(self):
+        from unittest.mock import MagicMock, patch
+
+        from asc.commands.update_cmd import _update_core
+        from asc.reporting import TaskReporter
+
+        class RecordingSink:
+            def __init__(self):
+                self.logs = []
+
+            def on_log(self, message, *, level="info"):
+                self.logs.append(message)
+
+            def on_progress(self, **kwargs):
+                pass
+
+        sink = RecordingSink()
+        reporter = TaskReporter(sinks=[sink])
+        commit = "c" * 40
+        with patch("asc.commands.update_cmd._resolve_git_ref_commit", return_value=commit), \
+                patch("asc.commands.update_cmd._install_git_ref") as install:
+            outcome = _update_core(
+                branch="main",
+                yes=True,
+                reporter=reporter,
+                defer_install=True,
+            )
+
+        install.assert_not_called()
+        assert outcome.changed is True
+        assert outcome.deferred is True
+        assert outcome.install_ref == "main"
+        assert outcome.commit == commit
+        assert any("defer" in line.lower() for line in sink.logs)
 
 
 class TestResolveGitRefCommit:

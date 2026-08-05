@@ -208,3 +208,50 @@ def test_update_restart_marker_roundtrip(isolated_state):
     assert data["installed"] is True
     daemon.clear_update_restart_marker()
     assert daemon.read_update_restart_marker() is None
+
+
+def test_schedule_restart_includes_deferred_install(isolated_state):
+    mock_proc = MagicMock()
+    mock_proc.pid = 99999
+
+    with patch.object(daemon, "get_status", return_value={"running": False}), \
+         patch("asc.web.daemon.subprocess.Popen", return_value=mock_proc) as popen, \
+         patch("asc.web.daemon.os.getpid", return_value=321), \
+         patch.dict("os.environ", {"ASC_WEB_HOST": "127.0.0.1", "ASC_WEB_PORT": "8080"}, clear=False):
+        result = daemon.schedule_restart(
+            delay=0.5,
+            install_ref="v0.1.26",
+            commit="a" * 40,
+            task_id="task-xyz",
+        )
+
+    assert result["status"] == "scheduled"
+    assert result["install_ref"] == "v0.1.26"
+    assert result["task_id"] == "task-xyz"
+    helper_code = popen.call_args.args[0][2]
+    assert "run_deferred_package_install" in helper_code
+    assert "v0.1.26" in helper_code
+    assert "task-xyz" in helper_code
+
+
+def test_run_deferred_package_install_updates_marker(isolated_state, tmp_path, monkeypatch):
+    from asc.web.tasks import TaskStore
+
+    store = TaskStore(tmp_path / "tasks.db")
+    task_id = store.create("update", profile="system")
+    monkeypatch.setattr("asc.web.tasks.task_store", store)
+    daemon.write_update_restart_marker(task_id, pending_install=True, installed=False)
+
+    with patch("asc.commands.update_cmd._install_git_ref") as install:
+        result = daemon.run_deferred_package_install(
+            install_ref="main",
+            commit="b" * 40,
+            task_id=task_id,
+        )
+
+    install.assert_called_once()
+    assert result["status"] == "installed"
+    marker = daemon.read_update_restart_marker()
+    assert marker is not None
+    assert marker["installed"] is True
+    assert marker.get("pending_install") is False

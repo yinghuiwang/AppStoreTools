@@ -545,8 +545,23 @@ class TaskStore:
             result.get("success") is True
             or result.get("restarting") is True
             or result.get("installed") is True
+            or result.get("pending_install") is True
             or result.get("restarted") is True
         )
+
+    @staticmethod
+    def _read_update_marker_for_task(task_id: str) -> dict | None:
+        try:
+            from asc.web.daemon import read_update_restart_marker
+
+            marker = read_update_restart_marker()
+        except Exception:
+            return None
+        if not isinstance(marker, dict):
+            return None
+        if str(marker.get("task_id") or "") != str(task_id):
+            return None
+        return marker
 
     def _recover_non_terminal_task(self, task: dict) -> dict:
         """Finalize or interrupt a PENDING/RUNNING task after process restart."""
@@ -555,10 +570,37 @@ class TaskStore:
         result = task.get("result") if isinstance(task.get("result"), dict) else None
         logs = list(task.get("logs") or [])
         if kind == "update" and self._update_result_looks_successful(result):
+            marker = self._read_update_marker_for_task(str(task.get("id") or ""))
+            if marker and marker.get("install_error"):
+                merged = dict(result or {})
+                merged["success"] = False
+                merged["installed"] = False
+                merged["pending_install"] = False
+                merged["restarting"] = False
+                merged["restarted"] = True
+                merged["error"] = str(marker.get("install_error"))
+                logs.append(f"❌ 重启后安装失败：{marker.get('install_error')}")
+                return {
+                    "status": TaskStatus.ERROR,
+                    "result": merged,
+                    "logs": logs,
+                    "updated_at": now,
+                    "completed_at": now,
+                }
             merged = dict(result or {})
             merged["success"] = True
             merged["restarting"] = False
             merged["restarted"] = True
+            if marker and marker.get("installed"):
+                merged["installed"] = True
+                merged["pending_install"] = False
+            elif merged.get("pending_install") and not (marker and marker.get("install_error")):
+                # Helper finished install before start; marker may already say installed,
+                # or was written then partially read — treat pending as completed when
+                # there is no install_error.
+                if marker is None or marker.get("installed") is not False:
+                    merged["installed"] = True
+                    merged["pending_install"] = False
             logs.append("✅ 服务已重启，更新任务已收尾")
             return {
                 "status": TaskStatus.DONE,
@@ -796,11 +838,40 @@ class TaskStore:
                     str(task.get("kind") or "") == "update"
                     and self._normalize_status(task["status"]) == TaskStatus.DONE
                     and isinstance(task.get("result"), dict)
-                    and task["result"].get("restarting") is True
+                    and (
+                        task["result"].get("restarting") is True
+                        or task["result"].get("pending_install") is True
+                    )
                 ):
+                    marker = self._read_update_marker_for_task(str(task.get("id") or ""))
+                    if marker and marker.get("install_error"):
+                        result = dict(task["result"])
+                        result["success"] = False
+                        result["installed"] = False
+                        result["pending_install"] = False
+                        result["restarting"] = False
+                        result["restarted"] = True
+                        result["error"] = str(marker.get("install_error"))
+                        task["result"] = result
+                        task["status"] = TaskStatus.ERROR
+                        task["updated_at"] = self._now()
+                        task["completed_at"] = task.get("completed_at") or task["updated_at"]
+                        task["logs"].append(
+                            f"❌ 重启后安装失败：{marker.get('install_error')}"
+                        )
+                        changed = True
+                        continue
                     result = dict(task["result"])
                     result["restarting"] = False
                     result["restarted"] = True
+                    if marker and marker.get("installed"):
+                        result["installed"] = True
+                        result["pending_install"] = False
+                    elif result.get("pending_install") and (
+                        marker is None or marker.get("installed") is not False
+                    ):
+                        result["installed"] = True
+                        result["pending_install"] = False
                     task["result"] = result
                     task["updated_at"] = self._now()
                     task["logs"].append("✅ Web UI 已重启，更新完成")

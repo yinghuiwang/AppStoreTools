@@ -279,12 +279,136 @@ def _wait_port_free(host: str, port: int, timeout: float = 10.0) -> bool:
     return False
 
 
-def schedule_restart(*, delay: float = 2.0) -> dict[str, Any]:
-    """Detach a helper that stops then restarts the Web UI after ``delay`` seconds.
+def _append_update_task_log(task_id: str | None, message: str) -> None:
+    """Best-effort append to the update task log from the restart helper."""
+    if not task_id:
+        return
+    try:
+        from asc.web.tasks import task_store
+
+        task_store.append_log(str(task_id), message)
+    except Exception as exc:  # noqa: BLE001
+        print(f"update task log append failed: {exc}", flush=True)
+
+
+def run_deferred_package_install(
+    *,
+    install_ref: str,
+    commit: str | None = None,
+    task_id: str | None = None,
+    timeout: float | None = None,
+) -> dict[str, Any]:
+    """Run pip install after the Web UI process has stopped.
+
+    Safe to uninstall/replace Pillow and other deps because nothing in this
+    venv should still be serving HTTP.
+    """
+    from asc.commands.update_cmd import (
+        PIP_INSTALL_TIMEOUT_SEC,
+        _install_git_ref,
+        _update_phase_plan,
+    )
+    from asc.reporting import TaskReporter
+
+    class _HelperSink:
+        def on_log(self, message: str, *, level: str = "info") -> None:
+            print(message, flush=True)
+            _append_update_task_log(task_id, message)
+
+        def on_progress(
+            self,
+            *,
+            pct: int,
+            msg: str,
+            phase: str,
+            phase_label: str,
+            phase_index: int,
+            phase_total: int,
+        ) -> None:
+            label = phase_label or phase
+            line = f"[{pct}%] {label}" + (f": {msg}" if msg else "")
+            print(line, flush=True)
+
+    install_target = commit or install_ref
+    sink = _HelperSink()
+    reporter = TaskReporter(sinks=[sink])
+    reporter.set_phases(_update_phase_plan())
+    reporter.phase("install")
+    sink.on_log(
+        f"Deferred pip install after Web UI stop: ref={install_ref!r} "
+        f"target={install_target!r}"
+    )
+    try:
+        _install_git_ref(
+            install_ref,
+            commit,
+            reporter=reporter,
+            no_deps=False,
+            timeout=float(timeout if timeout is not None else PIP_INSTALL_TIMEOUT_SEC),
+        )
+    except Exception as exc:  # noqa: BLE001
+        err = f"{exc.__class__.__name__}: {exc}"
+        sink.on_log(f"❌ Deferred install failed: {err}")
+        if task_id:
+            try:
+                marker = read_update_restart_marker() or {"task_id": task_id}
+                marker.update(
+                    {
+                        "task_id": str(task_id),
+                        "installed": False,
+                        "pending_install": True,
+                        "install_error": err,
+                        "install_ref": install_ref,
+                        "commit": commit,
+                    }
+                )
+                path = _update_restart_path()
+                path.write_text(json.dumps(marker, indent=2), encoding="utf-8")
+            except Exception:
+                pass
+        return {"status": "error", "message": err, "install_ref": install_ref}
+
+    if task_id:
+        try:
+            marker = read_update_restart_marker() or {"task_id": task_id}
+            marker.update(
+                {
+                    "task_id": str(task_id),
+                    "installed": True,
+                    "pending_install": False,
+                    "install_error": None,
+                    "install_ref": install_ref,
+                    "commit": commit,
+                }
+            )
+            # Drop null install_error for cleaner JSON
+            if marker.get("install_error") is None:
+                marker.pop("install_error", None)
+            path = _update_restart_path()
+            path.write_text(json.dumps(marker, indent=2), encoding="utf-8")
+        except Exception as exc:  # noqa: BLE001
+            sink.on_log(f"⚠️  Could not refresh update marker: {exc}")
+    sink.on_log("✅ Deferred package install completed")
+    return {
+        "status": "installed",
+        "install_ref": install_ref,
+        "commit": commit,
+    }
+
+
+def schedule_restart(
+    *,
+    delay: float = 2.0,
+    install_ref: str | None = None,
+    commit: str | None = None,
+    task_id: str | None = None,
+) -> dict[str, Any]:
+    """Detach a helper that stops, optionally installs, then restarts the Web UI.
 
     Used after a successful ``asc`` package update so the running server loads
-    the newly installed code. The helper is a separate process and survives
-    the current uvicorn shutdown.
+    the newly installed code. When ``install_ref`` is set, pip runs *after*
+    stop (and before start) so uninstalling Pillow/FastAPI cannot deadlock the
+    live server process.
 
     Always pins ``os.getpid()`` (this server process) as the stop target so a
     stale ``web.json`` cannot leave the old UI running after an update.
@@ -312,7 +436,7 @@ def schedule_restart(*, delay: float = 2.0) -> dict[str, Any]:
         }
     )
 
-    # Explicit pid + port-wait + retry start: survives stale state and TIME_WAIT.
+    # Explicit pid + port-wait + optional pip + retry start.
     helper_code = (
         "import os, time\n"
         f"time.sleep({float(delay)!r})\n"
@@ -321,30 +445,43 @@ def schedule_restart(*, delay: float = 2.0) -> dict[str, Any]:
         f"host = {host!r}\n"
         f"port = {int(port)}\n"
         f"cwd = {cwd!r}\n"
+        f"install_ref = {install_ref!r}\n"
+        f"commit = {commit!r}\n"
+        f"task_id = {task_id!r}\n"
         "daemon.write_state({\n"
         "    'pid': target_pid, 'host': host, 'port': port, 'cwd': cwd,\n"
         "    'log': str(daemon.LOG_FILE), 'url': daemon._open_url(host, port),\n"
         "})\n"
-        "print(daemon.stop(timeout=10.0, pid=target_pid))\n"
+        "print(daemon.stop(timeout=10.0, pid=target_pid), flush=True)\n"
         "daemon._wait_port_free(host, port, timeout=15.0)\n"
         "os.chdir(cwd)\n"
+        "install_result = None\n"
+        "if install_ref:\n"
+        "    install_result = daemon.run_deferred_package_install(\n"
+        "        install_ref=install_ref, commit=commit, task_id=task_id,\n"
+        "    )\n"
+        "    print(install_result, flush=True)\n"
+        "    if install_result.get('status') != 'installed':\n"
+        "        # Still try to bring the UI back so the user can see the error.\n"
+        "        pass\n"
         "result = None\n"
         "for attempt in range(8):\n"
         "    result = daemon.start_background(host, port)\n"
-        "    print(result)\n"
+        "    print(result, flush=True)\n"
         "    status = result.get('status')\n"
         "    if status == 'started':\n"
         "        break\n"
         "    if status == 'already_running' and result.get('pid') != target_pid:\n"
         "        break\n"
         "    time.sleep(0.5)\n"
-        "print(result)\n"
+        "print({'restart': result, 'install': install_result}, flush=True)\n"
     )
     _STATE_DIR.mkdir(parents=True, exist_ok=True)
     log_handle = open(LOG_FILE, "a", encoding="utf-8")
+    install_note = f", install_ref={install_ref}" if install_ref else ""
     log_handle.write(
         f"\n--- asc web restart scheduled at {time.strftime('%Y-%m-%d %H:%M:%S')} "
-        f"(delay={delay}s, pid={target_pid}, {host}:{port}) ---\n"
+        f"(delay={delay}s, pid={target_pid}, {host}:{port}{install_note}) ---\n"
     )
     log_handle.flush()
     try:
@@ -369,4 +506,7 @@ def schedule_restart(*, delay: float = 2.0) -> dict[str, Any]:
         "port": port,
         "delay": delay,
         "url": _open_url(host, port),
+        "install_ref": install_ref,
+        "commit": commit,
+        "task_id": task_id,
     }

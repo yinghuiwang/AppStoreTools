@@ -223,6 +223,32 @@ def test_task_store_keeps_successful_update_done_after_restart(tmp_path):
     assert any("重启" in line for line in task["logs"])
 
 
+def test_task_store_marks_update_error_from_install_marker(tmp_path, monkeypatch):
+    from asc.web import daemon
+
+    monkeypatch.setattr(daemon, "_STATE_DIR", tmp_path)
+    storage_path = tmp_path / "tasks.db"
+    store = TaskStore(storage_path)
+    task_id = store.create("update", profile="system")
+    store.set_status(task_id, TaskStatus.DONE)
+    store.set_result(
+        task_id,
+        {"success": True, "pending_install": True, "restarting": True},
+    )
+    daemon.write_update_restart_marker(
+        task_id,
+        installed=False,
+        pending_install=True,
+        install_error="pip timed out",
+    )
+
+    restored = TaskStore(storage_path)
+    task = restored.get(task_id)
+    assert task["status"] == TaskStatus.ERROR
+    assert task["result"]["success"] is False
+    assert "pip timed out" in task["result"]["error"]
+
+
 def test_task_store_finalizes_running_update_with_success_result(tmp_path):
     storage_path = tmp_path / "tasks.db"
     store = TaskStore(storage_path)
