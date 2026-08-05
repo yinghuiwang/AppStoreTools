@@ -465,6 +465,18 @@ ERRORS = {
         'en': 'Failed to get public IP address. Check network connection or use "asc guard disable".',
         'zh': '无法获取公网 IP 地址。请检查网络连接，或使用 "asc guard disable" 禁用 Guard。',
     },
+    'guard_fingerprint_required': {
+        'en': 'Machine fingerprint is required.',
+        'zh': '机器指纹不能为空。',
+    },
+    'guard_app_required': {
+        'en': 'Local app profile is required.',
+        'zh': '请选择本地 App。',
+    },
+    'guard_app_already_bound': {
+        'en': 'This app is already bound to a machine. Unbind it first before adding a new binding manually.',
+        'zh': '该 App 已绑定到某台机器，请先解绑后再手动添加。',
+    },
     'xcode_scheme_failed': {
         'en': 'Failed to get Xcode scheme list. Ensure --project points to a valid Xcode project.',
         'zh': '无法获取 Xcode scheme 列表。请确认 --project 路径指向有效的 Xcode 项目。',

@@ -227,6 +227,23 @@ class Guard:
         if removed:
             self._save()
 
+    def bound_app_ids(self) -> set[str]:
+        """Return the set of app_ids that already have at least one binding."""
+        bindings = self._data.get("bindings", {})
+        return {
+            str(entry.get("app_id"))
+            for category in ("machine", "ip", "credential")
+            for entry in bindings.get(category, {}).values()
+            if str(entry.get("app_id") or "").strip()
+        }
+
+    def is_app_bound(self, app_id: str) -> bool:
+        """Whether the given app_id already has any machine/ip/credential binding."""
+        app_id = str(app_id or "").strip()
+        if not app_id:
+            return False
+        return app_id in self.bound_app_ids()
+
     def profile_access(self, profiles: dict[str, dict]) -> dict:
         """Resolve Web profile availability for the current machine."""
         if not self.is_enabled():
@@ -296,6 +313,69 @@ class Guard:
         fp = self._get_machine_fingerprint()
         ip = self._get_public_ip()
         self._upsert_bindings(app_id, app_name, key_id, issuer_id, fp, ip, note)
+
+    def manual_bind(
+        self,
+        fingerprint: str,
+        app_name: str,
+        *,
+        app_id: str = "",
+        issuer_id: str = "",
+        key_id: str = "",
+        ip: str = "",
+        note: str = "",
+    ) -> dict:
+        """Manually create/update a machine binding (e.g. via the Web UI).
+
+        Unlike `bind()`, this does not read the current machine/IP - the
+        fingerprint (and optional IP) are supplied directly by the caller, so
+        an operator can pre-register another machine's binding without
+        actually running an upload from it. IP/Key ID/note are optional and
+        are only written when provided.
+
+        Raises GuardViolationError if the app already has a binding (machine,
+        IP, or credential) - manual add is only for apps that have never been
+        bound, matching the local-App dropdown which excludes bound apps.
+        """
+        fingerprint = str(fingerprint or "").strip()
+        app_name = str(app_name or "").strip()
+        if not fingerprint:
+            raise GuardConfigError(t(ERRORS['guard_fingerprint_required']))
+        if not app_name:
+            raise GuardConfigError(t(ERRORS['guard_app_required']))
+
+        app_id = str(app_id or "").strip()
+        issuer_id = str(issuer_id or "").strip()
+        key_id = str(key_id or "").strip()
+        ip = str(ip or "").strip()
+        note = str(note or "").strip()
+
+        if self.is_app_bound(app_id):
+            raise GuardViolationError(t(ERRORS['guard_app_already_bound']))
+
+        now = self._now()
+        b = self._data["bindings"]
+        b["machine"][fingerprint] = self._entry(
+            b["machine"].get(fingerprint), app_id, app_name, issuer_id, now
+        )
+        if ip:
+            b["ip"][ip] = self._entry(b["ip"].get(ip), app_id, app_name, issuer_id, now)
+        if key_id:
+            credential = self._entry(b["credential"].get(key_id), app_id, app_name, issuer_id, now)
+            credential["issuer_id"] = issuer_id
+            b["credential"][key_id] = credential
+        if note and app_id:
+            self._data.setdefault("app_notes", {})[app_id] = note
+        self._save()
+        return {
+            "fingerprint": fingerprint,
+            "app_id": app_id,
+            "app_name": app_name,
+            "issuer_id": issuer_id,
+            "key_id": key_id,
+            "ip": ip,
+            "note": note,
+        }
 
     def unbind(self, target: str, value: str) -> None:
         self._data["bindings"].get(target, {}).pop(value, None)

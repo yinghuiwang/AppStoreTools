@@ -535,6 +535,130 @@ def test_explicit_non_interactive_guard_never_prompts(tmp_path):
     prompt.assert_not_called()
 
 
+def test_manual_bind_requires_fingerprint(tmp_path):
+    from asc.guard import Guard, GuardConfigError
+    guard_file = tmp_path / "guard.json"
+    with patch("asc.guard.GUARD_FILE", guard_file):
+        g = Guard()
+        with pytest.raises(GuardConfigError):
+            g.manual_bind("", "myapp", app_id="123")
+
+
+def test_manual_bind_requires_app_name(tmp_path):
+    from asc.guard import Guard, GuardConfigError
+    guard_file = tmp_path / "guard.json"
+    with patch("asc.guard.GUARD_FILE", guard_file):
+        g = Guard()
+        with pytest.raises(GuardConfigError):
+            g.manual_bind("SERIAL-A", "", app_id="123")
+
+
+def test_manual_bind_creates_machine_binding_only_by_default(tmp_path):
+    from asc.guard import Guard
+    guard_file = tmp_path / "guard.json"
+    with patch("asc.guard.GUARD_FILE", guard_file):
+        g = Guard()
+        result = g.manual_bind(
+            "SERIAL-MANUAL", "myapp", app_id="123456789", issuer_id="ISS1"
+        )
+        data = json.loads(guard_file.read_text())
+        assert data["bindings"]["machine"]["SERIAL-MANUAL"]["app_id"] == "123456789"
+        assert data["bindings"]["machine"]["SERIAL-MANUAL"]["app_name"] == "myapp"
+        assert data["bindings"]["machine"]["SERIAL-MANUAL"]["issuer_id"] == "ISS1"
+        assert data["bindings"]["ip"] == {}
+        assert data["bindings"]["credential"] == {}
+        assert result["fingerprint"] == "SERIAL-MANUAL"
+
+
+def test_manual_bind_creates_optional_ip_and_credential_and_note(tmp_path):
+    from asc.guard import Guard
+    guard_file = tmp_path / "guard.json"
+    with patch("asc.guard.GUARD_FILE", guard_file):
+        g = Guard()
+        g.manual_bind(
+            "SERIAL-MANUAL",
+            "myapp",
+            app_id="123456789",
+            issuer_id="ISS1",
+            key_id="KEY1",
+            ip="9.9.9.9",
+            note="office spare mac",
+        )
+        data = json.loads(guard_file.read_text())
+        assert data["bindings"]["ip"]["9.9.9.9"]["app_id"] == "123456789"
+        assert data["bindings"]["credential"]["KEY1"]["app_id"] == "123456789"
+        assert data["bindings"]["credential"]["KEY1"]["issuer_id"] == "ISS1"
+        assert data["app_notes"]["123456789"] == "office spare mac"
+
+
+def test_manual_bind_updates_existing_machine_binding(tmp_path):
+    from asc.guard import Guard
+    guard_file = tmp_path / "guard.json"
+    with patch("asc.guard.GUARD_FILE", guard_file):
+        g = Guard()
+        g.manual_bind("SERIAL-MANUAL", "first", app_id="1", issuer_id="ISS1")
+        g.manual_bind("SERIAL-MANUAL", "second", app_id="2", issuer_id="ISS2")
+        data = json.loads(guard_file.read_text())
+        assert data["bindings"]["machine"]["SERIAL-MANUAL"]["app_id"] == "2"
+        assert data["bindings"]["machine"]["SERIAL-MANUAL"]["app_name"] == "second"
+
+
+def test_bound_app_ids_collects_across_all_binding_categories(tmp_path):
+    from asc.guard import Guard
+    guard_file = tmp_path / "guard.json"
+    with patch("asc.guard.GUARD_FILE", guard_file), \
+         patch.object(Guard, "_get_machine_fingerprint", return_value="fp1"), \
+         patch.object(Guard, "_get_public_ip", return_value="1.1.1.1"):
+        g = Guard()
+        g.bind("app-machine-only", "m", "K1", "I1")
+        g.manual_bind("SERIAL-B", "ip-only", app_id="app-ip-only", ip="2.2.2.2")
+        g.manual_bind("SERIAL-C", "cred-only", app_id="app-cred-only", key_id="K2")
+    assert g.bound_app_ids() == {"app-machine-only", "app-ip-only", "app-cred-only"}
+
+
+def test_is_app_bound_true_for_bound_app_and_false_otherwise(tmp_path):
+    from asc.guard import Guard
+    guard_file = tmp_path / "guard.json"
+    with patch("asc.guard.GUARD_FILE", guard_file), \
+         patch.object(Guard, "_get_machine_fingerprint", return_value="fp1"), \
+         patch.object(Guard, "_get_public_ip", return_value="1.1.1.1"):
+        g = Guard()
+        g.bind("app-bound", "m", "K1", "I1")
+    assert g.is_app_bound("app-bound") is True
+    assert g.is_app_bound("app-unbound") is False
+    assert g.is_app_bound("") is False
+    assert g.is_app_bound(None) is False
+
+
+def test_manual_bind_rejects_already_bound_app(tmp_path):
+    """已绑定的 App 不能通过手动添加再次绑定（防止绕过前端过滤）"""
+    from asc.guard import Guard, GuardViolationError
+    guard_file = tmp_path / "guard.json"
+    with patch("asc.guard.GUARD_FILE", guard_file), \
+         patch.object(Guard, "_get_machine_fingerprint", return_value="fp1"), \
+         patch.object(Guard, "_get_public_ip", return_value="1.1.1.1"):
+        g = Guard()
+        g.bind("app-1", "myapp", "K1", "ISS1")
+        with pytest.raises(GuardViolationError):
+            g.manual_bind("SERIAL-OTHER", "myapp", app_id="app-1", issuer_id="ISS1")
+        # No new machine binding should have been written
+        data = json.loads(guard_file.read_text())
+        assert "SERIAL-OTHER" not in data["bindings"]["machine"]
+
+
+def test_manual_bind_allows_app_without_app_id(tmp_path):
+    """没有 app_id 的 profile（尚未配置 App ID）不受已绑定限制"""
+    from asc.guard import Guard
+    guard_file = tmp_path / "guard.json"
+    with patch("asc.guard.GUARD_FILE", guard_file):
+        g = Guard()
+        g.manual_bind("SERIAL-A", "myapp")
+        g.manual_bind("SERIAL-B", "myapp")
+        data = json.loads(guard_file.read_text())
+        assert "SERIAL-A" in data["bindings"]["machine"]
+        assert "SERIAL-B" in data["bindings"]["machine"]
+
+
 def test_conflict_keyboard_interrupt(tmp_path):
     """Ctrl+C 时视为拒绝，抛出 GuardViolationError"""
     from asc.guard import Guard, GuardViolationError

@@ -854,9 +854,13 @@ async def list_profiles_api():
         app: config.get_app_profile(app) or {}
         for app in apps
     })
+    bound_app_ids = guard.bound_app_ids()
     for app in apps:
         profile_details[app]["machine_access"] = access["options"].get(app, {})
         profile_details[app]["bundle_ids"] = guard.profile_bundle_ids(app)
+        profile_details[app]["already_bound"] = bool(
+            profile_details[app]["app_id"] and profile_details[app]["app_id"] in bound_app_ids
+        )
     return {
         "profiles": apps,
         "default": default,
@@ -1092,6 +1096,49 @@ async def guard_note(
     if not guard.set_app_note(app_id, note):
         raise HTTPException(status_code=404, detail="App binding not found")
     return {"ok": True}
+
+
+@router.post("/guard/manual-bind")
+async def guard_manual_bind(
+    fingerprint: str = _Form(...),
+    profile: str = _Form(...),
+    ip: str = _Form(""),
+    key_id: str = _Form(""),
+    note: str = _Form(""),
+):
+    """Manually register a machine-fingerprint binding for a local app profile."""
+    from fastapi import HTTPException
+    from asc.config import Config
+    from asc.guard import Guard, GuardConfigError, GuardViolationError
+
+    fingerprint = fingerprint.strip()
+    profile = profile.strip()
+    if not fingerprint:
+        raise HTTPException(status_code=400, detail="Machine fingerprint is required")
+    if not profile:
+        raise HTTPException(status_code=400, detail="Local app profile is required")
+
+    config = Config()
+    profile_data = config.get_app_profile(profile)
+    if profile_data is None:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    guard = Guard()
+    try:
+        result = guard.manual_bind(
+            fingerprint,
+            profile,
+            app_id=str(profile_data.get("app_id", "")),
+            issuer_id=profile_data.get("issuer_id", ""),
+            key_id=key_id.strip() or profile_data.get("key_id", ""),
+            ip=ip.strip(),
+            note=note.strip(),
+        )
+    except GuardConfigError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except GuardViolationError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    return {"ok": True, "binding": result}
 
 
 @router.get("/tasks/recent", response_class=HTMLResponse)

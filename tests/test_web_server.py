@@ -1223,6 +1223,7 @@ def test_profiles_list_api_includes_profile_details(client):
         "screenshots": "data/screenshots",
         "machine_access": {"current": False, "elsewhere": False, "enabled": True},
         "bundle_ids": [],
+        "already_bound": False,
     }
 
 
@@ -1637,6 +1638,269 @@ def test_guard_note_api_persists_when_binding_app_id_is_numeric(client, tmp_path
 
     assert save_resp.status_code == 200
     assert status_resp.json()["app_notes"]["123456789"] == "办公室 Mac"
+
+
+def test_guard_manual_bind_api_requires_fingerprint(client):
+    # Empty string form values are treated as "missing" by FastAPI's Form(...),
+    # so the required-field check surfaces as a 422 before reaching our handler.
+    resp = client.post("/api/guard/manual-bind", data={
+        "fingerprint": "",
+        "profile": "myapp",
+    })
+    assert resp.status_code == 422
+
+
+def test_guard_manual_bind_api_requires_profile(client):
+    resp = client.post("/api/guard/manual-bind", data={
+        "fingerprint": "SERIAL-A",
+        "profile": "",
+    })
+    assert resp.status_code == 422
+
+
+def test_guard_manual_bind_api_rejects_whitespace_only_fingerprint(client):
+    resp = client.post("/api/guard/manual-bind", data={
+        "fingerprint": "   ",
+        "profile": "myapp",
+    })
+    assert resp.status_code == 400
+
+
+def test_guard_manual_bind_api_unknown_profile_returns_404(client):
+    from unittest.mock import patch
+    with patch("asc.config.Config.get_app_profile", return_value=None):
+        resp = client.post("/api/guard/manual-bind", data={
+            "fingerprint": "SERIAL-A",
+            "profile": "missing-app",
+        })
+    assert resp.status_code == 404
+
+
+def test_guard_manual_bind_api_success_uses_profile_credentials(client):
+    from unittest.mock import patch, MagicMock
+
+    mock_guard = MagicMock()
+    mock_guard.manual_bind.return_value = {
+        "fingerprint": "SERIAL-A",
+        "app_id": "123",
+        "app_name": "myapp",
+        "issuer_id": "ISS1",
+        "key_id": "KEY1",
+        "ip": "",
+        "note": "",
+    }
+    with patch("asc.config.Config.get_app_profile", return_value={
+        "app_id": "123", "issuer_id": "ISS1", "key_id": "KEY1",
+    }), patch("asc.guard.Guard", return_value=mock_guard):
+        resp = client.post("/api/guard/manual-bind", data={
+            "fingerprint": "SERIAL-A",
+            "profile": "myapp",
+        })
+
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    mock_guard.manual_bind.assert_called_once_with(
+        "SERIAL-A",
+        "myapp",
+        app_id="123",
+        issuer_id="ISS1",
+        key_id="KEY1",
+        ip="",
+        note="",
+    )
+
+
+def test_guard_manual_bind_api_allows_key_id_override_and_optional_fields(client):
+    from unittest.mock import patch, MagicMock
+
+    mock_guard = MagicMock()
+    mock_guard.manual_bind.return_value = {}
+    with patch("asc.config.Config.get_app_profile", return_value={
+        "app_id": "123", "issuer_id": "ISS1", "key_id": "KEY1",
+    }), patch("asc.guard.Guard", return_value=mock_guard):
+        resp = client.post("/api/guard/manual-bind", data={
+            "fingerprint": "SERIAL-A",
+            "profile": "myapp",
+            "key_id": "KEY-OVERRIDE",
+            "ip": "1.2.3.4",
+            "note": "office spare mac",
+        })
+
+    assert resp.status_code == 200
+    mock_guard.manual_bind.assert_called_once_with(
+        "SERIAL-A",
+        "myapp",
+        app_id="123",
+        issuer_id="ISS1",
+        key_id="KEY-OVERRIDE",
+        ip="1.2.3.4",
+        note="office spare mac",
+    )
+
+
+def test_guard_manual_bind_api_invalid_fingerprint_returns_400(client):
+    from unittest.mock import patch, MagicMock
+    from asc.guard import GuardConfigError
+
+    mock_guard = MagicMock()
+    mock_guard.manual_bind.side_effect = GuardConfigError("机器指纹不能为空")
+    with patch("asc.config.Config.get_app_profile", return_value={
+        "app_id": "123", "issuer_id": "ISS1", "key_id": "KEY1",
+    }), patch("asc.guard.Guard", return_value=mock_guard):
+        resp = client.post("/api/guard/manual-bind", data={
+            "fingerprint": "   ",
+            "profile": "myapp",
+        })
+
+    assert resp.status_code == 400
+
+
+def test_guard_manual_bind_api_persists_to_disk(client, tmp_path):
+    import json
+    from unittest.mock import patch
+
+    guard_file = tmp_path / "guard.json"
+    with patch("asc.guard.GUARD_FILE", guard_file), \
+         patch("asc.config.Config.get_app_profile", return_value={
+             "app_id": "123456789", "issuer_id": "ISS1", "key_id": "KEY1",
+         }):
+        resp = client.post("/api/guard/manual-bind", data={
+            "fingerprint": "SERIAL-NEW-MACHINE",
+            "profile": "myapp",
+        })
+
+    assert resp.status_code == 200
+    data = json.loads(guard_file.read_text())
+    assert data["bindings"]["machine"]["SERIAL-NEW-MACHINE"]["app_id"] == "123456789"
+    assert data["bindings"]["machine"]["SERIAL-NEW-MACHINE"]["app_name"] == "myapp"
+    assert data["bindings"]["credential"]["KEY1"]["app_id"] == "123456789"
+
+
+def test_guard_manual_bind_api_rejects_already_bound_app(client):
+    from unittest.mock import patch, MagicMock
+    from asc.guard import GuardViolationError
+
+    mock_guard = MagicMock()
+    mock_guard.manual_bind.side_effect = GuardViolationError("该 App 已绑定到某台机器，请先解绑后再手动添加。")
+    with patch("asc.config.Config.get_app_profile", return_value={
+        "app_id": "123", "issuer_id": "ISS1", "key_id": "KEY1",
+    }), patch("asc.guard.Guard", return_value=mock_guard):
+        resp = client.post("/api/guard/manual-bind", data={
+            "fingerprint": "SERIAL-A",
+            "profile": "myapp",
+        })
+
+    assert resp.status_code == 409
+    assert "已绑定" in resp.json()["detail"]
+
+
+def test_guard_manual_bind_api_rejects_already_bound_app_end_to_end(client, tmp_path):
+    """真实 Guard 实例：已绑定的 App 再次手动添加应被拒绝，且不产生新绑定。"""
+    import json
+    from unittest.mock import patch
+
+    guard_file = tmp_path / "guard.json"
+    guard_file.write_text(json.dumps({
+        "enabled": True,
+        "bindings": {
+            "machine": {
+                "SERIAL-EXISTING": {
+                    "app_id": "123456789",
+                    "app_name": "myapp",
+                    "issuer_id": "ISS1",
+                    "bound_at": "2026-01-01T00:00:00",
+                }
+            },
+            "ip": {},
+            "credential": {},
+        },
+        "app_notes": {},
+    }))
+
+    with patch("asc.guard.GUARD_FILE", guard_file), \
+         patch("asc.config.Config.get_app_profile", return_value={
+             "app_id": "123456789", "issuer_id": "ISS1", "key_id": "KEY1",
+         }):
+        resp = client.post("/api/guard/manual-bind", data={
+            "fingerprint": "SERIAL-NEW",
+            "profile": "myapp",
+        })
+
+    assert resp.status_code == 409
+    data = json.loads(guard_file.read_text())
+    assert "SERIAL-NEW" not in data["bindings"]["machine"]
+
+
+def test_profiles_api_marks_already_bound_apps(client, tmp_path, monkeypatch):
+    """/api/profiles 应标记出已绑定的本地 App，供手动添加表单过滤。"""
+    import json
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    profiles_dir = tmp_path / ".config" / "asc" / "profiles"
+    profiles_dir.mkdir(parents=True)
+    (profiles_dir / "bound-app.toml").write_text(
+        '[credentials]\n'
+        'issuer_id = "ISS1"\n'
+        'key_id = "KEY1"\n'
+        'key_file = "/tmp/AuthKey_KEY1.p8"\n'
+        'app_id = "111"\n\n'
+        '[defaults]\n'
+        'csv = "data/appstore_info.csv"\n'
+        'screenshots = "data/screenshots"\n'
+    )
+    (profiles_dir / "free-app.toml").write_text(
+        '[credentials]\n'
+        'issuer_id = "ISS2"\n'
+        'key_id = "KEY2"\n'
+        'key_file = "/tmp/AuthKey_KEY2.p8"\n'
+        'app_id = "222"\n\n'
+        '[defaults]\n'
+        'csv = "data/appstore_info.csv"\n'
+        'screenshots = "data/screenshots"\n'
+    )
+
+    guard_file = tmp_path / "guard.json"
+    guard_file.write_text(json.dumps({
+        "enabled": True,
+        "bindings": {
+            "machine": {
+                "SERIAL-BOUND": {
+                    "app_id": "111",
+                    "app_name": "bound-app",
+                    "issuer_id": "ISS1",
+                    "bound_at": "2026-01-01T00:00:00",
+                }
+            },
+            "ip": {},
+            "credential": {},
+        },
+        "app_notes": {},
+    }))
+
+    from unittest.mock import patch
+    with patch("asc.guard.GUARD_FILE", guard_file):
+        resp = client.get("/api/profiles")
+
+    assert resp.status_code == 200
+    details = resp.json()["profile_details"]
+    assert details["bound-app"]["already_bound"] is True
+    assert details["free-app"]["already_bound"] is False
+
+
+def test_guard_page_has_manual_add_form(client):
+    resp = client.get("/guard")
+    assert resp.status_code == 200
+    assert "/api/guard/manual-bind" in resp.text
+    assert ("guard.manual_add" in resp.text) or ("手动添加绑定" in resp.text) or ("Add binding manually" in resp.text)
+
+
+def test_guard_page_filters_already_bound_profiles_from_dropdown(client):
+    resp = client.get("/guard")
+    assert resp.status_code == 200
+    assert "already_bound" in resp.text
+    assert "availableProfiles" in resp.text
+    # The <option> loop must iterate the filtered list, not the raw profile list.
+    assert 'x-for="p in availableProfiles()"' in resp.text
 
 
 def test_guard_page_has_guard_note_editor(client):
