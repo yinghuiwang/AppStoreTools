@@ -35,6 +35,9 @@
 
     * { box-sizing: border-box; }
 
+    /* Hide Alpine-bound nodes until Alpine initializes */
+    [x-cloak] { display: none !important; }
+
     body {
       background: var(--bg-base);
       color: var(--text-primary);

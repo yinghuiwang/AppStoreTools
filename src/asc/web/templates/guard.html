@@ -15,6 +15,7 @@
     <div class="card"
          x-data="{
            guard: null,
+           loading: true,
            savingNote: '',
            profiles: [],
            profileDetails: {},
@@ -24,9 +25,13 @@
            addForm: { fingerprint: '', profile: '', ip: '', note: '' },
            loadGuard() {
              return fetch('/api/guard/status')
-               .then(r => r.json())
+               .then(r => {
+                 if (!r.ok) throw new Error('load failed');
+                 return r.json();
+               })
                .then(data => { this.guard = data; })
-               .catch(() => { this.guard = null; });
+               .catch(() => { this.guard = null; })
+               .finally(() => { this.loading = false; });
            },
            loadProfiles() {
              return fetch('/api/profiles')
@@ -109,7 +114,11 @@
         </button>
       </div>
       <div class="card-body">
-        <template x-if="guard">
+        <div x-show="loading" class="flex items-center gap-2 text-sm text-obsidian-500 py-2">
+          <svg class="w-4 h-4 animate-spin shrink-0" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+          {{ t("common.loading") }}
+        </div>
+        <template x-if="!loading && guard">
           <div>
             <!-- Status indicator -->
             <div class="flex items-center gap-3 mb-4">
@@ -295,7 +304,7 @@
             </div>
           </div>
         </template>
-        <template x-if="!guard">
+        <template x-if="!loading && !guard">
           <div class="flex items-center gap-2 text-sm text-red-400">
             <div class="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_8px_rgba(248,113,113,0.4)]"></div>
             {{ t("guard.load_failed") }}
@@ -304,12 +313,17 @@
       </div>
 
       <!-- Manual add drawer backdrop -->
-      <div x-show="addOpen" class="fixed inset-0 z-40" style="background: rgba(0,0,0,0.5); backdrop-filter: blur(2px);" @click="addOpen = false"></div>
+      <div x-show="addOpen"
+           x-cloak
+           class="fixed inset-0 z-40"
+           style="display: none; background: rgba(0,0,0,0.5); backdrop-filter: blur(2px);"
+           @click="addOpen = false"></div>
 
       <!-- Manual add drawer -->
       <div x-show="addOpen"
+           x-cloak
            class="fixed right-0 top-0 h-full w-[420px] z-50 overflow-y-auto"
-           style="background: var(--bg-surface); border-left: 1px solid var(--border-subtle);"
+           style="display: none; background: var(--bg-surface); border-left: 1px solid var(--border-subtle);"
            x-transition:enter="transition ease-out duration-300"
            x-transition:enter-start="translate-x-full"
            x-transition:enter-end="translate-x-0"

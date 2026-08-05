@@ -645,6 +645,11 @@ def test_settings_page_returns_200(client):
 def test_guard_page_returns_200(client):
     resp = client.get("/guard")
     assert resp.status_code == 200
+    # Loading vs failed must be distinct: initial guard=null is loading, not error.
+    assert "loading: true" in resp.text
+    assert "x-show=\"loading\"" in resp.text
+    assert "!loading && guard" in resp.text
+    assert "!loading && !guard" in resp.text
 
 
 def test_filebrowser_returns_html(client, tmp_path):
