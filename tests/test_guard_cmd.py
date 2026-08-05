@@ -31,8 +31,23 @@ def test_guard_status_enabled(tmp_path):
                 "credential": {},
             }
         }
-        instance._get_machine_fingerprint.return_value = machine_fp
-        instance._get_public_ip.return_value = "1.2.3.4"
+        instance.current_environment.return_value = {
+            "machine": {
+                "fingerprint": machine_fp,
+                "bound": True,
+                "app_id": "123456789",
+                "app_name": "myapp",
+                "note": "办公室 Mac",
+            },
+            "ip": {
+                "address": "1.2.3.4",
+                "available": True,
+                "bound": False,
+                "app_id": "",
+                "app_name": "",
+                "note": "",
+            },
+        }
         result = runner.invoke(app, ["guard", "status"])
     assert result.exit_code == 0
     assert "已启用" in result.output or "启用" in result.output
@@ -72,8 +87,23 @@ def test_guard_status_marks_current_ip_bound():
                 "credential": {},
             },
         }
-        instance._get_machine_fingerprint.return_value = machine_fp
-        instance._get_public_ip.return_value = ip
+        instance.current_environment.return_value = {
+            "machine": {
+                "fingerprint": machine_fp,
+                "bound": False,
+                "app_id": "",
+                "app_name": "",
+                "note": "",
+            },
+            "ip": {
+                "address": ip,
+                "available": True,
+                "bound": True,
+                "app_id": "6503186734",
+                "app_name": "test",
+                "note": "",
+            },
+        }
         result = runner.invoke(app, ["guard", "status"])
     assert result.exit_code == 0
     assert "机器指纹" in result.output

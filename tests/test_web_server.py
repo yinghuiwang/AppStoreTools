@@ -1437,6 +1437,23 @@ def test_guard_status_returns_json(client):
         "app_notes": {},
         "bindings": {"machine": {}, "ip": {}, "credential": {}},
     }
+    mock_guard.current_environment.return_value = {
+        "machine": {
+            "fingerprint": "SERIAL-TEST",
+            "bound": False,
+            "app_id": "",
+            "app_name": "",
+            "note": "",
+        },
+        "ip": {
+            "address": "1.2.3.4",
+            "available": True,
+            "bound": False,
+            "app_id": "",
+            "app_name": "",
+            "note": "",
+        },
+    }
     with patch("asc.guard.Guard", return_value=mock_guard):
         resp = client.get("/api/guard/status")
     assert resp.status_code == 200
@@ -1444,6 +1461,9 @@ def test_guard_status_returns_json(client):
     assert data["enabled"] is True
     assert "bindings" in data
     assert "current_profile" in data
+    assert data["current_environment"]["machine"]["fingerprint"] == "SERIAL-TEST"
+    assert data["current_environment"]["machine"]["bound"] is False
+    assert data["current_environment"]["ip"]["address"] == "1.2.3.4"
 
 
 def test_guard_status_returns_full_fingerprint(client):
@@ -1458,12 +1478,32 @@ def test_guard_status_returns_full_fingerprint(client):
             "credential": {},
         },
     }
+    mock_guard.current_environment.return_value = {
+        "machine": {
+            "fingerprint": long_fp,
+            "bound": True,
+            "app_id": "123",
+            "app_name": "myapp",
+            "note": "",
+        },
+        "ip": {
+            "address": "9.9.9.9",
+            "available": True,
+            "bound": False,
+            "app_id": "",
+            "app_name": "",
+            "note": "",
+        },
+    }
     with patch("asc.guard.Guard", return_value=mock_guard):
         resp = client.get("/api/guard/status")
     data = resp.json()
     machine_keys = list(data["bindings"]["machine"].keys())
     assert len(machine_keys) == 1
     assert machine_keys[0] == long_fp
+    assert data["current_environment"]["machine"]["bound"] is True
+    assert data["current_environment"]["machine"]["app_id"] == "123"
+    assert data["current_environment"]["machine"]["app_name"] == "myapp"
 
 
 def test_guard_note_api_updates_app_note(client):
@@ -1579,6 +1619,17 @@ def test_guard_status_error_returns_json(client):
     assert data["enabled"] is False
     assert data["bindings"] == {"machine": {}, "ip": {}, "credential": {}}
     assert "error" in data
+    assert "current_environment" in data
+    assert data["current_environment"]["machine"]["bound"] is False
+
+
+def test_guard_page_shows_current_environment_section(client):
+    resp = client.get("/guard")
+    assert resp.status_code == 200
+    assert "current_environment" in resp.text
+    assert ("guard.current_env" in resp.text) or ("当前环境" in resp.text) or ("Current environment" in resp.text)
+    assert ("guard.status_bound" in resp.text) or ("已绑定" in resp.text) or ("Bound" in resp.text)
+    assert ("guard.bound_app" in resp.text) or ("绑定 App" in resp.text) or ("Bound app" in resp.text)
 
 
 def test_task_store_create_with_profile_and_progress():

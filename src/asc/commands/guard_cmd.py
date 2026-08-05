@@ -50,23 +50,29 @@ def cmd_guard_status():
     status_str = "✅ 已启用" if enabled else "❌ 已禁用"
     typer.echo(f"\n守卫状态: {status_str}\n")
 
-    fp = g._get_machine_fingerprint()
-    ip = g._get_public_ip()
+    env = g.current_environment()
     bindings = data.get("bindings", {})
     app_notes = data.get("app_notes", {})
-    machine_entry = bindings.get("machine", {}).get(fp)
-    ip_entry = None if ip == "unknown" else bindings.get("ip", {}).get(ip)
-
-    machine_note = app_notes.get((machine_entry or {}).get("app_id", ""), "") if machine_entry else ""
-    ip_note = app_notes.get((ip_entry or {}).get("app_id", ""), "") if ip_entry else ""
 
     typer.echo("当前环境:")
-    _echo_binding_detail("机器指纹", fp, machine_entry, note=machine_note)
-    if ip == "unknown":
-        typer.echo("  IP 地址:  unknown")
+    machine = env["machine"]
+    _echo_binding_detail(
+        "机器指纹",
+        machine["fingerprint"],
+        {"app_id": machine["app_id"], "app_name": machine["app_name"]} if machine["bound"] else None,
+        note=machine.get("note", ""),
+    )
+    ip_info = env["ip"]
+    if not ip_info.get("available", True):
+        typer.echo(f"  IP 地址:  {ip_info['address']}")
         typer.echo("    状态: ⚠️  无法获取，跳过 IP 绑定检查")
     else:
-        _echo_binding_detail("IP 地址", ip, ip_entry, note=ip_note)
+        _echo_binding_detail(
+            "IP 地址",
+            ip_info["address"],
+            {"app_id": ip_info["app_id"], "app_name": ip_info["app_name"]} if ip_info["bound"] else None,
+            note=ip_info.get("note", ""),
+        )
     typer.echo("")
 
     rows = []

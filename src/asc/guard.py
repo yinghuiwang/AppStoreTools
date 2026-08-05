@@ -122,6 +122,36 @@ class Guard:
     def get_status(self) -> dict:
         return self._data
 
+    def current_environment(self) -> dict:
+        """Return current machine/IP fingerprint and whether each is bound."""
+        fp = self._get_machine_fingerprint()
+        ip = self._get_public_ip()
+        bindings = self._data.get("bindings", {})
+        app_notes = self._data.get("app_notes", {})
+
+        def binding_summary(entry: dict | None) -> dict:
+            if not entry:
+                return {"bound": False, "app_id": "", "app_name": "", "note": ""}
+            app_id = str(entry.get("app_id") or "")
+            return {
+                "bound": True,
+                "app_id": app_id,
+                "app_name": str(entry.get("app_name") or ""),
+                "note": str(app_notes.get(app_id, "") or ""),
+            }
+
+        machine_entry = bindings.get("machine", {}).get(fp)
+        ip_available = ip != "unknown"
+        ip_entry = bindings.get("ip", {}).get(ip) if ip_available else None
+        return {
+            "machine": {"fingerprint": fp, **binding_summary(machine_entry)},
+            "ip": {
+                "address": ip,
+                "available": ip_available,
+                **binding_summary(ip_entry),
+            },
+        }
+
     def profile_machine_status(
         self, app_id: str, issuer_id: str, *, fingerprint: str | None = None
     ) -> dict[str, bool]:

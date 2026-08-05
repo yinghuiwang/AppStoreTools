@@ -25,6 +25,55 @@ def test_guard_loads_empty_config(tmp_path):
         }
 
 
+def test_guard_current_environment_reports_bound_status(tmp_path):
+    from asc.guard import Guard
+    guard_file = tmp_path / "guard.json"
+    guard_file.write_text(json.dumps({
+        "enabled": True,
+        "bindings": {
+            "machine": {
+                "SERIAL-A": {
+                    "app_id": "6503186734",
+                    "app_name": "test",
+                    "issuer_id": "ISS1",
+                    "bound_at": "2026-07-17T08:55:10",
+                }
+            },
+            "ip": {
+                "1.2.3.4": {
+                    "app_id": "6503186734",
+                    "app_name": "test",
+                    "issuer_id": "ISS1",
+                    "bound_at": "2026-07-17T08:55:10",
+                }
+            },
+            "credential": {},
+        },
+        "app_notes": {"6503186734": "office"},
+    }))
+    with patch("asc.guard.GUARD_FILE", guard_file), \
+         patch.object(Guard, "_get_machine_fingerprint", return_value="SERIAL-A"), \
+         patch.object(Guard, "_get_public_ip", return_value="1.2.3.4"):
+        env = Guard().current_environment()
+    assert env["machine"]["bound"] is True
+    assert env["machine"]["app_id"] == "6503186734"
+    assert env["machine"]["note"] == "office"
+    assert env["ip"]["bound"] is True
+    assert env["ip"]["address"] == "1.2.3.4"
+
+
+def test_guard_current_environment_marks_unbound(tmp_path):
+    from asc.guard import Guard
+    with patch("asc.guard.GUARD_FILE", tmp_path / "guard.json"), \
+         patch.object(Guard, "_get_machine_fingerprint", return_value="OTHER"), \
+         patch.object(Guard, "_get_public_ip", return_value="9.9.9.9"):
+        env = Guard().current_environment()
+    assert env["machine"]["fingerprint"] == "OTHER"
+    assert env["machine"]["bound"] is False
+    assert env["ip"]["bound"] is False
+    assert env["ip"]["available"] is True
+
+
 def test_guard_loads_existing_config(tmp_path):
     from asc.guard import Guard
     guard_file = tmp_path / "guard.json"

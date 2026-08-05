@@ -1018,6 +1018,28 @@ async def get_profile(name: str):
     return data
 
 
+def _empty_current_environment() -> dict:
+    return {
+        "machine": {
+            "fingerprint": "",
+            "bound": False,
+            "app_id": "",
+            "app_name": "",
+            "note": "",
+            "profile_name": "",
+        },
+        "ip": {
+            "address": "unknown",
+            "available": False,
+            "bound": False,
+            "app_id": "",
+            "app_name": "",
+            "note": "",
+            "profile_name": "",
+        },
+    }
+
+
 @router.get("/guard/status")
 async def guard_status(request: Request):
     from asc.guard import Guard
@@ -1035,14 +1057,27 @@ async def guard_status(request: Request):
         for p in profiles:
             pdata = config.get_app_profile(p)
             if pdata and pdata.get("app_id"):
-                app_id_to_profile[pdata["app_id"]] = p
+                app_id_to_profile[str(pdata["app_id"])] = p
         # Inject profile_name into each binding entry
         for category in ("machine", "ip", "credential"):
             for key, info in data.get("bindings", {}).get(category, {}).items():
-                info["profile_name"] = app_id_to_profile.get(info.get("app_id", ""), "")
+                info["profile_name"] = app_id_to_profile.get(str(info.get("app_id", "")), "")
+        env = copy.deepcopy(guard.current_environment())
+        for section in ("machine", "ip"):
+            env[section]["profile_name"] = app_id_to_profile.get(
+                str(env[section].get("app_id", "")), ""
+            )
+        data["current_environment"] = env
         return data
     except Exception as e:
-        return {"enabled": False, "bindings": {"machine": {}, "ip": {}, "credential": {}}, "app_notes": {}, "current_profile": "", "error": str(e)}
+        return {
+            "enabled": False,
+            "bindings": {"machine": {}, "ip": {}, "credential": {}},
+            "app_notes": {},
+            "current_profile": "",
+            "current_environment": _empty_current_environment(),
+            "error": str(e),
+        }
 
 
 @router.post("/guard/note")
