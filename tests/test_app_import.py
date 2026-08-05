@@ -233,6 +233,7 @@ def test_import_enforces_guard_before_writing_profile(
         app_name="testapp",
         key_id="TESTKEY123",
         issuer_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        interactive=True,
     )
 
 

@@ -900,6 +900,81 @@ async def create_profile(
     return {"ok": True, "name": name}
 
 
+@router.get("/profiles/discover-local")
+async def discover_local_profiles():
+    """Scan cwd (and parents) for AppStore/Config/.env not yet in profiles."""
+    from asc.utils import discover_local_import_candidates
+
+    candidates = discover_local_import_candidates(Path.cwd())
+    return {
+        "candidates": candidates,
+        "cwd": str(Path.cwd()),
+    }
+
+
+@router.post("/profiles/import")
+async def import_local_profile(request: Request):
+    """Import the local AppStore/Config/.env into a global profile."""
+    from fastapi import HTTPException
+    from asc.commands.app_config import _do_import_from_env, _is_valid_profile_name, _write_local_default
+    from asc.guard import GuardViolationError
+    from asc.utils import discover_local_import_candidates, find_project_env
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+
+    name = (body.get("name") or "").strip() or None
+    set_default = _as_bool(body.get("set_default", True))
+
+    if name is not None and not _is_valid_profile_name(name):
+        raise HTTPException(status_code=400, detail="Invalid profile name")
+
+    candidates = discover_local_import_candidates(Path.cwd())
+    if not candidates:
+        raise HTTPException(status_code=404, detail="No importable local app config found")
+
+    candidate = candidates[0]
+    if name is None:
+        name = candidate["suggested_name"]
+    if not candidate.get("key_file_exists"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Key file not found: {candidate.get('key_file')}",
+        )
+
+    found = find_project_env(Path.cwd())
+    if not found:
+        raise HTTPException(status_code=404, detail="No AppStore/Config/.env found")
+    project_root, env_file = found
+
+    try:
+        profile_name = _do_import_from_env(
+            str(env_file),
+            project_root,
+            name,
+            quiet=True,
+            interactive=False,
+        )
+    except GuardViolationError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except (ValueError, FileNotFoundError) as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    if set_default:
+        _write_local_default(project_root / ".asc", profile_name)
+
+    return {
+        "ok": True,
+        "name": profile_name,
+        "project_root": str(project_root),
+        "set_default": set_default,
+    }
+
+
 @router.put("/profiles/{name}")
 async def update_profile(
     request: Request,
@@ -2220,10 +2295,14 @@ def _start_update_task(
                     reporter.log(
                         f"⚠️  自动重启未安排：{restart_info.get('message', restart_info.get('status'))}"
                     )
+            # Flush buffered logs before marking DONE so SSE clients see the full log
+            # (including restart notes) before the "done" event.
+            reporter.flush()
             _finish_task(task_id, _TaskStatus.DONE, result)
             return result
         except ProcessCanceled:
             reporter.log("⏹ 用户已终止更新")
+            reporter.flush()
             _finish_task(
                 task_id,
                 _TaskStatus.CANCELED,
@@ -2232,6 +2311,7 @@ def _start_update_task(
             raise
         except UpdateError as e:
             # Core already called reporter.fail; do not fail again.
+            reporter.flush()
             _finish_task(
                 task_id,
                 _TaskStatus.ERROR,
@@ -2240,6 +2320,7 @@ def _start_update_task(
             raise
         except Exception as e:
             reporter.fail(str(e))
+            reporter.flush()
             _finish_task(
                 task_id,
                 _TaskStatus.ERROR,

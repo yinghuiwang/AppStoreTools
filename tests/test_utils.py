@@ -292,6 +292,85 @@ def test_is_local_config_imported_false(tmp_path):
     assert is_local_config_imported(local, existing) is False
 
 
+# ── find_project_env / discover_local_import_candidates ──
+
+
+def test_find_project_env_walks_upward(tmp_path):
+    """从子目录向上找到 AppStore/Config/.env"""
+    from asc.utils import find_project_env
+
+    config_dir = tmp_path / "AppStore" / "Config"
+    config_dir.mkdir(parents=True)
+    env_file = config_dir / ".env"
+    env_file.write_text("ISSUER_ID=a\n", encoding="utf-8")
+    nested = tmp_path / "ios" / "Sources"
+    nested.mkdir(parents=True)
+
+    found = find_project_env(nested)
+    assert found is not None
+    assert found[0] == tmp_path.resolve()
+    assert found[1] == env_file.resolve()
+
+
+def test_find_project_env_returns_none_when_missing(tmp_path):
+    from asc.utils import find_project_env
+
+    assert find_project_env(tmp_path) is None
+
+
+def test_discover_local_import_candidates_filters_imported(tmp_path):
+    """已导入的凭证不会出现在候选列表中"""
+    from unittest.mock import MagicMock, patch
+    from asc.utils import discover_local_import_candidates
+
+    config_dir = tmp_path / "AppStore" / "Config"
+    config_dir.mkdir(parents=True)
+    (config_dir / ".env").write_text(
+        "ISSUER_ID=abc\nKEY_ID=def\nKEY_FILE=key.p8\nAPP_ID=123\n",
+        encoding="utf-8",
+    )
+    (config_dir / "key.p8").write_text("fake-key", encoding="utf-8")
+
+    mock_config = MagicMock()
+    mock_config.list_apps.return_value = ["myapp"]
+    mock_config.get_app_profile.return_value = {
+        "issuer_id": "abc",
+        "key_id": "def",
+        "app_id": "123",
+    }
+    with patch("asc.config.Config", return_value=mock_config):
+        assert discover_local_import_candidates(tmp_path) == []
+
+
+def test_discover_local_import_candidates_returns_unimported(tmp_path):
+    """未导入且完整的 .env 作为候选返回"""
+    from unittest.mock import MagicMock, patch
+    from asc.utils import discover_local_import_candidates
+
+    config_dir = tmp_path / "AppStore" / "Config"
+    config_dir.mkdir(parents=True)
+    (config_dir / ".env").write_text(
+        "ISSUER_ID=abc\nKEY_ID=def\nKEY_FILE=key.p8\nAPP_ID=123\n",
+        encoding="utf-8",
+    )
+    (config_dir / "key.p8").write_text("fake-key", encoding="utf-8")
+    (tmp_path / "AppStore" / "data" / "screenshots").mkdir(parents=True)
+
+    mock_config = MagicMock()
+    mock_config.list_apps.return_value = []
+    mock_config.get_app_profile.return_value = None
+    with patch("asc.config.Config", return_value=mock_config):
+        candidates = discover_local_import_candidates(tmp_path)
+
+    assert len(candidates) == 1
+    c = candidates[0]
+    assert c["app_id"] == "123"
+    assert c["key_id"] == "def"
+    assert c["key_file_exists"] is True
+    assert c["suggested_name"] == tmp_path.name
+    assert c["project_root"] == str(tmp_path.resolve())
+
+
 # ── prompt_local_config_usage ──
 
 

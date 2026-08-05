@@ -2396,3 +2396,109 @@ def test_vendored_web_assets_are_served(client):
     match = re.search(r"/static/vendor/(alpine-[^\"']+\.min\.js)", home)
     assert match, "alpine vendor script not linked"
     assert client.get(f"/static/vendor/{match.group(1)}").status_code == 200
+
+def test_profiles_discover_local_empty_when_no_env(client, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    resp = client.get("/api/profiles/discover-local")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["candidates"] == []
+    assert data["cwd"] == str(tmp_path.resolve())
+
+
+def test_profiles_discover_local_returns_candidate(client, tmp_path, monkeypatch):
+    from unittest.mock import MagicMock, patch
+
+    config_dir = tmp_path / "AppStore" / "Config"
+    config_dir.mkdir(parents=True)
+    (config_dir / ".env").write_text(
+        "ISSUER_ID=issuer-1\nKEY_ID=KEY1\nKEY_FILE=AuthKey.p8\nAPP_ID=999\n",
+        encoding="utf-8",
+    )
+    (config_dir / "AuthKey.p8").write_text("private-key", encoding="utf-8")
+    nested = tmp_path / "subdir"
+    nested.mkdir()
+    monkeypatch.chdir(nested)
+
+    mock_config = MagicMock()
+    mock_config.list_apps.return_value = []
+    mock_config.get_app_profile.return_value = None
+    with patch("asc.config.Config", return_value=mock_config):
+        resp = client.get("/api/profiles/discover-local")
+
+    assert resp.status_code == 200
+    candidates = resp.json()["candidates"]
+    assert len(candidates) == 1
+    assert candidates[0]["app_id"] == "999"
+    assert candidates[0]["key_file_exists"] is True
+    assert candidates[0]["suggested_name"] == tmp_path.name
+
+
+def test_profiles_discover_local_filters_already_imported(client, tmp_path, monkeypatch):
+    from unittest.mock import MagicMock, patch
+
+    config_dir = tmp_path / "AppStore" / "Config"
+    config_dir.mkdir(parents=True)
+    (config_dir / ".env").write_text(
+        "ISSUER_ID=issuer-1\nKEY_ID=KEY1\nKEY_FILE=AuthKey.p8\nAPP_ID=999\n",
+        encoding="utf-8",
+    )
+    (config_dir / "AuthKey.p8").write_text("private-key", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    mock_config = MagicMock()
+    mock_config.list_apps.return_value = ["existing"]
+    mock_config.get_app_profile.return_value = {
+        "issuer_id": "issuer-1",
+        "key_id": "KEY1",
+        "app_id": "999",
+    }
+    with patch("asc.config.Config", return_value=mock_config):
+        resp = client.get("/api/profiles/discover-local")
+
+    assert resp.status_code == 200
+    assert resp.json()["candidates"] == []
+
+
+def test_profiles_import_local_api(client, tmp_path, monkeypatch):
+    """POST /api/profiles/import 复用 CLI import 逻辑创建 profile"""
+    from unittest.mock import MagicMock, patch
+
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    config_dir = tmp_path / "AppStore" / "Config"
+    config_dir.mkdir(parents=True)
+    (config_dir / ".env").write_text(
+        "ISSUER_ID=issuer-1\nKEY_ID=KEY1\nKEY_FILE=AuthKey.p8\nAPP_ID=999\n",
+        encoding="utf-8",
+    )
+    (config_dir / "AuthKey.p8").write_text("private-key", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    guard = MagicMock()
+    guard.is_enabled.return_value = False
+    mock_config = MagicMock()
+    mock_config.list_apps.return_value = []
+    mock_config.get_app_profile.return_value = None
+
+    with patch("asc.config.Config", return_value=mock_config), \
+         patch("asc.guard.Guard", return_value=guard), \
+         patch("asc.commands.app_config.Config", return_value=mock_config):
+        resp = client.post(
+            "/api/profiles/import",
+            json={"name": "from-local", "set_default": True},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["name"] == "from-local"
+    mock_config.save_app_profile.assert_called_once()
+    assert (tmp_path / ".asc" / "config.toml").exists()
+    assert 'default_app = "from-local"' in (tmp_path / ".asc" / "config.toml").read_text()
+
+
+def test_profiles_import_local_api_404_when_none(client, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    resp = client.post("/api/profiles/import", json={})
+    assert resp.status_code == 404
+

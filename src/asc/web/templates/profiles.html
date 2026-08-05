@@ -81,7 +81,7 @@
   </div>
 
   <!-- Drawer backdrop -->
-  <div x-show="drawerOpen" class="fixed inset-0 z-40" style="background: rgba(0,0,0,0.5); backdrop-filter: blur(2px);" @click="drawerOpen = false"></div>
+  <div x-show="drawerOpen" class="fixed inset-0 z-40" style="background: rgba(0,0,0,0.5); backdrop-filter: blur(2px);" @click="closeDrawer()"></div>
 
   <!-- Drawer -->
   <div x-show="drawerOpen"
@@ -95,13 +95,74 @@
        x-transition:leave-end="translate-x-full">
     <div class="p-6">
       <div class="flex items-center justify-between mb-6">
-        <h2 class="font-semibold text-obsidian-50" x-text="editingProfile ? window.t('profiles.edit_title') : window.t('profiles.add_title')"></h2>
-        <button @click="drawerOpen = false" class="text-obsidian-500 hover:text-obsidian-300 cursor-pointer transition-colors duration-150 p-1 rounded focus-ring">
+        <h2 class="font-semibold text-obsidian-50"
+            x-text="editingProfile
+              ? window.t('profiles.edit_title')
+              : (addStep === 'import'
+                  ? window.t('profiles.import_title')
+                  : window.t('profiles.add_title'))"></h2>
+        <button @click="closeDrawer()" class="text-obsidian-500 hover:text-obsidian-300 cursor-pointer transition-colors duration-150 p-1 rounded focus-ring">
           <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
         </button>
       </div>
 
-      <form @submit.prevent="saveProfile" class="space-y-5">
+      <!-- Local import candidates -->
+      <div x-show="!editingProfile && addStep === 'import'" class="space-y-5">
+        <p class="text-sm text-obsidian-300" x-text="window.t('profiles.import_hint')"></p>
+        <template x-for="c in importCandidates" :key="c.env_file_path">
+          <div class="rounded-lg p-4 space-y-3" style="background: var(--bg-overlay); border: 1px solid var(--border-subtle);">
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-sm font-medium text-obsidian-50 font-mono truncate" x-text="c.suggested_name"></span>
+              <span class="badge badge-info text-[10px]">{{ t("profiles.import_local") }}</span>
+            </div>
+            <div class="grid grid-cols-1 gap-y-2">
+              <div>
+                <span class="text-[10px] uppercase tracking-widest text-obsidian-500 block mb-0.5">App ID</span>
+                <span class="text-xs text-obsidian-200 font-mono break-all" x-text="c.app_id || '-'"></span>
+              </div>
+              <div>
+                <span class="text-[10px] uppercase tracking-widest text-obsidian-500 block mb-0.5">{{ t("profiles.import_project") }}</span>
+                <span class="text-xs text-obsidian-300 font-mono break-all" x-text="c.project_root || '-'"></span>
+              </div>
+              <div>
+                <span class="text-[10px] uppercase tracking-widest text-obsidian-500 block mb-0.5">Key ID</span>
+                <span class="text-xs text-obsidian-200 font-mono break-all" x-text="c.key_id || '-'"></span>
+              </div>
+              <div>
+                <span class="text-[10px] uppercase tracking-widest text-obsidian-500 block mb-0.5">{{ t("profiles.key_file") }}</span>
+                <span class="text-xs font-mono break-all"
+                      :class="c.key_file_exists ? 'text-obsidian-300' : 'text-red-400'"
+                      x-text="c.key_file || '-'"></span>
+              </div>
+            </div>
+            <div x-show="!c.key_file_exists" class="rounded-lg p-2.5 bg-red-500/10 text-red-400 border border-red-500/20 text-xs"
+                 x-text="window.t('profiles.import_missing_key')"></div>
+            <div>
+              <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">{{ t("profiles.name") }}</label>
+              <input type="text" x-model="importName"
+                     class="field-input w-full"
+                     :placeholder="c.suggested_name">
+            </div>
+            <label class="flex items-center gap-2 text-xs text-obsidian-300 cursor-pointer">
+              <input type="checkbox" x-model="importSetDefault" class="rounded border-obsidian-600">
+              <span x-text="window.t('profiles.import_set_default')"></span>
+            </label>
+            <div class="flex gap-3 pt-2">
+              <button type="button" class="btn-primary"
+                      :disabled="!c.key_file_exists || importBusy"
+                      @click="importCandidate(c)"
+                      x-text="importBusy ? window.t('profiles.importing') : window.t('profiles.import_confirm')"></button>
+            </div>
+          </div>
+        </template>
+        <div x-show="formError" class="rounded-lg p-3 bg-red-500/10 text-red-400 border border-red-500/20 text-sm" x-text="formError"></div>
+        <div class="flex gap-3 pt-2 border-t border-obsidian-700">
+          <button type="button" @click="showManualForm()" class="btn-ghost" x-text="window.t('profiles.import_skip')"></button>
+          <button type="button" @click="closeDrawer()" class="btn-ghost">{{ t("common.cancel") }}</button>
+        </div>
+      </div>
+
+      <form x-show="editingProfile || addStep === 'manual'" @submit.prevent="saveProfile" class="space-y-5">
         <!-- Profile name -->
         <div>
           <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">{{ t("profiles.name") }}</label>
@@ -216,7 +277,7 @@
         <!-- Actions -->
         <div class="flex gap-3 pt-4 border-t border-obsidian-700">
           <button type="submit" class="btn-primary" x-text="editingProfile ? window.t('common.save') : window.t('profiles.create')"></button>
-          <button type="button" @click="drawerOpen = false" class="btn-ghost">{{ t("common.cancel") }}</button>
+          <button type="button" @click="closeDrawer()" class="btn-ghost">{{ t("common.cancel") }}</button>
         </div>
       </form>
     </div>
@@ -300,6 +361,11 @@ function profilesApp() {
     canCreate: true,
     drawerOpen: false,
     editingProfile: null,
+    addStep: 'manual',
+    importCandidates: [],
+    importName: '',
+    importSetDefault: true,
+    importBusy: false,
     showIssuer: false,
     showKeyId: false,
     showCsvHelp: false,
@@ -320,22 +386,89 @@ function profilesApp() {
       return this.profileDetails[name] || {};
     },
 
-    openDrawer(name) {
+    closeDrawer() {
+      this.drawerOpen = false;
+      this.importBusy = false;
+      this.formError = '';
+    },
+
+    resetAddForm() {
+      this.form = { name: '', issuer_id: '', key_id: '', app_id: '', csv: 'data/appstore_info.csv', screenshots: 'data/screenshots' };
+      this.showIssuer = false;
+      this.showKeyId = false;
+      this.showCsvHelp = false;
+      this.showScreenshotsHelp = false;
+      this.formError = '';
+    },
+
+    showManualForm() {
+      this.addStep = 'manual';
+      this.resetAddForm();
+    },
+
+    async openDrawer(name) {
       if (!name && !this.canCreate) return;
       this.editingProfile = name;
       this.formError = '';
+      this.importBusy = false;
+      this.importCandidates = [];
+      this.importName = '';
+      this.importSetDefault = true;
       this.showIssuer = false;
       this.showKeyId = false;
       this.showCsvHelp = false;
       this.showScreenshotsHelp = false;
       if (name) {
+        this.addStep = 'manual';
         fetch(`/api/profiles/${name}`).then(r => r.json()).then(d => {
           this.form = { name, issuer_id: d.issuer_id, key_id: d.key_id, app_id: d.app_id, csv: d.csv, screenshots: d.screenshots };
         });
-      } else {
-        this.form = { name: '', issuer_id: '', key_id: '', app_id: '', csv: 'data/appstore_info.csv', screenshots: 'data/screenshots' };
+        this.drawerOpen = true;
+        return;
       }
+
+      this.resetAddForm();
+      this.addStep = 'manual';
       this.drawerOpen = true;
+      try {
+        const r = await fetch('/api/profiles/discover-local');
+        const d = await r.json();
+        const candidates = (d && d.candidates) || [];
+        if (candidates.length > 0) {
+          this.importCandidates = candidates;
+          this.importName = candidates[0].suggested_name || '';
+          this.addStep = 'import';
+        }
+      } catch (_e) {
+        this.addStep = 'manual';
+      }
+    },
+
+    async importCandidate(candidate) {
+      this.formError = '';
+      this.importBusy = true;
+      try {
+        const name = (this.importName || candidate.suggested_name || '').trim();
+        const r = await fetch('/api/profiles/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: name || undefined,
+            set_default: this.importSetDefault,
+          }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (r.ok && d.ok) {
+          this.closeDrawer();
+          await this.loadProfiles();
+        } else {
+          this.formError = d.detail || window.t('profiles.import_failed');
+        }
+      } catch (_e) {
+        this.formError = window.t('profiles.import_failed');
+      } finally {
+        this.importBusy = false;
+      }
     },
 
     async saveProfile() {
@@ -350,7 +483,7 @@ function profilesApp() {
       const r = await fetch(url, { method, body: fd });
       const d = await r.json();
       if (d.ok) {
-        this.drawerOpen = false;
+        this.closeDrawer();
         await this.loadProfiles();
       } else {
         this.formError = d.detail || window.t('profiles.save_failed');

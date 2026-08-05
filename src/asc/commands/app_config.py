@@ -439,6 +439,9 @@ def _do_import_from_env(
     env_file_path: str,
     project_root: Optional[Path] = None,
     name: Optional[str] = None,
+    *,
+    quiet: bool = False,
+    interactive: bool = True,
 ) -> str:
     """Import app profile from .env file.
 
@@ -450,10 +453,16 @@ def _do_import_from_env(
         env_file_path: Path to the .env file to import
         project_root: Root path of the project (used for relative path resolution)
         name: Optional profile name (defaults to project_root.name)
+        quiet: Suppress CLI echo output (for Web/API callers)
+        interactive: Forwarded to Guard.check_and_enforce
 
     Returns:
         The profile name that was created/updated
     """
+    def _echo(msg: str) -> None:
+        if not quiet:
+            typer.echo(msg)
+
     env_file = Path(env_file_path)
     if not env_file.exists():
         raise FileNotFoundError(f"❌ {t(ERRORS['config_file_not_found']).format(path=env_file)}")
@@ -503,16 +512,17 @@ def _do_import_from_env(
             app_name=profile_name,
             key_id=key_id,
             issuer_id=issuer_id,
+            interactive=interactive,
         )
 
     global_keys_dir = Path.home() / ".config" / "asc" / "keys"
     global_keys_dir.mkdir(parents=True, exist_ok=True)
     dest_key = global_keys_dir / key_path.name
     if dest_key.exists():
-        typer.echo(f"  ℹ️  密钥文件已存在，跳过拷贝：{dest_key}")
+        _echo(f"  ℹ️  密钥文件已存在，跳过拷贝：{dest_key}")
     else:
         shutil.copy2(key_path, dest_key)
-        typer.echo(f"  ✅ 密钥文件已拷贝到 {dest_key}")
+        _echo(f"  ✅ 密钥文件已拷贝到 {dest_key}")
 
     # 自动推断 csv 和 screenshots 路径（存绝对路径，避免 CWD 依赖）
     data_dir = project_root / "AppStore" / "data"
@@ -529,7 +539,7 @@ def _do_import_from_env(
     config = Config()
     existing_apps = config.list_apps()
     if profile_name in existing_apps:
-        typer.echo(f"  ⚠️  Profile '{profile_name}' already exists and will be overwritten.")
+        _echo(f"  ⚠️  Profile '{profile_name}' already exists and will be overwritten.")
     config.save_app_profile(
         profile_name,
         issuer_id,
@@ -539,12 +549,12 @@ def _do_import_from_env(
         csv_path,
         screenshots_path,
     )
-    typer.echo(f"\n✅ App profile '{profile_name}' 已创建。")
-    typer.echo(f"   Issuer ID:  {issuer_id}")
-    typer.echo(f"   Key ID:     {key_id}")
-    typer.echo(f"   App ID:     {app_id}")
-    typer.echo(f"   CSV:        {csv_path}")
-    typer.echo(f"   截图路径:   {screenshots_path}")
+    _echo(f"\n✅ App profile '{profile_name}' 已创建。")
+    _echo(f"   Issuer ID:  {issuer_id}")
+    _echo(f"   Key ID:     {key_id}")
+    _echo(f"   App ID:     {app_id}")
+    _echo(f"   CSV:        {csv_path}")
+    _echo(f"   截图路径:   {screenshots_path}")
 
     return profile_name
 
@@ -575,22 +585,18 @@ def cmd_app_import(
         asc app import --path /path/to/MyProject
         asc app import --path /path/to/MyProject --name myapp
     """
+    from asc.utils import find_project_env
+
     if path:
         project_root = Path(path).expanduser().resolve()
         env_file = project_root / "AppStore" / "Config" / ".env"
     else:
-        # 从当前目录向上查找包含 AppStore/Config/.env 的项目根目录
-        cwd = Path.cwd()
-        env_file = None
-        for candidate in [cwd, *cwd.parents]:
-            candidate_env = candidate / "AppStore" / "Config" / ".env"
-            if candidate_env.exists():
-                project_root = candidate
-                env_file = candidate_env
-                break
-        if env_file is None:
-            project_root = cwd
-            env_file = cwd / "AppStore" / "Config" / ".env"
+        found = find_project_env(Path.cwd())
+        if found:
+            project_root, env_file = found
+        else:
+            project_root = Path.cwd()
+            env_file = project_root / "AppStore" / "Config" / ".env"
 
     if not env_file.exists():
         typer.echo(f"❌ {t(ERRORS['config_file_not_found']).format(path=env_file)}", err=True)

@@ -214,8 +214,9 @@ def resolve_app_profile(app_name: Optional[str], config: "Config") -> str:
     # Interactive: build selection list
     valid_profiles = list_valid_profiles(config)
 
-    # Detect local un-imported config
-    local_config = detect_local_app_config(Path.cwd())
+    # Detect local un-imported config (walk up from cwd, same as asc app import)
+    found_env = find_project_env(Path.cwd())
+    local_config = detect_local_app_config(found_env[0]) if found_env else None
     existing_profiles = [p[1] for p in valid_profiles]
     show_local = (
         local_config is not None
@@ -340,6 +341,20 @@ def make_api_from_config(config, app_id_override: Optional[str] = None):
     return AppStoreConnectAPI(issuer_id, key_id, key_file), app_id
 
 
+def find_project_env(start: Optional[Path] = None) -> Optional[tuple[Path, Path]]:
+    """从 start（默认 cwd）向上查找含 AppStore/Config/.env 的项目根。
+
+    Returns:
+        (project_root, env_file) 或 None
+    """
+    start_path = (start or Path.cwd()).expanduser().resolve()
+    for candidate in [start_path, *start_path.parents]:
+        env_file = candidate / "AppStore" / "Config" / ".env"
+        if env_file.exists():
+            return candidate, env_file
+    return None
+
+
 def detect_local_app_config(project_root: Path) -> Optional[dict]:
     """检测项目本地 AppStore/Config/.env 配置。
 
@@ -393,3 +408,62 @@ def is_local_config_imported(local_config: Optional[dict], existing_profiles: li
                 and profile.get("app_id") == local_config.get("app_id")):
             return True
     return False
+
+
+def _suggested_profile_name(project_name: str) -> str:
+    """Sanitize a directory name into a valid profile name."""
+    if re.fullmatch(r"[a-zA-Z0-9_-]+", project_name):
+        return project_name
+    sanitized = re.sub(r"[^a-zA-Z0-9_-]+", "_", project_name).strip("_")
+    return sanitized or "app"
+
+
+def resolve_local_key_path(local_config: dict) -> Path:
+    """Resolve KEY_FILE from local config relative to AppStore/Config/ when needed."""
+    key_file_val = local_config.get("key_file") or ""
+    key_path = Path(key_file_val).expanduser()
+    if key_path.is_absolute():
+        return key_path
+    env_file = Path(local_config.get("env_file_path") or "")
+    if env_file.name:
+        return env_file.parent / key_file_val
+    return key_path
+
+
+def discover_local_import_candidates(start: Optional[Path] = None) -> list[dict]:
+    """扫描当前根目录，返回可导入且尚未加入 profiles 的本地 App 候选。
+
+    「未添加」判定：issuer_id + key_id + app_id 与任何已有 profile 都不匹配。
+    扫描路径：从 start（默认 Path.cwd()）向上查找 AppStore/Config/.env。
+    """
+    from asc.config import Config
+
+    found = find_project_env(start)
+    if not found:
+        return []
+
+    project_root, _env_file = found
+    local = detect_local_app_config(project_root)
+    if not local:
+        return []
+
+    config = Config()
+    existing = [config.get_app_profile(name) or {} for name in config.list_apps()]
+    if is_local_config_imported(local, existing):
+        return []
+
+    key_path = resolve_local_key_path(local)
+    return [{
+        "project_root": str(project_root),
+        "project_name": local["project_name"],
+        "suggested_name": _suggested_profile_name(local["project_name"]),
+        "issuer_id": local["issuer_id"],
+        "key_id": local["key_id"],
+        "app_id": local["app_id"],
+        "key_file": local["key_file"],
+        "key_file_exists": key_path.exists(),
+        "csv_path": local["csv_path"],
+        "screenshots_path": local["screenshots_path"],
+        "iap_path": local["iap_path"],
+        "env_file_path": local["env_file_path"],
+    }]
