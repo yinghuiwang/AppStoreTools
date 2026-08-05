@@ -348,10 +348,12 @@
       <select id="app-switcher"
               class="field-select w-full text-xs"
               onchange="
+                if (!this.value) return;
                 fetch('/api/switch-profile?profile=' + encodeURIComponent(this.value))
                   .then(() => location.reload());
               "
               name="profile">
+        <option value="" disabled {% if not current_profile %}selected{% endif %}>{{ t("nav.select_app") }}</option>
         {% for p in profiles %}
         {% set access = profile_access.get(p, {}) %}
         <option value="{{ p }}"

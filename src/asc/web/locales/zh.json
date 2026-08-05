@@ -10,6 +10,7 @@
   "nav.settings": "设置",
   "nav.update": "检查更新",
   "nav.current_app": "当前应用",
+  "nav.select_app": "请选择 App",
   "nav.new_profile": "+ 新建 App Profile",
   "nav.other_machine": "（其他机器）",
   "settings.language": "语言",

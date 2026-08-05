@@ -37,24 +37,37 @@ def create_app() -> FastAPI:
         return await call_next(request)
 
     def _get_profile_context(request: Request) -> dict:
-        """Extract current profile from cookie or config, including profile defaults."""
+        """Resolve sidebar/current App: cookie if selectable, else machine match only."""
         from asc.config import Config
+        from asc.guard import Guard
+        from asc.web.profile_select import resolve_web_current_profile
+
         profile_from_cookie = request.cookies.get("asc_profile")
-        config = Config(app_name=profile_from_cookie)
+        # list_apps does not need a resolved default_app; avoid implying one is selected.
+        config = Config(app_name=profile_from_cookie or None)
         profiles = config.list_apps()
         profile_data = {
             name: config.get_app_profile(name) or {}
             for name in profiles
         }
-        from asc.guard import Guard
         access = Guard().profile_access(profile_data)
         options = access["options"]
-        selectable = [name for name in profiles if options[name]["enabled"]]
-        requested = profile_from_cookie or config.app_name or ""
-        current = requested if requested in selectable else ""
-        if not current:
-            current = access["matched_profile"] or (selectable[0] if selectable else "")
-        current_config = Config(app_name=current) if current else config
+        current = resolve_web_current_profile(
+            cookie_profile=profile_from_cookie,
+            profiles=profiles,
+            matched_profile=access["matched_profile"],
+            options=options,
+        )
+        if current:
+            current_config = Config(app_name=current)
+            profile_csv = current_config.csv_path
+            profile_screenshots = current_config.screenshots_path
+            profile_iap_file = current_config.iap_path or "data/iap_packages.json"
+        else:
+            # Do not load default_app paths when nothing is selected.
+            profile_csv = "data/appstore_info.csv"
+            profile_screenshots = "data/screenshots"
+            profile_iap_file = "data/iap_packages.json"
         from asc import __version__ as asset_version
         lang = getattr(request.state, "lang", None) or resolve_lang(
             cookie=request.cookies.get(COOKIE_NAME),
@@ -69,9 +82,9 @@ def create_app() -> FastAPI:
             "profile_access": options,
             "has_machine_profile": bool(access["matched_profile"]),
             "current_profile": current,
-            "profile_csv": current_config.csv_path,
-            "profile_screenshots": current_config.screenshots_path,
-            "profile_iap_file": current_config.iap_path or "data/iap_packages.json",
+            "profile_csv": profile_csv,
+            "profile_screenshots": profile_screenshots,
+            "profile_iap_file": profile_iap_file,
             "asset_version": asset_version,
             "lang": lang,
             "html_lang": map_html_lang(lang),
@@ -80,22 +93,25 @@ def create_app() -> FastAPI:
         }
 
     def _render(request: Request, template: str, ctx: dict):
-        """Render a page and persist the resolved profile to the cookie when missing.
+        """Render a page and sync ``asc_profile`` with the resolved selection.
 
-        The sidebar switcher only writes ``asc_profile`` on a manual ``onchange``.
-        Without this, the first visit shows a selected app (via fallback) but the
-        cookie stays empty, so API endpoints reject requests with
-        "No profile selected". Setting the cookie here keeps the visible selection
-        and the backend in sync.
+        When a machine-matched profile is auto-selected, persist it to the cookie
+        so API routes see the same app. When nothing is selected, clear a stale
+        cookie so APIs do not silently fall through to ``default_app``.
         """
         resp = templates.TemplateResponse(request, template, ctx)
-        if request.cookies.get("asc_profile") != ctx.get("current_profile") and ctx.get("current_profile"):
-            resp.set_cookie(
-                "asc_profile",
-                ctx["current_profile"],
-                httponly=True,
-                samesite="lax",
-            )
+        cookie = request.cookies.get("asc_profile") or ""
+        current = ctx.get("current_profile") or ""
+        if cookie != current:
+            if current:
+                resp.set_cookie(
+                    "asc_profile",
+                    current,
+                    httponly=True,
+                    samesite="lax",
+                )
+            elif cookie:
+                resp.delete_cookie("asc_profile")
         return resp
 
     @app.get("/", response_class=HTMLResponse)

@@ -1424,6 +1424,106 @@ def test_sidebar_disables_other_machine_profile(client):
     assert response.cookies.get("asc_profile") == "current-app"
 
 
+def test_homepage_does_not_auto_select_without_machine_match(client):
+    """Without a Guard machine match, do not fall back to default_app / first profile."""
+    from unittest.mock import MagicMock, patch
+
+    config = MagicMock()
+    config.list_apps.return_value = ["alpha", "beta"]
+    config.app_name = "alpha"  # would previously become current via default_app
+    config.csv_path = "data/appstore_info.csv"
+    config.screenshots_path = "data/screenshots"
+    config.iap_path = None
+    config.get_app_profile.side_effect = lambda name: {
+        "app_id": f"app-{name}",
+        "issuer_id": "ISS",
+    }
+    access = {
+        "matched_profile": "",
+        "options": {
+            "alpha": {"enabled": True, "current": False, "elsewhere": False},
+            "beta": {"enabled": True, "current": False, "elsewhere": False},
+        },
+    }
+    with patch("asc.config.Config", return_value=config), \
+         patch("asc.guard.Guard.profile_access", return_value=access):
+        response = client.get("/")
+
+    assert response.status_code == 200
+    assert 'data-current-profile=""' in response.text
+    assert 'id="app-switcher"' in response.text
+    assert 'value=""' in response.text
+    assert "请选择 App" in response.text or "Select an app" in response.text
+    # Stale auto-selection cookie must not be written
+    assert response.cookies.get("asc_profile") in (None, "")
+
+
+def test_homepage_clears_stale_cookie_when_unselected(client):
+    """Invalid cookie with no machine match → unselected and cookie cleared."""
+    from unittest.mock import MagicMock, patch
+
+    config = MagicMock()
+    config.list_apps.return_value = ["alpha"]
+    config.app_name = "alpha"
+    config.csv_path = "data/appstore_info.csv"
+    config.screenshots_path = "data/screenshots"
+    config.iap_path = None
+    config.get_app_profile.return_value = {"app_id": "app-1", "issuer_id": "ISS"}
+    access = {
+        "matched_profile": "",
+        "options": {
+            "alpha": {"enabled": False, "current": False, "elsewhere": True},
+        },
+    }
+    with patch("asc.config.Config", return_value=config), \
+         patch("asc.guard.Guard.profile_access", return_value=access):
+        response = client.get("/", cookies={"asc_profile": "alpha"})
+
+    assert response.status_code == 200
+    assert 'data-current-profile=""' in response.text
+    # delete_cookie typically sets empty / expired
+    set_cookie = response.headers.get("set-cookie", "")
+    assert "asc_profile=" in set_cookie.lower() or response.cookies.get("asc_profile") in (None, "")
+
+
+def test_homepage_keeps_manual_cookie_without_machine_match(client):
+    """User may still keep an unbound profile selected when nothing is machine-bound."""
+    from unittest.mock import MagicMock, patch
+
+    config = MagicMock()
+    config.list_apps.return_value = ["alpha", "beta"]
+    config.app_name = "beta"
+    config.csv_path = "data/appstore_info.csv"
+    config.screenshots_path = "data/screenshots"
+    config.iap_path = None
+    config.get_app_profile.side_effect = lambda name: {
+        "app_id": f"app-{name}",
+        "issuer_id": "ISS",
+    }
+    access = {
+        "matched_profile": "",
+        "options": {
+            "alpha": {"enabled": True, "current": False, "elsewhere": False},
+            "beta": {"enabled": True, "current": False, "elsewhere": False},
+        },
+    }
+    with patch("asc.config.Config", return_value=config), \
+         patch("asc.guard.Guard.profile_access", return_value=access):
+        response = client.get("/", cookies={"asc_profile": "alpha"})
+
+    assert response.status_code == 200
+    assert 'data-current-profile="alpha"' in response.text
+
+
+def test_metadata_check_requires_profile(client):
+    resp = client.post("/api/metadata/check")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is False
+    assert data["level"] == "error"
+    assert "profile" in data["message"].lower() or "App" in data["message"]
+
+
 def test_profile_update_api_allows_rename(client, tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.chdir(tmp_path)

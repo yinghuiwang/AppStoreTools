@@ -10,6 +10,7 @@
   "nav.settings": "Settings",
   "nav.update": "Check Updates",
   "nav.current_app": "Current App",
+  "nav.select_app": "Select an app",
   "nav.new_profile": "+ New App Profile",
   "nav.other_machine": "(other machine)",
   "settings.language": "Language",

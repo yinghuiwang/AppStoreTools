@@ -50,6 +50,20 @@ def _as_bool(value) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _cookie_profile(request: Request) -> str:
+    """Return the explicitly selected Web profile cookie (may be empty)."""
+    return (request.cookies.get("asc_profile") or "").strip()
+
+
+def _no_profile_payload(lang: str) -> dict:
+    return {
+        "ok": False,
+        "level": "error",
+        "message": t("api.no_profile", lang=lang),
+        "detail": {},
+    }
+
+
 def _lang(request: Request) -> str:
     from asc.web.i18n import COOKIE_NAME, resolve_lang
 
@@ -404,8 +418,11 @@ def _start_metadata_task(
 
 @router.post("/metadata/check")
 async def metadata_check(request: Request):
-    profile = request.cookies.get("asc_profile", "")
-    result = _run_metadata_check(profile, lang=_lang(request))
+    lang = _lang(request)
+    profile = _cookie_profile(request)
+    if not profile:
+        return _no_profile_payload(lang)
+    result = _run_metadata_check(profile, lang=lang)
     return result
 
 
@@ -419,7 +436,10 @@ async def metadata_run(
     dry_run: str = _Form(""),
     verbose: str = _Form(""),
 ):
-    profile = request.cookies.get("asc_profile", "")
+    lang = _lang(request)
+    profile = _cookie_profile(request)
+    if not profile:
+        return JSONResponse({"error": t("api.no_profile", lang=lang)}, status_code=400)
     task_id = _start_metadata_task(
         profile=profile,
         csv_path=csv_path,
@@ -588,7 +608,10 @@ async def build_run(
     dry_run: str = _Form(""),
     reuse_archive: str = _Form(""),
 ):
-    profile = request.cookies.get("asc_profile", "")
+    lang = _lang(request)
+    profile = _cookie_profile(request)
+    if not profile:
+        return JSONResponse({"error": t("api.no_profile", lang=lang)}, status_code=400)
     task_id = _start_build_task(
         profile=profile,
         mode=mode,
@@ -643,8 +666,8 @@ def build_options(
             scan_archives,
         )
 
-        profile = request.cookies.get("asc_profile", "")
-        config = Config(app_name=profile)
+        profile = _cookie_profile(request)
+        config = Config(app_name=profile or None)
         source_project = project or config.build_project or "."
         project_path, kind = detect_project(source_project)
         schemes = list_schemes(project_path, kind)
@@ -1126,7 +1149,7 @@ async def guard_status(request: Request):
         guard = Guard()
         data = copy.deepcopy(guard.get_status())
         # Add current_profile from cookie
-        profile = request.cookies.get("asc_profile", "")
+        profile = _cookie_profile(request)
         data["current_profile"] = profile
         # Build app_id → profile_name mapping for display
         from asc.config import Config
@@ -1250,7 +1273,7 @@ def dashboard_summary(
             detail="status must be one of: pending, running, done, error, canceled, or empty",
         )
 
-    selected_profile = request.cookies.get("asc_profile", "") if profile is None else profile
+    selected_profile = _cookie_profile(request) if profile is None else profile
     return build_dashboard_summary(
         _task_store.list_recent_states(limit=500),
         days=ranges[range_],
@@ -1347,7 +1370,7 @@ async def download_example_iap():
 def whats_new_check(request: Request):
     """Check environment and return available locales for the current app version."""
     lang = _lang(request)
-    profile = request.cookies.get("asc_profile", "")
+    profile = _cookie_profile(request)
     if not profile:
         return {
             "ok": False,
@@ -1391,7 +1414,7 @@ def whats_new_check(request: Request):
 async def whats_new_translate(request: Request):
     """Start a preview-translate background task; result.translations on task done."""
     lang = _lang(request)
-    profile = request.cookies.get("asc_profile", "")
+    profile = _cookie_profile(request)
     if not profile:
         return JSONResponse({"error": t("api.no_profile", lang=lang)}, status_code=400)
     try:
@@ -1573,7 +1596,7 @@ async def whats_new_run(
     """Run whats-new upload. Supports translated dicts, translate mode, and direct text mode."""
     import json
     lang = _lang(request)
-    profile = request.cookies.get("asc_profile", "")
+    profile = _cookie_profile(request)
     if not profile:
         return JSONResponse({"error": t("api.no_profile", lang=lang)}, status_code=400)
 
@@ -1861,7 +1884,10 @@ async def iap_run(
         update_existing: str = _Form(""),
         verbose: str = _Form(""),
 ):
-    profile = request.cookies.get("asc_profile", "")
+    lang = _lang(request)
+    profile = _cookie_profile(request)
+    if not profile:
+        return JSONResponse({"error": t("api.no_profile", lang=lang)}, status_code=400)
     task_id = _start_iap_task(
         profile=profile,
         iap_file=iap_file,
@@ -1875,7 +1901,9 @@ async def iap_run(
 @router.post("/iap/check")
 async def iap_check(request: Request):
     lang = _lang(request)
-    profile = request.cookies.get("asc_profile", "")
+    profile = _cookie_profile(request)
+    if not profile:
+        return _no_profile_payload(lang)
     try:
         from pathlib import Path
         config = Config(app_name=profile)
@@ -1908,7 +1936,10 @@ async def iap_check(request: Request):
 async def iap_review_screenshots_scan(request: Request):
     from fastapi import HTTPException
 
-    profile = request.cookies.get("asc_profile", "")
+    lang = _lang(request)
+    profile = _cookie_profile(request)
+    if not profile:
+        return JSONResponse({"error": t("api.no_profile", lang=lang)}, status_code=400)
     body = await request.body()
     if body.strip():
         try:
@@ -1939,7 +1970,10 @@ async def iap_review_screenshots_scan(request: Request):
 async def iap_review_screenshots_upload(request: Request):
     from fastapi import HTTPException
 
-    profile = request.cookies.get("asc_profile", "")
+    lang = _lang(request)
+    profile = _cookie_profile(request)
+    if not profile:
+        return JSONResponse({"error": t("api.no_profile", lang=lang)}, status_code=400)
     body = await request.body()
     if body.strip():
         try:
@@ -2011,7 +2045,9 @@ def _get_available_locales(api, app_id: str) -> list[dict]:
 async def urls_check(request: Request):
     """Check environment for URL settings."""
     lang = _lang(request)
-    profile = request.cookies.get("asc_profile", "")
+    profile = _cookie_profile(request)
+    if not profile:
+        return _no_profile_payload(lang)
     try:
         config = Config(app_name=profile)
         api, app_id = make_api_from_config(config)
@@ -2044,7 +2080,10 @@ async def urls_set(
     verbose: str = _Form(""),
 ):
     """Set a URL field directly."""
-    profile = request.cookies.get("asc_profile", "")
+    lang = _lang(request)
+    profile = _cookie_profile(request)
+    if not profile:
+        return JSONResponse({"error": t("api.no_profile", lang=lang)}, status_code=400)
     task_id = _start_urls_task(
         profile=profile,
         field=field,
