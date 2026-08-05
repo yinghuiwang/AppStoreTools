@@ -21,7 +21,7 @@
            addOpen: false,
            addSaving: false,
            addError: '',
-           addForm: { fingerprint: '', profile: '', key_id: '', ip: '', note: '' },
+           addForm: { fingerprint: '', profile: '', ip: '', note: '' },
            loadGuard() {
              return fetch('/api/guard/status')
                .then(r => r.json())
@@ -63,7 +63,7 @@
            },
            openAddForm() {
              this.addError = '';
-             this.addForm = { fingerprint: '', profile: this.availableProfiles()[0] || '', key_id: '', ip: '', note: '' };
+             this.addForm = { fingerprint: '', profile: this.availableProfiles()[0] || '', ip: '', note: '' };
              this.addOpen = true;
              this.loadProfiles().then(() => {
                this.addForm.profile = this.availableProfiles()[0] || '';
@@ -350,14 +350,7 @@
               </select>
               <p x-show="profiles.length === 0" class="text-[11px] text-amber-500 mt-1.5">{{ t("guard.no_profiles") }}</p>
               <p x-show="profiles.length > 0 && availableProfiles().length === 0" class="text-[11px] text-amber-500 mt-1.5">{{ t("guard.all_apps_bound") }}</p>
-            </div>
-
-            <!-- Key ID (optional) -->
-            <div>
-              <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">{{ t("guard.key_id_optional") }}</label>
-              <input type="text" x-model="addForm.key_id"
-                     class="field-input w-full font-mono"
-                     placeholder="{{ t('guard.key_id_hint') }}">
+              <p x-show="addForm.profile" class="text-[11px] text-obsidian-500 mt-1.5">{{ t("guard.credentials_from_profile") }}</p>
             </div>
 
             <!-- IP (optional) -->

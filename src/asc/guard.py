@@ -330,8 +330,12 @@ class Guard:
         Unlike `bind()`, this does not read the current machine/IP - the
         fingerprint (and optional IP) are supplied directly by the caller, so
         an operator can pre-register another machine's binding without
-        actually running an upload from it. IP/Key ID/note are optional and
-        are only written when provided.
+        actually running an upload from it. `app_id`/`issuer_id`/`key_id`
+        are expected to come from the selected app profile (not user input)
+        - callers should not let a user override `key_id` for this flow.
+        IP/note are optional and only written when provided; `key_id` is
+        optional too (e.g. a profile that has none configured yet), and the
+        credential binding is only created when it is non-empty.
 
         Raises GuardViolationError if the app already has a binding (machine,
         IP, or credential) - manual add is only for apps that have never been

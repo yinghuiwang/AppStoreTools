@@ -1103,10 +1103,13 @@ async def guard_manual_bind(
     fingerprint: str = _Form(...),
     profile: str = _Form(...),
     ip: str = _Form(""),
-    key_id: str = _Form(""),
     note: str = _Form(""),
 ):
-    """Manually register a machine-fingerprint binding for a local app profile."""
+    """Manually register a machine-fingerprint binding for a local app profile.
+
+    Credential fields (app_id/issuer_id/key_id) always come from the selected
+    profile - the client cannot override key_id here.
+    """
     from fastapi import HTTPException
     from asc.config import Config
     from asc.guard import Guard, GuardConfigError, GuardViolationError
@@ -1130,7 +1133,7 @@ async def guard_manual_bind(
             profile,
             app_id=str(profile_data.get("app_id", "")),
             issuer_id=profile_data.get("issuer_id", ""),
-            key_id=key_id.strip() or profile_data.get("key_id", ""),
+            key_id=profile_data.get("key_id", ""),
             ip=ip.strip(),
             note=note.strip(),
         )

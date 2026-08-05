@@ -1710,18 +1710,19 @@ def test_guard_manual_bind_api_success_uses_profile_credentials(client):
     )
 
 
-def test_guard_manual_bind_api_allows_key_id_override_and_optional_fields(client):
+def test_guard_manual_bind_api_ignores_client_supplied_key_id(client):
+    """Key ID 始终取自所选 profile，客户端传入的 key_id 应被忽略，不能覆盖。"""
     from unittest.mock import patch, MagicMock
 
     mock_guard = MagicMock()
     mock_guard.manual_bind.return_value = {}
     with patch("asc.config.Config.get_app_profile", return_value={
-        "app_id": "123", "issuer_id": "ISS1", "key_id": "KEY1",
+        "app_id": "123", "issuer_id": "ISS1", "key_id": "KEY-FROM-PROFILE",
     }), patch("asc.guard.Guard", return_value=mock_guard):
         resp = client.post("/api/guard/manual-bind", data={
             "fingerprint": "SERIAL-A",
             "profile": "myapp",
-            "key_id": "KEY-OVERRIDE",
+            "key_id": "KEY-CLIENT-OVERRIDE",
             "ip": "1.2.3.4",
             "note": "office spare mac",
         })
@@ -1732,7 +1733,7 @@ def test_guard_manual_bind_api_allows_key_id_override_and_optional_fields(client
         "myapp",
         app_id="123",
         issuer_id="ISS1",
-        key_id="KEY-OVERRIDE",
+        key_id="KEY-FROM-PROFILE",
         ip="1.2.3.4",
         note="office spare mac",
     )
