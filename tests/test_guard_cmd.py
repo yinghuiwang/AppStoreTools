@@ -18,7 +18,15 @@ def test_guard_status_enabled(tmp_path):
             "enabled": True,
             "app_notes": {"123456789": "办公室 Mac"},
             "bindings": {
-                "machine": {machine_fp: {"app_id": "123456789", "app_name": "myapp", "bound_at": "2026-05-18T10:00:00"}},
+                "machine": {
+                    machine_fp: {
+                        "app_id": "123456789",
+                        "app_name": "myapp",
+                        "issuer_id": "iss-1",
+                        "bound_at": "2026-05-18T10:00:00",
+                        "last_checked": "2026-05-19T11:00:00",
+                    }
+                },
                 "ip": {},
                 "credential": {},
             }
@@ -31,6 +39,48 @@ def test_guard_status_enabled(tmp_path):
     assert machine_fp in result.output
     assert "办公室 Mac" in result.output
     assert "SERIAL-C02ABC1234..." not in result.output
+    assert "✅ 已绑定" in result.output
+    assert "myapp (123456789)" in result.output
+    assert "❌ 未绑定" in result.output
+    assert "绑定方式" not in result.output
+    assert "Issuer ID" not in result.output
+    assert "绑定时间" not in result.output.split("绑定记录:")[0]
+    assert "最近检查" not in result.output
+
+
+def test_guard_status_marks_current_ip_bound():
+    from asc.cli import app
+    runner = CliRunner()
+    machine_fp = "SERIAL-CURRENT"
+    ip = "203.0.113.10"
+    with patch("asc.commands.guard_cmd.Guard") as MockGuard:
+        instance = MockGuard.return_value
+        instance.is_enabled.return_value = True
+        instance.get_status.return_value = {
+            "enabled": True,
+            "app_notes": {},
+            "bindings": {
+                "machine": {},
+                "ip": {
+                    ip: {
+                        "app_id": "6503186734",
+                        "app_name": "test",
+                        "issuer_id": "iss-test",
+                        "bound_at": "2026-07-17T08:55:10",
+                    }
+                },
+                "credential": {},
+            },
+        }
+        instance._get_machine_fingerprint.return_value = machine_fp
+        instance._get_public_ip.return_value = ip
+        result = runner.invoke(app, ["guard", "status"])
+    assert result.exit_code == 0
+    assert "机器指纹" in result.output
+    assert "❌ 未绑定" in result.output
+    assert "test (6503186734)" in result.output
+    assert "Issuer ID" not in result.output
+    assert "绑定方式" not in result.output
 
 
 def test_guard_disable(tmp_path):
