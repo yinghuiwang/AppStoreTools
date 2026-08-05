@@ -34,7 +34,7 @@ def test_installed_commit_short_reads_direct_url_metadata():
 
 
 def test_run_app_no_args_shows_help_without_cross_mark(monkeypatch):
-    """Bare `asc` should show help and not print a trailing ❌."""
+    """Bare `asc` should show help and not print a trailing ❌ or traceback."""
     from asc.cli import run_app
 
     monkeypatch.setattr("sys.argv", ["asc"])
@@ -49,6 +49,9 @@ def test_run_app_no_args_shows_help_without_cross_mark(monkeypatch):
     assert "Usage:" in out or "Commands" in out
     assert "❌" not in out
     assert "❌" not in err
+    assert "Traceback" not in err
+    assert "NoArgsIsHelpError" not in err
+    assert "NoArgsIsHelpError" not in out
 
 
 def test_run_app_help_flag_shows_help_without_cross_mark(monkeypatch):
@@ -81,3 +84,73 @@ def test_run_app_unknown_command_still_prints_cross_mark(monkeypatch):
     assert exc_info.value.code == 1
     assert "❌" in stderr.getvalue()
     assert "nosuchcmd" in stderr.getvalue()
+
+
+def test_run_app_catches_vendored_no_args_is_help_error(monkeypatch):
+    """Typer's vendored typer._click raises a different NoArgsIsHelpError class.
+
+    ``isinstance(exc, click.exceptions.NoArgsIsHelpError)`` is False for that
+    foreign class; run_app must still treat it as success (exit 0, no traceback).
+    """
+    import asc.cli as cli
+
+    class NoArgsIsHelpError(Exception):
+        """Mimics typer._click.exceptions.NoArgsIsHelpError (separate identity)."""
+
+    def boom(*_args, **_kwargs):
+        raise NoArgsIsHelpError("help already shown")
+
+    monkeypatch.setattr(cli, "app", boom)
+    stderr = io.StringIO()
+    with redirect_stderr(stderr):
+        code = cli.run_app()
+
+    assert code == 0
+    assert "Traceback" not in stderr.getvalue()
+    assert "NoArgsIsHelpError" not in stderr.getvalue()
+
+
+def test_run_app_catches_vendored_usage_error(monkeypatch):
+    """Vendored Click UsageError must still get ❌ handling, not a traceback."""
+    import asc.cli as cli
+
+    class UsageError(Exception):
+        """Mimics typer._click.exceptions.UsageError (separate identity)."""
+
+        def format_message(self):
+            return "No such command 'ghost'."
+
+    def boom(*_args, **_kwargs):
+        raise UsageError()
+
+    monkeypatch.setattr(cli, "app", boom)
+    monkeypatch.delenv("_ASC_DEBUG", raising=False)
+    monkeypatch.delenv("ASC_DEBUG", raising=False)
+    stderr = io.StringIO()
+    with redirect_stderr(stderr), pytest.raises(SystemExit) as exc_info:
+        cli.run_app()
+
+    assert exc_info.value.code == 1
+    err = stderr.getvalue()
+    assert "❌" in err
+    assert "ghost" in err
+    assert "Traceback" not in err
+
+
+def test_is_no_args_is_help_error_matches_by_name():
+    from asc.cli import _is_no_args_is_help_error, _is_usage_error
+
+    class NoArgsIsHelpError(Exception):
+        pass
+
+    class UsageError(Exception):
+        pass
+
+    foreign_help = NoArgsIsHelpError()
+    foreign_usage = UsageError()
+    assert _is_no_args_is_help_error(foreign_help) is True
+    assert _is_usage_error(foreign_help) is True
+    assert _is_no_args_is_help_error(foreign_usage) is False
+    assert _is_usage_error(foreign_usage) is True
+    assert _is_no_args_is_help_error(RuntimeError("x")) is False
+    assert _is_usage_error(RuntimeError("x")) is False

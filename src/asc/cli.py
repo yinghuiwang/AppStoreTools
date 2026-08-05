@@ -56,17 +56,41 @@ patch_typer_completion()
 PACKAGE_NAME = "asc-appstore-tools"
 
 
+def _exc_type_names(exc: BaseException) -> set[str]:
+    """Return exception class names across the MRO (supports vendored Click)."""
+    return {cls.__name__ for cls in type(exc).__mro__}
+
+
+def _is_no_args_is_help_error(exc: BaseException) -> bool:
+    """True for Click/Typer NoArgsIsHelpError, including typer._click vendored copy.
+
+    Newer Typer vendors Click as ``typer._click``. That raises a *different*
+    ``NoArgsIsHelpError`` class than ``click.exceptions.NoArgsIsHelpError``, so
+    ``isinstance(..., click.exceptions.NoArgsIsHelpError)`` fails and the
+    exception escapes to Typer's pretty ``sys.excepthook`` (Rich traceback).
+    Match by class name like Typer's own ``rich_format_error`` does.
+    """
+    return "NoArgsIsHelpError" in _exc_type_names(exc)
+
+
+def _is_usage_error(exc: BaseException) -> bool:
+    """True for Click/Typer UsageError from either click or typer._click."""
+    names = _exc_type_names(exc)
+    if "UsageError" in names or "NoArgsIsHelpError" in names:
+        return True
+    return isinstance(exc, click.exceptions.UsageError)
+
+
 def _handle_typer_exception(exc: Exception) -> None:
     """Handle Typer/Click exceptions with user-friendly messages in non-debug mode."""
     from asc.error_handler import is_debug
-    import click
 
     # Only handle UsageError (e.g., "No such command") in non-debug mode
-    if not isinstance(exc, click.exceptions.UsageError):
+    if not _is_usage_error(exc):
         return
 
     # no_args_is_help: Typer already printed Rich help; not a real error.
-    if isinstance(exc, click.exceptions.NoArgsIsHelpError):
+    if _is_no_args_is_help_error(exc):
         return
 
     if is_debug():
@@ -240,16 +264,21 @@ def run_app() -> int:
     """
     from asc.error_handler import is_debug
     try:
-        return app(standalone_mode=False)
-    except click.exceptions.NoArgsIsHelpError:
-        # Help already shown via Typer rich_format_help during exception init.
-        # Treat as success (same UX as --help), not a usage failure.
-        return 0
-    except click.exceptions.UsageError as exc:
-        if is_debug():
-            raise
-        _handle_typer_exception(exc)
-        return 1
+        result = app(standalone_mode=False)
+        return result if isinstance(result, int) else 0
+    except Exception as exc:
+        # Match by class name: Typer may raise typer._click.exceptions.* which
+        # is not the same object as click.exceptions.* (see helpers above).
+        if _is_no_args_is_help_error(exc):
+            # Help already shown via Typer rich_format_help during exception init.
+            # Treat as success (same UX as --help), not a usage failure.
+            return 0
+        if _is_usage_error(exc):
+            if is_debug():
+                raise
+            _handle_typer_exception(exc)
+            return 1
+        raise
 
 
 # Entry point for: python -m asc
