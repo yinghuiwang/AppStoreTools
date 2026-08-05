@@ -374,7 +374,6 @@
   "guard.ip_unavailable": "无法获取，跳过 IP 绑定检查",
   "guard.bound_at": "绑定时间",
   "guard.note": "备注",
-  "guard.edit_note": "编辑备注",
   "guard.empty": "暂无绑定记录",
   "guard.help1": "Guard 将凭证绑定到当前机器和 IP，防止凭证滥用。",
   "guard.help2": "可在此编辑绑定备注；启用、禁用和解绑仍使用 CLI：",

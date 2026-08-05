@@ -374,7 +374,6 @@
   "guard.ip_unavailable": "Unavailable; IP binding check skipped",
   "guard.bound_at": "Bound at",
   "guard.note": "Note",
-  "guard.edit_note": "Edit note",
   "guard.empty": "No bindings yet",
   "guard.help1": "Guard binds credentials to this machine and IP to prevent credential abuse.",
   "guard.help2": "Edit binding notes here; enable, disable, and unbind still use the CLI:",

@@ -29,23 +29,6 @@
              if (name && id) return `${name} (${id})`;
              return name || id || '';
            },
-           noteRows() {
-             if (!this.guard || !this.guard.bindings) return [];
-             const apps = {};
-             const notes = this.guard.app_notes || {};
-             for (const bindings of Object.values(this.guard.bindings)) {
-               for (const info of Object.values(bindings || {})) {
-                 const appId = String(info.app_id || '');
-                 if (!appId || apps[appId]) continue;
-                 apps[appId] = {
-                   app_id: appId,
-                   app: info.profile_name || info.app_name || info.app_id,
-                   note: notes[appId] || ''
-                 };
-               }
-             }
-             return Object.values(apps);
-           },
            saveNote(row) {
              const token = row.app_id;
              this.savingNote = token;
@@ -222,36 +205,27 @@
                             <span class="text-xs text-obsidian-400 font-mono" x-text="row.bound_at.slice(0,19).replace('T',' ')"></span>
                           </div>
                         </template>
-                        <template x-if="row.note">
-                          <div class="col-span-2">
-                            <span class="text-[10px] uppercase tracking-widest text-obsidian-500 block mb-0.5">{{ t("guard.note") }}</span>
-                            <span class="text-xs text-obsidian-300 break-all" x-text="row.note"></span>
-                          </div>
-                        </template>
                       </div>
+                      <!-- Inline note editor -->
+                      <template x-if="row.app_id">
+                        <div class="pt-3 border-t border-obsidian-800">
+                          <span class="text-[10px] uppercase tracking-widest text-obsidian-500 block mb-1.5">{{ t("guard.note") }}</span>
+                          <div class="flex items-center gap-2">
+                            <input class="field-input text-xs h-9 flex-1"
+                                   type="text"
+                                   placeholder="{{ t('guard.note') }}"
+                                   x-model="row.note">
+                            <button type="button"
+                                    class="btn-secondary text-xs h-9 px-3 shrink-0"
+                                    @click="saveNote(row)"
+                                    :disabled="savingNote === row.app_id">
+                              <span x-text="savingNote === row.app_id ? window.t('guard.saving') : window.t('guard.save_note')"></span>
+                            </button>
+                          </div>
+                        </div>
+                      </template>
                     </div>
                   </template>
-                </div>
-                <div class="mt-5 pt-4 border-t border-obsidian-800">
-                  <h4 class="text-[10px] uppercase tracking-widest text-obsidian-500 font-medium mb-3">{{ t("guard.edit_note") }}</h4>
-                  <div class="space-y-2">
-                    <template x-for="row in noteRows()" :key="row.app_id">
-                      <div class="grid grid-cols-[84px_minmax(0,1fr)_minmax(180px,260px)_auto] items-center gap-2">
-                        <span class="text-[11px] text-obsidian-400">App</span>
-                        <span class="text-xs text-obsidian-200 font-mono truncate" :title="row.app_id" x-text="row.app_id"></span>
-                        <input class="field-input text-xs h-9"
-                               type="text"
-                               placeholder="{{ t('guard.note') }}"
-                               x-model="row.note">
-                        <button type="button"
-                                class="btn-secondary text-xs h-9 px-3"
-                                @click="saveNote(row)"
-                                :disabled="savingNote === row.app_id">
-                          <span x-text="savingNote === row.app_id ? window.t('guard.saving') : window.t('guard.save_note')"></span>
-                        </button>
-                      </div>
-                    </template>
-                  </div>
                 </div>
               </div>
             </template>
