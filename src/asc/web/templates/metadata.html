@@ -27,6 +27,7 @@
 
     diff: {
       loading: false, loaded: false, error: '', pullOk: false, pulling: false,
+      pullShotsOk: false, pullingShots: false,
       version: null, locales: [], filter: 'all',
     },
 
@@ -360,7 +361,18 @@
     },
 
     wbDiffLocaleVisible(loc) {
-      return (loc.fields || []).some(f => this.wbDiffFieldVisible(f));
+      const fieldsVisible = (loc.fields || []).some(f => this.wbDiffFieldVisible(f));
+      const hasShots = (loc.screenshots || []).length > 0;
+      return fieldsVisible || hasShots;
+    },
+
+    wbDiffShotThumb(item, side) {
+      if (!item) return '';
+      if (item.thumb_url) return item.thumb_url;
+      if (side === 'asc' && item.remote_id) {
+        return '/api/listing/asc-thumb?screenshot_id=' + encodeURIComponent(item.remote_id);
+      }
+      return '';
     },
 
     wbDiffLoad() {
@@ -370,6 +382,7 @@
       }
       this.diff.error = '';
       this.diff.pullOk = false;
+      this.diff.pullShotsOk = false;
       this.diff.loading = true;
       const csvPath = document.getElementById('csv-path-input').value;
       const screenshotsDir = document.getElementById('screenshots-dir-input').value;
@@ -395,7 +408,10 @@
               // Pull defaults: never auto-select local_only (would wipe local with empty ASC)
               selected: f.status === 'changed' || f.status === 'asc_only',
             })),
-            screenshots: loc.screenshots || [],
+            screenshots: (loc.screenshots || []).map(s => ({
+              ...s,
+              selected: !!(s.asc && s.asc.length),
+            })),
           }));
           this.diff.loaded = true;
           this.wb.tab = 'diff';
@@ -521,6 +537,59 @@
         })
         .catch(e => { this.diff.error = e.message; })
         .finally(() => { this.diff.pulling = false; });
+    },
+
+    wbDiffPullScreenshots() {
+      if (this.wb.dirty) {
+        alert(window.t('metadata.diff_dirty_block'));
+        return;
+      }
+      const scopes = [];
+      this.diff.locales.forEach(loc => {
+        (loc.screenshots || []).forEach(s => {
+          if (s.selected) {
+            scopes.push({ locale: loc.locale, display_type: s.display_type });
+          }
+        });
+      });
+      if (!scopes.length) {
+        alert(window.t('metadata.diff_shots_no_selection'));
+        return;
+      }
+      const screenshotsDir = document.getElementById('screenshots-dir-input').value.trim();
+      if (!screenshotsDir) {
+        alert(window.t('metadata.diff_shots_need_dir'));
+        return;
+      }
+      if (!confirm(window.t('metadata.diff_shots_confirm', { count: scopes.length }))) {
+        return;
+      }
+      this.diff.pullingShots = true;
+      this.diff.error = '';
+      this.diff.pullShotsOk = false;
+      fetch('/api/listing/pull/screenshots', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ screenshots_dir: screenshotsDir, scopes }),
+      })
+        .then(async r => {
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok || data.ok === false) {
+            throw new Error(data.message || data.error || window.t('common.request_failed'));
+          }
+          return data;
+        })
+        .then(data => {
+          this.diff.pullShotsOk = true;
+          if (data.task_id) {
+            this.taskId = data.task_id;
+            this.step = 2;
+            this.submitting = false;
+            startTaskLogs(data.task_id);
+          }
+        })
+        .catch(e => { this.diff.error = e.message; })
+        .finally(() => { this.diff.pullingShots = false; });
     },
   }">
 
@@ -811,8 +880,20 @@
                 <template x-if="diff.pullOk">
                   <p class="text-xs text-emerald-400">{{ t("metadata.diff_pull_ok") }}</p>
                 </template>
+                <template x-if="diff.pullShotsOk">
+                  <p class="text-xs text-emerald-400">{{ t("metadata.diff_shots_pull_started") }}</p>
+                </template>
 
                 <p class="text-[11px] text-obsidian-500">{{ t("metadata.diff_shots_note") }}</p>
+
+                <div class="flex flex-wrap gap-2 mb-2">
+                  <button type="button" class="btn-ghost text-xs"
+                          :disabled="diff.pullingShots"
+                          @click="wbDiffPullScreenshots()">
+                    <span x-show="!diff.pullingShots">{{ t("metadata.diff_shots_pull") }}</span>
+                    <span x-show="diff.pullingShots">{{ t("metadata.diff_shots_pulling") }}</span>
+                  </button>
+                </div>
 
                 <div class="rounded-lg border border-obsidian-700 divide-y divide-obsidian-700 overflow-hidden">
                   <template x-for="loc in diff.locales" :key="'diff-' + loc.locale">
@@ -851,6 +932,50 @@
                               </div>
                             </div>
                             <p x-show="field.status === 'equal'" class="text-xs text-obsidian-500 truncate" x-text="field.local || field.asc || '—'"></p>
+                          </div>
+                        </template>
+
+                        <template x-if="loc.screenshots && loc.screenshots.length">
+                          <div class="pt-3 mt-1 border-t border-obsidian-700/60 space-y-3">
+                            <p class="text-[10px] uppercase tracking-widest text-obsidian-500">{{ t("metadata.diff_shots_heading") }}</p>
+                            <template x-for="shot in loc.screenshots" :key="loc.locale + '-' + shot.display_type">
+                              <div class="space-y-1.5">
+                                <label class="flex items-center gap-2 cursor-pointer">
+                                  <input type="checkbox" class="w-3.5 h-3.5 accent-amber-500" x-model="shot.selected">
+                                  <span class="text-xs font-mono text-obsidian-300" x-text="shot.display_type"></span>
+                                  <span class="text-[10px] text-obsidian-500"
+                                        x-text="(shot.local || []).length + ' / ' + (shot.asc || []).length"></span>
+                                </label>
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                  <div>
+                                    <p class="text-[10px] uppercase tracking-widest text-obsidian-500 mb-1">{{ t("metadata.diff_local") }}</p>
+                                    <div class="flex flex-wrap gap-1.5 min-h-[2.5rem] rounded border border-obsidian-700 bg-obsidian-900/40 p-1.5">
+                                      <template x-for="item in (shot.local || [])" :key="'L-' + item.file_name + item.order">
+                                        <img class="h-16 w-auto rounded border border-obsidian-600 object-cover bg-obsidian-800"
+                                             :src="wbDiffShotThumb(item, 'local')"
+                                             :alt="item.file_name"
+                                             loading="lazy"
+                                             @error="$el.style.opacity='0.3'">
+                                      </template>
+                                      <span x-show="!(shot.local || []).length" class="text-[11px] text-obsidian-600 self-center px-1">—</span>
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <p class="text-[10px] uppercase tracking-widest text-obsidian-500 mb-1">{{ t("metadata.diff_asc") }}</p>
+                                    <div class="flex flex-wrap gap-1.5 min-h-[2.5rem] rounded border border-obsidian-700 bg-obsidian-900/40 p-1.5">
+                                      <template x-for="item in (shot.asc || [])" :key="'A-' + (item.remote_id || item.file_name) + item.order">
+                                        <img class="h-16 w-auto rounded border border-violet-500/30 object-cover bg-obsidian-800"
+                                             :src="wbDiffShotThumb(item, 'asc')"
+                                             :alt="item.file_name"
+                                             loading="lazy"
+                                             @error="$el.src='/api/listing/asc-thumb?screenshot_id=' + encodeURIComponent(item.remote_id || '')">
+                                      </template>
+                                      <span x-show="!(shot.asc || []).length" class="text-[11px] text-obsidian-600 self-center px-1">—</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </template>
                           </div>
                         </template>
                       </div>

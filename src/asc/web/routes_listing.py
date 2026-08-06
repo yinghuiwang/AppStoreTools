@@ -6,8 +6,9 @@ import os
 from dataclasses import asdict
 from pathlib import Path
 
+import requests
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 
 from asc.config import Config
 from asc.guard import GuardViolationError, enforce_config_guard
@@ -27,9 +28,19 @@ from asc.listing.local import (
     scan_local_screenshots,
 )
 from asc.listing.models import FIELD_NAMES, LocaleListing
-from asc.listing.remote import NoAppInfoError, NoEditableVersionError, load_asc_text_snapshot
+from asc.listing.remote import (
+    NoAppInfoError,
+    NoEditableVersionError,
+    attach_asc_screenshots,
+    download_asc_screenshots,
+    load_asc_text_snapshot,
+    screenshot_thumb_url,
+)
+from asc.progress import ProcessCanceled
 from asc.utils import make_api_from_config
 from asc.web.i18n import t
+from asc.web.task_runner import start_background_task
+from asc.web.tasks import task_store
 
 router = APIRouter()
 
@@ -250,11 +261,7 @@ async def listing_diff(
     csv_path: str,
     screenshots_dir: str = "",
 ):
-    """Compare local CSV (+ optional screenshots) against ASC text snapshot.
-
-    ASC screenshots are empty in this task (Task 8 fills them). Local screenshots
-    are scanned when `screenshots_dir` is provided and appear in the diff structure.
-    """
+    """Compare local CSV (+ screenshots) against ASC text + screenshot sets."""
     lang = _lang(request)
     profile = _require_profile(request)
     if not profile:
@@ -270,6 +277,7 @@ async def listing_diff(
     try:
         api, app_id = _api_for_profile(profile)
         asc = load_asc_text_snapshot(api, app_id)
+        attach_asc_screenshots(api, asc)
     except (NoEditableVersionError, NoAppInfoError) as e:
         return _asc_error_response(e, lang)
     except Exception as e:
@@ -288,6 +296,112 @@ async def listing_diff(
         "asc": _snapshot_to_dict(asc),
         "diff": asdict(diff),
     }
+
+
+@router.get("/asc-thumb")
+async def listing_asc_thumb(request: Request, screenshot_id: str):
+    """Proxy a small ASC screenshot preview by `screenshot_id`.
+
+    Resolves `imageAsset.templateUrl` (100×100) from the screenshot resource and
+    streams the CDN bytes so the browser does not need cross-origin CDN access.
+    """
+    lang = _lang(request)
+    profile = _require_profile(request)
+    if not profile:
+        return JSONResponse(_no_profile_payload(lang), status_code=400)
+    sid = (screenshot_id or "").strip()
+    if not sid:
+        raise HTTPException(status_code=400, detail="screenshot_id is required")
+
+    try:
+        api, _app_id = _api_for_profile(profile)
+        detail = api.get(f"/v1/appScreenshots/{sid}")
+        attrs = ((detail or {}).get("data") or {}).get("attributes") or {}
+        url = screenshot_thumb_url(attrs)
+        if not url:
+            raise HTTPException(status_code=404, detail="thumb URL not available")
+        resp = requests.get(url, timeout=(10, 60))
+        resp.raise_for_status()
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+    content_type = resp.headers.get("Content-Type") or "image/png"
+    return Response(content=resp.content, media_type=content_type)
+
+
+@router.post("/pull/screenshots")
+async def listing_pull_screenshots(request: Request):
+    """Start a background task that downloads ASC screenshots over local scopes."""
+    lang = _lang(request)
+    profile = _require_profile(request)
+    if not profile:
+        return JSONResponse(_no_profile_payload(lang), status_code=400)
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON") from None
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="JSON body must be an object")
+
+    screenshots_dir = body.get("screenshots_dir")
+    if not isinstance(screenshots_dir, str) or not screenshots_dir.strip():
+        raise HTTPException(status_code=400, detail="screenshots_dir is required")
+
+    scopes_raw = body.get("scopes")
+    if not isinstance(scopes_raw, list) or not scopes_raw:
+        raise HTTPException(status_code=400, detail="scopes must be a non-empty list")
+
+    scopes: list[dict] = []
+    for item in scopes_raw:
+        if not isinstance(item, dict):
+            raise HTTPException(status_code=400, detail="invalid scope entry")
+        locale = item.get("locale")
+        display_type = item.get("display_type")
+        if not isinstance(locale, str) or not locale.strip():
+            raise HTTPException(status_code=400, detail="invalid scope entry")
+        if not isinstance(display_type, str) or not display_type.strip():
+            raise HTTPException(status_code=400, detail="invalid scope entry")
+        scopes.append({"locale": locale.strip(), "display_type": display_type.strip()})
+
+    if not scopes:
+        raise HTTPException(status_code=400, detail="no valid scopes")
+
+    task_id = task_store.create("listing-pull-screenshots", profile=profile)
+
+    def run(reporter, cancel_event):
+        try:
+            api, app_id = _api_for_profile(profile)
+            if cancel_event.is_set():
+                raise ProcessCanceled("screenshot pull canceled")
+            download_asc_screenshots(
+                api,
+                app_id,
+                screenshots_dir.strip(),
+                scopes,
+                reporter=reporter,
+            )
+            if cancel_event.is_set():
+                raise ProcessCanceled("screenshot pull canceled")
+            reporter.done("截图拉取完成")
+            return {"success": True}
+        except ProcessCanceled:
+            raise
+        except Exception as e:
+            reporter.fail(str(e))
+            raise
+
+    start_background_task(
+        task_store,
+        kind="listing-pull-screenshots",
+        profile=profile,
+        verbose=False,
+        run=run,
+        task_id=task_id,
+    )
+    return {"ok": True, "task_id": task_id}
 
 
 @router.post("/pull/text")

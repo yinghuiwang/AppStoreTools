@@ -654,6 +654,7 @@ def _mock_asc_api_for_text():
             },
         },
     ]
+    mock_api.get_screenshot_sets.return_value = {"data": [], "included": []}
     return mock_api
 
 
@@ -820,9 +821,132 @@ def test_metadata_page_has_diff_tab_ui(client):
     assert "wbDiffPull" in r.text
     assert "/api/listing/diff" in r.text
     assert "/api/listing/pull/text" in r.text
+    assert "/api/listing/pull/screenshots" in r.text
+    assert "wbDiffPullScreenshots" in r.text
+    assert "wbDiffShotThumb" in r.text
+    assert "/api/listing/asc-thumb" in r.text
     # Pull defaults: changed + asc_only only (not local_only)
     assert "f.status === 'changed' || f.status === 'asc_only'" in r.text
     # Upload「仅勾选有差异项」: changed + local_only (not asc_only)
     assert "f.status === 'changed' || f.status === 'local_only'" in r.text
-    # Pull / tab / load all gate on dirty via the same i18n key
-    assert r.text.count("metadata.diff_dirty_block") >= 3
+    # Pull / tab / load / screenshot-pull all gate on dirty via the same i18n key
+    assert r.text.count("metadata.diff_dirty_block") >= 4
+    assert "metadata.diff_shots_confirm" in r.text
+
+
+def test_listing_diff_includes_asc_screenshots(client, tmp_path):
+    p = tmp_path / "app.csv"
+    p.write_text("locale,name\nen-US,Local\n", encoding="utf-8-sig")
+    mock_api = _mock_asc_api_for_text()
+    mock_api.get_screenshot_sets.return_value = {
+        "data": [{
+            "id": "set1",
+            "attributes": {"screenshotDisplayType": "APP_IPHONE_67"},
+            "relationships": {
+                "appScreenshots": {"data": [{"id": "s1", "type": "appScreenshots"}]}
+            },
+        }],
+        "included": [{
+            "type": "appScreenshots",
+            "id": "s1",
+            "attributes": {
+                "fileName": "shot.png",
+                "imageAsset": {"templateUrl": "https://cdn.example/{w}x{h}.png"},
+            },
+        }],
+    }
+
+    with patch("asc.web.routes_listing.Config", return_value=MagicMock()), \
+         patch("asc.web.routes_listing.make_api_from_config", return_value=(mock_api, "app123")):
+        r = client.get(
+            "/api/listing/diff",
+            params={"csv_path": str(p)},
+            cookies={"asc_profile": "test"},
+        )
+
+    assert r.status_code == 200
+    data = r.json()
+    locales = {x["locale"]: x for x in data["diff"]["locales"]}
+    shot_types = {s["display_type"]: s for s in locales["en-US"]["screenshots"]}
+    assert "APP_IPHONE_67" in shot_types
+    assert shot_types["APP_IPHONE_67"]["asc"][0]["remote_id"] == "s1"
+    assert "100x100" in shot_types["APP_IPHONE_67"]["asc"][0]["thumb_url"]
+
+
+def test_listing_asc_thumb_proxies_image(client):
+    mock_api = MagicMock()
+    mock_api.get.return_value = {
+        "data": {
+            "id": "s1",
+            "attributes": {
+                "imageAsset": {"templateUrl": "https://cdn.example/{w}x{h}.png"},
+            },
+        }
+    }
+    mock_resp = MagicMock()
+    mock_resp.content = b"fake-png"
+    mock_resp.headers = {"Content-Type": "image/png"}
+    mock_resp.raise_for_status = MagicMock()
+
+    with patch("asc.web.routes_listing.Config", return_value=MagicMock()), \
+         patch("asc.web.routes_listing.make_api_from_config", return_value=(mock_api, "app123")), \
+         patch("asc.web.routes_listing.requests.get", return_value=mock_resp) as get_mock:
+        r = client.get(
+            "/api/listing/asc-thumb",
+            params={"screenshot_id": "s1"},
+            cookies={"asc_profile": "test"},
+        )
+
+    assert r.status_code == 200
+    assert r.content == b"fake-png"
+    assert "100x100" in get_mock.call_args.args[0]
+
+
+def test_listing_asc_thumb_requires_profile(client):
+    r = client.get("/api/listing/asc-thumb", params={"screenshot_id": "s1"})
+    assert r.status_code == 400
+    assert r.json()["ok"] is False
+
+
+def test_listing_pull_screenshots_starts_task(client, tmp_path):
+    from asc.web import routes_api
+
+    shots = tmp_path / "screenshots"
+    shots.mkdir()
+    mock_api = _mock_asc_api_for_text()
+
+    with patch("asc.web.routes_listing.Config", return_value=MagicMock()), \
+         patch("asc.web.routes_listing.make_api_from_config", return_value=(mock_api, "app123")), \
+         patch("asc.web.routes_listing.download_asc_screenshots") as dl:
+        r = client.post(
+            "/api/listing/pull/screenshots",
+            cookies={"asc_profile": "test"},
+            json={
+                "screenshots_dir": str(shots),
+                "scopes": [{"locale": "en-US", "display_type": "APP_IPHONE_67"}],
+            },
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["ok"] is True
+        assert data["task_id"]
+        task = _wait_for_task(routes_api, data["task_id"])
+        assert task is not None
+        assert task["status"] == TaskStatus.DONE
+        dl.assert_called_once()
+        args = dl.call_args
+        assert args.args[1] == "app123"
+        assert args.args[2] == str(shots)
+        assert args.args[3] == [{"locale": "en-US", "display_type": "APP_IPHONE_67"}]
+
+
+def test_listing_pull_screenshots_requires_profile(client, tmp_path):
+    r = client.post(
+        "/api/listing/pull/screenshots",
+        json={
+            "screenshots_dir": str(tmp_path),
+            "scopes": [{"locale": "en-US", "display_type": "APP_IPHONE_67"}],
+        },
+    )
+    assert r.status_code == 400
+    assert r.json()["ok"] is False
