@@ -375,6 +375,28 @@
       return '';
     },
 
+    wbDiffAscThumbError(el, item) {
+      if (!el) return;
+      // Avoid infinite fallback loops when CDN and proxy both fail.
+      if (el.dataset.ascThumbTried === '1') {
+        el.style.opacity = '0.3';
+        return;
+      }
+      const src = el.getAttribute('src') || '';
+      if (src.includes('/api/listing/asc-thumb')) {
+        el.style.opacity = '0.3';
+        return;
+      }
+      const rid = item && item.remote_id;
+      if (!rid) {
+        el.style.opacity = '0.3';
+        return;
+      }
+      el.dataset.ascThumbTried = '1';
+      el.onerror = null;
+      el.src = '/api/listing/asc-thumb?screenshot_id=' + encodeURIComponent(rid);
+    },
+
     wbDiffLoad() {
       if (this.wb.dirty) {
         alert(window.t('metadata.diff_dirty_block'));
@@ -968,7 +990,7 @@
                                              :src="wbDiffShotThumb(item, 'asc')"
                                              :alt="item.file_name"
                                              loading="lazy"
-                                             @error="$el.src='/api/listing/asc-thumb?screenshot_id=' + encodeURIComponent(item.remote_id || '')">
+                                             @error="wbDiffAscThumbError($el, item)">
                                       </template>
                                       <span x-show="!(shot.asc || []).length" class="text-[11px] text-obsidian-600 self-center px-1">—</span>
                                     </div>

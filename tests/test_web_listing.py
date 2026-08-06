@@ -824,6 +824,7 @@ def test_metadata_page_has_diff_tab_ui(client):
     assert "/api/listing/pull/screenshots" in r.text
     assert "wbDiffPullScreenshots" in r.text
     assert "wbDiffShotThumb" in r.text
+    assert "wbDiffAscThumbError" in r.text
     assert "/api/listing/asc-thumb" in r.text
     # Pull defaults: changed + asc_only only (not local_only)
     assert "f.status === 'changed' || f.status === 'asc_only'" in r.text

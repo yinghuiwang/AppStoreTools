@@ -204,3 +204,69 @@ def test_download_asc_screenshots_overwrites_display_type(tmp_path):
     assert get_mock.call_count == 2
     # Full-res URL used for download
     assert "1290x2796" in get_mock.call_args_list[0].args[0]
+
+
+def _mock_download_api_with_one_shot():
+    api = MagicMock()
+    api.get_editable_version.return_value = {
+        "id": "v1",
+        "attributes": {"versionString": "1.0", "appStoreState": "PREPARE_FOR_SUBMISSION"},
+    }
+    api.get_version_localizations.return_value = [
+        {"id": "vl1", "attributes": {"locale": "en-US"}},
+    ]
+    api.get_screenshot_sets.return_value = {
+        "data": [{
+            "id": "set1",
+            "attributes": {"screenshotDisplayType": "APP_IPHONE_67"},
+            "relationships": {
+                "appScreenshots": {"data": [{"id": "s1", "type": "appScreenshots"}]}
+            },
+        }],
+        "included": [{
+            "type": "appScreenshots",
+            "id": "s1",
+            "attributes": {
+                "fileName": "home.png",
+                "imageAsset": {
+                    "templateUrl": "https://cdn.example/{w}x{h}.{f}",
+                    "width": 1290,
+                    "height": 2796,
+                },
+            },
+        }],
+    }
+    return api
+
+
+def test_download_asc_screenshots_writes_into_mapped_en_folder(tmp_path):
+    """`en/` maps to en-US via SCREENSHOT_FOLDER_TO_LOCALE — pull must overwrite en/, not create en-US/."""
+    from PIL import Image
+
+    en_dir = tmp_path / "en"
+    en_dir.mkdir()
+    old = en_dir / "01_old.png"
+    Image.new("RGB", (1290, 2796), color=(1, 2, 3)).save(old)
+
+    api = _mock_download_api_with_one_shot()
+    buf = tmp_path / "_src.png"
+    Image.new("RGB", (10, 10), color=(9, 9, 9)).save(buf)
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.content = buf.read_bytes()
+    mock_resp.raise_for_status = MagicMock()
+
+    with patch("asc.listing.remote.requests.get", return_value=mock_resp):
+        download_asc_screenshots(
+            api,
+            "app1",
+            str(tmp_path),
+            [{"locale": "en-US", "display_type": "APP_IPHONE_67"}],
+        )
+
+    assert not (tmp_path / "en-US").exists()  # must not create sibling ASC-named folder
+    assert en_dir.is_dir()
+    assert not old.exists()
+    written = list(en_dir.glob("*.png"))
+    assert len(written) == 1
+    assert written[0].name.startswith("01_")

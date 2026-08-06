@@ -8,6 +8,12 @@ from typing import Any
 import requests
 
 from asc.commands.metadata import _select_app_info_id
+from asc.listing.local import (
+    PathTraversalError,
+    _assert_under_root,
+    _safe_locale_name,
+    find_locale_screenshot_dir,
+)
 from asc.listing.models import FIELD_NAMES, ListingSnapshot, LocaleListing, ScreenshotItem
 
 # App Info localization fields (name / subtitle / privacy URL).
@@ -269,6 +275,23 @@ def _delete_local_display_type(locale_dir: Path, display_type: str) -> None:
             path.unlink(missing_ok=True)
 
 
+def _resolve_pull_locale_dir(screenshots_dir: str, locale: str) -> Path:
+    """Resolve the local folder for an ASC locale, preferring an existing mapped dir.
+
+    Uses `find_locale_screenshot_dir` so aliases like `en/` → `en-US` stay in place.
+    Creates `root / <ASC-locale>` only when no mapped folder exists. Always asserts
+    the result lies under `screenshots_dir`.
+    """
+    safe = _safe_locale_name(locale)
+    existing = find_locale_screenshot_dir(screenshots_dir, safe)
+    if existing is not None:
+        locale_dir = existing
+    else:
+        locale_dir = Path(screenshots_dir) / safe
+        locale_dir.mkdir(parents=True, exist_ok=True)
+    return _assert_under_root(screenshots_dir, locale_dir)
+
+
 def download_asc_screenshots(
     api,
     app_id: str,
@@ -278,8 +301,9 @@ def download_asc_screenshots(
 ) -> None:
     """Download ASC screenshots for each `(locale, display_type)` scope.
 
-    For each scope: delete local files detected as that displayType under the
-    ASC-locale folder, then write `01_*.png` … in online order.
+    For each scope: resolve the local folder that Diff/scan maps to the ASC
+    locale (keep existing mapped names like `en/`), delete files of that
+    displayType there, then write `01_*.png` … in online order.
     """
     version = api.get_editable_version(app_id)
     if not version:
@@ -328,18 +352,23 @@ def download_asc_screenshots(
             continue
 
         shots = _shots_for_set(api, set_resource, included)
-        locale_dir = base / locale
-        locale_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            locale_dir = _resolve_pull_locale_dir(screenshots_dir, locale)
+        except PathTraversalError as e:
+            if reporter is not None:
+                reporter.log(f"⚠️  跳过 {locale}：{e}")
+            continue
+
         _delete_local_display_type(locale_dir, display_type)
 
         for order, shot in enumerate(shots, start=1):
             attrs = shot.get("attributes") or {}
             name = _safe_download_name(str(attrs.get("fileName") or ""), order)
-            target = locale_dir / name
+            target = _assert_under_root(screenshots_dir, locale_dir / name)
             data = _fetch_image_bytes(api, shot)
             target.write_bytes(data)
             if reporter is not None:
-                reporter.log(f"  ✓ {locale}/{name}")
+                reporter.log(f"  ✓ {locale_dir.name}/{name}")
 
     if reporter is not None:
         try:
