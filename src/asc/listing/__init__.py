@@ -1,4 +1,5 @@
 from asc.listing.diff import diff_snapshots
+from asc.listing.filters import filter_metadata_rows
 from asc.listing.local import FileChangedError, load_local_text_snapshot, save_local_csv
 from asc.listing.models import (
     FIELD_NAMES, FieldDiff, ListingDiff, ListingSnapshot,
@@ -10,4 +11,5 @@ __all__ = [
     "FieldDiff", "ScreenshotTypeDiff", "LocaleDiff", "ListingDiff",
     "diff_snapshots",
     "FileChangedError", "load_local_text_snapshot", "save_local_csv",
+    "filter_metadata_rows",
 ]

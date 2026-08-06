@@ -353,12 +353,15 @@ def _start_metadata_task(
     include_screenshots: bool,
     dry_run: bool,
     verbose: bool = False,
+    locales: list[str] | None = None,
+    fields_by_locale: dict | None = None,
 ) -> str:
     guard_enforcer = enforce_config_guard
     task_id = _task_store.create("metadata", profile=profile)
 
     def run(reporter, cancel_event):
         from asc.config import Config
+        from asc.listing.filters import filter_metadata_rows
         from asc.utils import make_api_from_config, parse_csv
 
         try:
@@ -380,6 +383,14 @@ def _start_metadata_task(
                 from asc.commands.metadata import _upload_metadata_core
 
                 metadata_list = parse_csv(csv_path)
+                if locales or fields_by_locale is not None:
+                    metadata_list = filter_metadata_rows(
+                        metadata_list,
+                        locales or None,
+                        fields_by_locale,
+                    )
+                if not metadata_list and not include_screenshots:
+                    raise RuntimeError("no metadata rows selected")
                 _upload_metadata_core(
                     api,
                     app_id,
@@ -455,19 +466,63 @@ async def metadata_run(
     include_screenshots: str = _Form(""),
     dry_run: str = _Form(""),
     verbose: str = _Form(""),
+    locales_json: str = _Form(""),
+    fields_by_locale_json: str = _Form(""),
 ):
     lang = _lang(request)
     profile = _cookie_profile(request)
     if not profile:
         return JSONResponse({"error": t("api.no_profile", lang=lang)}, status_code=400)
+
+    locale_list: list[str] | None = None
+    if locales_json.strip():
+        try:
+            parsed_locales = json.loads(locales_json)
+        except json.JSONDecodeError:
+            return JSONResponse({"error": "Invalid locales_json"}, status_code=400)
+        if not isinstance(parsed_locales, list) or not all(
+            isinstance(item, str) for item in parsed_locales
+        ):
+            return JSONResponse({"error": "locales_json must be a list of strings"}, status_code=400)
+        locale_list = parsed_locales or None
+
+    fields_by_locale: dict | None = None
+    if fields_by_locale_json.strip():
+        try:
+            parsed_fields = json.loads(fields_by_locale_json)
+        except json.JSONDecodeError:
+            return JSONResponse({"error": "Invalid fields_by_locale_json"}, status_code=400)
+        if not isinstance(parsed_fields, dict):
+            return JSONResponse({"error": "fields_by_locale_json must be an object"}, status_code=400)
+        fields_by_locale = parsed_fields or None
+
+    include_metadata_bool = bool(include_metadata)
+    include_screenshots_bool = bool(include_screenshots)
+
+    if include_metadata_bool and not include_screenshots_bool and (
+        locale_list or fields_by_locale is not None
+    ):
+        from asc.listing.filters import filter_metadata_rows
+        from asc.utils import parse_csv
+
+        try:
+            metadata_list = parse_csv(csv_path)
+        except (FileNotFoundError, OSError):
+            metadata_list = []
+        filtered = filter_metadata_rows(metadata_list, locale_list, fields_by_locale)
+        if not filtered:
+            return JSONResponse({"error": "no metadata rows selected"}, status_code=400)
+
     task_id = _start_metadata_task(
         profile=profile,
         csv_path=csv_path,
         screenshots_dir=screenshots_dir,
-        include_metadata=bool(include_metadata),
-        include_screenshots=bool(include_screenshots),
+        include_metadata=include_metadata_bool,
+        include_screenshots=include_screenshots_bool,
         dry_run=bool(dry_run),
         verbose=bool(verbose),
+        locales=locale_list,
+        fields_by_locale=fields_by_locale,
     )
     return {"task_id": task_id}
 
