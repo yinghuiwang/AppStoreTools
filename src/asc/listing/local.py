@@ -7,6 +7,7 @@ from __future__ import annotations
 import csv
 import os
 
+from asc.constants import canonicalize_csv_header
 from asc.listing.models import FIELD_NAMES, ListingSnapshot, LocaleListing
 from asc.utils import extract_locale, parse_csv
 
@@ -50,6 +51,9 @@ def save_local_csv(
     fieldnames: list[str] = []
     raw_rows: list[dict[str, str]] = []
     locale_col = "locale"
+    # canonical field name ("locale" / one of FIELD_NAMES) -> actual raw column
+    # name in the file (which may be a Chinese alias like "语言" or "应用名称").
+    column_for_canonical: dict[str, str] = {}
 
     if os.path.exists(csv_path):
         with open(csv_path, "r", encoding="utf-8-sig", newline="") as f:
@@ -58,17 +62,26 @@ def save_local_csv(
             raw_rows = [dict(row) for row in reader]
 
         for fname in fieldnames:
-            if (fname or "").strip().strip('"').strip("'").strip() == "locale":
-                locale_col = fname
-                break
+            stripped = (fname or "").strip().strip('"').strip("'").strip()
+            canonical = canonicalize_csv_header(stripped)
+            if canonical is None:
+                continue
+            # Prefer the exact English canonical column if there are duplicates.
+            if canonical not in column_for_canonical or stripped == canonical:
+                column_for_canonical[canonical] = fname
+
+        if "locale" in column_for_canonical:
+            locale_col = column_for_canonical["locale"]
 
     if not fieldnames:
         fieldnames = ["locale", *FIELD_NAMES]
         locale_col = "locale"
+        column_for_canonical = {"locale": "locale", **{name: name for name in FIELD_NAMES}}
     else:
         for name in FIELD_NAMES:
-            if name not in fieldnames:
+            if name not in column_for_canonical:
                 fieldnames.append(name)
+                column_for_canonical[name] = name
 
     matched_locales: set[str] = set()
     out_rows: list[dict[str, str]] = []
@@ -80,7 +93,8 @@ def save_local_csv(
         if listing is not None:
             matched_locales.add(locale_code)
             for name in FIELD_NAMES:
-                row[name] = listing.fields.get(name, "")
+                col = column_for_canonical.get(name, name)
+                row[col] = listing.fields.get(name, "")
         out_rows.append(row)
 
     for loc in locales:
@@ -89,7 +103,8 @@ def save_local_csv(
         row = {fname: "" for fname in fieldnames}
         row[locale_col] = loc.locale
         for name in FIELD_NAMES:
-            row[name] = loc.fields.get(name, "")
+            col = column_for_canonical.get(name, name)
+            row[col] = loc.fields.get(name, "")
         out_rows.append(row)
 
     with open(csv_path, "w", encoding="utf-8-sig", newline="") as f:

@@ -41,6 +41,59 @@ def test_save_preserves_unknown_columns_and_order(tmp_path: Path):
     # zh-Hans row still present before/after en depending on original order
     assert text.index("en-US") < text.index("zh-Hans") or "zh-Hans" in text
 
+def test_save_preserves_locale_display_string(tmp_path: Path):
+    p = tmp_path / "a.csv"
+    p.write_text(
+        "locale,name\n"
+        "简体中文(zh-Hans),应用\n",
+        encoding="utf-8-sig",
+    )
+    snap = load_local_text_snapshot(str(p))
+    zh = next(x for x in snap.locales if x.locale == "zh-Hans")
+    zh.fields["name"] = "新应用"
+    save_local_csv(str(p), snap.locales)
+    text = p.read_text(encoding="utf-8-sig")
+    assert "简体中文(zh-Hans)" in text
+    assert "新应用" in text
+    assert "zh-Hans\n" not in text
+    assert ",zh-Hans," not in text
+
+def test_save_appends_new_locale_at_end(tmp_path: Path):
+    p = tmp_path / "a.csv"
+    p.write_text(
+        "locale,name\n"
+        "en-US,App\n",
+        encoding="utf-8-sig",
+    )
+    snap = load_local_text_snapshot(str(p))
+    snap.locales.append(LocaleListing("ja", {"name": "アプリ"}, {}))
+    save_local_csv(str(p), snap.locales)
+    lines = p.read_text(encoding="utf-8-sig").splitlines()
+    assert lines[0].split(",")[0] == "locale"
+    assert lines[1].startswith("en-US,")
+    assert lines[-1].startswith("ja,")
+    assert "アプリ" in lines[-1]
+
+def test_save_updates_chinese_alias_headers(tmp_path: Path):
+    p = tmp_path / "a.csv"
+    p.write_text(
+        "语言,应用名称,附加信息\n"
+        "英文(en-US),OldName,keep-me\n",
+        encoding="utf-8-sig",
+    )
+    snap = load_local_text_snapshot(str(p))
+    en = next(x for x in snap.locales if x.locale == "en-US")
+    assert en.fields["name"] == "OldName"
+    en.fields["name"] = "NewName"
+    save_local_csv(str(p), snap.locales)
+    text = p.read_text(encoding="utf-8-sig")
+    lines = text.splitlines()
+    assert lines[0].startswith("语言,应用名称,附加信息")
+    assert "NewName" in text
+    assert "OldName" not in text
+    assert "keep-me" in text
+    assert "英文(en-US)" in text
+
 def test_save_mtime_conflict(tmp_path: Path):
     p = tmp_path / "a.csv"
     p.write_text("locale,name\nen-US,A\n", encoding="utf-8-sig")
