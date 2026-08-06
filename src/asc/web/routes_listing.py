@@ -1,15 +1,27 @@
-"""Local listing (CSV text) routes for asc Web UI (/api/listing/*)."""
+"""Local listing (CSV text + screenshots) routes for asc Web UI (/api/listing/*)."""
 from __future__ import annotations
 
+import mimetypes
 import os
 from dataclasses import asdict
+from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse
 
 from asc.config import Config
 from asc.guard import GuardViolationError, enforce_config_guard
-from asc.listing.local import FileChangedError, load_local_text_snapshot, save_local_csv
+from asc.listing.local import (
+    FileChangedError,
+    add_screenshot,
+    apply_screenshot_order,
+    delete_screenshot,
+    find_locale_screenshot_dir,
+    load_local_text_snapshot,
+    replace_screenshot,
+    save_local_csv,
+    scan_local_screenshots,
+)
 from asc.listing.models import LocaleListing
 from asc.web.i18n import t
 
@@ -59,16 +71,36 @@ def _snapshot_to_dict(snapshot) -> dict:
     return asdict(snapshot)
 
 
+def _resolve_under_root(root: str, path: str) -> Path:
+    """Resolve `path`'s realpath and ensure it lies under `root`'s realpath.
+
+    Raises `HTTPException(400)` otherwise. Used by every screenshot-editing
+    endpoint below so callers can never read/write/delete files outside the
+    screenshots directory they were given.
+    """
+    if not root or not path:
+        raise HTTPException(status_code=400, detail="root and path are required")
+    root_real = Path(root).resolve()
+    target_real = Path(path).resolve()
+    try:
+        target_real.relative_to(root_real)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="path is outside root") from None
+    return target_real
+
+
 @router.get("/local")
 async def listing_local(
     request: Request,
     csv_path: str,
     screenshots_dir: str = "",
 ):
-    """Read a local CSV into a text-only `ListingSnapshot`.
+    """Read a local CSV into a `ListingSnapshot`.
 
-    `screenshots` is left empty on every locale for now; screenshot scanning
-    is wired up in a later task.
+    When `screenshots_dir` is provided, it is scanned with
+    `scan_local_screenshots` and merged into each matching locale's
+    `screenshots` field (`displayType -> [ScreenshotItem]`); otherwise
+    `screenshots` stays `{}` on every locale.
     """
     lang = _lang(request)
     profile = _require_profile(request)
@@ -80,12 +112,33 @@ async def listing_local(
     except (FileNotFoundError, OSError) as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
 
+    if screenshots_dir.strip():
+        by_locale = scan_local_screenshots(screenshots_dir)
+        for loc in snapshot.locales:
+            if loc.locale in by_locale:
+                loc.screenshots = by_locale[loc.locale]
+
     mtime = os.path.getmtime(csv_path) if os.path.exists(csv_path) else None
     return {
         "ok": True,
         "mtime": mtime,
         "snapshot": _snapshot_to_dict(snapshot),
     }
+
+
+@router.get("/thumb")
+async def listing_thumb(path: str, root: str):
+    """Serve a screenshot thumbnail/original file, restricted to `root`.
+
+    Read-only local filesystem access (no ASC credentials involved), so this
+    endpoint intentionally does not require a selected profile — mirrors
+    `/api/browse`'s pattern of gating solely on a real-path containment check.
+    """
+    target = _resolve_under_root(root, path)
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail="not found")
+    media_type, _ = mimetypes.guess_type(str(target))
+    return FileResponse(str(target), media_type=media_type or "application/octet-stream")
 
 
 @router.post("/local/save")
@@ -141,3 +194,131 @@ async def listing_local_save(request: Request):
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
 
     return {"ok": True, "mtime": new_mtime}
+
+
+def _screenshot_item_to_dict(root: str, file_path: Path, order: int) -> dict:
+    from asc.listing.local import _thumb_url  # local import: private helper reused for responses
+
+    return {
+        "file_name": file_path.name,
+        "order": order,
+        "thumb_url": _thumb_url(root, file_path),
+        "local_path": str(file_path),
+        "remote_id": "",
+    }
+
+
+@router.post("/screenshots/reorder")
+async def listing_screenshots_reorder(request: Request):
+    """Reorder screenshots of one `(locale, display_type)` group, writing to disk immediately."""
+    lang = _lang(request)
+    profile = _require_profile(request)
+    if not profile:
+        return JSONResponse(_no_profile_payload(lang), status_code=400)
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON") from None
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="JSON body must be an object")
+
+    root = body.get("root")
+    locale = body.get("locale")
+    display_type = body.get("display_type")
+    file_names = body.get("file_names")
+    if not isinstance(root, str) or not root.strip():
+        raise HTTPException(status_code=400, detail="root is required")
+    if not isinstance(locale, str) or not locale.strip():
+        raise HTTPException(status_code=400, detail="locale is required")
+    if not isinstance(display_type, str) or not display_type.strip():
+        raise HTTPException(status_code=400, detail="display_type is required")
+    if not isinstance(file_names, list) or not all(isinstance(n, str) for n in file_names):
+        raise HTTPException(status_code=400, detail="file_names must be a list of strings")
+
+    locale_dir = find_locale_screenshot_dir(root, locale)
+    if locale_dir is None:
+        raise HTTPException(status_code=404, detail="locale folder not found under root")
+
+    apply_screenshot_order(locale_dir, display_type, file_names)
+
+    by_type = scan_local_screenshots(root).get(locale, {})
+    items = [_screenshot_item_to_dict(root, Path(i.local_path), i.order) for i in by_type.get(display_type, [])]
+    return {"ok": True, "items": items}
+
+
+@router.post("/screenshots/replace")
+async def listing_screenshots_replace(
+    request: Request,
+    root: str = Form(...),
+    path: str = Form(...),
+    new_name: str = Form(""),
+    file: UploadFile = File(...),
+):
+    """Replace a single screenshot's bytes in place (optionally renaming it)."""
+    lang = _lang(request)
+    profile = _require_profile(request)
+    if not profile:
+        return JSONResponse(_no_profile_payload(lang), status_code=400)
+
+    target = _resolve_under_root(root, path)
+    data = await file.read()
+    new_path = replace_screenshot(target, data, new_name.strip() or None)
+    return {
+        "ok": True,
+        "path": str(new_path),
+        "file_name": new_path.name,
+        "thumb_url": _screenshot_item_to_dict(root, new_path, 0)["thumb_url"],
+    }
+
+
+@router.post("/screenshots/delete")
+async def listing_screenshots_delete(request: Request):
+    """Delete a single screenshot file, writing to disk immediately."""
+    lang = _lang(request)
+    profile = _require_profile(request)
+    if not profile:
+        return JSONResponse(_no_profile_payload(lang), status_code=400)
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON") from None
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="JSON body must be an object")
+
+    root = body.get("root")
+    path = body.get("path")
+    if not isinstance(root, str) or not isinstance(path, str):
+        raise HTTPException(status_code=400, detail="root and path are required")
+
+    target = _resolve_under_root(root, path)
+    delete_screenshot(target)
+    return {"ok": True}
+
+
+@router.post("/screenshots/add")
+async def listing_screenshots_add(
+    request: Request,
+    root: str = Form(...),
+    locale: str = Form(...),
+    display_type: str = Form(""),
+    filename: str = Form(""),
+    file: UploadFile = File(...),
+):
+    """Add a new screenshot to a locale folder (created under `root` if it doesn't exist yet)."""
+    lang = _lang(request)
+    profile = _require_profile(request)
+    if not profile:
+        return JSONResponse(_no_profile_payload(lang), status_code=400)
+
+    locale_dir = find_locale_screenshot_dir(root, locale) or (Path(root) / locale)
+    data = await file.read()
+    target_name = filename.strip() or file.filename or "screenshot.png"
+    new_path = add_screenshot(locale_dir, display_type, target_name, data)
+    return {
+        "ok": True,
+        "path": str(new_path),
+        "file_name": new_path.name,
+        "thumb_url": _screenshot_item_to_dict(root, new_path, 0)["thumb_url"],
+    }

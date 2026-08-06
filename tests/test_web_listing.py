@@ -283,3 +283,238 @@ def test_listing_local_missing_csv_returns_400(client, tmp_path):
         cookies={"asc_profile": "test"},
     )
     assert r.status_code == 400
+
+
+# ---------- /api/listing/local screenshots merge + thumb + edit endpoints ----------
+
+
+def _make_png(path, size=(1290, 2796)):
+    from PIL import Image
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", size, color=(10, 20, 30)).save(path)
+
+
+def test_listing_local_merges_screenshots_when_dir_given(client, tmp_path):
+    p = tmp_path / "app.csv"
+    p.write_text("locale,name\nen-US,Old\n", encoding="utf-8-sig")
+    shots = tmp_path / "screenshots"
+    _make_png(shots / "en-US" / "01_a.png")
+
+    r = client.get(
+        "/api/listing/local",
+        params={"csv_path": str(p), "screenshots_dir": str(shots)},
+        cookies={"asc_profile": "test"},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    by_locale = {loc["locale"]: loc for loc in data["snapshot"]["locales"]}
+    screenshots = by_locale["en-US"]["screenshots"]
+    assert "APP_IPHONE_67" in screenshots
+    items = screenshots["APP_IPHONE_67"]
+    assert items[0]["file_name"] == "01_a.png"
+    assert items[0]["thumb_url"].startswith("/api/listing/thumb?path=")
+
+
+def test_listing_local_without_screenshots_dir_leaves_empty(client, tmp_path):
+    p = tmp_path / "app.csv"
+    p.write_text("locale,name\nen-US,Old\n", encoding="utf-8-sig")
+    r = client.get(
+        "/api/listing/local",
+        params={"csv_path": str(p)},
+        cookies={"asc_profile": "test"},
+    )
+    assert r.status_code == 200
+    by_locale = {loc["locale"]: loc for loc in r.json()["snapshot"]["locales"]}
+    assert by_locale["en-US"]["screenshots"] == {}
+
+
+def test_listing_thumb_serves_file_under_root(client, tmp_path):
+    shots = tmp_path / "screenshots"
+    img_path = shots / "en-US" / "01_a.png"
+    _make_png(img_path)
+
+    r = client.get(
+        "/api/listing/thumb",
+        params={"path": str(img_path), "root": str(shots)},
+    )
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("image/")
+    assert len(r.content) > 0
+
+
+def test_listing_thumb_rejects_path_outside_root(client, tmp_path):
+    shots = tmp_path / "screenshots"
+    outside = tmp_path / "outside"
+    img_path = outside / "secret.png"
+    _make_png(img_path)
+
+    r = client.get(
+        "/api/listing/thumb",
+        params={"path": str(img_path), "root": str(shots)},
+    )
+    assert r.status_code == 400
+
+
+def test_listing_thumb_missing_file_returns_404(client, tmp_path):
+    shots = tmp_path / "screenshots"
+    shots.mkdir()
+    r = client.get(
+        "/api/listing/thumb",
+        params={"path": str(shots / "nope.png"), "root": str(shots)},
+    )
+    assert r.status_code == 404
+
+
+def test_listing_screenshots_reorder(client, tmp_path):
+    shots = tmp_path / "screenshots"
+    _make_png(shots / "en-US" / "01_a.png")
+    _make_png(shots / "en-US" / "02_b.png")
+
+    r = client.post(
+        "/api/listing/screenshots/reorder",
+        json={
+            "root": str(shots),
+            "locale": "en-US",
+            "display_type": "APP_IPHONE_67",
+            "file_names": ["02_b.png", "01_a.png"],
+        },
+        cookies={"asc_profile": "test"},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is True
+    names = sorted(f.name for f in (shots / "en-US").iterdir())
+    assert names == ["01_b.png", "02_a.png"]
+
+
+def test_listing_screenshots_reorder_requires_profile(client, tmp_path):
+    shots = tmp_path / "screenshots"
+    _make_png(shots / "en-US" / "01_a.png")
+    r = client.post(
+        "/api/listing/screenshots/reorder",
+        json={
+            "root": str(shots),
+            "locale": "en-US",
+            "display_type": "APP_IPHONE_67",
+            "file_names": ["01_a.png"],
+        },
+    )
+    assert r.status_code == 400
+    assert r.json()["ok"] is False
+
+
+def test_listing_screenshots_reorder_missing_locale_returns_404(client, tmp_path):
+    shots = tmp_path / "screenshots"
+    shots.mkdir()
+    r = client.post(
+        "/api/listing/screenshots/reorder",
+        json={
+            "root": str(shots),
+            "locale": "ja",
+            "display_type": "APP_IPHONE_67",
+            "file_names": ["01_a.png"],
+        },
+        cookies={"asc_profile": "test"},
+    )
+    assert r.status_code == 404
+
+
+def test_listing_screenshots_replace(client, tmp_path):
+    shots = tmp_path / "screenshots"
+    img_path = shots / "en-US" / "01_a.png"
+    _make_png(img_path)
+
+    r = client.post(
+        "/api/listing/screenshots/replace",
+        data={"root": str(shots), "path": str(img_path)},
+        files={"file": ("new.png", b"new-image-bytes", "image/png")},
+        cookies={"asc_profile": "test"},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is True
+    assert img_path.read_bytes() == b"new-image-bytes"
+
+
+def test_listing_screenshots_replace_rejects_path_outside_root(client, tmp_path):
+    shots = tmp_path / "screenshots"
+    shots.mkdir()
+    outside = tmp_path / "outside" / "x.png"
+    _make_png(outside)
+
+    r = client.post(
+        "/api/listing/screenshots/replace",
+        data={"root": str(shots), "path": str(outside)},
+        files={"file": ("new.png", b"new-image-bytes", "image/png")},
+        cookies={"asc_profile": "test"},
+    )
+    assert r.status_code == 400
+
+
+def test_listing_screenshots_delete(client, tmp_path):
+    shots = tmp_path / "screenshots"
+    img_path = shots / "en-US" / "01_a.png"
+    _make_png(img_path)
+
+    r = client.post(
+        "/api/listing/screenshots/delete",
+        json={"root": str(shots), "path": str(img_path)},
+        cookies={"asc_profile": "test"},
+    )
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
+    assert not img_path.exists()
+
+
+def test_listing_screenshots_delete_rejects_path_outside_root(client, tmp_path):
+    shots = tmp_path / "screenshots"
+    shots.mkdir()
+    outside = tmp_path / "outside" / "x.png"
+    _make_png(outside)
+
+    r = client.post(
+        "/api/listing/screenshots/delete",
+        json={"root": str(shots), "path": str(outside)},
+        cookies={"asc_profile": "test"},
+    )
+    assert r.status_code == 400
+    assert outside.exists()
+
+
+def test_listing_screenshots_add(client, tmp_path):
+    shots = tmp_path / "screenshots"
+    shots.mkdir()
+
+    r = client.post(
+        "/api/listing/screenshots/add",
+        data={"root": str(shots), "locale": "en-US", "display_type": "APP_IPHONE_67"},
+        files={"file": ("03_new.png", b"png-bytes", "image/png")},
+        cookies={"asc_profile": "test"},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is True
+    assert (shots / "en-US" / "03_new.png").read_bytes() == b"png-bytes"
+
+
+def test_metadata_page_has_screenshot_workbench_markup(client):
+    r = client.get("/metadata")
+    assert r.status_code == 200
+    assert 'id="screenshot-scopes-json-input"' in r.text
+    assert "wbReorderDrop" in r.text
+    assert "wbTriggerReplace" in r.text
+    assert "wbDeleteScreenshot" in r.text
+    assert "wbTriggerAdd" in r.text
+
+
+def test_listing_screenshots_add_requires_profile(client, tmp_path):
+    shots = tmp_path / "screenshots"
+    shots.mkdir()
+    r = client.post(
+        "/api/listing/screenshots/add",
+        data={"root": str(shots), "locale": "en-US", "display_type": "APP_IPHONE_67"},
+        files={"file": ("03_new.png", b"png-bytes", "image/png")},
+    )
+    assert r.status_code == 400
+    assert r.json()["ok"] is False

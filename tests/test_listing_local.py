@@ -106,3 +106,150 @@ def test_save_mtime_conflict(tmp_path: Path):
             [LocaleListing("en-US", {"name": "C"}, {})],
             expected_mtime=mtime,
         )
+
+
+# ---------- Screenshot scan / reorder / replace / delete / add ----------
+
+
+def test_reorder_matches_sorted_screenshots(tmp_path):
+    from PIL import Image
+
+    from asc.commands.screenshots import _get_sorted_screenshots
+    from asc.listing.local import apply_screenshot_order
+
+    d = tmp_path / "en-US"
+    d.mkdir()
+    # 1290x2796 → APP_IPHONE_67 in DISPLAY_TYPE_BY_SIZE
+    for name in ("a.png", "b.png"):
+        Image.new("RGB", (1290, 2796), color=(1, 2, 3)).save(d / name)
+    apply_screenshot_order(d, "APP_IPHONE_67", ["b.png", "a.png"])
+    names = [p.name for p in _get_sorted_screenshots(d)]
+    assert names[0].startswith("01_")
+    assert "b" in names[0]
+    assert names[1].startswith("02_")
+
+
+def test_reorder_strips_old_numeric_prefix(tmp_path):
+    from PIL import Image
+
+    from asc.commands.screenshots import _get_sorted_screenshots
+    from asc.listing.local import apply_screenshot_order
+
+    d = tmp_path / "en-US"
+    d.mkdir()
+    Image.new("RGB", (1290, 2796)).save(d / "01_home.png")
+    Image.new("RGB", (1290, 2796)).save(d / "02_detail.png")
+    apply_screenshot_order(d, "APP_IPHONE_67", ["02_detail.png", "01_home.png"])
+    names = sorted(p.name for p in d.iterdir())
+    assert names == ["01_detail.png", "02_home.png"]
+    ordered = [p.name for p in _get_sorted_screenshots(d)]
+    assert ordered[0] == "01_detail.png"
+    assert ordered[1] == "02_home.png"
+
+
+def test_scan_local_screenshots_groups_by_locale_and_display_type(tmp_path):
+    from PIL import Image
+
+    from asc.listing.local import scan_local_screenshots
+
+    base = tmp_path / "screenshots"
+    en = base / "en-US"
+    en.mkdir(parents=True)
+    Image.new("RGB", (1290, 2796)).save(en / "01_a.png")
+    Image.new("RGB", (1290, 2796)).save(en / "02_b.png")
+
+    cn = base / "cn"
+    cn.mkdir(parents=True)
+    Image.new("RGB", (1290, 2796)).save(cn / "01_a.png")
+
+    result = scan_local_screenshots(str(base))
+
+    assert set(result.keys()) == {"en-US", "zh-Hans"}
+    en_groups = result["en-US"]
+    assert set(en_groups.keys()) == {"APP_IPHONE_67"}
+    items = en_groups["APP_IPHONE_67"]
+    assert [i.file_name for i in items] == ["01_a.png", "02_b.png"]
+    assert [i.order for i in items] == [1, 2]
+    assert items[0].local_path == str(en / "01_a.png")
+
+    from urllib.parse import parse_qs, unquote, urlparse
+
+    parsed = urlparse(items[0].thumb_url)
+    assert parsed.path == "/api/listing/thumb"
+    qs = parse_qs(parsed.query)
+    assert unquote(qs["path"][0]) == str(en / "01_a.png")
+    assert unquote(qs["root"][0]) == str(base)
+
+
+def test_scan_local_screenshots_unknown_dimension_marked_unknown(tmp_path):
+    from PIL import Image
+
+    from asc.listing.local import scan_local_screenshots
+
+    base = tmp_path / "screenshots"
+    en = base / "en-US"
+    en.mkdir(parents=True)
+    Image.new("RGB", (10, 10)).save(en / "01_weird.png")
+
+    result = scan_local_screenshots(str(base))
+    assert set(result["en-US"].keys()) == {"UNKNOWN"}
+    assert result["en-US"]["UNKNOWN"][0].file_name == "01_weird.png"
+
+
+def test_scan_local_screenshots_missing_dir_returns_empty(tmp_path):
+    from asc.listing.local import scan_local_screenshots
+
+    result = scan_local_screenshots(str(tmp_path / "does-not-exist"))
+    assert result == {}
+
+
+def test_replace_screenshot_overwrites_bytes(tmp_path):
+    from asc.listing.local import replace_screenshot
+
+    d = tmp_path / "en-US"
+    d.mkdir()
+    p = d / "01_a.png"
+    p.write_bytes(b"old-bytes")
+    result = replace_screenshot(p, b"new-bytes", None)
+    assert result == p
+    assert p.read_bytes() == b"new-bytes"
+
+
+def test_replace_screenshot_with_new_name_removes_old_file(tmp_path):
+    from asc.listing.local import replace_screenshot
+
+    d = tmp_path / "en-US"
+    d.mkdir()
+    p = d / "01_a.png"
+    p.write_bytes(b"old-bytes")
+    result = replace_screenshot(p, b"new-bytes", "01_a.jpg")
+    assert result == d / "01_a.jpg"
+    assert not p.exists()
+    assert result.read_bytes() == b"new-bytes"
+
+
+def test_delete_screenshot_removes_file(tmp_path):
+    from asc.listing.local import delete_screenshot
+
+    d = tmp_path / "en-US"
+    d.mkdir()
+    p = d / "01_a.png"
+    p.write_bytes(b"data")
+    delete_screenshot(p)
+    assert not p.exists()
+
+
+def test_delete_screenshot_missing_file_is_noop(tmp_path):
+    from asc.listing.local import delete_screenshot
+
+    p = tmp_path / "missing.png"
+    delete_screenshot(p)  # should not raise
+
+
+def test_add_screenshot_creates_file(tmp_path):
+    from asc.listing.local import add_screenshot
+
+    d = tmp_path / "en-US"
+    result = add_screenshot(d, "APP_IPHONE_67", "03_new.png", b"png-bytes")
+    assert result == d / "03_new.png"
+    assert result.read_bytes() == b"png-bytes"

@@ -1,15 +1,19 @@
-"""本地 CSV 与 ListingSnapshot 的互转（读入 + 写回）。
-
-截图相关的本地文件系统辅助函数将在后续任务中补充到本文件。
-"""
+"""本地 CSV 与 ListingSnapshot 的互转（读入 + 写回），以及本地截图目录的扫描 / 编辑辅助函数。"""
 from __future__ import annotations
 
 import csv
 import os
+import re
+from pathlib import Path
+from urllib.parse import quote
 
-from asc.constants import canonicalize_csv_header
-from asc.listing.models import FIELD_NAMES, ListingSnapshot, LocaleListing
+from asc.constants import SCREENSHOT_FOLDER_TO_LOCALE, canonicalize_csv_header
+from asc.listing.models import FIELD_NAMES, ListingSnapshot, LocaleListing, ScreenshotItem
 from asc.utils import extract_locale, parse_csv
+
+UNKNOWN_DISPLAY_TYPE = "UNKNOWN"
+
+_NUMERIC_PREFIX_RE = re.compile(r"^\d+_(.+)$")
 
 
 class FileChangedError(Exception):
@@ -114,3 +118,125 @@ def save_local_csv(
             writer.writerow(row)
 
     return os.path.getmtime(csv_path)
+
+
+def _folder_locale(folder_name: str) -> str:
+    """Map a screenshots subfolder name to a locale code via `SCREENSHOT_FOLDER_TO_LOCALE`."""
+    return SCREENSHOT_FOLDER_TO_LOCALE.get(folder_name.lower(), folder_name)
+
+
+def _thumb_url(root: str, path: Path) -> str:
+    return f"/api/listing/thumb?path={quote(str(path), safe='')}&root={quote(str(root), safe='')}"
+
+
+def scan_local_screenshots(screenshots_dir: str) -> dict[str, dict[str, list[ScreenshotItem]]]:
+    """Scan `screenshots_dir` and return `locale -> displayType -> [ScreenshotItem]`.
+
+    Display type is detected per-file via `_detect_display_type` (image dimensions);
+    files whose dimensions don't match any known device type are grouped under
+    `"UNKNOWN"` and still listed (not dropped).
+    """
+    # Imported lazily to avoid a hard dependency between `asc.listing` and the
+    # `asc.commands` CLI layer at module import time.
+    from asc.commands.screenshots import _detect_display_type, _get_sorted_screenshots
+
+    result: dict[str, dict[str, list[ScreenshotItem]]] = {}
+    base = Path(screenshots_dir)
+    if not base.exists() or not base.is_dir():
+        return result
+
+    for folder in sorted(p for p in base.iterdir() if p.is_dir()):
+        files = _get_sorted_screenshots(folder)
+        if not files:
+            continue
+        locale = _folder_locale(folder.name)
+        by_type: dict[str, list[ScreenshotItem]] = {}
+        for file_path in files:
+            display_type = _detect_display_type(file_path) or UNKNOWN_DISPLAY_TYPE
+            items = by_type.setdefault(display_type, [])
+            items.append(
+                ScreenshotItem(
+                    file_name=file_path.name,
+                    order=len(items) + 1,
+                    thumb_url=_thumb_url(str(base), file_path),
+                    local_path=str(file_path),
+                )
+            )
+        result[locale] = by_type
+    return result
+
+
+def find_locale_screenshot_dir(screenshots_dir: str, locale: str) -> Path | None:
+    """Find the subfolder of `screenshots_dir` that maps to `locale`, if any."""
+    base = Path(screenshots_dir)
+    if not base.exists() or not base.is_dir():
+        return None
+    for folder in base.iterdir():
+        if folder.is_dir() and _folder_locale(folder.name) == locale:
+            return folder
+    return None
+
+
+def apply_screenshot_order(locale_dir: Path, display_type: str, ordered_file_names: list[str]) -> None:
+    """Reorder the files in `ordered_file_names` within `locale_dir` to `01_stem.ext`, `02_...`.
+
+    Only the files named in `ordered_file_names` are touched — other files in
+    `locale_dir` (e.g. belonging to a different displayType) are left as-is.
+    A previously-applied `NN_` numeric prefix is stripped so the semantic stem
+    is preserved across repeated reorders. `display_type` is accepted for
+    interface/documentation purposes; callers are expected to only pass file
+    names that belong to that displayType group.
+    """
+    locale_dir = Path(locale_dir)
+
+    entries: list[tuple[Path, str, str]] = []
+    for name in ordered_file_names:
+        src = locale_dir / name
+        if not src.exists():
+            continue
+        match = _NUMERIC_PREFIX_RE.match(src.stem)
+        semantic_stem = match.group(1) if match else src.stem
+        entries.append((src, semantic_stem, src.suffix))
+
+    # Two-phase rename (via temp names) so swapping/rotating positions never
+    # collides with a file that hasn't been renamed yet.
+    temp_entries: list[tuple[Path, str, str]] = []
+    for idx, (src, semantic_stem, suffix) in enumerate(entries):
+        tmp_path = locale_dir / f".__asc_reorder_tmp_{idx}{suffix}"
+        src.rename(tmp_path)
+        temp_entries.append((tmp_path, semantic_stem, suffix))
+
+    for idx, (tmp_path, semantic_stem, suffix) in enumerate(temp_entries, start=1):
+        new_name = f"{idx:02d}_{semantic_stem}{suffix}"
+        tmp_path.rename(locale_dir / new_name)
+
+
+def replace_screenshot(path: Path, upload_bytes: bytes, new_name: str | None) -> Path:
+    """Overwrite the screenshot at `path` with `upload_bytes`, optionally renaming it."""
+    path = Path(path)
+    target = path.parent / new_name if new_name else path
+    target.write_bytes(upload_bytes)
+    if target != path and path.exists():
+        path.unlink()
+    return target
+
+
+def delete_screenshot(path: Path) -> None:
+    """Delete the screenshot at `path`; a no-op if the file no longer exists."""
+    path = Path(path)
+    if path.exists():
+        path.unlink()
+
+
+def add_screenshot(locale_dir: Path, display_type: str, filename: str, data: bytes) -> Path:
+    """Write a new screenshot `filename` (bytes `data`) into `locale_dir`, creating it if needed.
+
+    `display_type` is accepted for interface/documentation purposes (the new
+    file's actual displayType is re-detected from its image dimensions on the
+    next scan); it is not encoded into the file name here.
+    """
+    locale_dir = Path(locale_dir)
+    locale_dir.mkdir(parents=True, exist_ok=True)
+    target = locale_dir / filename
+    target.write_bytes(data)
+    return target

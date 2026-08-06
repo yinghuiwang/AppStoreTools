@@ -18,15 +18,23 @@
       loading: false, loaded: false, error: '', mtime: null, dirty: false, saving: false, saveError: '', saveOk: false,
       locales: [],
       fieldNames: ['name', 'subtitle', 'description', 'keywords', 'supportUrl', 'marketingUrl', 'privacyPolicyUrl'],
+      screenshotsRoot: '',
+      shotsError: '',
+      shotsBusy: false,
+      dragCtx: null,
     },
 
     wbLoadPreview() {
       this.wb.error = '';
       this.wb.saveError = '';
       this.wb.saveOk = false;
+      this.wb.shotsError = '';
       this.wb.loading = true;
       const csvPath = document.getElementById('csv-path-input').value;
-      fetch('/api/listing/local?csv_path=' + encodeURIComponent(csvPath))
+      const screenshotsDir = document.getElementById('screenshots-dir-input').value;
+      let url = '/api/listing/local?csv_path=' + encodeURIComponent(csvPath);
+      if (screenshotsDir.trim()) url += '&screenshots_dir=' + encodeURIComponent(screenshotsDir);
+      fetch(url)
         .then(async r => {
           const data = await r.json().catch(() => ({}));
           if (!r.ok || data.ok === false) {
@@ -36,6 +44,7 @@
         })
         .then(data => {
           this.wb.mtime = data.mtime;
+          this.wb.screenshotsRoot = screenshotsDir.trim();
           this.wb.locales = (data.snapshot.locales || []).map(loc => {
             const fieldSelected = {};
             const fields = {};
@@ -43,7 +52,14 @@
               fieldSelected[f] = true;
               fields[f] = (loc.fields && loc.fields[f]) || '';
             });
-            return { locale: loc.locale, selected: true, expanded: false, fieldSelected, fields };
+            const screenshotGroups = Object.keys(loc.screenshots || {}).sort().map(displayType => ({
+              displayType,
+              items: (loc.screenshots[displayType] || []).map(it => ({ ...it, selected: true })),
+            }));
+            return {
+              locale: loc.locale, selected: true, expanded: false, fieldSelected, fields,
+              screenshotGroups, shotsExpanded: false,
+            };
           });
           this.wb.loaded = true;
           this.wb.dirty = false;
@@ -89,8 +105,176 @@
     wbSyncHidden() {
       const lj = document.getElementById('locales-json-input');
       const fj = document.getElementById('fields-by-locale-json-input');
+      const sj = document.getElementById('screenshot-scopes-json-input');
       if (lj) lj.value = this.wbLocalesJson();
       if (fj) fj.value = this.wbFieldsByLocaleJson();
+      if (sj) sj.value = this.wbScreenshotScopesJson();
+    },
+
+    wbScreenshotScopesJson() {
+      if (!this.wb.loaded) return '';
+      const out = {};
+      this.wb.locales.forEach(loc => {
+        (loc.screenshotGroups || []).forEach(group => {
+          const selected = group.items.filter(it => it.selected).map(it => it.file_name);
+          if (selected.length) {
+            out[loc.locale] = out[loc.locale] || {};
+            out[loc.locale][group.displayType] = selected;
+          }
+        });
+      });
+      return JSON.stringify(out);
+    },
+
+    wbGroupAllSelected(group) {
+      return group.items.length > 0 && group.items.every(it => it.selected);
+    },
+
+    wbSetGroupSelected(group, value) {
+      group.items.forEach(it => it.selected = value);
+      this.wbSyncHidden();
+    },
+
+    wbCacheBust(url) {
+      if (!url) return url;
+      return url + '&v=' + Date.now();
+    },
+
+    wbReorderDrop(loc, group, dropIndex) {
+      const ctx = this.wb.dragCtx;
+      this.wb.dragCtx = null;
+      if (!ctx || ctx.locale !== loc.locale || ctx.displayType !== group.displayType) return;
+      if (ctx.index === dropIndex) return;
+      const items = group.items;
+      const [moved] = items.splice(ctx.index, 1);
+      items.splice(dropIndex, 0, moved);
+      this.wbPersistOrder(loc, group);
+    },
+
+    wbPersistOrder(loc, group) {
+      this.wb.shotsBusy = true;
+      this.wb.shotsError = '';
+      fetch('/api/listing/screenshots/reorder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          root: this.wb.screenshotsRoot,
+          locale: loc.locale,
+          display_type: group.displayType,
+          file_names: group.items.map(it => it.file_name),
+        }),
+      })
+        .then(async r => {
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok || data.ok === false) throw new Error(data.error || window.t('metadata.shots_error'));
+          return data;
+        })
+        .then(data => {
+          const selectedByName = {};
+          group.items.forEach(it => selectedByName[it.file_name] = it.selected);
+          group.items = (data.items || []).map(it => ({ ...it, selected: selectedByName[it.file_name] !== false }));
+          this.wbSyncHidden();
+        })
+        .catch(e => { this.wb.shotsError = e.message; })
+        .finally(() => { this.wb.shotsBusy = false; });
+    },
+
+    wbTriggerReplace(loc, group, item) {
+      this._pendingReplace = { loc, group, item };
+      this.$refs.wbReplaceInput.value = '';
+      this.$refs.wbReplaceInput.click();
+    },
+
+    wbOnReplaceFileChosen(event) {
+      const file = event.target.files && event.target.files[0];
+      const ctx = this._pendingReplace;
+      this._pendingReplace = null;
+      if (!file || !ctx) return;
+      const { loc, group, item } = ctx;
+      const fd = new FormData();
+      fd.append('root', this.wb.screenshotsRoot);
+      fd.append('path', item.local_path);
+      fd.append('file', file);
+      this.wb.shotsBusy = true;
+      this.wb.shotsError = '';
+      fetch('/api/listing/screenshots/replace', { method: 'POST', body: fd })
+        .then(async r => {
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok || data.ok === false) throw new Error(data.error || window.t('metadata.shots_error'));
+          return data;
+        })
+        .then(data => {
+          item.file_name = data.file_name;
+          item.local_path = data.path;
+          item.thumb_url = this.wbCacheBust(data.thumb_url);
+        })
+        .catch(e => { this.wb.shotsError = e.message; })
+        .finally(() => { this.wb.shotsBusy = false; });
+    },
+
+    wbDeleteScreenshot(loc, group, item) {
+      if (!confirm(window.t('metadata.shots_confirm_delete'))) return;
+      this.wb.shotsBusy = true;
+      this.wb.shotsError = '';
+      fetch('/api/listing/screenshots/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ root: this.wb.screenshotsRoot, path: item.local_path }),
+      })
+        .then(async r => {
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok || data.ok === false) throw new Error(data.error || window.t('metadata.shots_error'));
+        })
+        .then(() => {
+          group.items = group.items.filter(it => it !== item);
+          if (!group.items.length) {
+            loc.screenshotGroups = loc.screenshotGroups.filter(g => g !== group);
+          }
+          this.wbSyncHidden();
+        })
+        .catch(e => { this.wb.shotsError = e.message; })
+        .finally(() => { this.wb.shotsBusy = false; });
+    },
+
+    wbTriggerAdd(loc, group) {
+      this._pendingAdd = { loc, displayType: group ? group.displayType : '' };
+      this.$refs.wbAddInput.value = '';
+      this.$refs.wbAddInput.click();
+    },
+
+    wbOnAddFileChosen(event) {
+      const file = event.target.files && event.target.files[0];
+      const ctx = this._pendingAdd;
+      this._pendingAdd = null;
+      if (!file || !ctx) return;
+      const { loc, displayType } = ctx;
+      const fd = new FormData();
+      fd.append('root', this.wb.screenshotsRoot);
+      fd.append('locale', loc.locale);
+      fd.append('display_type', displayType || '');
+      fd.append('file', file);
+      this.wb.shotsBusy = true;
+      this.wb.shotsError = '';
+      fetch('/api/listing/screenshots/add', { method: 'POST', body: fd })
+        .then(async r => {
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok || data.ok === false) throw new Error(data.error || window.t('metadata.shots_error'));
+          return data;
+        })
+        .then(data => {
+          let group = loc.screenshotGroups.find(g => g.displayType === (displayType || 'UNKNOWN'));
+          if (!group) {
+            group = { displayType: displayType || 'UNKNOWN', items: [] };
+            loc.screenshotGroups.push(group);
+          }
+          group.items.push({
+            file_name: data.file_name, order: group.items.length + 1,
+            thumb_url: data.thumb_url, local_path: data.path, remote_id: '', selected: true,
+          });
+          this.wbSyncHidden();
+        })
+        .catch(e => { this.wb.shotsError = e.message; })
+        .finally(() => { this.wb.shotsBusy = false; });
     },
 
     wbSaveToCsv() {
@@ -218,6 +402,9 @@
             <!-- Local workbench -->
             <input type="hidden" name="locales_json" id="locales-json-input" value="">
             <input type="hidden" name="fields_by_locale_json" id="fields-by-locale-json-input" value="">
+            <input type="hidden" name="screenshot_scopes_json" id="screenshot-scopes-json-input" value="">
+            <input type="file" x-ref="wbReplaceInput" accept="image/*" class="hidden" @change="wbOnReplaceFileChosen($event)">
+            <input type="file" x-ref="wbAddInput" accept="image/*" class="hidden" @change="wbOnAddFileChosen($event)">
             <div class="pt-1">
               <div class="flex items-center justify-between gap-3 mb-2">
                 <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">{{ t("metadata.workbench") }}</label>
@@ -283,6 +470,59 @@
                             <input x-show="fname !== 'description'" type="text" x-model="loc.fields[fname]" @input="wbMarkDirty()" class="field-input w-full text-xs">
                           </div>
                         </template>
+
+                        <!-- Screenshots -->
+                        <div class="pt-3 mt-2 border-t border-obsidian-700/60">
+                          <div class="flex items-center justify-between mb-2">
+                            <span class="text-xs uppercase tracking-widest text-obsidian-500 font-medium">{{ t("metadata.shots_section") }}</span>
+                            <button type="button"
+                                    class="text-xs text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium"
+                                    @click="wbTriggerAdd(loc, loc.screenshotGroups[0])">{{ t("metadata.shots_add") }}</button>
+                          </div>
+
+                          <template x-if="!loc.screenshotGroups || !loc.screenshotGroups.length">
+                            <p class="text-xs text-obsidian-500 py-1">{{ t("metadata.shots_empty") }}</p>
+                          </template>
+
+                          <template x-for="group in loc.screenshotGroups" :key="group.displayType">
+                            <div class="mb-3">
+                              <div class="flex items-center gap-2 mb-1.5">
+                                <input type="checkbox" class="w-3.5 h-3.5 accent-amber-500"
+                                       :checked="wbGroupAllSelected(group)"
+                                       @change="wbSetGroupSelected(group, $event.target.checked)">
+                                <span class="text-xs font-mono text-obsidian-300" x-text="group.displayType === 'UNKNOWN' ? window.t('metadata.shots_unknown_type') : group.displayType"></span>
+                                <span class="text-[10px] text-obsidian-500" x-text="group.items.length + ' ' + window.t('metadata.shots_drag_hint')"></span>
+                              </div>
+                              <div class="flex gap-2.5 overflow-x-auto pb-1" @dragover.prevent>
+                                <template x-for="(item, idx) in group.items" :key="item.file_name">
+                                  <div class="relative shrink-0 w-20 group/thumb"
+                                       draggable="true"
+                                       @dragstart="wb.dragCtx = { locale: loc.locale, displayType: group.displayType, index: idx }"
+                                       @dragover.prevent
+                                       @drop="wbReorderDrop(loc, group, idx)">
+                                    <img :src="item.thumb_url" loading="lazy"
+                                         class="w-20 h-36 object-cover rounded border border-obsidian-700 bg-obsidian-900 cursor-move">
+                                    <input type="checkbox" class="absolute top-1 left-1 w-3.5 h-3.5 accent-amber-500"
+                                           x-model="item.selected" @change="wbSyncHidden()">
+                                    <div class="absolute inset-x-0 bottom-0 flex justify-center gap-1 py-0.5 bg-obsidian-950/70 opacity-0 group-hover/thumb:opacity-100 transition-opacity duration-150">
+                                      <button type="button" title="{{ t('metadata.shots_replace') }}"
+                                              class="text-[10px] text-obsidian-200 hover:text-amber-400 cursor-pointer px-1"
+                                              @click.stop="wbTriggerReplace(loc, group, item)">{{ t("metadata.shots_replace") }}</button>
+                                      <button type="button" title="{{ t('metadata.shots_delete') }}"
+                                              class="text-[10px] text-obsidian-200 hover:text-red-400 cursor-pointer px-1"
+                                              @click.stop="wbDeleteScreenshot(loc, group, item)">{{ t("metadata.shots_delete") }}</button>
+                                    </div>
+                                    <span class="block text-[9px] text-obsidian-500 truncate mt-0.5" x-text="item.file_name"></span>
+                                  </div>
+                                </template>
+                              </div>
+                            </div>
+                          </template>
+
+                          <template x-if="wb.shotsError">
+                            <p class="text-xs text-red-400 mt-1" x-text="wb.shotsError"></p>
+                          </template>
+                        </div>
                       </div>
                     </div>
                   </template>
