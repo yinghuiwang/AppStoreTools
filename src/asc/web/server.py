@@ -184,7 +184,8 @@ def create_app() -> FastAPI:
         ctx["is_editable"] = _is_editable()
         return _render(request, "update.html", ctx)
 
-    from asc.web import routes_api
+    from asc.web import routes_api, routes_listing
     app.include_router(routes_api.router, prefix="/api")
+    app.include_router(routes_listing.router, prefix="/api/listing")
 
     return app

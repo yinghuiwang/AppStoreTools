@@ -19,6 +19,10 @@ def isolated_web_task_guard(monkeypatch):
         "asc.web.routes_api.enforce_config_guard",
         MagicMock(),
     )
+    monkeypatch.setattr(
+        "asc.web.routes_listing.enforce_config_guard",
+        MagicMock(),
+    )
 
 
 @pytest.fixture
@@ -189,3 +193,93 @@ def test_metadata_run_invalid_fields_by_locale_json_returns_400(client):
     assert response.status_code == 400
     data = response.json()
     assert "error" in data
+
+
+# ---------- /api/listing/local (local text workbench) ----------
+
+
+def test_listing_local_requires_profile(client, tmp_path):
+    """GET without an asc_profile cookie returns the standard no-profile payload."""
+    p = tmp_path / "app.csv"
+    p.write_text("locale,name\nen-US,Old\n", encoding="utf-8-sig")
+    r = client.get("/api/listing/local", params={"csv_path": str(p)})
+    assert r.status_code == 400
+    assert r.json()["ok"] is False
+
+
+def test_listing_local_and_save(client, tmp_path):
+    p = tmp_path / "app.csv"
+    p.write_text("locale,name\nen-US,Old\n", encoding="utf-8-sig")
+
+    r = client.get(
+        "/api/listing/local",
+        params={"csv_path": str(p)},
+        cookies={"asc_profile": "test"},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is True
+    by_locale = {loc["locale"]: loc for loc in data["snapshot"]["locales"]}
+    assert by_locale["en-US"]["fields"]["name"] == "Old"
+    assert by_locale["en-US"]["screenshots"] == {}
+    mtime = data["mtime"]
+
+    body = {
+        "csv_path": str(p),
+        "expected_mtime": mtime,
+        "locales": [{"locale": "en-US", "fields": {"name": "New"}}],
+    }
+    r2 = client.post(
+        "/api/listing/local/save",
+        json=body,
+        cookies={"asc_profile": "test"},
+    )
+    assert r2.status_code == 200
+    assert r2.json()["ok"] is True
+    assert "New" in p.read_text(encoding="utf-8-sig")
+
+
+def test_listing_local_save_conflict_returns_409(client, tmp_path):
+    """A stale expected_mtime (file changed on disk since loading) returns 409."""
+    import time
+
+    p = tmp_path / "app.csv"
+    p.write_text("locale,name\nen-US,A\n", encoding="utf-8-sig")
+    stale_mtime = p.stat().st_mtime
+    time.sleep(0.02)
+    p.write_text("locale,name\nen-US,B\n", encoding="utf-8-sig")
+
+    body = {
+        "csv_path": str(p),
+        "expected_mtime": stale_mtime,
+        "locales": [{"locale": "en-US", "fields": {"name": "C"}}],
+    }
+    r = client.post(
+        "/api/listing/local/save",
+        json=body,
+        cookies={"asc_profile": "test"},
+    )
+    assert r.status_code == 409
+
+
+def test_listing_local_save_requires_profile(client, tmp_path):
+    p = tmp_path / "app.csv"
+    p.write_text("locale,name\nen-US,Old\n", encoding="utf-8-sig")
+    body = {
+        "csv_path": str(p),
+        "expected_mtime": None,
+        "locales": [{"locale": "en-US", "fields": {"name": "New"}}],
+    }
+    r = client.post("/api/listing/local/save", json=body)
+    assert r.status_code == 400
+    assert r.json()["ok"] is False
+
+
+def test_listing_local_missing_csv_returns_400(client, tmp_path):
+    missing = tmp_path / "does-not-exist.csv"
+    r = client.get(
+        "/api/listing/local",
+        params={"csv_path": str(missing)},
+        cookies={"asc_profile": "test"},
+    )
+    assert r.status_code == 400

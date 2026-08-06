@@ -11,7 +11,116 @@
     </h1>
   </div>
 
-  <div x-data="{ step: 1, taskId: null, status: 'idle', progress: 0, progressMsg: '', checkResult: null, submitting: false, canceling: false, showCsvHelp: false, showScreenshotsHelp: false }">
+  <div x-data="{
+    step: 1, taskId: null, status: 'idle', progress: 0, progressMsg: '', checkResult: null, submitting: false, canceling: false, showCsvHelp: false, showScreenshotsHelp: false,
+
+    wb: {
+      loading: false, loaded: false, error: '', mtime: null, dirty: false, saving: false, saveError: '', saveOk: false,
+      locales: [],
+      fieldNames: ['name', 'subtitle', 'description', 'keywords', 'supportUrl', 'marketingUrl', 'privacyPolicyUrl'],
+    },
+
+    wbLoadPreview() {
+      this.wb.error = '';
+      this.wb.saveError = '';
+      this.wb.saveOk = false;
+      this.wb.loading = true;
+      const csvPath = document.getElementById('csv-path-input').value;
+      fetch('/api/listing/local?csv_path=' + encodeURIComponent(csvPath))
+        .then(async r => {
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok || data.ok === false) {
+            throw new Error(data.message || data.error || window.t('common.request_failed'));
+          }
+          return data;
+        })
+        .then(data => {
+          this.wb.mtime = data.mtime;
+          this.wb.locales = (data.snapshot.locales || []).map(loc => {
+            const fieldSelected = {};
+            const fields = {};
+            this.wb.fieldNames.forEach(f => {
+              fieldSelected[f] = true;
+              fields[f] = (loc.fields && loc.fields[f]) || '';
+            });
+            return { locale: loc.locale, selected: true, expanded: false, fieldSelected, fields };
+          });
+          this.wb.loaded = true;
+          this.wb.dirty = false;
+          this.$nextTick(() => this.wbSyncHidden());
+        })
+        .catch(e => { this.wb.error = e.message; })
+        .finally(() => { this.wb.loading = false; });
+    },
+
+    wbMarkDirty() {
+      this.wb.dirty = true;
+      this.wb.saveOk = false;
+    },
+
+    wbSelectAllLocales(value) {
+      this.wb.locales.forEach(loc => loc.selected = value);
+      this.wbSyncHidden();
+    },
+
+    wbFieldSummary(loc) {
+      const selected = this.wb.fieldNames.filter(f => loc.fieldSelected[f]);
+      return selected.length + '/' + this.wb.fieldNames.length + ' \u00b7 ' + selected.join(', ');
+    },
+
+    wbFieldLabel(fname) {
+      return window.t('metadata.field_' + fname);
+    },
+
+    wbLocalesJson() {
+      if (!this.wb.loaded) return '';
+      return JSON.stringify(this.wb.locales.filter(l => l.selected).map(l => l.locale));
+    },
+
+    wbFieldsByLocaleJson() {
+      if (!this.wb.loaded) return '';
+      const out = {};
+      this.wb.locales.filter(l => l.selected).forEach(l => {
+        out[l.locale] = this.wb.fieldNames.filter(f => l.fieldSelected[f]);
+      });
+      return JSON.stringify(out);
+    },
+
+    wbSyncHidden() {
+      const lj = document.getElementById('locales-json-input');
+      const fj = document.getElementById('fields-by-locale-json-input');
+      if (lj) lj.value = this.wbLocalesJson();
+      if (fj) fj.value = this.wbFieldsByLocaleJson();
+    },
+
+    wbSaveToCsv() {
+      this.wb.saving = true;
+      this.wb.saveError = '';
+      const csvPath = document.getElementById('csv-path-input').value;
+      fetch('/api/listing/local/save', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          csv_path: csvPath,
+          expected_mtime: this.wb.mtime,
+          locales: this.wb.locales.map(l => ({ locale: l.locale, fields: l.fields })),
+        }),
+      })
+        .then(async r => {
+          const data = await r.json().catch(() => ({}));
+          if (r.status === 409) throw new Error(window.t('metadata.wb_conflict'));
+          if (!r.ok || data.ok === false) throw new Error(data.error || window.t('common.request_failed'));
+          return data;
+        })
+        .then(data => {
+          this.wb.mtime = data.mtime;
+          this.wb.dirty = false;
+          this.wb.saveOk = true;
+        })
+        .catch(e => { this.wb.saveError = e.message; })
+        .finally(() => { this.wb.saving = false; });
+    },
+  }">
 
     <!-- Step 1: 配置表单 -->
     <div x-show="step === 1">
@@ -27,7 +136,14 @@
               submitting = false;
               startTaskLogs(taskId);
             "
-            @htmx:before-request.camel="submitting = true">
+            @htmx:before-request.camel="
+              if (wb.loaded && wb.dirty) {
+                event.preventDefault();
+                alert(window.t('metadata.wb_dirty_block'));
+                return;
+              }
+              submitting = true;
+            ">
 
         <div class="card">
           <div class="card-body space-y-5">
@@ -96,6 +212,81 @@
                 <button type="button"
                         class="btn-ghost whitespace-nowrap"
                         onclick="openFileBrowser('screenshots-dir-input', 'dir', '')">{{ t("filebrowser.browse") }}</button>
+              </div>
+            </div>
+
+            <!-- Local workbench -->
+            <input type="hidden" name="locales_json" id="locales-json-input" value="">
+            <input type="hidden" name="fields_by_locale_json" id="fields-by-locale-json-input" value="">
+            <div class="pt-1">
+              <div class="flex items-center justify-between gap-3 mb-2">
+                <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">{{ t("metadata.workbench") }}</label>
+                <div class="flex items-center gap-3">
+                  <span x-show="wb.dirty" class="text-xs text-amber-500 font-medium">{{ t("metadata.unsaved") }}</span>
+                  <button type="button" class="btn-ghost text-xs" :disabled="wb.loading" @click="wbLoadPreview()">
+                    <span x-show="!wb.loading">{{ t("metadata.load_preview") }}</span>
+                    <span x-show="wb.loading">{{ t("common.loading") }}</span>
+                  </button>
+                </div>
+              </div>
+              <p class="text-xs text-obsidian-500 mb-3">{{ t("metadata.wb_hint") }}</p>
+
+              <template x-if="wb.error">
+                <p class="text-xs text-red-400 mb-3" x-text="wb.error"></p>
+              </template>
+
+              <template x-if="!wb.loaded && !wb.loading && !wb.error">
+                <p class="text-xs text-obsidian-500 py-2">{{ t("metadata.wb_empty") }}</p>
+              </template>
+
+              <div x-show="wb.loaded" class="space-y-3">
+                <div class="flex items-center justify-between gap-3">
+                  <div class="flex items-center gap-3">
+                    <button type="button"
+                            class="text-xs text-amber-500 hover:text-amber-400 cursor-pointer transition-colors duration-150 font-medium"
+                            @click="wbSelectAllLocales(true)">{{ t("urls.select_all") }}</button>
+                    <button type="button"
+                            class="text-xs text-obsidian-400 hover:text-obsidian-200 cursor-pointer transition-colors duration-150 font-medium"
+                            @click="wbSelectAllLocales(false)">{{ t("urls.deselect_all") }}</button>
+                  </div>
+                  <button type="button" class="btn-ghost text-xs" :disabled="wb.saving" @click="wbSaveToCsv()">
+                    <span x-show="!wb.saving">{{ t("metadata.save_csv") }}</span>
+                    <span x-show="wb.saving">{{ t("common.saving") }}</span>
+                  </button>
+                </div>
+
+                <template x-if="wb.saveError">
+                  <p class="text-xs text-red-400" x-text="wb.saveError"></p>
+                </template>
+                <template x-if="wb.saveOk && !wb.dirty">
+                  <p class="text-xs text-emerald-400">{{ t("metadata.wb_save_ok") }}</p>
+                </template>
+
+                <div class="rounded-lg border border-obsidian-700 divide-y divide-obsidian-700 overflow-hidden">
+                  <template x-for="loc in wb.locales" :key="loc.locale">
+                    <div class="bg-obsidian-800/30">
+                      <div class="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-obsidian-800/60 transition-colors duration-150"
+                           @click="loc.expanded = !loc.expanded">
+                        <input type="checkbox" class="w-3.5 h-3.5 accent-amber-500" x-model="loc.selected" @click.stop @change="wbSyncHidden()">
+                        <span class="text-sm font-mono text-obsidian-100 w-28 shrink-0 truncate" x-text="loc.locale"></span>
+                        <span class="text-xs text-obsidian-400 flex-1 truncate" x-text="wbFieldSummary(loc)"></span>
+                        <svg class="w-3.5 h-3.5 text-obsidian-500 shrink-0 transition-transform duration-150" :class="{'rotate-180': loc.expanded}" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg>
+                      </div>
+                      <div x-show="loc.expanded" x-transition class="px-3 pb-3 space-y-2.5 border-t border-obsidian-700/60">
+                        <template x-for="fname in wb.fieldNames" :key="fname">
+                          <div class="pt-2.5">
+                            <label class="flex items-center gap-2 mb-1 cursor-pointer">
+                              <input type="checkbox" class="w-3.5 h-3.5 accent-amber-500" x-model="loc.fieldSelected[fname]" @change="wbSyncHidden()">
+                              <span class="text-xs text-obsidian-400" x-text="wbFieldLabel(fname)"></span>
+                            </label>
+                            <textarea x-show="fname === 'description'" x-model="loc.fields[fname]" @input="wbMarkDirty()" rows="3" class="field-input w-full text-xs"></textarea>
+                            <input x-show="fname !== 'description'" type="text" x-model="loc.fields[fname]" @input="wbMarkDirty()" class="field-input w-full text-xs">
+                          </div>
+                        </template>
+                      </div>
+                    </div>
+                  </template>
+                </div>
               </div>
             </div>
 
