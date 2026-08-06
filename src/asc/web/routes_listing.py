@@ -331,6 +331,48 @@ async def listing_asc_thumb(request: Request, screenshot_id: str):
     return Response(content=resp.content, media_type=content_type)
 
 
+@router.get("/asc-image")
+async def listing_asc_image(request: Request, screenshot_id: str):
+    """Proxy the full ASC screenshot image by `screenshot_id` for lightbox viewing."""
+    lang = _lang(request)
+    profile = _require_profile(request)
+    if not profile:
+        return JSONResponse(_no_profile_payload(lang), status_code=400)
+    sid = (screenshot_id or "").strip()
+    if not sid:
+        raise HTTPException(status_code=400, detail="screenshot_id is required")
+
+    try:
+        api, _app_id = _api_for_profile(profile)
+        detail = api.get(f"/v1/appScreenshots/{sid}")
+        attrs = ((detail or {}).get("data") or {}).get("attributes") or {}
+        asset = (attrs or {}).get("imageAsset") or {}
+        template = asset.get("templateUrl") or ""
+        if not template:
+            raise HTTPException(status_code=404, detail="image URL not available")
+        width = asset.get("width") or 0
+        height = asset.get("height") or 0
+        if width and height:
+            url = template.replace("{w}", str(width)).replace("{h}", str(height))
+        else:
+            url = template.replace("{w}", "2000").replace("{h}", "2000")
+        if "{f}" in url:
+            file_name = str(attrs.get("fileName") or "")
+            suffix = Path(file_name).suffix.lower().lstrip(".")
+            if suffix == "jpeg":
+                suffix = "jpg"
+            url = url.replace("{f}", suffix if suffix in ("png", "jpg") else "png")
+        resp = requests.get(url, timeout=(10, 120))
+        resp.raise_for_status()
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+    content_type = resp.headers.get("Content-Type") or "image/png"
+    return Response(content=resp.content, media_type=content_type)
+
+
 @router.post("/pull/screenshots")
 async def listing_pull_screenshots(request: Request):
     """Start a background task that downloads ASC screenshots over local scopes."""

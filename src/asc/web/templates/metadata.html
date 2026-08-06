@@ -31,6 +31,315 @@
       version: null, locales: [], filter: 'all',
     },
 
+    lightbox: (window.AscImageViewer && window.AscImageViewer.createState)
+      ? window.AscImageViewer.createState()
+      : { open: false, items: [], index: 0 },
+    lightboxUi: {
+      scale: 1,
+      minScale: 0.2,
+      maxScale: 8,
+      offsetX: 0,
+      offsetY: 0,
+      rotate: 0,
+      flipX: 1,
+      dragging: false,
+      dragStartX: 0,
+      dragStartY: 0,
+      dragOriginX: 0,
+      dragOriginY: 0,
+      pinchStartDist: 0,
+      pinchStartScale: 1,
+      fitWidth: 0,
+      fitHeight: 0,
+      swipeStartX: 0,
+      swipeStartY: 0,
+      swipeActive: false,
+      swipeCommitted: false,
+      swipeThreshold: 40,
+      wheelSwipeAccum: 0,
+      wheelSwipeCommitted: false,
+      wheelSwipeIdleTimer: null,
+    },
+
+    wbLightboxCurrent() {
+      if (window.AscImageViewer && window.AscImageViewer.current) {
+        return window.AscImageViewer.current(this.lightbox);
+      }
+      return this.lightbox.items[this.lightbox.index] || { src: '', title: '' };
+    },
+
+    wbOpenLightboxItems(items, index) {
+      if (window.AscImageViewer && window.AscImageViewer.open) {
+        window.AscImageViewer.open(this.lightbox, items, index);
+        this.wbLightboxResetTransform(true);
+        return;
+      }
+      const normalized = (items || []).map(it => ({ src: (it && it.src) || '', title: (it && it.title) || '' })).filter(it => !!it.src);
+      if (!normalized.length) return;
+      this.lightbox = { open: true, items: normalized, index: Math.max(0, Math.min(index || 0, normalized.length - 1)) };
+      this.wbLightboxResetTransform(true);
+    },
+
+    wbOpenLightboxFromThumbs(items, index) {
+      if (window.AscImageViewer && window.AscImageViewer.openByKeys) {
+        window.AscImageViewer.openByKeys(this.lightbox, items, index, 'thumb_url', 'file_name');
+        return;
+      }
+      this.wbOpenLightboxItems((items || []).map(it => ({
+        src: (it && it.thumb_url) || '',
+        title: (it && it.file_name) || '',
+      })), index);
+    },
+
+    wbOpenLightboxFromDiff(items, index, side) {
+      this.wbOpenLightboxItems((items || []).map(it => ({
+        src: this.wbDiffShotFull(it, side),
+        title: (it && it.file_name) || '',
+      })), index);
+    },
+
+    wbLightboxPrev() {
+      if (window.AscImageViewer && window.AscImageViewer.prev) {
+        window.AscImageViewer.prev(this.lightbox);
+        this.wbLightboxResetTransform(true);
+        return;
+      }
+      if (!this.lightbox.open || !this.lightbox.items.length) return;
+      this.lightbox.index = (this.lightbox.index - 1 + this.lightbox.items.length) % this.lightbox.items.length;
+      this.wbLightboxResetTransform(true);
+    },
+
+    wbLightboxNext() {
+      if (window.AscImageViewer && window.AscImageViewer.next) {
+        window.AscImageViewer.next(this.lightbox);
+        this.wbLightboxResetTransform(true);
+        return;
+      }
+      if (!this.lightbox.open || !this.lightbox.items.length) return;
+      this.lightbox.index = (this.lightbox.index + 1) % this.lightbox.items.length;
+      this.wbLightboxResetTransform(true);
+    },
+
+    wbCloseLightbox() {
+      if (window.AscImageViewer && window.AscImageViewer.close) {
+        window.AscImageViewer.close(this.lightbox);
+        this.wbLightboxResetTransform(true);
+        return;
+      }
+      this.lightbox = { open: false, items: [], index: 0 };
+      this.wbLightboxResetTransform(true);
+    },
+
+    wbLightboxResetTransform(force = false) {
+      this.lightboxUi.scale = 1;
+      this.lightboxUi.offsetX = 0;
+      this.lightboxUi.offsetY = 0;
+      this.lightboxUi.rotate = 0;
+      this.lightboxUi.flipX = 1;
+      this.lightboxUi.swipeActive = false;
+      this.lightboxUi.swipeCommitted = false;
+      if (force) this.lightboxUi.dragging = false;
+    },
+
+    wbLightboxRefit() {
+      const stage = this.$refs.lbStage;
+      const img = this.$refs.lbImage;
+      if (!stage || !img) return;
+      // 两侧为箭头预留约 3.5rem * 2，避免图片盖住箭头
+      const gutter = 112;
+      const stageW = Math.max(1, (stage.clientWidth || 0) - gutter);
+      const stageH = stage.clientHeight || 0;
+      const naturalW = img.naturalWidth || 0;
+      const naturalH = img.naturalHeight || 0;
+      if (!stageW || !stageH || !naturalW || !naturalH) return;
+      const ratio = Math.min(stageW / naturalW, stageH / naturalH, 1);
+      this.lightboxUi.fitWidth = Math.max(1, Math.floor(naturalW * ratio));
+      this.lightboxUi.fitHeight = Math.max(1, Math.floor(naturalH * ratio));
+    },
+
+    wbLightboxOnImageLoad() {
+      this.wbLightboxRefit();
+    },
+
+    wbLightboxSetScale(nextScale) {
+      const min = this.lightboxUi.minScale;
+      const max = this.lightboxUi.maxScale;
+      this.lightboxUi.scale = Math.max(min, Math.min(max, nextScale));
+      if (this.lightboxUi.scale <= 1) {
+        this.lightboxUi.offsetX = 0;
+        this.lightboxUi.offsetY = 0;
+      }
+    },
+
+    wbLightboxZoomBy(delta) {
+      const factor = delta > 0 ? 1.12 : 0.88;
+      this.wbLightboxSetScale(this.lightboxUi.scale * factor);
+    },
+
+    wbLightboxWheel(event) {
+      if (!this.lightbox.open) return;
+      event.preventDefault();
+      const dx = event.deltaX || 0;
+      const dy = event.deltaY || 0;
+      // 触控板左右滑动：一次手势只切一张
+      if (this.lightbox.items.length > 1 && Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 2) {
+        if (this.lightboxUi.wheelSwipeIdleTimer) {
+          clearTimeout(this.lightboxUi.wheelSwipeIdleTimer);
+          this.lightboxUi.wheelSwipeIdleTimer = null;
+        }
+        if (!this.lightboxUi.wheelSwipeCommitted) {
+          this.lightboxUi.wheelSwipeAccum += dx;
+          if (Math.abs(this.lightboxUi.wheelSwipeAccum) >= this.lightboxUi.swipeThreshold) {
+            this.lightboxUi.wheelSwipeCommitted = true;
+            if (this.lightboxUi.wheelSwipeAccum > 0) this.wbLightboxNext();
+            else this.wbLightboxPrev();
+            this.lightboxUi.wheelSwipeAccum = 0;
+          }
+        }
+        // 手势结束后再允许下一次切图
+        this.lightboxUi.wheelSwipeIdleTimer = setTimeout(() => {
+          this.lightboxUi.wheelSwipeAccum = 0;
+          this.lightboxUi.wheelSwipeCommitted = false;
+          this.lightboxUi.wheelSwipeIdleTimer = null;
+        }, 220);
+        return;
+      }
+      // 仅明确的纵向滚轮才缩放
+      if (Math.abs(dy) > 4) {
+        this.wbLightboxZoomBy(dy < 0 ? 1 : -1);
+      }
+    },
+
+    wbLightboxDragStart(event) {
+      if (!this.lightbox.open) return;
+      // 忽略箭头等按钮上的拖动手势
+      if (event && event.target && event.target.closest && event.target.closest('button')) return;
+      const p = event.touches ? event.touches[0] : event;
+      if (this.lightboxUi.scale > 1) {
+        this.lightboxUi.dragging = true;
+        this.lightboxUi.dragStartX = p.clientX;
+        this.lightboxUi.dragStartY = p.clientY;
+        this.lightboxUi.dragOriginX = this.lightboxUi.offsetX;
+        this.lightboxUi.dragOriginY = this.lightboxUi.offsetY;
+        this.lightboxUi.swipeActive = false;
+        this.lightboxUi.swipeCommitted = false;
+        return;
+      }
+      // Fit 模式：单指/鼠标拖动用于左右切图，一次手势只切一张
+      this.lightboxUi.swipeActive = true;
+      this.lightboxUi.swipeCommitted = false;
+      this.lightboxUi.swipeStartX = p.clientX;
+      this.lightboxUi.swipeStartY = p.clientY;
+      this.lightboxUi.dragging = false;
+      this.lightboxUi.pinchStartDist = 0;
+    },
+
+    wbLightboxDragMove(event) {
+      if (this.lightboxUi.swipeActive && !this.lightboxUi.swipeCommitted && this.lightboxUi.scale <= 1 && this.lightbox.items.length > 1) {
+        const p = event.touches ? event.touches[0] : event;
+        const dx = p.clientX - this.lightboxUi.swipeStartX;
+        const dy = p.clientY - this.lightboxUi.swipeStartY;
+        if (Math.abs(dx) >= this.lightboxUi.swipeThreshold && Math.abs(dx) > Math.abs(dy) * 0.8) {
+          this.lightboxUi.swipeCommitted = true;
+          if (dx < 0) this.wbLightboxNext();
+          else this.wbLightboxPrev();
+        }
+        return;
+      }
+      if (!this.lightboxUi.dragging) return;
+      const p = event.touches ? event.touches[0] : event;
+      this.lightboxUi.offsetX = this.lightboxUi.dragOriginX + (p.clientX - this.lightboxUi.dragStartX);
+      this.lightboxUi.offsetY = this.lightboxUi.dragOriginY + (p.clientY - this.lightboxUi.dragStartY);
+    },
+
+    wbLightboxDragEnd(event) {
+      // 若 move 时尚未提交，在 end 再判定一次（短滑也切一张）
+      if (this.lightboxUi.swipeActive && !this.lightboxUi.swipeCommitted && this.lightboxUi.scale <= 1 && this.lightbox.items.length > 1) {
+        const p = (event && event.changedTouches && event.changedTouches[0])
+          || (event && typeof event.clientX === 'number' ? event : null);
+        if (p) {
+          const dx = p.clientX - this.lightboxUi.swipeStartX;
+          const dy = p.clientY - this.lightboxUi.swipeStartY;
+          if (Math.abs(dx) >= this.lightboxUi.swipeThreshold && Math.abs(dx) > Math.abs(dy) * 0.8) {
+            if (dx < 0) this.wbLightboxNext();
+            else this.wbLightboxPrev();
+          }
+        }
+      }
+      this.lightboxUi.swipeActive = false;
+      this.lightboxUi.swipeCommitted = false;
+      this.lightboxUi.dragging = false;
+    },
+
+    wbLightboxTouchStart(event) {
+      if (!this.lightbox.open) return;
+      const touches = event.touches || [];
+      // 双指才进入捏合缩放；单指一律走切图/拖拽
+      if (touches.length >= 2) {
+        const dx = touches[0].clientX - touches[1].clientX;
+        const dy = touches[0].clientY - touches[1].clientY;
+        this.lightboxUi.pinchStartDist = Math.hypot(dx, dy);
+        this.lightboxUi.pinchStartScale = this.lightboxUi.scale;
+        this.lightboxUi.dragging = false;
+        this.lightboxUi.swipeActive = false;
+        return;
+      }
+      this.wbLightboxDragStart(event);
+    },
+
+    wbLightboxTouchMove(event) {
+      const touches = event.touches || [];
+      if (touches.length >= 2 && this.lightboxUi.pinchStartDist > 0) {
+        const dx = touches[0].clientX - touches[1].clientX;
+        const dy = touches[0].clientY - touches[1].clientY;
+        const dist = Math.hypot(dx, dy);
+        const ratio = dist / this.lightboxUi.pinchStartDist;
+        this.wbLightboxSetScale(this.lightboxUi.pinchStartScale * ratio);
+        return;
+      }
+      // 单指滑动过程不缩放，只在 end 时切图；放大态才平移
+      this.wbLightboxDragMove(event);
+    },
+
+    wbLightboxTouchEnd(event) {
+      this.lightboxUi.pinchStartDist = 0;
+      this.wbLightboxDragEnd(event);
+    },
+
+    wbLightboxRotate() {
+      this.lightboxUi.rotate = (this.lightboxUi.rotate + 90) % 360;
+    },
+
+    wbLightboxMirror() {
+      this.lightboxUi.flipX = this.lightboxUi.flipX * -1;
+    },
+
+    wbLightboxImageStyle() {
+      return [
+        'translate(' + this.lightboxUi.offsetX + 'px,' + this.lightboxUi.offsetY + 'px)',
+        'scale(' + (this.lightboxUi.scale * this.lightboxUi.flipX) + ',' + this.lightboxUi.scale + ')',
+        'rotate(' + this.lightboxUi.rotate + 'deg)',
+      ].join(' ');
+    },
+
+    wbLightboxSizeStyle() {
+      if (this.lightboxUi.fitWidth && this.lightboxUi.fitHeight) {
+        return 'width:' + this.lightboxUi.fitWidth + 'px;height:' + this.lightboxUi.fitHeight + 'px;';
+      }
+      return 'max-width:100%;max-height:100%;width:auto;height:auto;';
+    },
+
+    wbLightboxDownload() {
+      const current = this.wbLightboxCurrent();
+      if (!current || !current.src) return;
+      const link = document.createElement('a');
+      link.href = current.src;
+      link.download = current.title || 'screenshot';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    },
+
     wbLoadPreview() {
       this.wb.error = '';
       this.wb.saveError = '';
@@ -64,7 +373,7 @@
               items: (loc.screenshots[displayType] || []).map(it => ({ ...it, selected: true })),
             }));
             return {
-              locale: loc.locale, selected: true, expanded: false, fieldSelected, fields,
+              locale: loc.locale, selected: true, fieldSelected, fields,
               screenshotGroups, shotsExpanded: false,
             };
           });
@@ -86,13 +395,47 @@
       this.wbSyncHidden();
     },
 
-    wbFieldSummary(loc) {
-      const selected = this.wb.fieldNames.filter(f => loc.fieldSelected[f]);
-      return selected.length + '/' + this.wb.fieldNames.length + ' \u00b7 ' + selected.join(', ');
+    wbSelectAllField(fname, value) {
+      this.wb.locales.forEach(loc => { loc.fieldSelected[fname] = value; });
+      this.wbSyncHidden();
+    },
+
+    wbShotCount(loc) {
+      return (loc.screenshotGroups || []).reduce((n, g) => n + g.items.length, 0);
+    },
+
+    wbShotPreview(loc, limit = 6) {
+      const out = [];
+      (loc.screenshotGroups || []).forEach(g => {
+        (g.items || []).forEach(it => {
+          if (out.length < limit) out.push(it);
+        });
+      });
+      return out;
+    },
+
+    wbDiffShotPreview(loc, side = 'local', limit = 6) {
+      const out = [];
+      (loc.screenshots || []).forEach(g => {
+        ((g[side]) || []).forEach(it => {
+          if (out.length < limit) out.push(it);
+        });
+      });
+      return out;
+    },
+
+    wbDiffField(loc, fname) {
+      return (loc.fields || []).find(f => f.field === fname)
+        || { field: fname, status: 'equal', local: '', asc: '', selected: false };
     },
 
     wbFieldLabel(fname) {
       return window.t('metadata.field_' + fname);
+    },
+
+    wbT(key, fallback, params) {
+      const v = window.t(key, params || {});
+      return (v && v !== key) ? v : fallback;
     },
 
     wbLocalesJson() {
@@ -390,6 +733,14 @@
       return '';
     },
 
+    wbDiffShotFull(item, side) {
+      if (!item) return '';
+      if (side === 'asc' && item.remote_id) {
+        return '/api/listing/asc-image?screenshot_id=' + encodeURIComponent(item.remote_id);
+      }
+      return this.wbDiffShotThumb(item, side);
+    },
+
     wbDiffAscThumbError(el, item) {
       if (!el) return;
       // Avoid infinite fallback loops when CDN and proxy both fail.
@@ -439,7 +790,7 @@
           this.diff.locales = (data.diff && data.diff.locales || []).map(loc => ({
             locale: loc.locale,
             selected: (loc.fields || []).some(f => f.status === 'changed' || f.status === 'asc_only'),
-            expanded: true,
+            shotsExpanded: false,
             fields: (loc.fields || []).map(f => ({
               ...f,
               // Pull defaults: never auto-select local_only (would wipe local with empty ASC)
@@ -490,7 +841,7 @@
           fields[f] = '';
         });
         this.wb.locales.push({
-          locale: loc.locale, selected: true, expanded: false, fieldSelected, fields,
+          locale: loc.locale, selected: true, fieldSelected, fields,
           screenshotGroups: [], shotsExpanded: false,
         });
       });
@@ -557,7 +908,7 @@
                 fields[f] = ascFields[f] || '';
               });
               loc = {
-                locale: sel.locale, selected: true, expanded: false, fieldSelected, fields,
+                locale: sel.locale, selected: true, fieldSelected, fields,
                 screenshotGroups: [], shotsExpanded: false,
               };
               this.wb.locales.push(loc);
@@ -798,83 +1149,119 @@
                   <p class="text-xs text-emerald-400">{{ t("metadata.wb_save_ok") }}</p>
                 </template>
 
-                <div class="rounded-lg border border-obsidian-700 divide-y divide-obsidian-700 overflow-hidden">
-                  <template x-for="loc in wb.locales" :key="loc.locale">
-                    <div class="bg-obsidian-800/30">
-                      <div class="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-obsidian-800/60 transition-colors duration-150"
-                           @click="loc.expanded = !loc.expanded">
-                        <input type="checkbox" class="w-3.5 h-3.5 accent-amber-500" x-model="loc.selected" @click.stop @change="wbSyncHidden()">
-                        <span class="text-sm font-mono text-obsidian-100 w-28 shrink-0 truncate" x-text="loc.locale"></span>
-                        <span class="text-xs text-obsidian-400 flex-1 truncate" x-text="wbFieldSummary(loc)"></span>
-                        <svg class="w-3.5 h-3.5 text-obsidian-500 shrink-0 transition-transform duration-150" :class="{'rotate-180': loc.expanded}" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg>
-                      </div>
-                      <div x-show="loc.expanded" x-transition class="px-3 pb-3 space-y-2.5 border-t border-obsidian-700/60">
-                        <template x-for="fname in wb.fieldNames" :key="fname">
-                          <div class="pt-2.5">
-                            <label class="flex items-center gap-2 mb-1 cursor-pointer">
-                              <input type="checkbox" class="w-3.5 h-3.5 accent-amber-500" x-model="loc.fieldSelected[fname]" @change="wbSyncHidden()">
-                              <span class="text-xs text-obsidian-400" x-text="wbFieldLabel(fname)"></span>
+                <div class="overflow-x-auto rounded-lg border border-obsidian-700">
+                  <table class="w-full min-w-[1100px] text-xs border-collapse listing-csv-table">
+                    <thead class="bg-obsidian-800/90 sticky top-0 z-10">
+                      <tr class="border-b border-obsidian-700 text-left">
+                        <th class="px-2 py-2 w-8 align-middle">
+                          <span class="sr-only">{{ t("metadata.col_upload") }}</span>
+                        </th>
+                        <th class="px-2 py-2 w-24 font-mono text-obsidian-400 uppercase tracking-wider text-[10px]">locale</th>
+                        <template x-for="fname in wb.fieldNames" :key="'h-' + fname">
+                          <th class="px-2 py-2 min-w-[120px] align-top">
+                            <label class="flex items-center gap-1.5 cursor-pointer text-obsidian-400 font-medium">
+                              <input type="checkbox" class="w-3 h-3 accent-amber-500 shrink-0"
+                                     :checked="wb.locales.length && wb.locales.every(l => l.fieldSelected[fname])"
+                                     @change="wbSelectAllField(fname, $event.target.checked)">
+                              <span x-text="wbFieldLabel(fname)"></span>
                             </label>
-                            <textarea x-show="fname === 'description'" x-model="loc.fields[fname]" @input="wbMarkDirty()" rows="3" class="field-input w-full text-xs"></textarea>
-                            <input x-show="fname !== 'description'" type="text" x-model="loc.fields[fname]" @input="wbMarkDirty()" class="field-input w-full text-xs">
-                          </div>
+                          </th>
                         </template>
-
-                        <!-- Screenshots -->
-                        <div class="pt-3 mt-2 border-t border-obsidian-700/60">
-                          <div class="flex items-center justify-between mb-2">
-                            <span class="text-xs uppercase tracking-widest text-obsidian-500 font-medium">{{ t("metadata.shots_section") }}</span>
-                            <button type="button"
-                                    class="text-xs text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium"
-                                    @click="wbTriggerAdd(loc, loc.screenshotGroups[0])">{{ t("metadata.shots_add") }}</button>
-                          </div>
-
-                          <template x-if="!loc.screenshotGroups || !loc.screenshotGroups.length">
-                            <p class="text-xs text-obsidian-500 py-1">{{ t("metadata.shots_empty") }}</p>
+                        <th class="px-2 py-2 w-24 text-obsidian-400 font-medium">{{ t("metadata.col_screenshots") }}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <template x-for="loc in wb.locales" :key="loc.locale">
+                        <tr class="border-b border-obsidian-700/60 hover:bg-obsidian-800/40 align-top">
+                          <td class="px-2 py-2 align-middle">
+                            <input type="checkbox" class="w-3.5 h-3.5 accent-amber-500" x-model="loc.selected" @change="wbSyncHidden()">
+                          </td>
+                          <td class="px-2 py-2 font-mono text-obsidian-100 whitespace-nowrap" x-text="loc.locale"></td>
+                          <template x-for="fname in wb.fieldNames" :key="loc.locale + '-' + fname">
+                            <td class="px-2 py-2 min-w-[120px] max-w-[220px]">
+                              <label class="flex items-center gap-1 mb-1 cursor-pointer">
+                                <input type="checkbox" class="w-3 h-3 accent-amber-500 shrink-0"
+                                       x-model="loc.fieldSelected[fname]" @change="wbSyncHidden()">
+                              </label>
+                              <textarea x-show="fname === 'description'" x-model="loc.fields[fname]" @input="wbMarkDirty()"
+                                        rows="2" class="field-input w-full text-xs min-h-[2.5rem] resize-y"></textarea>
+                              <input x-show="fname !== 'description'" type="text" x-model="loc.fields[fname]" @input="wbMarkDirty()"
+                                     class="field-input w-full text-xs">
+                            </td>
                           </template>
-
-                          <template x-for="group in loc.screenshotGroups" :key="group.displayType">
-                            <div class="mb-3">
-                              <div class="flex items-center gap-2 mb-1.5">
-                                <input type="checkbox" class="w-3.5 h-3.5 accent-amber-500"
-                                       :checked="wbGroupAllSelected(group)"
-                                       @change="wbSetGroupSelected(group, $event.target.checked)">
-                                <span class="text-xs font-mono text-obsidian-300" x-text="group.displayType === 'UNKNOWN' ? window.t('metadata.shots_unknown_type') : group.displayType"></span>
-                                <span class="text-[10px] text-obsidian-500" x-text="group.items.length + ' ' + window.t('metadata.shots_drag_hint')"></span>
-                              </div>
-                              <div class="flex gap-2.5 overflow-x-auto pb-1" @dragover.prevent>
-                                <template x-for="(item, idx) in group.items" :key="item.file_name">
-                                  <div class="relative shrink-0 w-20 group/thumb"
-                                       draggable="true"
-                                       @dragstart="wb.dragCtx = { locale: loc.locale, displayType: group.displayType, index: idx }"
-                                       @dragover.prevent
-                                       @drop="wbReorderDrop(loc, group, idx)">
-                                    <img :src="item.thumb_url" loading="lazy"
-                                         class="w-20 h-36 object-cover rounded border border-obsidian-700 bg-obsidian-900 cursor-move">
-                                    <input type="checkbox" class="absolute top-1 left-1 w-3.5 h-3.5 accent-amber-500"
-                                           x-model="item.selected" @change="wbSyncHidden()">
-                                    <div class="absolute inset-x-0 bottom-0 flex justify-center gap-1 py-0.5 bg-obsidian-950/70 opacity-0 group-hover/thumb:opacity-100 transition-opacity duration-150">
-                                      <button type="button" title="{{ t('metadata.shots_replace') }}"
-                                              class="text-[10px] text-obsidian-200 hover:text-amber-400 cursor-pointer px-1"
-                                              @click.stop="wbTriggerReplace(loc, group, item)">{{ t("metadata.shots_replace") }}</button>
-                                      <button type="button" title="{{ t('metadata.shots_delete') }}"
-                                              class="text-[10px] text-obsidian-200 hover:text-red-400 cursor-pointer px-1"
-                                              @click.stop="wbDeleteScreenshot(loc, group, item)">{{ t("metadata.shots_delete") }}</button>
-                                    </div>
-                                    <span class="block text-[9px] text-obsidian-500 truncate mt-0.5" x-text="item.file_name"></span>
-                                  </div>
-                                </template>
-                              </div>
+                          <td class="px-2 py-2 align-middle">
+                            <div class="flex items-center gap-1.5">
+                              <template x-for="(item, pvIdx) in wbShotPreview(loc, 6)" :key="'pv-' + loc.locale + item.file_name">
+                                <img :src="item.thumb_url" :alt="item.file_name" loading="lazy"
+                                     :title="wbT('metadata.shots_click_zoom', '点击放大查看')"
+                                     class="h-8 w-8 rounded border border-obsidian-700 object-cover bg-obsidian-900 cursor-zoom-in"
+                                     @click.stop="wbOpenLightboxFromThumbs(wbShotPreview(loc, 6), pvIdx)">
+                              </template>
+                              <span x-show="wbShotCount(loc) === 0" class="text-obsidian-600">—</span>
+                              <button type="button" x-show="wbShotCount(loc) > 0"
+                                      class="text-[11px] text-amber-550 hover:text-amber-500 cursor-pointer font-medium"
+                                      @click="loc.shotsExpanded = !loc.shotsExpanded"
+                                      :title="wbT('metadata.shots_click_zoom', '点击放大查看')">
+                                <span x-text="'+' + Math.max(wbShotCount(loc) - 6, 0)"></span>
+                              </button>
                             </div>
-                          </template>
-
-                          <template x-if="wb.shotsError">
-                            <p class="text-xs text-red-400 mt-1" x-text="wb.shotsError"></p>
-                          </template>
-                        </div>
-                      </div>
-                    </div>
-                  </template>
+                          </td>
+                        </tr>
+                        <tr x-show="loc.shotsExpanded" class="bg-obsidian-900/50 border-b border-obsidian-700/60">
+                          <td :colspan="wb.fieldNames.length + 3" class="px-3 py-3">
+                            <div class="flex items-center justify-between mb-2">
+                              <span class="text-xs uppercase tracking-widest text-obsidian-500 font-medium">{{ t("metadata.shots_section") }}</span>
+                              <button type="button"
+                                      class="text-xs text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium"
+                                      @click="wbTriggerAdd(loc, loc.screenshotGroups[0])">{{ t("metadata.shots_add") }}</button>
+                            </div>
+                            <template x-if="!loc.screenshotGroups || !loc.screenshotGroups.length">
+                              <p class="text-xs text-obsidian-500 py-1">{{ t("metadata.shots_empty") }}</p>
+                            </template>
+                            <template x-for="group in loc.screenshotGroups" :key="group.displayType">
+                              <div class="mb-3 last:mb-0">
+                                <div class="flex items-center gap-2 mb-1.5">
+                                  <input type="checkbox" class="w-3.5 h-3.5 accent-amber-500"
+                                         :checked="wbGroupAllSelected(group)"
+                                         @change="wbSetGroupSelected(group, $event.target.checked)">
+                                  <span class="text-xs font-mono text-obsidian-300" x-text="group.displayType === 'UNKNOWN' ? window.t('metadata.shots_unknown_type') : group.displayType"></span>
+                                  <span class="text-[10px] text-obsidian-500" x-text="group.items.length + ' ' + window.t('metadata.shots_drag_hint')"></span>
+                                </div>
+                                <div class="flex gap-1.5 overflow-x-auto pb-1" @dragover.prevent>
+                                  <template x-for="(item, idx) in group.items" :key="item.file_name">
+                                    <div class="relative shrink-0 w-11 group/thumb"
+                                         draggable="true"
+                                         @dragstart="wb.dragCtx = { locale: loc.locale, displayType: group.displayType, index: idx }"
+                                         @dragover.prevent
+                                         @drop="wbReorderDrop(loc, group, idx)">
+                                      <img :src="item.thumb_url" loading="lazy"
+                                           :title="wbT('metadata.shots_click_zoom', '点击放大查看')"
+                                           class="w-11 h-[4.25rem] object-cover rounded border border-obsidian-700 bg-obsidian-900 cursor-zoom-in"
+                                           @click.stop="wbOpenLightboxFromThumbs(group.items, idx)">
+                                      <input type="checkbox" class="absolute top-0.5 left-0.5 w-3 h-3 accent-amber-500"
+                                             x-model="item.selected" @change="wbSyncHidden()" @click.stop>
+                                      <div class="absolute inset-x-0 bottom-0 flex justify-center gap-0.5 py-0.5 bg-obsidian-950/80 opacity-0 group-hover/thumb:opacity-100 transition-opacity duration-150">
+                                        <button type="button" title="{{ t('metadata.shots_replace') }}"
+                                                class="text-[9px] text-obsidian-200 hover:text-amber-400 cursor-pointer px-0.5"
+                                                @click.stop="wbTriggerReplace(loc, group, item)">↻</button>
+                                        <button type="button" title="{{ t('metadata.shots_delete') }}"
+                                                class="text-[9px] text-obsidian-200 hover:text-red-400 cursor-pointer px-0.5"
+                                                @click.stop="wbDeleteScreenshot(loc, group, item)">×</button>
+                                      </div>
+                                      <span class="block text-[8px] text-obsidian-500 truncate mt-0.5 max-w-[2.75rem]" x-text="item.file_name"></span>
+                                    </div>
+                                  </template>
+                                </div>
+                              </div>
+                            </template>
+                            <template x-if="wb.shotsError">
+                              <p class="text-xs text-red-400 mt-1" x-text="wb.shotsError"></p>
+                            </template>
+                          </td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
                 </div>
               </div>
               </div>
@@ -941,51 +1328,77 @@
                   </button>
                 </div>
 
-                <div class="rounded-lg border border-obsidian-700 divide-y divide-obsidian-700 overflow-hidden">
-                  <template x-for="loc in diff.locales" :key="'diff-' + loc.locale">
-                    <div class="bg-obsidian-800/30" x-show="wbDiffLocaleVisible(loc)">
-                      <div class="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-obsidian-800/60 transition-colors duration-150"
-                           @click="loc.expanded = !loc.expanded">
-                        <input type="checkbox" class="w-3.5 h-3.5 accent-amber-500" x-model="loc.selected" @click.stop>
-                        <span class="text-sm font-mono text-obsidian-100 w-28 shrink-0 truncate" x-text="loc.locale"></span>
-                        <span class="text-xs text-obsidian-400 flex-1 truncate"
-                              x-text="window.t('metadata.diff_locale_summary', { count: loc.fields.filter(f => f.status !== 'equal').length })"></span>
-                        <svg class="w-3.5 h-3.5 text-obsidian-500 shrink-0 transition-transform duration-150" :class="{'rotate-180': loc.expanded}" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg>
-                      </div>
-                      <div x-show="loc.expanded" x-transition class="px-3 pb-3 space-y-2 border-t border-obsidian-700/60">
-                        <template x-for="field in loc.fields" :key="field.field">
-                          <div class="pt-2.5" x-show="wbDiffFieldVisible(field)">
-                            <label class="flex items-center gap-2 mb-1 cursor-pointer">
-                              <input type="checkbox" class="w-3.5 h-3.5 accent-amber-500" x-model="field.selected">
-                              <span class="text-xs text-obsidian-300" x-text="wbFieldLabel(field.field)"></span>
-                              <span class="text-[10px] font-medium uppercase tracking-wide"
-                                    :class="wbDiffStatusClass(field.status)"
-                                    x-text="wbDiffStatusLabel(field.status)"></span>
-                            </label>
-                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2"
-                                 x-show="field.status !== 'equal'">
-                              <div>
-                                <p class="text-[10px] uppercase tracking-widest text-obsidian-500 mb-0.5">{{ t("metadata.diff_local") }}</p>
-                                <p class="text-xs text-obsidian-200 whitespace-pre-wrap break-words rounded border border-obsidian-700 bg-obsidian-900/40 px-2 py-1.5 min-h-[1.75rem]"
-                                   :class="field.status === 'changed' || field.status === 'local_only' ? 'border-sky-500/30' : ''"
-                                   x-text="field.local || '—'"></p>
-                              </div>
-                              <div>
-                                <p class="text-[10px] uppercase tracking-widest text-obsidian-500 mb-0.5">{{ t("metadata.diff_asc") }}</p>
-                                <p class="text-xs text-obsidian-200 whitespace-pre-wrap break-words rounded border border-obsidian-700 bg-obsidian-900/40 px-2 py-1.5 min-h-[1.75rem]"
-                                   :class="field.status === 'changed' || field.status === 'asc_only' ? 'border-violet-500/30' : ''"
-                                   x-text="field.asc || '—'"></p>
-                              </div>
-                            </div>
-                            <p x-show="field.status === 'equal'" class="text-xs text-obsidian-500 truncate" x-text="field.local || field.asc || '—'"></p>
-                          </div>
+                <div class="overflow-x-auto rounded-lg border border-obsidian-700">
+                  <table class="w-full min-w-[1100px] text-xs border-collapse listing-csv-table">
+                    <thead class="bg-obsidian-800/90 sticky top-0 z-10">
+                      <tr class="border-b border-obsidian-700 text-left">
+                        <th class="px-2 py-2 w-8"><span class="sr-only">{{ t("metadata.col_pull") }}</span></th>
+                        <th class="px-2 py-2 w-24 font-mono text-obsidian-400 uppercase tracking-wider text-[10px]">locale</th>
+                        <template x-for="fname in wb.fieldNames" :key="'dh-' + fname">
+                          <th class="px-2 py-2 min-w-[120px] text-obsidian-400 font-medium" x-text="wbFieldLabel(fname)"></th>
                         </template>
-
-                        <template x-if="loc.screenshots && loc.screenshots.length">
-                          <div class="pt-3 mt-1 border-t border-obsidian-700/60 space-y-3">
-                            <p class="text-[10px] uppercase tracking-widest text-obsidian-500">{{ t("metadata.diff_shots_heading") }}</p>
+                        <th class="px-2 py-2 w-24 text-obsidian-400 font-medium">{{ t("metadata.col_screenshots") }}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <template x-for="loc in diff.locales" :key="'diff-' + loc.locale">
+                        <tr class="border-b border-obsidian-700/60 hover:bg-obsidian-800/40 align-top" x-show="wbDiffLocaleVisible(loc)">
+                          <td class="px-2 py-2 align-middle">
+                            <input type="checkbox" class="w-3.5 h-3.5 accent-amber-500" x-model="loc.selected">
+                          </td>
+                          <td class="px-2 py-2 font-mono text-obsidian-100 whitespace-nowrap" x-text="loc.locale"></td>
+                          <template x-for="fname in wb.fieldNames" :key="'df-' + loc.locale + fname">
+                            <td class="px-2 py-2 min-w-[120px] max-w-[220px]">
+                              <template x-for="field in loc.fields" :key="field.field">
+                                <div x-show="field.field === fname && wbDiffFieldVisible(field)">
+                                  <label class="flex items-center gap-1 mb-1 cursor-pointer">
+                                    <input type="checkbox" class="w-3 h-3 accent-amber-500 shrink-0" x-model="field.selected">
+                                    <span class="text-[10px] font-medium uppercase tracking-wide"
+                                          :class="wbDiffStatusClass(field.status)"
+                                          x-text="wbDiffStatusLabel(field.status)"></span>
+                                  </label>
+                                  <div x-show="field.status !== 'equal'" class="space-y-1">
+                                    <p class="text-[10px] text-obsidian-500">{{ t("metadata.diff_local") }}</p>
+                                    <p class="text-xs text-obsidian-200 whitespace-pre-wrap break-words rounded border px-1.5 py-1 min-h-[1.25rem]"
+                                       :class="field.status === 'changed' || field.status === 'local_only' ? 'border-sky-500/30 bg-sky-500/5' : 'border-obsidian-700 bg-obsidian-900/40'"
+                                       x-text="field.local || '—'"></p>
+                                    <p class="text-[10px] text-obsidian-500">{{ t("metadata.diff_asc") }}</p>
+                                    <p class="text-xs text-obsidian-200 whitespace-pre-wrap break-words rounded border px-1.5 py-1 min-h-[1.25rem]"
+                                       :class="field.status === 'changed' || field.status === 'asc_only' ? 'border-violet-500/30 bg-violet-500/5' : 'border-obsidian-700 bg-obsidian-900/40'"
+                                       x-text="field.asc || '—'"></p>
+                                  </div>
+                                  <p x-show="field.status === 'equal'" class="text-xs text-obsidian-400 truncate"
+                                     x-text="field.local || field.asc || '—'"></p>
+                                </div>
+                              </template>
+                            </td>
+                          </template>
+                          <td class="px-2 py-2 align-middle">
+                            <div class="flex items-center gap-1.5">
+                              <template x-for="(item, dlIdx) in wbDiffShotPreview(loc, 'local', 3)" :key="'dl-' + loc.locale + (item.file_name || item.remote_id)">
+                                <img :src="wbDiffShotThumb(item, 'local')" :alt="item.file_name" loading="lazy"
+                                     :title="wbT('metadata.shots_click_zoom', '点击放大查看')"
+                                     class="h-7 w-7 rounded border border-sky-500/30 object-cover bg-obsidian-900 cursor-zoom-in"
+                                     @click.stop="wbOpenLightboxFromDiff(wbDiffShotPreview(loc, 'local', 3), dlIdx, 'local')">
+                              </template>
+                              <template x-for="(item, daIdx) in wbDiffShotPreview(loc, 'asc', 3)" :key="'da-' + loc.locale + (item.remote_id || item.file_name)">
+                                <img :src="wbDiffShotThumb(item, 'asc')" :alt="item.file_name" loading="lazy"
+                                     :title="wbT('metadata.shots_click_zoom', '点击放大查看')"
+                                     class="h-7 w-7 rounded border border-violet-500/30 object-cover bg-obsidian-900 cursor-zoom-in"
+                                     @click.stop="wbOpenLightboxFromDiff(wbDiffShotPreview(loc, 'asc', 3), daIdx, 'asc')">
+                              </template>
+                              <button type="button" x-show="loc.screenshots && loc.screenshots.length"
+                                      class="text-[11px] text-amber-550 hover:text-amber-500 cursor-pointer font-medium"
+                                      @click="loc.shotsExpanded = !loc.shotsExpanded">{{ t("metadata.diff_shots_heading") }}</button>
+                              <span x-show="!(loc.screenshots && loc.screenshots.length)" class="text-obsidian-600">—</span>
+                            </div>
+                          </td>
+                        </tr>
+                        <tr x-show="loc.shotsExpanded && wbDiffLocaleVisible(loc)" class="bg-obsidian-900/50 border-b border-obsidian-700/60">
+                          <td :colspan="wb.fieldNames.length + 3" class="px-3 py-3">
+                            <p class="text-[10px] uppercase tracking-widest text-obsidian-500 mb-2">{{ t("metadata.diff_shots_heading") }}</p>
                             <template x-for="shot in loc.screenshots" :key="loc.locale + '-' + shot.display_type">
-                              <div class="space-y-1.5">
+                              <div class="mb-3 last:mb-0 space-y-1.5">
                                 <label class="flex items-center gap-2 cursor-pointer">
                                   <input type="checkbox" class="w-3.5 h-3.5 accent-amber-500" x-model="shot.selected">
                                   <span class="text-xs font-mono text-obsidian-300" x-text="shot.display_type"></span>
@@ -995,12 +1408,12 @@
                                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                   <div>
                                     <p class="text-[10px] uppercase tracking-widest text-obsidian-500 mb-1">{{ t("metadata.diff_local") }}</p>
-                                    <div class="flex flex-wrap gap-1.5 min-h-[2.5rem] rounded border border-obsidian-700 bg-obsidian-900/40 p-1.5">
-                                      <template x-for="item in (shot.local || [])" :key="'L-' + item.file_name + item.order">
-                                        <img class="h-16 w-auto rounded border border-obsidian-600 object-cover bg-obsidian-800"
-                                             :src="wbDiffShotThumb(item, 'local')"
-                                             :alt="item.file_name"
-                                             loading="lazy"
+                                    <div class="flex flex-wrap gap-1 min-h-[2rem] rounded border border-obsidian-700 bg-obsidian-900/40 p-1">
+                                      <template x-for="(item, slIdx) in (shot.local || [])" :key="'L-' + item.file_name + item.order">
+                                        <img class="h-10 w-auto max-w-[2.5rem] rounded border border-obsidian-600 object-cover bg-obsidian-800 cursor-zoom-in"
+                                             :src="wbDiffShotThumb(item, 'local')" :alt="item.file_name" loading="lazy"
+                                             :title="wbT('metadata.shots_click_zoom', '点击放大查看')"
+                                             @click.stop="wbOpenLightboxFromDiff((shot.local || []), slIdx, 'local')"
                                              @error="$el.style.opacity='0.3'">
                                       </template>
                                       <span x-show="!(shot.local || []).length" class="text-[11px] text-obsidian-600 self-center px-1">—</span>
@@ -1008,12 +1421,12 @@
                                   </div>
                                   <div>
                                     <p class="text-[10px] uppercase tracking-widest text-obsidian-500 mb-1">{{ t("metadata.diff_asc") }}</p>
-                                    <div class="flex flex-wrap gap-1.5 min-h-[2.5rem] rounded border border-obsidian-700 bg-obsidian-900/40 p-1.5">
-                                      <template x-for="item in (shot.asc || [])" :key="'A-' + (item.remote_id || item.file_name) + item.order">
-                                        <img class="h-16 w-auto rounded border border-violet-500/30 object-cover bg-obsidian-800"
-                                             :src="wbDiffShotThumb(item, 'asc')"
-                                             :alt="item.file_name"
-                                             loading="lazy"
+                                    <div class="flex flex-wrap gap-1 min-h-[2rem] rounded border border-obsidian-700 bg-obsidian-900/40 p-1">
+                                      <template x-for="(item, saIdx) in (shot.asc || [])" :key="'A-' + (item.remote_id || item.file_name) + item.order">
+                                        <img class="h-10 w-auto max-w-[2.5rem] rounded border border-violet-500/30 object-cover bg-obsidian-800 cursor-zoom-in"
+                                             :src="wbDiffShotThumb(item, 'asc')" :alt="item.file_name" loading="lazy"
+                                             :title="wbT('metadata.shots_click_zoom', '点击放大查看')"
+                                             @click.stop="wbOpenLightboxFromDiff((shot.asc || []), saIdx, 'asc')"
                                              @error="wbDiffAscThumbError($el, item)">
                                       </template>
                                       <span x-show="!(shot.asc || []).length" class="text-[11px] text-obsidian-600 self-center px-1">—</span>
@@ -1022,11 +1435,11 @@
                                 </div>
                               </div>
                             </template>
-                          </div>
-                        </template>
-                      </div>
-                    </div>
-                  </template>
+                          </td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
                 </div>
               </div>
               </div>
@@ -1131,6 +1544,94 @@
     </div>
 
     <div id="run-result"></div>
+
+    <!-- Screenshot lightbox -->
+<div x-show="lightbox.open" x-cloak
+     class="fixed inset-0 z-[60] flex items-center justify-center"
+     style="background: rgba(0,0,0,0.72); backdrop-filter: blur(6px); padding: 24px;"
+     @keydown.escape.window="wbCloseLightbox()"
+     @keydown.arrow-left.window="wbLightboxPrev()"
+     @keydown.arrow-right.window="wbLightboxNext()"
+     @keydown.window.prevent.ctrl.equal="wbLightboxZoomBy(1)"
+     @keydown.window.prevent.ctrl.minus="wbLightboxZoomBy(-1)"
+     @keydown.window.prevent.ctrl.digit0="wbLightboxResetTransform()"
+     @click.self="wbCloseLightbox()">
+  <div class="flex flex-col overflow-hidden"
+       style="width:min(960px, calc(100vw - 48px)); height:min(820px, calc(100vh - 48px)); background:#111115; border:1px solid rgba(255,255,255,0.06); border-radius:12px; box-shadow:0 24px 80px rgba(0,0,0,0.55);"
+       @click.stop>
+    <div class="h-10 shrink-0 flex items-center justify-between px-3" style="border-bottom:1px solid rgba(255,255,255,0.06);">
+      <div class="min-w-0 flex items-center gap-3">
+        <span class="text-[11px] text-obsidian-200 font-mono" x-text="(lightbox.index + 1) + ' / ' + lightbox.items.length"></span>
+        <span class="text-[11px] text-obsidian-400 truncate" style="max-width:min(420px,40vw);" x-text="wbLightboxCurrent().title || 'screenshot'"></span>
+      </div>
+      <button type="button"
+              class="text-obsidian-300 hover:text-white cursor-pointer transition-colors duration-150 p-1 rounded focus-ring"
+              :title="wbT('metadata.shots_lightbox_close', '关闭预览')"
+              @click="wbCloseLightbox()">
+        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+
+    <div class="relative flex-1 min-h-0 overflow-hidden"
+         x-ref="lbStage"
+         @wheel.prevent="wbLightboxWheel($event)"
+         @resize.window="wbLightboxRefit()"
+         @mousemove="wbLightboxDragMove($event)"
+         @mouseup="wbLightboxDragEnd($event)"
+         @mouseleave="wbLightboxDragEnd($event)"
+         @mousedown="wbLightboxDragStart($event)"
+         @touchstart.prevent="wbLightboxTouchStart($event)"
+         @touchmove.prevent="wbLightboxTouchMove($event)"
+         @touchend="wbLightboxTouchEnd($event)"
+         @touchcancel="wbLightboxTouchEnd($event)">
+      <div class="absolute inset-0 flex items-center justify-center pointer-events-none" style="padding:0 56px;">
+        <img :src="wbLightboxCurrent().src" :alt="wbLightboxCurrent().title"
+             x-ref="lbImage"
+             class="rounded-lg border border-obsidian-600 shadow-2xl object-contain bg-obsidian-950 select-none pointer-events-auto"
+             :style="wbLightboxSizeStyle() + 'transform:' + wbLightboxImageStyle() + ';transform-origin:center center;cursor:' + (lightboxUi.scale > 1 ? (lightboxUi.dragging ? 'grabbing' : 'grab') : 'grab') + ';transition:' + (lightboxUi.dragging ? 'none' : 'transform 120ms ease-out')"
+             draggable="false"
+             @load="wbLightboxOnImageLoad()"
+             @dblclick.stop="wbLightboxSetScale(lightboxUi.scale > 1 ? 1 : 2)">
+      </div>
+
+      <button type="button"
+              class="absolute z-30 text-white text-3xl leading-none bg-black/70 hover:bg-black/90 rounded-full w-12 h-12 flex items-center justify-center shadow-xl"
+              style="left:12px;top:50%;transform:translateY(-50%);border:1px solid rgba(255,255,255,0.1);"
+              @click.stop="wbLightboxPrev()"
+              x-show="lightbox.items.length > 1"
+              x-cloak
+              aria-label="上一张">‹</button>
+
+      <button type="button"
+              class="absolute z-30 text-white text-3xl leading-none bg-black/70 hover:bg-black/90 rounded-full w-12 h-12 flex items-center justify-center shadow-xl"
+              style="right:12px;top:50%;transform:translateY(-50%);border:1px solid rgba(255,255,255,0.1);"
+              @click.stop="wbLightboxNext()"
+              x-show="lightbox.items.length > 1"
+              x-cloak
+              aria-label="下一张">›</button>
+    </div>
+
+    <div class="shrink-0 p-2 space-y-2" style="border-top:1px solid rgba(255,255,255,0.06);">
+      <div class="flex items-center justify-center gap-1.5">
+        <button type="button" class="btn-ghost text-xs px-2 py-1" @click="wbLightboxZoomBy(1)">放大</button>
+        <button type="button" class="btn-ghost text-xs px-2 py-1" @click="wbLightboxZoomBy(-1)">缩小</button>
+        <button type="button" class="btn-ghost text-xs px-2 py-1" @click="wbLightboxResetTransform()">1:1</button>
+        <button type="button" class="btn-ghost text-xs px-2 py-1" @click="wbLightboxRotate()">旋转</button>
+        <button type="button" class="btn-ghost text-xs px-2 py-1" @click="wbLightboxMirror()">镜像</button>
+        <button type="button" class="btn-ghost text-xs px-2 py-1" @click="wbLightboxDownload()">下载</button>
+      </div>
+      <div class="flex items-center gap-1 overflow-x-auto pb-0.5" x-show="lightbox.items.length > 1">
+        <template x-for="(it, idx) in lightbox.items" :key="'lb-thumb-' + idx + '-' + (it.title || '')">
+          <button type="button"
+                  class="shrink-0 rounded border p-0.5 transition-colors duration-150"
+                  :class="idx === lightbox.index ? 'border-amber-500 bg-amber-500/10' : 'border-obsidian-700 bg-black/20 hover:border-obsidian-500'"
+                  @click="lightbox.index = idx; wbLightboxResetTransform(true)">
+            <img :src="it.src" :alt="it.title"
+                 class="w-10 h-10 object-cover rounded bg-obsidian-900">
+          </button>
+        </template>
+      </div>
+    </div>
   </div>
 </div>
 
