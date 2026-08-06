@@ -170,9 +170,13 @@
           return data;
         })
         .then(data => {
-          const selectedByName = {};
-          group.items.forEach(it => selectedByName[it.file_name] = it.selected);
-          group.items = (data.items || []).map(it => ({ ...it, selected: selectedByName[it.file_name] !== false }));
+          // Remap selection by index: reorder renames files (01_stem…), so
+          // old→new name lookup would miss and unchecked state would be lost.
+          const selectedFlags = group.items.map(it => it.selected);
+          group.items = (data.items || []).map((it, i) => ({
+            ...it,
+            selected: selectedFlags[i] !== undefined ? selectedFlags[i] : true,
+          }));
           this.wbSyncHidden();
         })
         .catch(e => { this.wb.shotsError = e.message; })

@@ -13,6 +13,9 @@ from asc.config import Config
 from asc.guard import GuardViolationError, enforce_config_guard
 from asc.listing.local import (
     FileChangedError,
+    PathTraversalError,
+    _assert_under_root,
+    _safe_locale_name,
     add_screenshot,
     apply_screenshot_order,
     delete_screenshot,
@@ -80,13 +83,10 @@ def _resolve_under_root(root: str, path: str) -> Path:
     """
     if not root or not path:
         raise HTTPException(status_code=400, detail="root and path are required")
-    root_real = Path(root).resolve()
-    target_real = Path(path).resolve()
     try:
-        target_real.relative_to(root_real)
-    except ValueError:
+        return _assert_under_root(root, path)
+    except PathTraversalError:
         raise HTTPException(status_code=400, detail="path is outside root") from None
-    return target_real
 
 
 @router.get("/local")
@@ -263,7 +263,10 @@ async def listing_screenshots_replace(
 
     target = _resolve_under_root(root, path)
     data = await file.read()
-    new_path = replace_screenshot(target, data, new_name.strip() or None)
+    try:
+        new_path = replace_screenshot(target, data, new_name.strip() or None, root=root)
+    except PathTraversalError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
     return {
         "ok": True,
         "path": str(new_path),
@@ -312,10 +315,19 @@ async def listing_screenshots_add(
     if not profile:
         return JSONResponse(_no_profile_payload(lang), status_code=400)
 
-    locale_dir = find_locale_screenshot_dir(root, locale) or (Path(root) / locale)
+    try:
+        safe_locale = _safe_locale_name(locale)
+    except PathTraversalError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
+
+    root_path = Path(root).resolve()
+    locale_dir = find_locale_screenshot_dir(root, safe_locale) or (root_path / safe_locale)
     data = await file.read()
     target_name = filename.strip() or file.filename or "screenshot.png"
-    new_path = add_screenshot(locale_dir, display_type, target_name, data)
+    try:
+        new_path = add_screenshot(locale_dir, display_type, target_name, data, root=root_path)
+    except PathTraversalError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
     return {
         "ok": True,
         "path": str(new_path),

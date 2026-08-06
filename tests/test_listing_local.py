@@ -253,3 +253,110 @@ def test_add_screenshot_creates_file(tmp_path):
     result = add_screenshot(d, "APP_IPHONE_67", "03_new.png", b"png-bytes")
     assert result == d / "03_new.png"
     assert result.read_bytes() == b"png-bytes"
+
+
+def test_add_screenshot_rejects_path_traversal(tmp_path):
+    import pytest
+
+    from asc.listing.local import PathTraversalError, add_screenshot
+
+    root = tmp_path / "screenshots"
+    root.mkdir()
+    locale_dir = root / "en-US"
+
+    with pytest.raises(PathTraversalError):
+        add_screenshot(locale_dir, "APP_IPHONE_67", "../escape.png", b"x", root=root)
+    with pytest.raises(PathTraversalError):
+        add_screenshot(locale_dir, "APP_IPHONE_67", "/tmp/evil.png", b"x", root=root)
+    outside = tmp_path / "outside"
+    with pytest.raises(PathTraversalError):
+        add_screenshot(outside, "APP_IPHONE_67", "a.png", b"x", root=root)
+    assert not (root / "escape.png").exists()
+    assert list(root.iterdir()) == []
+
+
+def test_add_screenshot_uses_basename_under_root(tmp_path):
+    from asc.listing.local import add_screenshot
+
+    root = tmp_path / "screenshots"
+    locale_dir = root / "en-US"
+    result = add_screenshot(locale_dir, "APP_IPHONE_67", "nested/ok.png", b"png", root=root)
+    assert result == locale_dir / "ok.png"
+    assert result.read_bytes() == b"png"
+
+
+def test_replace_screenshot_rejects_unsafe_new_name(tmp_path):
+    import pytest
+
+    from asc.listing.local import PathTraversalError, replace_screenshot
+
+    root = tmp_path / "screenshots"
+    d = root / "en-US"
+    d.mkdir(parents=True)
+    p = d / "01_a.png"
+    p.write_bytes(b"old")
+
+    with pytest.raises(PathTraversalError):
+        replace_screenshot(p, b"new", "../evil.png", root=root)
+    with pytest.raises(PathTraversalError):
+        replace_screenshot(p, b"new", "/tmp/evil.png", root=root)
+    assert p.read_bytes() == b"old"
+    assert not (root / "evil.png").exists()
+
+
+def test_replace_screenshot_new_name_basename_under_parent(tmp_path):
+    from asc.listing.local import replace_screenshot
+
+    root = tmp_path / "screenshots"
+    d = root / "en-US"
+    d.mkdir(parents=True)
+    p = d / "01_a.png"
+    p.write_bytes(b"old")
+    result = replace_screenshot(p, b"new", "subdir/01_a.jpg", root=root)
+    assert result == d / "01_a.jpg"
+    assert result.read_bytes() == b"new"
+    assert not p.exists()
+
+
+def test_reorder_numeric_stem_strips_digits_for_sort_key(tmp_path):
+    """I1: pure-numeric stems must not become `01_2.png` (breaks last-number sort)."""
+    import re
+
+    from PIL import Image
+
+    from asc.commands.screenshots import _get_sorted_screenshots
+    from asc.listing.local import apply_screenshot_order
+
+    d = tmp_path / "en-US"
+    d.mkdir()
+    Image.new("RGB", (1290, 2796)).save(d / "1.png")
+    Image.new("RGB", (1290, 2796)).save(d / "2.png")
+    apply_screenshot_order(d, "APP_IPHONE_67", ["2.png", "1.png"])
+    names = [p.name for p in _get_sorted_screenshots(d)]
+    assert names == ["01_shot.png", "02_shot.png"]
+    for name in names:
+        nums = re.findall(r"\d+", Path(name).stem)
+        assert nums[-1] == name[:2]
+
+
+def test_reorder_renumbers_entire_folder_across_display_types(tmp_path):
+    """I2: reordering one displayType must renumber other types to avoid NN_ collisions."""
+    from PIL import Image
+
+    from asc.commands.screenshots import _get_sorted_screenshots
+    from asc.listing.local import apply_screenshot_order
+
+    d = tmp_path / "en-US"
+    d.mkdir()
+    # iPhone 6.7" + iPad Pro 12.9" in the same locale folder
+    Image.new("RGB", (1290, 2796)).save(d / "01_iphone_a.png")
+    Image.new("RGB", (2048, 2732)).save(d / "02_ipad.png")
+    Image.new("RGB", (1290, 2796)).save(d / "03_iphone_b.png")
+
+    apply_screenshot_order(
+        d,
+        "APP_IPHONE_67",
+        ["03_iphone_b.png", "01_iphone_a.png"],
+    )
+    names = [p.name for p in _get_sorted_screenshots(d)]
+    assert names == ["01_iphone_b.png", "02_ipad.png", "03_iphone_a.png"]

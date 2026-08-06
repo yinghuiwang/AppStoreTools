@@ -14,10 +14,66 @@ from asc.utils import extract_locale, parse_csv
 UNKNOWN_DISPLAY_TYPE = "UNKNOWN"
 
 _NUMERIC_PREFIX_RE = re.compile(r"^\d+_(.+)$")
+_DIGIT_RUN_RE = re.compile(r"\d+")
 
 
 class FileChangedError(Exception):
     """写回 CSV 时，磁盘文件的 mtime 与调用方持有的 `expected_mtime` 不一致。"""
+
+
+class PathTraversalError(ValueError):
+    """路径逃逸 screenshots root，或 locale/filename 含绝对路径 / `..`。"""
+
+
+def _assert_under_root(root: Path | str, path: Path | str) -> Path:
+    """Resolve `path` and assert it lies under resolved `root` via `os.path.commonpath`."""
+    root_r = Path(root).resolve()
+    path_r = Path(path).resolve()
+    try:
+        common = os.path.commonpath([str(root_r), str(path_r)])
+    except ValueError as e:
+        raise PathTraversalError("path is outside root") from e
+    if common != str(root_r):
+        raise PathTraversalError("path is outside root")
+    return path_r
+
+
+def _safe_locale_name(locale: str) -> str:
+    """Reject absolute paths, `..`, and multi-segment locale names."""
+    locale = (locale or "").strip()
+    if not locale:
+        raise PathTraversalError("locale is required")
+    p = Path(locale)
+    if p.is_absolute() or ".." in p.parts or len(p.parts) != 1:
+        raise PathTraversalError("locale must not be absolute or contain '..'")
+    return locale
+
+
+def _safe_basename(filename: str) -> str:
+    """Return a bare basename; reject absolute paths and `..` components."""
+    filename = (filename or "").strip()
+    if not filename:
+        raise PathTraversalError("filename is required")
+    p = Path(filename)
+    if p.is_absolute() or ".." in p.parts:
+        raise PathTraversalError("filename must not be absolute or contain '..'")
+    base = p.name
+    if not base or base in (".", ".."):
+        raise PathTraversalError("invalid filename")
+    return base
+
+
+def _semantic_stem(stem: str) -> str:
+    """Strip a leading `NN_` order prefix and all digit runs from the semantic base.
+
+    `_get_sorted_screenshots` sorts by the *last* number in the stem, so the
+    order prefix must be the only digits left (e.g. `01_shot.png`, not `01_2.png`).
+    """
+    match = _NUMERIC_PREFIX_RE.match(stem)
+    base = match.group(1) if match else stem
+    cleaned = _DIGIT_RUN_RE.sub("", base).strip("._- ")
+    return cleaned or "shot"
+
 
 
 def load_local_text_snapshot(csv_path: str) -> ListingSnapshot:
@@ -178,25 +234,48 @@ def find_locale_screenshot_dir(screenshots_dir: str, locale: str) -> Path | None
 
 
 def apply_screenshot_order(locale_dir: Path, display_type: str, ordered_file_names: list[str]) -> None:
-    """Reorder the files in `ordered_file_names` within `locale_dir` to `01_stem.ext`, `02_...`.
+    """Reorder `ordered_file_names` and renumber the entire locale folder consistently.
 
-    Only the files named in `ordered_file_names` are touched — other files in
-    `locale_dir` (e.g. belonging to a different displayType) are left as-is.
-    A previously-applied `NN_` numeric prefix is stripped so the semantic stem
-    is preserved across repeated reorders. `display_type` is accepted for
-    interface/documentation purposes; callers are expected to only pass file
-    names that belong to that displayType group.
+    Files named in `ordered_file_names` fill the slots previously occupied by
+    that set (in the new order). Other files (e.g. a different displayType)
+    keep their relative positions and are renumbered together so `NN_` prefixes
+    never collide across types. Digit runs are stripped from semantic stems so
+    `_get_sorted_screenshots` (which uses the last number in the stem) sees the
+    order prefix as the sort key. `display_type` is accepted for
+    interface/documentation purposes; callers should only pass names from that
+    displayType group.
     """
+    # Imported lazily — same rationale as `scan_local_screenshots`.
+    from asc.commands.screenshots import _get_sorted_screenshots
+
     locale_dir = Path(locale_dir)
+    all_files = _get_sorted_screenshots(locale_dir)
+    ordered_existing = [n for n in ordered_file_names if (locale_dir / n).exists()]
+    ordered_set = set(ordered_existing)
+
+    # Preserve other types' slots: walk current sorted order and replace only
+    # members of the reorder set with the new sequence.
+    final_names: list[str] = []
+    qi = 0
+    for f in all_files:
+        if f.name in ordered_set:
+            if qi < len(ordered_existing):
+                final_names.append(ordered_existing[qi])
+                qi += 1
+        else:
+            final_names.append(f.name)
+    while qi < len(ordered_existing):
+        name = ordered_existing[qi]
+        if name not in final_names:
+            final_names.append(name)
+        qi += 1
 
     entries: list[tuple[Path, str, str]] = []
-    for name in ordered_file_names:
+    for name in final_names:
         src = locale_dir / name
         if not src.exists():
             continue
-        match = _NUMERIC_PREFIX_RE.match(src.stem)
-        semantic_stem = match.group(1) if match else src.stem
-        entries.append((src, semantic_stem, src.suffix))
+        entries.append((src, _semantic_stem(src.stem), src.suffix))
 
     # Two-phase rename (via temp names) so swapping/rotating positions never
     # collides with a file that hasn't been renamed yet.
@@ -211,10 +290,33 @@ def apply_screenshot_order(locale_dir: Path, display_type: str, ordered_file_nam
         tmp_path.rename(locale_dir / new_name)
 
 
-def replace_screenshot(path: Path, upload_bytes: bytes, new_name: str | None) -> Path:
-    """Overwrite the screenshot at `path` with `upload_bytes`, optionally renaming it."""
+def replace_screenshot(
+    path: Path,
+    upload_bytes: bytes,
+    new_name: str | None,
+    *,
+    root: Path | str | None = None,
+) -> Path:
+    """Overwrite the screenshot at `path` with `upload_bytes`, optionally renaming it.
+
+    When `new_name` is set it must be a bare basename (no absolute path / `..`);
+    the target is always written under `path.parent`. When `root` is provided,
+    both `path` / `path.parent` and the final target must resolve under it.
+    """
     path = Path(path)
-    target = path.parent / new_name if new_name else path
+    if root is not None:
+        root_r = Path(root).resolve()
+        _assert_under_root(root_r, path)
+        _assert_under_root(root_r, path.parent)
+
+    if new_name:
+        target = path.parent / _safe_basename(new_name)
+    else:
+        target = path
+
+    if root is not None:
+        _assert_under_root(Path(root).resolve(), target)
+
     target.write_bytes(upload_bytes)
     if target != path and path.exists():
         path.unlink()
@@ -228,15 +330,33 @@ def delete_screenshot(path: Path) -> None:
         path.unlink()
 
 
-def add_screenshot(locale_dir: Path, display_type: str, filename: str, data: bytes) -> Path:
-    """Write a new screenshot `filename` (bytes `data`) into `locale_dir`, creating it if needed.
+def add_screenshot(
+    locale_dir: Path,
+    display_type: str,
+    filename: str,
+    data: bytes,
+    *,
+    root: Path | str | None = None,
+) -> Path:
+    """Write a new screenshot into `locale_dir`, creating it if needed.
 
-    `display_type` is accepted for interface/documentation purposes (the new
-    file's actual displayType is re-detected from its image dimensions on the
-    next scan); it is not encoded into the file name here.
+    `filename` is reduced to a bare basename; absolute paths and `..` are
+    rejected. When `root` is provided, both `locale_dir` and the final target
+    must resolve under it. `display_type` is accepted for interface/documentation
+    purposes (actual type is re-detected from image dimensions on the next scan).
     """
+    safe_name = _safe_basename(filename)
     locale_dir = Path(locale_dir)
+
+    if root is not None:
+        root_r = Path(root).resolve()
+        _assert_under_root(root_r, locale_dir)
+
     locale_dir.mkdir(parents=True, exist_ok=True)
-    target = locale_dir / filename
+    target = locale_dir / safe_name
+
+    if root is not None:
+        _assert_under_root(Path(root).resolve(), target)
+
     target.write_bytes(data)
     return target

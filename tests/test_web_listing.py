@@ -498,6 +498,66 @@ def test_listing_screenshots_add(client, tmp_path):
     assert (shots / "en-US" / "03_new.png").read_bytes() == b"png-bytes"
 
 
+def test_listing_screenshots_add_rejects_locale_traversal(client, tmp_path):
+    shots = tmp_path / "screenshots"
+    shots.mkdir()
+
+    r = client.post(
+        "/api/listing/screenshots/add",
+        data={
+            "root": str(shots),
+            "locale": "../outside",
+            "display_type": "APP_IPHONE_67",
+            "filename": "x.png",
+        },
+        files={"file": ("x.png", b"png-bytes", "image/png")},
+        cookies={"asc_profile": "test"},
+    )
+    assert r.status_code == 400
+    assert not (tmp_path / "outside").exists()
+    assert not (tmp_path / "outside" / "x.png").exists()
+
+
+def test_listing_screenshots_add_rejects_filename_traversal(client, tmp_path):
+    shots = tmp_path / "screenshots"
+    shots.mkdir()
+    (shots / "en-US").mkdir()
+
+    r = client.post(
+        "/api/listing/screenshots/add",
+        data={
+            "root": str(shots),
+            "locale": "en-US",
+            "display_type": "APP_IPHONE_67",
+            "filename": "../escape.png",
+        },
+        files={"file": ("escape.png", b"png-bytes", "image/png")},
+        cookies={"asc_profile": "test"},
+    )
+    assert r.status_code == 400
+    assert not (shots / "escape.png").exists()
+
+
+def test_listing_screenshots_replace_rejects_new_name_traversal(client, tmp_path):
+    shots = tmp_path / "screenshots"
+    img_path = shots / "en-US" / "01_a.png"
+    _make_png(img_path)
+
+    r = client.post(
+        "/api/listing/screenshots/replace",
+        data={
+            "root": str(shots),
+            "path": str(img_path),
+            "new_name": "../evil.png",
+        },
+        files={"file": ("new.png", b"new-image-bytes", "image/png")},
+        cookies={"asc_profile": "test"},
+    )
+    assert r.status_code == 400
+    assert img_path.read_bytes() != b"new-image-bytes"
+    assert not (shots / "evil.png").exists()
+
+
 def test_metadata_page_has_screenshot_workbench_markup(client):
     r = client.get("/metadata")
     assert r.status_code == 200
@@ -506,6 +566,8 @@ def test_metadata_page_has_screenshot_workbench_markup(client):
     assert "wbTriggerReplace" in r.text
     assert "wbDeleteScreenshot" in r.text
     assert "wbTriggerAdd" in r.text
+    # I3: selection remapped by index after reorder rename
+    assert "selectedFlags" in r.text
 
 
 def test_listing_screenshots_add_requires_profile(client, tmp_path):
