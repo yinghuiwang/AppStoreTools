@@ -2090,12 +2090,17 @@ async def urls_check(request: Request):
         return {"ok": False, "level": "error", "message": str(e), "detail": {}}
 
 
+def _parse_urls_locales(locales: str) -> list[str]:
+    """Parse comma-separated locales; empty / whitespace-only → []."""
+    return [part.strip() for part in (locales or "").split(",") if part.strip()]
+
+
 @router.post("/urls/set")
 async def urls_set(
     request: Request,
     field: str = _Form(...),  # supportUrl, marketingUrl, privacyPolicyUrl
     url: str = _Form(...),
-    locales: str = _Form(""),  # comma-separated or empty for all
+    locales: str = _Form(""),  # comma-separated; required (no silent all)
     dry_run: str = _Form(""),
     verbose: str = _Form(""),
 ):
@@ -2104,11 +2109,17 @@ async def urls_set(
     profile = _cookie_profile(request)
     if not profile:
         return JSONResponse({"error": t("api.no_profile", lang=lang)}, status_code=400)
+    locale_list = _parse_urls_locales(locales)
+    if not locale_list:
+        return JSONResponse(
+            {"error": t("api.urls_locales_required", lang=lang)},
+            status_code=400,
+        )
     task_id = _start_urls_task(
         profile=profile,
         field=field,
         url=url,
-        locales=locales,
+        locales=locale_list,
         dry_run=bool(dry_run),
         verbose=bool(verbose),
     )
@@ -2120,19 +2131,19 @@ def _start_urls_task(
     profile: str,
     field: str,
     url: str,
-    locales: str = "",
+    locales: list[str],
     dry_run: bool = False,
     verbose: bool = False,
 ) -> str:
     task_id = _task_store.create("urls", profile=profile)
     guard_enforcer = enforce_config_guard
+    locale_list = list(locales)
 
     def run(reporter, cancel_event):
         try:
             config = Config(app_name=profile)
             guard_enforcer(config, interactive=False)
             api, app_id = make_api_from_config(config)
-            locale_list = [l.strip() for l in locales.split(",")] if locales else None
 
             if field == "privacyPolicyUrl":
                 from asc.commands.metadata import _update_app_info_field_core

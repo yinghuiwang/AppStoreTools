@@ -12,7 +12,7 @@
     <p class="text-sm text-obsidian-400 mt-1">{{ t("urls.subtitle") }}</p>
   </div>
 
-  <div x-data="{
+  <div id="urls-state" x-data="{
     step: 1,
     taskId: null,
     status: 'idle',
@@ -20,22 +20,43 @@
     progressMsg: '',
     canceling: false,
     checkResult: null,
+    checkLoading: false,
     selectedField: 'supportUrl',
     availableLocales: [],
-    localesText: '',
+    selectedLocales: [],
+    localeError: '',
     submitting: false,
 
+    selectAllLocales() {
+      this.selectedLocales = [...this.availableLocales];
+      this.localeError = '';
+    },
+
+    deselectAllLocales() {
+      this.selectedLocales = [];
+    },
+
     submitForm(e) {
+      this.localeError = '';
+      if (!this.selectedLocales.length) {
+        this.localeError = window.t('urls.locales_required');
+        return;
+      }
       this.submitting = true;
       const form = e.target;
-      // 设置隐藏字段
       form.elements.namedItem('field').value = this.selectedField;
-      form.elements.namedItem('locales').value = this.localesText;
+      form.elements.namedItem('locales').value = this.selectedLocales.join(',');
       fetch('/api/urls/set', {
         method: 'POST',
         body: new FormData(form)
       })
-      .then(r => r.json())
+      .then(async r => {
+        const data = await r.json();
+        if (!r.ok) {
+          throw new Error(data.error || window.t('common.request_failed'));
+        }
+        return data;
+      })
       .then(data => {
         this.taskId = data.task_id;
         this.step = 2;
@@ -44,32 +65,40 @@
         this.canceling = false;
         TaskLogDrawer.open(this.taskId, urlsLogOptions());
       })
-      .catch(e => { 
+      .catch(e => {
         this.submitting = false;
-        alert(window.t('urls.submit_failed_prefix') + e); 
+        alert(window.t('urls.submit_failed_prefix') + e.message);
       });
     },
 
     checkEnv() {
+      this.checkLoading = true;
+      this.localeError = '';
       fetch('/api/urls/check')
         .then(r => r.json())
         .then(data => {
           this.checkResult = data;
+          this.checkLoading = false;
           if (data.ok && data.detail && data.detail.locales) {
             this.availableLocales = data.detail.locales;
-            this.localesText = data.detail.locales.join(', ');
+            // Default: all locales selected
+            this.selectedLocales = [...data.detail.locales];
           }
         })
-        .catch(() => { this.checkResult = {ok: false, level: 'error', message: window.t('common.request_failed')}; });
+        .catch(() => {
+          this.checkLoading = false;
+          this.checkResult = {ok: false, level: 'error', message: window.t('common.request_failed')};
+        });
     }
-  }">
+  }"
+  x-init="checkEnv()">
 
     <!-- Step 1: 配置表单 -->
     <div x-show="step === 1">
       <form id="urls-form" @submit.prevent="submitForm($event)">
         <!-- 隐藏字段 -->
         <input type="hidden" name="field" :value="selectedField">
-        <input type="hidden" name="locales" :value="localesText">
+        <input type="hidden" name="locales" :value="selectedLocales.join(',')">
 
         <div class="card">
           <div class="card-body space-y-5">
@@ -125,14 +154,55 @@
                      placeholder="https://example.com/support">
             </div>
 
-            <!-- Locales -->
+            <!-- Locales multi-select -->
             <div>
-              <label for="locales-input" class="text-xs uppercase tracking-widest text-obsidian-400 font-medium mb-2 block">{{ t("urls.locales") }}</label>
-              <input type="text" id="locales-input"
-                     x-model="localesText"
-                     class="field-input w-full"
-                     placeholder="{{ t('urls.locales_ph') }}">
+              <div class="flex items-center justify-between gap-3 mb-2">
+                <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">{{ t("urls.locales") }}</label>
+                <div class="flex items-center gap-3" x-show="availableLocales.length">
+                  <button type="button"
+                          class="text-xs text-amber-500 hover:text-amber-400 cursor-pointer transition-colors duration-150 font-medium"
+                          @click="selectAllLocales()">{{ t("urls.select_all") }}</button>
+                  <button type="button"
+                          class="text-xs text-obsidian-400 hover:text-obsidian-200 cursor-pointer transition-colors duration-150 font-medium"
+                          @click="deselectAllLocales()">{{ t("urls.deselect_all") }}</button>
+                </div>
+              </div>
+
+              <template x-if="checkLoading">
+                <p class="text-xs text-obsidian-500 flex items-center gap-1.5 py-2">
+                  <svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                  {{ t("common.loading") }}
+                </p>
+              </template>
+
+              <template x-if="!checkLoading && !availableLocales.length">
+                <p class="text-xs text-obsidian-500 py-2">{{ t("urls.locales_load_hint") }}</p>
+              </template>
+
+              <div class="flex flex-wrap gap-2" x-show="!checkLoading && availableLocales.length"
+                   data-locale-checkboxes>
+                <template x-for="locale in availableLocales" :key="locale">
+                  <label class="flex items-center gap-2 px-2.5 py-1.5 rounded-md border cursor-pointer transition-all duration-150"
+                         :class="selectedLocales.includes(locale) ? 'border-amber-500/40 bg-amber-500/10' : 'border-obsidian-700 bg-obsidian-800/30 hover:border-obsidian-600'">
+                    <input type="checkbox"
+                           class="w-3.5 h-3.5 accent-amber-500"
+                           :value="locale"
+                           x-model="selectedLocales"
+                           @change="localeError = ''">
+                    <span class="text-sm text-obsidian-100 font-mono" x-text="locale"></span>
+                  </label>
+                </template>
+              </div>
+
+              <p x-show="localeError"
+                 class="text-xs text-red-400 mt-2"
+                 role="alert"
+                 data-locale-error
+                 x-text="localeError"></p>
               <p class="text-xs text-obsidian-500 mt-1">{{ t("urls.locales_hint") }}</p>
+              <p class="text-xs text-obsidian-500 mt-0.5"
+                 x-show="availableLocales.length"
+                 x-text="window.t('urls.locales_selected', { selected: selectedLocales.length, total: availableLocales.length })"></p>
             </div>
 
             <!-- Dry run -->
@@ -144,14 +214,14 @@
 
             <!-- Actions -->
             <div class="flex gap-3 pt-3 border-t border-obsidian-700">
-              <button type="submit" class="btn-primary" :disabled="submitting">
+              <button type="submit" class="btn-primary" :disabled="submitting || checkLoading">
                 <span x-show="!submitting">{{ t("urls.submit") }}</span>
                 <span x-show="submitting" class="flex items-center gap-1.5">
                   <svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
                   {{ t("common.submitting") }}
                 </span>
               </button>
-              <button type="button" class="btn-ghost" @click="checkEnv()">
+              <button type="button" class="btn-ghost" @click="checkEnv()" :disabled="checkLoading">
                 {{ t("common.check_env") }}
               </button>
             </div>
@@ -218,14 +288,14 @@ function cancelTask(taskId, beforeCancel) {
   if (beforeCancel) beforeCancel();
   fetch(`/api/task/${taskId}/cancel`, {method: 'POST'})
     .catch(() => {
-      const root = document.querySelector('[x-data]');
+      const root = document.getElementById('urls-state');
       const d = Alpine.$data(root);
       d.canceling = false;
     });
 }
 
 function urlsLogOptions() {
-  const root = document.querySelector('[x-data]');
+  const root = document.getElementById('urls-state');
   const d = Alpine.$data(root);
   return {
     title: window.t('urls.log_title'),

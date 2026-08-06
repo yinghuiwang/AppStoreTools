@@ -160,6 +160,157 @@ def test_urls_web_starter_uses_start_background_task():
     # route delegates to starter
     route = inspect.getsource(routes_api.urls_set)
     assert "_start_urls_task" in route
+    assert "_parse_urls_locales" in route
+    assert "api.urls_locales_required" in route
+
+
+def test_parse_urls_locales():
+    from asc.web.routes_api import _parse_urls_locales
+
+    assert _parse_urls_locales("") == []
+    assert _parse_urls_locales("   ") == []
+    assert _parse_urls_locales("en-US") == ["en-US"]
+    assert _parse_urls_locales("en-US, zh-Hans") == ["en-US", "zh-Hans"]
+    assert _parse_urls_locales("en-US,, ,zh-Hans,") == ["en-US", "zh-Hans"]
+
+
+def test_urls_set_rejects_empty_locales(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from unittest.mock import patch
+
+    from asc.web.server import create_app
+    from asc.web.tasks import TaskStore
+    from asc.web import routes_api
+
+    store = TaskStore(tmp_path / "tasks.db")
+    monkeypatch.setattr(routes_api, "_task_store", store)
+    client = TestClient(create_app())
+    client.cookies.set("asc_profile", "testapp")
+    client.cookies.set("asc_lang", "en")
+
+    with patch("asc.web.routes_api._start_urls_task") as starter:
+        resp = client.post(
+            "/api/urls/set",
+            data={
+                "field": "supportUrl",
+                "url": "https://example.com/support",
+                "locales": "",
+            },
+        )
+    assert resp.status_code == 400
+    assert resp.json()["error"] == "Select at least one target locale"
+    starter.assert_not_called()
+
+    with patch("asc.web.routes_api._start_urls_task") as starter:
+        resp = client.post(
+            "/api/urls/set",
+            data={
+                "field": "supportUrl",
+                "url": "https://example.com/support",
+                "locales": "  ,  ",
+            },
+        )
+    assert resp.status_code == 400
+    starter.assert_not_called()
+
+
+def test_urls_set_passes_selected_locales(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from unittest.mock import patch
+
+    from asc.web.server import create_app
+    from asc.web.tasks import TaskStore
+    from asc.web import routes_api
+
+    store = TaskStore(tmp_path / "tasks.db")
+    monkeypatch.setattr(routes_api, "_task_store", store)
+    client = TestClient(create_app())
+    client.cookies.set("asc_profile", "testapp")
+
+    with patch("asc.web.routes_api._start_urls_task", return_value="task-1") as starter:
+        resp = client.post(
+            "/api/urls/set",
+            data={
+                "field": "marketingUrl",
+                "url": "https://example.com",
+                "locales": "en-US, zh-Hans",
+                "dry_run": "on",
+            },
+        )
+    assert resp.status_code == 200
+    assert resp.json()["task_id"] == "task-1"
+    starter.assert_called_once()
+    kwargs = starter.call_args.kwargs
+    assert kwargs["profile"] == "testapp"
+    assert kwargs["field"] == "marketingUrl"
+    assert kwargs["url"] == "https://example.com"
+    assert kwargs["locales"] == ["en-US", "zh-Hans"]
+    assert kwargs["dry_run"] is True
+
+
+def test_urls_page_has_locale_checkbox_ui():
+    from fastapi.testclient import TestClient
+
+    from asc.web.server import create_app
+
+    client = TestClient(create_app())
+    resp = client.get("/urls")
+    assert resp.status_code == 200
+    html = resp.text
+    assert "selectedLocales" in html
+    assert "selectAllLocales" in html
+    assert "deselectAllLocales" in html
+    assert "data-locale-checkboxes" in html
+    assert "urls.locales_required" in html
+    assert "x-init=\"checkEnv()\"" in html
+    # No longer a free-text locales input
+    assert 'id="locales-input"' not in html
+    assert "localesText" not in html
+
+
+def test_start_urls_task_passes_locale_list_to_core(tmp_path, monkeypatch):
+    from unittest.mock import MagicMock, patch
+
+    from asc.web import routes_api
+    from asc.web.tasks import TaskStore
+
+    store = TaskStore(tmp_path / "tasks.db")
+    monkeypatch.setattr(routes_api, "_task_store", store)
+    captured = {}
+
+    def fake_run(store_arg, *, task_id=None, run=None, **kwargs):
+        reporter = MagicMock()
+        reporter.failed = False
+        run(reporter, MagicMock(is_set=MagicMock(return_value=False)))
+        return task_id
+
+    def fake_core(api, app_id, field, label, url, locales, dry_run, **kwargs):
+        captured["locales"] = locales
+        captured["field"] = field
+        captured["url"] = url
+
+    with patch("asc.web.routes_api.start_background_task", side_effect=fake_run), \
+            patch("asc.web.routes_api.Config", return_value=MagicMock()), \
+            patch("asc.web.routes_api.enforce_config_guard"), \
+            patch(
+                "asc.web.routes_api.make_api_from_config",
+                return_value=(MagicMock(), "app1"),
+            ), \
+            patch(
+                "asc.commands.metadata._update_version_field_core",
+                side_effect=fake_core,
+            ):
+        routes_api._start_urls_task(
+            profile="testapp",
+            field="supportUrl",
+            url="https://example.com/support",
+            locales=["en-US"],
+            dry_run=True,
+        )
+
+    assert captured["locales"] == ["en-US"]
+    assert captured["field"] == "supportUrl"
+    assert captured["url"] == "https://example.com/support"
 
 
 def test_update_phase_plan_download_70_install_30():

@@ -257,3 +257,12 @@ def test_urls_check_env_ok_locales_localized(client, monkeypatch):
     data = resp.json()
     assert data["ok"] is True
     assert data["message"] == "Environment OK, found 3 locale versions"
+
+
+def test_urls_locales_i18n_keys():
+    assert t("urls.select_all", lang="zh") == "全选"
+    assert t("urls.deselect_all", lang="zh") == "取消全选"
+    assert t("urls.locales_required", lang="zh") == "请至少选择一种目标语言"
+    assert t("api.urls_locales_required", lang="en") == "Select at least one target locale"
+    assert "selected" in t("urls.locales_selected", lang="en", selected=2, total=5)
+    assert "已选" in t("urls.locales_selected", lang="zh", selected=2, total=5)
