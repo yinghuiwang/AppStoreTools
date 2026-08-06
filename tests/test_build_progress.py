@@ -52,11 +52,11 @@ class _FakeSpinner:
         Path(self.log_path).parent.mkdir(parents=True, exist_ok=True)
         text = self.__class__.stderr or ""
         Path(self.log_path).write_text(text)
+        if self.on_log_line and text:
+            for line in text.splitlines():
+                self.on_log_line(line)
         if output_callback and text:
             output_callback(text)
-        if self.__class__.returncode != 0 and self.on_log_line and text:
-            for line in text.splitlines()[-20:]:
-                self.on_log_line(line)
         return subprocess.CompletedProcess(
             args=cmd,
             returncode=self.__class__.returncode,
@@ -275,6 +275,26 @@ def test_build_web_starter_uses_start_background_task():
     assert "phase" in starter or "_build_phase_plan" in starter
 
 
+def test_spinner_streams_lines_to_on_log_line_on_success(tmp_path):
+    """Live tee should forward every non-empty line to on_log_line (Web TaskReporter)."""
+    from asc.progress import Spinner
+
+    lines: list[str] = []
+    log = tmp_path / "ok.log"
+    sp = Spinner(
+        "Stream ok",
+        log_path=str(log),
+        verbose=False,
+        tty=False,
+        on_log_line=lines.append,
+    )
+    result = sp.run([__import__("sys").executable, "-c", "print('STREAM_LINE_A'); print('STREAM_LINE_B')"])
+    assert result.returncode == 0
+    assert any("STREAM_LINE_A" in line for line in lines)
+    assert any("STREAM_LINE_B" in line for line in lines)
+    assert any("完成" in line for line in lines)
+
+
 def test_spinner_failure_tail_calls_on_log_line(tmp_path):
     from asc.progress import Spinner
 
@@ -290,5 +310,9 @@ def test_spinner_failure_tail_calls_on_log_line(tmp_path):
     code = "import sys\n" + "\n".join(f"print('L{i}')" for i in range(5)) + "\nsys.exit(1)\n"
     result = sp.run([__import__("sys").executable, "-c", code])
     assert result.returncode == 1
+    # All body lines streamed live; failure summary also forwarded (no duplicate tail).
     assert any("L4" in line for line in lines)
-    assert len(lines) <= 20
+    assert any("L0" in line for line in lines)
+    assert sum(1 for line in lines if line == "L4") == 1
+    assert any("失败" in line for line in lines)
+    assert any("完整日志" in line for line in lines)

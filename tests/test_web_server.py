@@ -464,6 +464,14 @@ def test_build_page_uses_shared_task_log_drawer_and_keeps_scan_panel(client):
     assert ("Auto-detect results" in resp.text) or ("自动检测结果" in resp.text)
     assert "startBuildSSE" not in resp.text
     assert 'id="build-log-panel"' not in resp.text
+    assert "task-run-panel" in resp.text
+    assert "task-fail-banner" in resp.text
+    assert "task-run-panel--error" in resp.text
+    assert "task-run-panel--running" in resp.text
+    assert "animate-spin" in resp.text
+    assert ("Build / upload failed" in resp.text) or ("构建 / 上传失败" in resp.text) or (
+        "build.fail_banner_title" in resp.text
+    )
 
 
 def test_iap_page_contains_review_screenshot_tools(client):
@@ -2449,6 +2457,11 @@ def test_task_log_drawer_slide_animation(client):
     assert "translateX(0)" in css.text
     assert ".is-open" in css.text
     assert "transition:" in css.text
+    assert "task-log-line--error" in css.text
+    assert "data-task-state" in js.text
+    assert "task-log-status-spinner" in css.text
+    assert "setTaskState" in js.text
+    assert "createLogNode" in js.text
     assert "function openDrawerPanel()" in js.text
     assert "function beginCloseDrawerPanel()" in js.text
     assert 'void drawer.offsetWidth;' in js.text

@@ -64,6 +64,22 @@ def test_spinner_verbose_mode_passes_output_through(tmp_path, capsys):
     assert "VISIBLE_LINE" in log.read_text()
 
 
+def test_spinner_on_log_line_receives_live_output(tmp_path):
+    log = tmp_path / "out.log"
+    received: list[str] = []
+    sp = Spinner(
+        "Bridge test",
+        log_path=str(log),
+        verbose=False,
+        tty=False,
+        on_log_line=received.append,
+    )
+    result = sp.run([sys.executable, "-c", "print('bridged-output')"])
+    assert result.returncode == 0
+    assert "bridged-output" in received
+    assert any("完成" in line for line in received)
+
+
 def test_spinner_creates_parent_dir(tmp_path):
     log = tmp_path / "deep" / "nested" / "out.log"
     sp = Spinner("Mkdir test", log_path=str(log), verbose=False, tty=False)

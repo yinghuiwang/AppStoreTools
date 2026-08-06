@@ -16,7 +16,7 @@
 </script>
 {% endif %}
 {% for task in tasks %}
-<div class="px-5 py-3.5 border-b border-obsidian-700 last:border-0 hover:bg-obsidian-800/50 transition-colors duration-150" data-task-id="{{ task.id }}">
+<div class="px-5 py-3.5 border-b border-obsidian-700 last:border-0 hover:bg-obsidian-800/50 transition-colors duration-150{% if task.status == 'error' %} task-list-row--error{% elif task.status == 'running' %} task-list-row--running{% endif %}" data-task-id="{{ task.id }}">
   <div class="flex items-center justify-between">
     <div class="flex items-center gap-3">
       {% if task.status == 'done' %}

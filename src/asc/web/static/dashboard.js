@@ -178,6 +178,8 @@
     tasks.slice(0, 20).forEach(function (task) {
       var row = document.createElement("tr");
       row.dataset.taskId = String(task.id || "");
+      if (task.status === "error") row.className = "dashboard-row--error";
+      else if (task.status === "running" || task.status === "pending") row.className = "dashboard-row--running";
 
       var identity = document.createElement("td");
       identity.append(textElement("strong", "", taskTitle(task)));

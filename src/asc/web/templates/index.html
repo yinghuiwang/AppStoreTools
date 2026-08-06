@@ -144,7 +144,7 @@
         </thead>
         <tbody id="dashboard-task-list">
           {% for task in dashboard.tasks[:20] %}
-          <tr data-task-id="{{ task.id }}">
+          <tr data-task-id="{{ task.id }}"{% if task.status == 'error' %} class="dashboard-row--error"{% elif task.status in ['running', 'pending'] %} class="dashboard-row--running"{% endif %}>
             <td><strong>{{ task.title }}</strong><small>{{ task.kind }}</small></td>
             <td><span class="dashboard-status dashboard-status--{{ task.status }}"><i aria-hidden="true"></i>{{ {
               'done': t('index.status.done'),

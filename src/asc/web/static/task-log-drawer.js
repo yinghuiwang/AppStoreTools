@@ -207,6 +207,12 @@
     }, 300);
   }
 
+  function setTaskState(state) {
+    if (!drawer) return;
+    if (state) drawer.setAttribute("data-task-state", state);
+    else drawer.removeAttribute("data-task-state");
+  }
+
   function updatePosition() {
     if (!positionEl || !statusEl) return;
     if (newLogCount > 0) {
@@ -254,11 +260,18 @@
     return /\b(error|failed|failure|fatal|exception|traceback)\b|错误|失败|异常/i.test(String(message));
   }
 
+  function createLogNode(entry) {
+    var line = document.createElement("div");
+    line.className = entry.isError ? "task-log-line task-log-line--error" : "task-log-line";
+    line.textContent = entry.message;
+    return line;
+  }
+
   function renderLogEntries() {
     if (!output) return;
     var fragment = document.createDocumentFragment();
     logEntries.forEach(function (entry) {
-      if (!onlyErrors || entry.isError) fragment.append(document.createTextNode(entry.message + "\n"));
+      if (!onlyErrors || entry.isError) fragment.append(createLogNode(entry));
     });
     output.replaceChildren(fragment);
   }
@@ -267,7 +280,7 @@
     var shouldFollow = !followPaused && isAtBottom();
     var entry = { seq: seq, message: String(message), isError: isErrorLog(message) };
     logEntries.push(entry);
-    if (output && (!onlyErrors || entry.isError)) output.append(document.createTextNode(entry.message + "\n"));
+    if (output && (!onlyErrors || entry.isError)) output.append(createLogNode(entry));
     if (shouldFollow) {
       if (output) output.scrollTop = output.scrollHeight;
       newLogCount = 0;
@@ -312,6 +325,11 @@
 
   function finishStream(source, message, callbackName, payload) {
     if (eventSource !== source) return;
+    var state = "idle";
+    if (callbackName === "onDone") state = "done";
+    else if (callbackName === "onError") state = "error";
+    else if (callbackName === "onCanceled") state = "canceled";
+    setTaskState(state);
     setConnectionStatus(message);
     closeSource();
     var callback = callbacks[callbackName];
@@ -348,6 +366,7 @@
     source.onopen = function () {
       if (eventSource !== source) return;
       reconnectAttempts = 0;
+      setTaskState("running");
       setConnectionStatus(tt("drawer.connected"), true);
     };
     source.onerror = function () {
@@ -443,6 +462,7 @@
     };
     resetLogState();
     if (titleEl) titleEl.textContent = options.title || tt("drawer.title");
+    setTaskState("running");
     setConnectionStatus(tt("drawer.connecting"));
     updatePosition();
     previouslyFocused = document.activeElement;
@@ -460,6 +480,7 @@
   function close() {
     closeSource();
     cancelPreflight();
+    setTaskState("");
     beginCloseDrawerPanel();
     var target = previouslyFocused && previouslyFocused.isConnected ? previouslyFocused : null;
     activeTaskId = null;
@@ -505,7 +526,12 @@
         if (statusEl) statusEl.textContent = tt("drawer.copy_unsupported");
         return;
       }
-      navigator.clipboard.writeText(output ? output.textContent : "").then(function () {
+      var visible = onlyErrors
+        ? logEntries.filter(function (entry) { return entry.isError; })
+        : logEntries;
+      navigator.clipboard.writeText(
+        visible.map(function (entry) { return entry.message; }).join("\n")
+      ).then(function () {
         if (statusEl) statusEl.textContent = tt("drawer.copied");
       }).catch(function () {
         if (statusEl) statusEl.textContent = tt("drawer.copy_failed");

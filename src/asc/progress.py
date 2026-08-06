@@ -34,18 +34,23 @@ class Spinner:
       - Subprocess stdout+stderr combined and tee'd to log_path (line-flushed)
       - On success: clear spinner line, print "✅ {label} 完成 ({elapsed})"
       - On failure: clear spinner line, print "❌ {label} 失败 ({elapsed})\\n   完整日志: {log_path}",
-        followed by last 20 lines of log file
+        followed by last 20 lines of log file on stderr
       - Returns subprocess.CompletedProcess (returncode + empty stdout/stderr — caller uses log file)
 
     Behavior in non-TTY mode (verbose=False, isatty()==False):
       - No spinner; emit "▶ {label}..." once at start
       - Same log file tee
-      - Same final ✅/❌ + elapsed line, plus tail-on-fail
+      - Same final ✅/❌ + elapsed line, plus tail-on-fail (stderr)
 
     Behavior in verbose mode (verbose=True):
       - No spinner. Subprocess stdout/stderr pass through to caller's terminal directly.
       - Still tee to log file as a backup.
       - Final ✅/❌ + elapsed line.
+
+    When on_log_line is set (e.g. Web TaskReporter):
+      - Every non-empty output line is forwarded during the tee loop (live streaming).
+      - Final ✅/❌ summary (and log path on failure) is also forwarded.
+      - Failure tail is not re-forwarded (already streamed).
 
     Usage:
         sp = Spinner("构建 Archive", log_path="build/build.log", verbose=False)
@@ -90,7 +95,18 @@ class Spinner:
             sys.stderr.write("\r\033[K")
             sys.stderr.flush()
 
+    def _emit_log_line(self, message: str) -> None:
+        if self.on_log_line is None:
+            return
+        text = str(message).rstrip("\n\r")
+        if text:
+            self.on_log_line(text)
+
     def _print_tail(self) -> None:
+        """Echo last N log lines to stderr for CLI operators.
+
+        Does not call on_log_line — lines were already streamed during tee.
+        """
         try:
             lines = self.log_path.read_text(errors="replace").splitlines()
         except Exception:
@@ -100,8 +116,6 @@ class Spinner:
             sys.stderr.write("   ── 最后 " + str(len(tail)) + " 行 ──\n")
             for line in tail:
                 sys.stderr.write(f"   {line}\n")
-                if self.on_log_line is not None:
-                    self.on_log_line(line)
             sys.stderr.flush()
 
     def run(
@@ -162,6 +176,7 @@ class Spinner:
                 log_file.write(line)
                 if output_callback is not None:
                     output_callback(line)
+                self._emit_log_line(line)
                 if self.verbose:
                     sys.stdout.write(line)
                     sys.stdout.flush()
@@ -177,14 +192,22 @@ class Spinner:
 
         elapsed = format_elapsed(time.monotonic() - start)
         if cancel_event is not None and cancel_event.is_set():
-            sys.stderr.write(f"⏹ {self.label} 已终止 ({elapsed})\n")
+            canceled_msg = f"⏹ {self.label} 已终止 ({elapsed})"
+            sys.stderr.write(canceled_msg + "\n")
             sys.stderr.flush()
+            self._emit_log_line(canceled_msg)
             raise ProcessCanceled(f"{self.label} canceled")
         if returncode == 0:
-            sys.stderr.write(f"✅ {self.label} 完成 ({elapsed})\n")
+            ok_msg = f"✅ {self.label} 完成 ({elapsed})"
+            sys.stderr.write(ok_msg + "\n")
+            self._emit_log_line(ok_msg)
         else:
-            sys.stderr.write(f"❌ {self.label} 失败 ({elapsed})\n")
-            sys.stderr.write(f"   完整日志: {self.log_path}\n")
+            fail_msg = f"❌ {self.label} 失败 ({elapsed})"
+            log_hint = f"   完整日志: {self.log_path}"
+            sys.stderr.write(fail_msg + "\n")
+            sys.stderr.write(log_hint + "\n")
+            self._emit_log_line(fail_msg)
+            self._emit_log_line(log_hint)
             self._print_tail()
         sys.stderr.flush()
 

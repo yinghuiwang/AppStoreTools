@@ -66,8 +66,65 @@
   padding: 14px 16px;
   border-bottom: 1px solid var(--border-subtle);
   background: var(--bg-surface);
+  transition: background .2s ease, border-color .2s ease, box-shadow .2s ease;
 }
 .task-log-drawer__header .task-log-kicker { margin-bottom: 4px; }
+
+.task-log-drawer[data-task-state="running"] .task-log-drawer__header {
+  border-bottom-color: rgba(245, 158, 11, .35);
+  background: linear-gradient(90deg, rgba(245, 158, 11, .1), var(--bg-surface) 55%);
+}
+.task-log-drawer[data-task-state="error"] .task-log-drawer__header {
+  border-bottom-color: rgba(248, 113, 113, .5);
+  background: linear-gradient(90deg, rgba(248, 113, 113, .14), var(--bg-surface) 55%);
+  box-shadow: inset 0 -1px 0 rgba(248, 113, 113, .25);
+}
+.task-log-drawer[data-task-state="done"] .task-log-drawer__header {
+  border-bottom-color: rgba(52, 211, 153, .35);
+  background: linear-gradient(90deg, rgba(52, 211, 153, .08), var(--bg-surface) 55%);
+}
+.task-log-drawer[data-task-state="canceled"] .task-log-drawer__header {
+  border-bottom-color: rgba(148, 163, 184, .35);
+}
+
+.task-log-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-default);
+  background: rgba(255, 255, 255, .03);
+  color: var(--text-muted);
+  font: 10px/1 "Fira Code", monospace;
+}
+.task-log-drawer[data-task-state="running"] .task-log-status-pill {
+  border-color: rgba(245, 158, 11, .4);
+  color: #fbbf24;
+  background: rgba(245, 158, 11, .1);
+}
+.task-log-drawer[data-task-state="error"] .task-log-status-pill {
+  border-color: rgba(248, 113, 113, .5);
+  color: #fca5a5;
+  background: rgba(248, 113, 113, .12);
+}
+.task-log-drawer[data-task-state="done"] .task-log-status-pill {
+  border-color: rgba(52, 211, 153, .4);
+  color: #6ee7b7;
+  background: rgba(52, 211, 153, .1);
+}
+.task-log-status-spinner {
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid rgba(251, 191, 36, .25);
+  border-top-color: #fbbf24;
+  border-radius: 50%;
+  animation: task-log-spin .7s linear infinite;
+  display: none;
+}
+.task-log-drawer[data-task-state="running"] .task-log-status-spinner { display: inline-block; }
+@keyframes task-log-spin { to { transform: rotate(360deg); } }
 
 .task-log-icon-button {
   width: 30px;
@@ -127,6 +184,17 @@
   overflow-wrap: anywhere;
 }
 .task-log-output:focus-visible { outline: 1px solid var(--accent); outline-offset: -2px; }
+.task-log-line { display: block; }
+.task-log-line--error {
+  color: #fca5a5;
+  background: rgba(248, 113, 113, .08);
+  margin: 0 -15px;
+  padding: 0 15px;
+  border-left: 2px solid rgba(248, 113, 113, .55);
+}
+.task-log-drawer[data-task-state="error"] .task-log-output {
+  box-shadow: inset 0 0 0 1px rgba(248, 113, 113, .12);
+}
 
 .task-log-follow {
   border-top: 1px solid var(--border-subtle);
@@ -165,4 +233,5 @@
 
 @media (prefers-reduced-motion: reduce) {
   .task-log-drawer { transition: none; }
+  .task-log-status-spinner { animation: none; }
 }
