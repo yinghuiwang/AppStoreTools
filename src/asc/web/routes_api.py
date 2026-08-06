@@ -505,14 +505,39 @@ async def metadata_run(
             parsed_scopes = json.loads(screenshot_scopes_json)
         except json.JSONDecodeError:
             return JSONResponse({"error": "Invalid screenshot_scopes_json"}, status_code=400)
-        if not isinstance(parsed_scopes, list) or not all(
-            isinstance(item, dict) for item in parsed_scopes
-        ):
+        if isinstance(parsed_scopes, list):
+            if not all(isinstance(item, dict) for item in parsed_scopes):
+                return JSONResponse(
+                    {"error": "screenshot_scopes_json must be a list of objects"},
+                    status_code=400,
+                )
+            screenshot_scopes = parsed_scopes or None
+        elif isinstance(parsed_scopes, dict):
+            # Task 5 UI shape: {locale: {displayType: [file_names]}}
+            normalized: list[dict] = []
+            for locale, groups in parsed_scopes.items():
+                if not isinstance(groups, dict):
+                    return JSONResponse(
+                        {"error": "screenshot_scopes_json nested values must be objects"},
+                        status_code=400,
+                    )
+                for display_type, file_names in groups.items():
+                    if file_names is not None and not isinstance(file_names, list):
+                        return JSONResponse(
+                            {"error": "screenshot_scopes_json file_names must be a list"},
+                            status_code=400,
+                        )
+                    normalized.append({
+                        "locale": locale,
+                        "display_type": display_type,
+                        "file_names": file_names,
+                    })
+            screenshot_scopes = normalized or None
+        else:
             return JSONResponse(
-                {"error": "screenshot_scopes_json must be a list of objects"},
+                {"error": "screenshot_scopes_json must be a list or object"},
                 status_code=400,
             )
-        screenshot_scopes = parsed_scopes or None
 
     include_metadata_bool = bool(include_metadata)
     include_screenshots_bool = bool(include_screenshots)
