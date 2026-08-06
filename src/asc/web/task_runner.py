@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import traceback
 import threading
 from threading import Event
 from typing import Any, Callable
@@ -71,8 +72,12 @@ def start_background_task(
             except Exception as exc:  # noqa: BLE001
                 print(f"⚠️  Failed to mark task {task_id} canceled: {exc}", file=sys.stderr)
         except Exception as exc:
+            tb = traceback.format_exc()
             if not reporter.failed:
-                reporter.fail(str(exc))
+                reporter.fail(str(exc), detail=tb)
+            else:
+                # Core already logged a friendly fail; still attach traceback for the drawer.
+                reporter.log(tb, level="error")
             if _is_terminal(store, task_id):
                 return
             try:

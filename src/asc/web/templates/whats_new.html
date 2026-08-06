@@ -317,28 +317,20 @@
     </div>
 
     <!-- Step 3: Execution Panel -->
+    {% from "_task_run_macros.html" import panel_class_attr, title_class_attr, fail_banner, status_icons, progress_block %}
     <div x-show="step === 3">
-      <div class="card">
+      <div class="card task-run-panel"
+           {{ panel_class_attr() }}>
         <div class="card-body">
-          <div class="flex items-center justify-between mb-5">
-            <h2 class="font-semibold text-obsidian-100 flex items-center gap-2.5" x-text="status === 'done' ? window.t('whats_new.done') : status === 'error' ? window.t('whats_new.failed') : status === 'canceled' ? window.t('whats_new.canceled') : window.t('whats_new.running')">
+          {{ fail_banner('whats_new.fail_banner_title', 'whats_new.fail_banner_hint') }}
+
+          <div class="flex items-center justify-between mb-5 gap-3">
+            <h2 class="font-semibold flex items-center gap-2.5 min-w-0"
+                {{ title_class_attr() }}
+                x-text="status === 'done' ? window.t('whats_new.done') : status === 'error' ? window.t('whats_new.failed') : status === 'canceled' ? window.t('whats_new.canceled') : window.t('whats_new.running')">
             </h2>
-            <div class="flex items-center gap-3">
-              <template x-if="status === 'done'">
-                <div class="w-7 h-7 rounded-full flex items-center justify-center bg-emerald-500/15">
-                  <svg class="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>
-                </div>
-              </template>
-              <template x-if="status === 'error'">
-                <div class="w-7 h-7 rounded-full flex items-center justify-center bg-red-500/15">
-                  <svg class="w-4 h-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"/></svg>
-                </div>
-              </template>
-              <template x-if="status === 'running'">
-                <div class="w-7 h-7 rounded-full flex items-center justify-center" style="background: var(--accent-glow);">
-                  <svg class="w-4 h-4 text-amber-500 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-                </div>
-              </template>
+            <div class="flex items-center gap-3 shrink-0">
+              {{ status_icons() }}
               <button type="button"
                       data-task-log-open
                       class="text-xs text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium"
@@ -349,18 +341,11 @@
                       :disabled="canceling"
                       @click="cancelTask(taskId, () => { canceling = true; progressMsg = window.t('whats_new.canceling_msg'); })"
                       x-text="canceling ? window.t('common.canceling') : window.t('common.cancel_upload')"></button>
-              <button type="button" class="text-xs text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium" @click="step=1; status='idle'; taskId=null">{{ t("common.retry") }}</button>
+              <button type="button" class="text-xs text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium" @click="step=1; status='idle'; taskId=null; progress=0; progressMsg=''">{{ t("common.retry") }}</button>
             </div>
           </div>
 
-          <!-- Progress -->
-          <div class="progress-track mb-2">
-            <div class="progress-fill" :style="`width: ${progress}%`"></div>
-          </div>
-          <div class="flex items-center justify-between mb-5">
-            <p class="text-xs text-obsidian-400" x-text="progressMsg"></p>
-            <span class="text-xs font-mono text-obsidian-500 tabular-nums" x-text="progress > 0 ? progress + '%' : ''"></span>
-          </div>
+          {{ progress_block('common.running_hint') }}
         </div>
       </div>
     </div>
@@ -459,7 +444,10 @@ function whatsNewLogOptions() {
       d.progressMsg = progress.msg || '';
     },
     onDone: () => { d.status = 'done'; d.progress = 100; },
-    onError: () => { d.status = 'error'; },
+    onError: () => {
+      d.status = 'error';
+      if (!d.progressMsg) d.progressMsg = window.t('whats_new.fail_banner_hint');
+    },
     onCanceled: () => { d.status = 'canceled'; d.progressMsg = window.t('whats_new.canceled_msg'); d.canceling = false; }
   };
 }

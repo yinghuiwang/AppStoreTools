@@ -211,13 +211,18 @@
     </div>
 
     <!-- Progress card -->
-    <div x-show="step === 2" class="card mt-6">
+    {% from "_task_run_macros.html" import panel_class_attr, title_class_attr, fail_banner, progress_block %}
+    <div x-show="step === 2" class="card task-run-panel mt-6"
+         {{ panel_class_attr() }}>
       <div class="card-body">
-        <div class="flex items-center justify-between mb-5">
-          <h2 class="font-semibold text-obsidian-100 flex items-center gap-2.5"
+        {{ fail_banner('update.fail_banner_title', 'update.fail_banner_hint') }}
+
+        <div class="flex items-center justify-between mb-5 gap-3">
+          <h2 class="font-semibold flex items-center gap-2.5 min-w-0"
+              {{ title_class_attr() }}
               x-text="status === 'done' ? window.t('update.done') : status === 'error' ? window.t('update.failed') : status === 'canceled' ? window.t('update.canceled') : restarting ? window.t('update.restarting') : window.t('update.running')"></h2>
-          <div class="flex items-center gap-3">
-            <template x-if="restarting && status !== 'done'">
+          <div class="flex items-center gap-3 shrink-0">
+            <template x-if="restarting && status !== 'done' && status !== 'error'">
               <div class="w-7 h-7 rounded-full flex items-center justify-center bg-amber-500/15">
                 <svg class="w-4 h-4 text-amber-400 animate-spin" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"/></svg>
               </div>
@@ -228,8 +233,13 @@
               </div>
             </template>
             <template x-if="status === 'error'">
-              <div class="w-7 h-7 rounded-full flex items-center justify-center bg-red-500/15">
+              <div class="w-7 h-7 rounded-full flex items-center justify-center bg-red-500/15 task-status-pulse-error">
                 <svg class="w-4 h-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"/></svg>
+              </div>
+            </template>
+            <template x-if="status === 'running' && !restarting">
+              <div class="w-7 h-7 rounded-full flex items-center justify-center task-status-spin-wrap" style="background: var(--accent-glow);">
+                <svg class="w-4 h-4 text-amber-500 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
               </div>
             </template>
             <button type="button"
@@ -238,18 +248,12 @@
                     @click="TaskLogDrawer.open(taskId, updateLogOptions())">{{ t("common.logs") }}</button>
           </div>
         </div>
-        <div class="progress-track mb-2">
-          <div class="progress-fill" :style="`width: ${progress}%`"></div>
-        </div>
-        <div class="flex items-center justify-between gap-3 mb-3">
-          <p class="text-xs text-obsidian-400" x-text="progressMsg"></p>
-          <span class="text-xs font-mono text-obsidian-500 tabular-nums" x-text="progress > 0 ? progress + '%' : ''"></span>
-        </div>
+        {{ progress_block('common.running_hint') }}
         <template x-if="status === 'done' && restarting">
-          <p class="text-sm text-obsidian-400">{{ t("update.restarting_hint") }}</p>
+          <p class="text-sm text-obsidian-400 mt-3">{{ t("update.restarting_hint") }}</p>
         </template>
-        <template x-if="restarting && status !== 'done'">
-          <p class="text-sm text-obsidian-400">{{ t("update.restarting_hint") }}</p>
+        <template x-if="restarting && status !== 'done' && status !== 'error'">
+          <p class="text-sm text-obsidian-400 mt-3">{{ t("update.restarting_hint") }}</p>
         </template>
       </div>
     </div>
@@ -277,7 +281,12 @@ function updateLogOptions() {
       d.progressMsg = progress.msg || '';
     },
     onDone: () => { d.status = 'done'; d.progress = 100; handleUpdateDone(d); },
-    onError: () => { d.status = 'error'; d.restarting = false; clearUpdateSession(); },
+    onError: () => {
+      d.status = 'error';
+      d.restarting = false;
+      if (!d.progressMsg) d.progressMsg = window.t('update.fail_banner_hint');
+      clearUpdateSession();
+    },
     onCanceled: () => { d.status = 'canceled'; d.canceling = false; d.restarting = false; clearUpdateSession(); }
   };
 }

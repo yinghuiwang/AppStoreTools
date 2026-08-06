@@ -16,6 +16,8 @@
     step: 1,
     taskId: null,
     status: 'idle',
+    progress: 0,
+    progressMsg: '',
     canceling: false,
     checkResult: null,
     selectedField: 'supportUrl',
@@ -175,12 +177,19 @@
     </div>
 
     <!-- Step 2: 执行面板 -->
+    {% from "_task_run_macros.html" import panel_class_attr, title_class_attr, fail_banner, status_icons, progress_block %}
     <div x-show="step === 2">
-      <div class="card">
+      <div class="card task-run-panel"
+           {{ panel_class_attr() }}>
         <div class="card-body">
-          <div class="flex items-center justify-between mb-5">
-            <h2 class="font-semibold text-obsidian-100" x-text="status === 'done' ? window.t('urls.done') : status === 'error' ? window.t('urls.failed') : status === 'canceled' ? window.t('urls.canceled') : window.t('urls.running')"></h2>
-            <div class="flex items-center gap-3">
+          {{ fail_banner('urls.fail_banner_title', 'urls.fail_banner_hint') }}
+
+          <div class="flex items-center justify-between mb-5 gap-3">
+            <h2 class="font-semibold min-w-0"
+                {{ title_class_attr() }}
+                x-text="status === 'done' ? window.t('urls.done') : status === 'error' ? window.t('urls.failed') : status === 'canceled' ? window.t('urls.canceled') : window.t('urls.running')"></h2>
+            <div class="flex items-center gap-3 shrink-0">
+              {{ status_icons() }}
               <button type="button"
                       data-task-log-open
                       class="text-xs text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium"
@@ -191,9 +200,11 @@
                       :disabled="canceling"
                       @click="cancelTask(taskId, () => { canceling = true; })"
                       x-text="canceling ? window.t('common.canceling') : window.t('common.cancel_upload')"></button>
-              <button type="button" class="text-xs text-amber-500 hover:text-amber-400 cursor-pointer transition-colors duration-150 font-medium" @click="step=1; status='idle'; checkResult=null;">{{ t("common.retry") }}</button>
+              <button type="button" class="text-xs text-amber-500 hover:text-amber-400 cursor-pointer transition-colors duration-150 font-medium" @click="step=1; status='idle'; checkResult=null; progress=0; progressMsg=''">{{ t("common.retry") }}</button>
             </div>
           </div>
+
+          {{ progress_block('common.running_hint') }}
         </div>
       </div>
     </div>
@@ -218,8 +229,16 @@ function urlsLogOptions() {
   const d = Alpine.$data(root);
   return {
     title: window.t('urls.log_title'),
-    onDone: () => { d.status = 'done'; },
-    onError: () => { d.status = 'error'; },
+    onProgress: (progress) => {
+      if (!progress) return;
+      if (progress.pct != null) d.progress = progress.pct;
+      d.progressMsg = progress.msg || '';
+    },
+    onDone: () => { d.status = 'done'; d.progress = 100; },
+    onError: () => {
+      d.status = 'error';
+      if (!d.progressMsg) d.progressMsg = window.t('urls.fail_banner_hint');
+    },
     onCanceled: () => { d.status = 'canceled'; d.canceling = false; }
   };
 }

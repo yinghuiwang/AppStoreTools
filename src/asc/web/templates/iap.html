@@ -283,12 +283,19 @@
     </div>
 
     <!-- Step2: Execution panel -->
+    {% from "_task_run_macros.html" import panel_class_attr, title_class_attr, fail_banner, status_icons, progress_block %}
     <div x-show="step === 2" class="max-w-xl">
-      <div class="card">
+      <div class="card task-run-panel"
+           {{ panel_class_attr() }}>
         <div class="card-body">
-          <div class="flex items-center justify-between mb-5">
-            <h2 class="font-semibold text-obsidian-100" x-text="status === 'done' ? window.t('iap.done') : status === 'error' ? window.t('iap.failed') : status === 'canceled' ? window.t('iap.canceled') : window.t('iap.running')"></h2>
-            <div class="flex items-center gap-3">
+          {{ fail_banner('iap.fail_banner_title', 'iap.fail_banner_hint') }}
+
+          <div class="flex items-center justify-between mb-5 gap-3">
+            <h2 class="font-semibold min-w-0"
+                {{ title_class_attr() }}
+                x-text="status === 'done' ? window.t('iap.done') : status === 'error' ? window.t('iap.failed') : status === 'canceled' ? window.t('iap.canceled') : window.t('iap.running')"></h2>
+            <div class="flex items-center gap-3 shrink-0">
+              {{ status_icons() }}
               <button type="button"
                       data-task-log-open
                       class="text-xs text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium"
@@ -299,19 +306,11 @@
                       :disabled="canceling"
                       @click="cancelTask(taskId, () => { canceling = true; })"
                       x-text="canceling ? window.t('common.canceling') : window.t('common.cancel_upload')"></button>
-              <button type="button" class="text-xs text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium" @click="step=1; status='idle'">{{ t("iap.retry") }}</button>
+              <button type="button" class="text-xs text-amber-550 hover:text-amber-500 cursor-pointer transition-colors duration-150 font-medium" @click="step=1; status='idle'; progress=0; progressMsg=''">{{ t("iap.retry") }}</button>
             </div>
           </div>
 
-          <!-- Progress -->
-          <div class="progress-track mb-2">
-            <div class="progress-fill" :style="`width: ${progress}%`"></div>
-          </div>
-          <div class="flex items-center justify-between mb-5">
-            <p class="text-xs text-obsidian-400" x-text="progressMsg"></p>
-            <span class="text-xs font-mono text-obsidian-500 tabular-nums" x-text="progress > 0 ? progress + '%' : ''"></span>
-          </div>
-
+          {{ progress_block('common.running_hint') }}
         </div>
       </div>
     </div>
@@ -529,7 +528,10 @@ function iapLogOptions() {
       d.progressMsg = progress.msg || '';
     },
     onDone: () => { d.status = 'done'; d.progress = 100; },
-    onError: () => { d.status = 'error'; },
+    onError: () => {
+      d.status = 'error';
+      if (!d.progressMsg) d.progressMsg = window.t('iap.fail_banner_hint');
+    },
     onCanceled: () => { d.status = 'canceled'; d.canceling = false; }
   };
 }

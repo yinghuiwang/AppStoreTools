@@ -405,6 +405,13 @@ def test_metadata_page_uses_shared_task_log_drawer(client):
     assert "data-task-log-open" in resp.text
     assert "new EventSource(`/api/task/${taskId}/stream`)" not in resp.text
     assert 'id="log-panel"' not in resp.text
+    assert "task-run-panel" in resp.text
+    assert "task-fail-banner" in resp.text
+    assert "task-run-panel--error" in resp.text
+    assert "task-live-dot" in resp.text
+    assert ("metadata.fail_banner_title" in resp.text) or ("元数据 / 截图上传失败" in resp.text) or (
+        "Metadata / screenshot upload failed" in resp.text
+    )
 
 
 @pytest.mark.parametrize("path", ["/urls", "/whats-new", "/iap", "/update"])
@@ -418,6 +425,12 @@ def test_feature_page_uses_shared_task_log_drawer(client, path):
     assert "function startIapSSE" not in resp.text
     assert 'id="log-panel"' not in resp.text
     assert 'id="iap-log-panel"' not in resp.text
+    assert "task-run-panel" in resp.text
+    assert "task-fail-banner" in resp.text
+    assert "task-run-panel--error" in resp.text
+    assert "task-live-dot" in resp.text
+    assert "progress-track--running" in resp.text
+    assert "common.running_hint" in resp.text or "任务运行中" in resp.text or "logs are streaming" in resp.text
 
 
 @pytest.mark.parametrize(

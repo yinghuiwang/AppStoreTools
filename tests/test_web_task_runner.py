@@ -130,6 +130,7 @@ def test_exception_marks_error(tmp_path):
     task = _wait_terminal(store, task_id)
     assert task["status"] == TaskStatus.ERROR
     assert any("boom" in line for line in task["logs"])
+    assert any("Traceback" in line for line in task["logs"])
 
 
 def test_exception_skips_second_fail_when_core_already_failed(tmp_path):
@@ -144,7 +145,9 @@ def test_exception_skips_second_fail_when_core_already_failed(tmp_path):
     )
     task = _wait_terminal(store, task_id)
     assert task["status"] == TaskStatus.ERROR
+    # Friendly fail once; traceback is appended separately for the log drawer.
     assert task["logs"].count("core already failed") == 1
+    assert any("Traceback" in line for line in task["logs"])
 
 
 def test_process_canceled_marks_canceled_when_not_pre_finished(tmp_path):
