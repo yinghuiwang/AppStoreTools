@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from asc.config import Config
 from asc.guard import GuardViolationError, enforce_config_guard
+from asc.listing.diff import diff_snapshots
 from asc.listing.local import (
     FileChangedError,
     PathTraversalError,
@@ -25,7 +26,9 @@ from asc.listing.local import (
     save_local_csv,
     scan_local_screenshots,
 )
-from asc.listing.models import LocaleListing
+from asc.listing.models import FIELD_NAMES, LocaleListing
+from asc.listing.remote import NoAppInfoError, NoEditableVersionError, load_asc_text_snapshot
+from asc.utils import make_api_from_config
 from asc.web.i18n import t
 
 router = APIRouter()
@@ -188,6 +191,188 @@ async def listing_local_save(request: Request):
 
     try:
         new_mtime = save_local_csv(csv_path, locales, expected_mtime=expected_mtime)
+    except FileChangedError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=409)
+    except OSError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+    return {"ok": True, "mtime": new_mtime}
+
+
+def _api_for_profile(profile: str):
+    """Build ASC API client + app_id from the selected profile name."""
+    config = Config(app_name=profile)
+    return make_api_from_config(config)
+
+
+def _merge_local_screenshots(snapshot, screenshots_dir: str) -> None:
+    """In-place merge of scanned local screenshots into a text snapshot."""
+    if not screenshots_dir.strip():
+        return
+    by_locale = scan_local_screenshots(screenshots_dir)
+    for loc in snapshot.locales:
+        if loc.locale in by_locale:
+            loc.screenshots = by_locale[loc.locale]
+
+
+def _asc_error_response(exc: Exception, lang: str) -> JSONResponse:
+    if isinstance(exc, NoEditableVersionError):
+        return JSONResponse(
+            {
+                "ok": False,
+                "level": "warning",
+                "message": t("api.no_editable_version_create", lang=lang),
+                "error": str(exc),
+                "detail": {},
+            },
+            status_code=400,
+        )
+    if isinstance(exc, NoAppInfoError):
+        return JSONResponse(
+            {
+                "ok": False,
+                "level": "error",
+                "message": str(exc),
+                "error": str(exc),
+                "detail": {},
+            },
+            status_code=400,
+        )
+    return JSONResponse(
+        {"ok": False, "error": str(exc), "message": str(exc)},
+        status_code=400,
+    )
+
+
+@router.get("/diff")
+async def listing_diff(
+    request: Request,
+    csv_path: str,
+    screenshots_dir: str = "",
+):
+    """Compare local CSV (+ optional screenshots) against ASC text snapshot.
+
+    ASC screenshots are empty in this task (Task 8 fills them). Local screenshots
+    are scanned when `screenshots_dir` is provided and appear in the diff structure.
+    """
+    lang = _lang(request)
+    profile = _require_profile(request)
+    if not profile:
+        return JSONResponse(_no_profile_payload(lang), status_code=400)
+
+    try:
+        local = load_local_text_snapshot(csv_path)
+    except (FileNotFoundError, OSError) as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+    _merge_local_screenshots(local, screenshots_dir)
+
+    try:
+        api, app_id = _api_for_profile(profile)
+        asc = load_asc_text_snapshot(api, app_id)
+    except (NoEditableVersionError, NoAppInfoError) as e:
+        return _asc_error_response(e, lang)
+    except Exception as e:
+        return JSONResponse(
+            {"ok": False, "error": str(e), "message": str(e)},
+            status_code=400,
+        )
+
+    diff = diff_snapshots(local, asc)
+    mtime = os.path.getmtime(csv_path) if os.path.exists(csv_path) else None
+    return {
+        "ok": True,
+        "mtime": mtime,
+        "version": asc.version,
+        "local": _snapshot_to_dict(local),
+        "asc": _snapshot_to_dict(asc),
+        "diff": asdict(diff),
+    }
+
+
+@router.post("/pull/text")
+async def listing_pull_text(request: Request):
+    """Pull selected ASC text fields into the local CSV (mtime-guarded)."""
+    lang = _lang(request)
+    profile = _require_profile(request)
+    if not profile:
+        return JSONResponse(_no_profile_payload(lang), status_code=400)
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON") from None
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="JSON body must be an object")
+
+    csv_path = body.get("csv_path")
+    if not isinstance(csv_path, str) or not csv_path.strip():
+        raise HTTPException(status_code=400, detail="csv_path is required")
+
+    expected_mtime = body.get("expected_mtime")
+    if expected_mtime is not None and not isinstance(expected_mtime, (int, float)):
+        raise HTTPException(status_code=400, detail="expected_mtime must be a number")
+
+    selections = body.get("selections")
+    if not isinstance(selections, list) or not selections:
+        raise HTTPException(status_code=400, detail="selections must be a non-empty list")
+
+    parsed: list[tuple[str, list[str]]] = []
+    for item in selections:
+        if not isinstance(item, dict):
+            raise HTTPException(status_code=400, detail="invalid selection entry")
+        locale = item.get("locale")
+        fields = item.get("fields")
+        if not isinstance(locale, str) or not locale.strip():
+            raise HTTPException(status_code=400, detail="invalid selection entry")
+        if not isinstance(fields, list) or not all(isinstance(f, str) for f in fields):
+            raise HTTPException(status_code=400, detail="invalid selection entry")
+        allowed = [f for f in fields if f in FIELD_NAMES]
+        if allowed:
+            parsed.append((locale, allowed))
+
+    if not parsed:
+        raise HTTPException(status_code=400, detail="no valid field selections")
+
+    try:
+        local = load_local_text_snapshot(csv_path)
+    except (FileNotFoundError, OSError) as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+    try:
+        api, app_id = _api_for_profile(profile)
+        asc = load_asc_text_snapshot(api, app_id)
+    except (NoEditableVersionError, NoAppInfoError) as e:
+        return _asc_error_response(e, lang)
+    except Exception as e:
+        return JSONResponse(
+            {"ok": False, "error": str(e), "message": str(e)},
+            status_code=400,
+        )
+
+    local_map = {loc.locale: loc for loc in local.locales}
+    asc_map = {loc.locale: loc for loc in asc.locales}
+
+    for locale, fields in parsed:
+        asc_loc = asc_map.get(locale)
+        if asc_loc is None:
+            continue
+        if locale not in local_map:
+            local_map[locale] = LocaleListing(
+                locale=locale,
+                fields={name: "" for name in FIELD_NAMES},
+                screenshots={},
+            )
+            local.locales.append(local_map[locale])
+        for name in fields:
+            local_map[locale].fields[name] = asc_loc.fields.get(name, "")
+
+    try:
+        new_mtime = save_local_csv(
+            csv_path,
+            list(local_map.values()),
+            expected_mtime=expected_mtime,
+        )
     except FileChangedError as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=409)
     except OSError as e:

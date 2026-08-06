@@ -22,6 +22,12 @@
       shotsError: '',
       shotsBusy: false,
       dragCtx: null,
+      tab: 'local',
+    },
+
+    diff: {
+      loading: false, loaded: false, error: '', pullOk: false, pulling: false,
+      version: null, locales: [], filter: 'all',
     },
 
     wbLoadPreview() {
@@ -322,6 +328,193 @@
         .catch(e => { this.wb.saveError = e.message; })
         .finally(() => { this.wb.saving = false; });
     },
+
+    wbSwitchTab(tab) {
+      if (tab === 'diff' && this.wb.dirty) {
+        alert(window.t('metadata.diff_dirty_block'));
+        return;
+      }
+      this.wb.tab = tab;
+    },
+
+    wbDiffStatusLabel(status) {
+      return window.t('metadata.diff_status_' + status) || status;
+    },
+
+    wbDiffStatusClass(status) {
+      return {
+        equal: 'text-obsidian-500',
+        changed: 'text-amber-400',
+        local_only: 'text-sky-400',
+        asc_only: 'text-violet-400',
+      }[status] || 'text-obsidian-400';
+    },
+
+    wbDiffFieldVisible(field) {
+      const f = this.diff.filter;
+      if (f === 'all') return true;
+      if (f === 'diff') return field.status !== 'equal';
+      if (f === 'local') return field.status === 'local_only';
+      if (f === 'asc') return field.status === 'asc_only';
+      return true;
+    },
+
+    wbDiffLocaleVisible(loc) {
+      return (loc.fields || []).some(f => this.wbDiffFieldVisible(f));
+    },
+
+    wbDiffLoad() {
+      if (this.wb.dirty) {
+        alert(window.t('metadata.diff_dirty_block'));
+        return;
+      }
+      this.diff.error = '';
+      this.diff.pullOk = false;
+      this.diff.loading = true;
+      const csvPath = document.getElementById('csv-path-input').value;
+      const screenshotsDir = document.getElementById('screenshots-dir-input').value;
+      let url = '/api/listing/diff?csv_path=' + encodeURIComponent(csvPath);
+      if (screenshotsDir.trim()) url += '&screenshots_dir=' + encodeURIComponent(screenshotsDir);
+      fetch(url)
+        .then(async r => {
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok || data.ok === false) {
+            throw new Error(data.message || data.error || window.t('common.request_failed'));
+          }
+          return data;
+        })
+        .then(data => {
+          if (data.mtime != null) this.wb.mtime = data.mtime;
+          this.diff.version = data.version || null;
+          this.diff.locales = (data.diff && data.diff.locales || []).map(loc => ({
+            locale: loc.locale,
+            selected: true,
+            expanded: true,
+            fields: (loc.fields || []).map(f => ({
+              ...f,
+              selected: f.status !== 'equal',
+            })),
+            screenshots: loc.screenshots || [],
+          }));
+          this.diff.loaded = true;
+          this.wb.tab = 'diff';
+        })
+        .catch(e => { this.diff.error = e.message; this.diff.loaded = false; })
+        .finally(() => { this.diff.loading = false; });
+    },
+
+    wbSelectDiffsOnly() {
+      if (!this.diff.loaded) return;
+      const byLocale = {};
+      this.diff.locales.forEach(loc => {
+        const diffFields = loc.fields.filter(f => f.status !== 'equal').map(f => f.field);
+        byLocale[loc.locale] = new Set(diffFields);
+        loc.selected = diffFields.length > 0;
+        loc.fields.forEach(f => { f.selected = f.status !== 'equal'; });
+      });
+      // Mirror onto local workbench upload checkboxes
+      this.wb.locales.forEach(loc => {
+        const set = byLocale[loc.locale];
+        if (!set) {
+          loc.selected = false;
+          this.wb.fieldNames.forEach(f => { loc.fieldSelected[f] = false; });
+          return;
+        }
+        loc.selected = set.size > 0;
+        this.wb.fieldNames.forEach(f => { loc.fieldSelected[f] = set.has(f); });
+      });
+      // Ensure diff-only locales appear in workbench selection maps for upload
+      this.diff.locales.forEach(loc => {
+        if (this.wb.locales.some(l => l.locale === loc.locale)) return;
+        const fieldSelected = {};
+        const fields = {};
+        const set = byLocale[loc.locale] || new Set();
+        this.wb.fieldNames.forEach(f => {
+          fieldSelected[f] = set.has(f);
+          fields[f] = '';
+        });
+        this.wb.locales.push({
+          locale: loc.locale, selected: set.size > 0, expanded: false, fieldSelected, fields,
+          screenshotGroups: [], shotsExpanded: false,
+        });
+      });
+      if (!this.wb.loaded) this.wb.loaded = true;
+      this.wbSyncHidden();
+    },
+
+    wbDiffPull() {
+      const selections = this.diff.locales
+        .filter(l => l.selected)
+        .map(l => ({
+          locale: l.locale,
+          fields: l.fields.filter(f => f.selected).map(f => f.field),
+        }))
+        .filter(s => s.fields.length);
+      if (!selections.length) {
+        alert(window.t('metadata.diff_no_selection'));
+        return;
+      }
+      this.diff.pulling = true;
+      this.diff.error = '';
+      this.diff.pullOk = false;
+      const csvPath = document.getElementById('csv-path-input').value;
+      fetch('/api/listing/pull/text', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          csv_path: csvPath,
+          expected_mtime: this.wb.mtime,
+          selections,
+        }),
+      })
+        .then(async r => {
+          const data = await r.json().catch(() => ({}));
+          if (r.status === 409) throw new Error(window.t('metadata.wb_conflict'));
+          if (!r.ok || data.ok === false) {
+            throw new Error(data.message || data.error || window.t('common.request_failed'));
+          }
+          return data;
+        })
+        .then(data => {
+          this.wb.mtime = data.mtime;
+          this.diff.pullOk = true;
+          this.wb.dirty = false;
+          // Apply pulled ASC values into the local workbench in-memory state
+          const ascByLocale = {};
+          this.diff.locales.forEach(loc => {
+            const fields = {};
+            loc.fields.forEach(f => { fields[f.field] = f.asc || ''; });
+            ascByLocale[loc.locale] = fields;
+          });
+          selections.forEach(sel => {
+            let loc = this.wb.locales.find(l => l.locale === sel.locale);
+            const ascFields = ascByLocale[sel.locale] || {};
+            if (!loc) {
+              const fieldSelected = {};
+              const fields = {};
+              this.wb.fieldNames.forEach(f => {
+                fieldSelected[f] = true;
+                fields[f] = ascFields[f] || '';
+              });
+              loc = {
+                locale: sel.locale, selected: true, expanded: false, fieldSelected, fields,
+                screenshotGroups: [], shotsExpanded: false,
+              };
+              this.wb.locales.push(loc);
+              this.wb.loaded = true;
+            } else {
+              sel.fields.forEach(fname => {
+                loc.fields[fname] = ascFields[fname] || '';
+              });
+            }
+          });
+          this.wbSyncHidden();
+          // Refresh Diff so statuses flip to equal where pulled
+          this.wbDiffLoad();
+        })
+        .catch(e => { this.diff.error = e.message; })
+        .finally(() => { this.diff.pulling = false; });
+    },
   }">
 
     <!-- Step 1: 配置表单 -->
@@ -417,7 +610,7 @@
               </div>
             </div>
 
-            <!-- Local workbench -->
+            <!-- Local workbench + Diff -->
             <input type="hidden" name="locales_json" id="locales-json-input" value="">
             <input type="hidden" name="fields_by_locale_json" id="fields-by-locale-json-input" value="">
             <input type="hidden" name="screenshot_scopes_json" id="screenshot-scopes-json-input" value="">
@@ -425,15 +618,31 @@
             <input type="file" x-ref="wbAddInput" accept="image/*" class="hidden" @change="wbOnAddFileChosen($event)">
             <div class="pt-1">
               <div class="flex items-center justify-between gap-3 mb-2">
-                <label class="text-xs uppercase tracking-widest text-obsidian-400 font-medium">{{ t("metadata.workbench") }}</label>
+                <div class="flex items-center gap-1 rounded-lg border border-obsidian-700 p-0.5">
+                  <button type="button"
+                          class="text-xs px-2.5 py-1 rounded-md transition-colors duration-150 cursor-pointer font-medium"
+                          :class="wb.tab === 'local' ? 'bg-obsidian-700 text-obsidian-100' : 'text-obsidian-400 hover:text-obsidian-200'"
+                          @click="wbSwitchTab('local')">{{ t("metadata.tab_local") }}</button>
+                  <button type="button"
+                          class="text-xs px-2.5 py-1 rounded-md transition-colors duration-150 cursor-pointer font-medium"
+                          :class="wb.tab === 'diff' ? 'bg-obsidian-700 text-obsidian-100' : 'text-obsidian-400 hover:text-obsidian-200'"
+                          @click="wbSwitchTab('diff')">{{ t("metadata.tab_diff") }}</button>
+                </div>
                 <div class="flex items-center gap-3">
                   <span x-show="wb.dirty" class="text-xs text-amber-500 font-medium">{{ t("metadata.unsaved") }}</span>
-                  <button type="button" class="btn-ghost text-xs" :disabled="wb.loading" @click="wbLoadPreview()">
+                  <button type="button" class="btn-ghost text-xs" x-show="wb.tab === 'local'" :disabled="wb.loading" @click="wbLoadPreview()">
                     <span x-show="!wb.loading">{{ t("metadata.load_preview") }}</span>
                     <span x-show="wb.loading">{{ t("common.loading") }}</span>
                   </button>
+                  <button type="button" class="btn-ghost text-xs" x-show="wb.tab === 'diff'" :disabled="diff.loading" @click="wbDiffLoad()">
+                    <span x-show="!diff.loading" x-text="diff.loaded ? window.t('metadata.diff_reload') : window.t('metadata.diff_load')"></span>
+                    <span x-show="diff.loading">{{ t("common.loading") }}</span>
+                  </button>
                 </div>
               </div>
+
+              <!-- ===== Local tab ===== -->
+              <div x-show="wb.tab === 'local'">
               <p class="text-xs text-obsidian-500 mb-3">{{ t("metadata.wb_hint") }}</p>
 
               <template x-if="wb.error">
@@ -545,6 +754,103 @@
                     </div>
                   </template>
                 </div>
+              </div>
+              </div>
+
+              <!-- ===== Diff tab ===== -->
+              <div x-show="wb.tab === 'diff'">
+              <p class="text-xs text-obsidian-500 mb-3">{{ t("metadata.diff_hint") }}</p>
+
+              <template x-if="diff.error">
+                <p class="text-xs text-red-400 mb-3" x-text="diff.error"></p>
+              </template>
+
+              <template x-if="!diff.loaded && !diff.loading && !diff.error">
+                <p class="text-xs text-obsidian-500 py-2">{{ t("metadata.diff_empty") }}</p>
+              </template>
+
+              <div x-show="diff.loaded" class="space-y-3">
+                <template x-if="diff.version">
+                  <p class="text-xs text-obsidian-400"
+                     x-text="window.t('metadata.diff_version', { version: diff.version.versionString || '?', state: diff.version.appStoreState || '?' })"></p>
+                </template>
+
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <button type="button" class="text-xs font-medium cursor-pointer transition-colors duration-150"
+                            :class="diff.filter === 'all' ? 'text-amber-500' : 'text-obsidian-400 hover:text-obsidian-200'"
+                            @click="diff.filter = 'all'">{{ t("metadata.diff_filter_all") }}</button>
+                    <button type="button" class="text-xs font-medium cursor-pointer transition-colors duration-150"
+                            :class="diff.filter === 'diff' ? 'text-amber-500' : 'text-obsidian-400 hover:text-obsidian-200'"
+                            @click="diff.filter = 'diff'">{{ t("metadata.diff_filter_diff") }}</button>
+                    <button type="button" class="text-xs font-medium cursor-pointer transition-colors duration-150"
+                            :class="diff.filter === 'local' ? 'text-amber-500' : 'text-obsidian-400 hover:text-obsidian-200'"
+                            @click="diff.filter = 'local'">{{ t("metadata.diff_filter_local") }}</button>
+                    <button type="button" class="text-xs font-medium cursor-pointer transition-colors duration-150"
+                            :class="diff.filter === 'asc' ? 'text-amber-500' : 'text-obsidian-400 hover:text-obsidian-200'"
+                            @click="diff.filter = 'asc'">{{ t("metadata.diff_filter_asc") }}</button>
+                  </div>
+                  <div class="flex items-center gap-3">
+                    <button type="button"
+                            class="text-xs text-amber-500 hover:text-amber-400 cursor-pointer transition-colors duration-150 font-medium"
+                            @click="wbSelectDiffsOnly()">{{ t("metadata.diff_select_diffs") }}</button>
+                    <button type="button" class="btn-ghost text-xs" :disabled="diff.pulling" @click="wbDiffPull()">
+                      <span x-show="!diff.pulling">{{ t("metadata.diff_pull") }}</span>
+                      <span x-show="diff.pulling">{{ t("metadata.diff_pulling") }}</span>
+                    </button>
+                  </div>
+                </div>
+
+                <template x-if="diff.pullOk">
+                  <p class="text-xs text-emerald-400">{{ t("metadata.diff_pull_ok") }}</p>
+                </template>
+
+                <p class="text-[11px] text-obsidian-500">{{ t("metadata.diff_shots_note") }}</p>
+
+                <div class="rounded-lg border border-obsidian-700 divide-y divide-obsidian-700 overflow-hidden">
+                  <template x-for="loc in diff.locales" :key="'diff-' + loc.locale">
+                    <div class="bg-obsidian-800/30" x-show="wbDiffLocaleVisible(loc)">
+                      <div class="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-obsidian-800/60 transition-colors duration-150"
+                           @click="loc.expanded = !loc.expanded">
+                        <input type="checkbox" class="w-3.5 h-3.5 accent-amber-500" x-model="loc.selected" @click.stop>
+                        <span class="text-sm font-mono text-obsidian-100 w-28 shrink-0 truncate" x-text="loc.locale"></span>
+                        <span class="text-xs text-obsidian-400 flex-1 truncate"
+                              x-text="window.t('metadata.diff_locale_summary', { count: loc.fields.filter(f => f.status !== 'equal').length })"></span>
+                        <svg class="w-3.5 h-3.5 text-obsidian-500 shrink-0 transition-transform duration-150" :class="{'rotate-180': loc.expanded}" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg>
+                      </div>
+                      <div x-show="loc.expanded" x-transition class="px-3 pb-3 space-y-2 border-t border-obsidian-700/60">
+                        <template x-for="field in loc.fields" :key="field.field">
+                          <div class="pt-2.5" x-show="wbDiffFieldVisible(field)">
+                            <label class="flex items-center gap-2 mb-1 cursor-pointer">
+                              <input type="checkbox" class="w-3.5 h-3.5 accent-amber-500" x-model="field.selected">
+                              <span class="text-xs text-obsidian-300" x-text="wbFieldLabel(field.field)"></span>
+                              <span class="text-[10px] font-medium uppercase tracking-wide"
+                                    :class="wbDiffStatusClass(field.status)"
+                                    x-text="wbDiffStatusLabel(field.status)"></span>
+                            </label>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2"
+                                 x-show="field.status !== 'equal'">
+                              <div>
+                                <p class="text-[10px] uppercase tracking-widest text-obsidian-500 mb-0.5">{{ t("metadata.diff_local") }}</p>
+                                <p class="text-xs text-obsidian-200 whitespace-pre-wrap break-words rounded border border-obsidian-700 bg-obsidian-900/40 px-2 py-1.5 min-h-[1.75rem]"
+                                   :class="field.status === 'changed' || field.status === 'local_only' ? 'border-sky-500/30' : ''"
+                                   x-text="field.local || '—'"></p>
+                              </div>
+                              <div>
+                                <p class="text-[10px] uppercase tracking-widest text-obsidian-500 mb-0.5">{{ t("metadata.diff_asc") }}</p>
+                                <p class="text-xs text-obsidian-200 whitespace-pre-wrap break-words rounded border border-obsidian-700 bg-obsidian-900/40 px-2 py-1.5 min-h-[1.75rem]"
+                                   :class="field.status === 'changed' || field.status === 'asc_only' ? 'border-violet-500/30' : ''"
+                                   x-text="field.asc || '—'"></p>
+                              </div>
+                            </div>
+                            <p x-show="field.status === 'equal'" class="text-xs text-obsidian-500 truncate" x-text="field.local || field.asc || '—'"></p>
+                          </div>
+                        </template>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </div>
               </div>
             </div>
 

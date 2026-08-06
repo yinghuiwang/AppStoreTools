@@ -619,3 +619,203 @@ def test_listing_screenshots_add_requires_profile(client, tmp_path):
     )
     assert r.status_code == 400
     assert r.json()["ok"] is False
+
+
+# ---------- /api/listing/diff + /api/listing/pull/text ----------
+
+
+def _mock_asc_api_for_text():
+    mock_api = MagicMock()
+    mock_api.get_editable_version.return_value = {
+        "id": "v1",
+        "attributes": {"versionString": "1.2.0", "appStoreState": "PREPARE_FOR_SUBMISSION"},
+    }
+    mock_api.get_app_infos.return_value = [{"id": "ai1", "relationships": {}}]
+    mock_api.get_app_info_localizations.return_value = [
+        {
+            "id": "il1",
+            "attributes": {
+                "locale": "en-US",
+                "name": "ASC Name",
+                "subtitle": "ASC Sub",
+                "privacyPolicyUrl": "https://p.asc",
+            },
+        },
+    ]
+    mock_api.get_version_localizations.return_value = [
+        {
+            "id": "vl1",
+            "attributes": {
+                "locale": "en-US",
+                "description": "ASC Desc",
+                "keywords": "asc,kw",
+                "supportUrl": "https://s.asc",
+                "marketingUrl": "https://m.asc",
+            },
+        },
+    ]
+    return mock_api
+
+
+def test_listing_diff_requires_profile(client, tmp_path):
+    p = tmp_path / "app.csv"
+    p.write_text("locale,name\nen-US,Local\n", encoding="utf-8-sig")
+    r = client.get("/api/listing/diff", params={"csv_path": str(p)})
+    assert r.status_code == 400
+    assert r.json()["ok"] is False
+
+
+def test_listing_diff_returns_field_statuses(client, tmp_path):
+    p = tmp_path / "app.csv"
+    p.write_text(
+        "locale,name,description\nen-US,Local Name,Same\n",
+        encoding="utf-8-sig",
+    )
+    mock_api = _mock_asc_api_for_text()
+    # Override description to match local for one equal field
+    mock_api.get_version_localizations.return_value[0]["attributes"]["description"] = "Same"
+
+    with patch("asc.web.routes_listing.Config", return_value=MagicMock()), \
+         patch("asc.web.routes_listing.make_api_from_config", return_value=(mock_api, "app123")):
+        r = client.get(
+            "/api/listing/diff",
+            params={"csv_path": str(p)},
+            cookies={"asc_profile": "test"},
+        )
+
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is True
+    assert data["version"]["versionString"] == "1.2.0"
+    assert "diff" in data
+    locales = {x["locale"]: x for x in data["diff"]["locales"]}
+    assert "en-US" in locales
+    by_field = {f["field"]: f for f in locales["en-US"]["fields"]}
+    assert by_field["name"]["status"] == "changed"
+    assert by_field["name"]["local"] == "Local Name"
+    assert by_field["name"]["asc"] == "ASC Name"
+    assert by_field["description"]["status"] == "equal"
+
+
+def test_listing_diff_no_editable_version_returns_4xx(client, tmp_path):
+    p = tmp_path / "app.csv"
+    p.write_text("locale,name\nen-US,Local\n", encoding="utf-8-sig")
+    mock_api = MagicMock()
+    mock_api.get_editable_version.return_value = None
+
+    with patch("asc.web.routes_listing.Config", return_value=MagicMock()), \
+         patch("asc.web.routes_listing.make_api_from_config", return_value=(mock_api, "app123")):
+        r = client.get(
+            "/api/listing/diff",
+            params={"csv_path": str(p)},
+            cookies={"asc_profile": "test"},
+        )
+
+    assert r.status_code in (400, 404, 409, 422)
+    data = r.json()
+    assert data["ok"] is False
+    assert data.get("message") or data.get("error")
+
+
+def test_listing_diff_merges_local_screenshots(client, tmp_path):
+    from PIL import Image
+
+    p = tmp_path / "app.csv"
+    p.write_text("locale,name\nen-US,Local\n", encoding="utf-8-sig")
+    shots = tmp_path / "screenshots" / "en-US"
+    shots.mkdir(parents=True)
+    img = shots / "01_home.png"
+    Image.new("RGB", (1290, 2796), color=(10, 20, 30)).save(img)
+
+    mock_api = _mock_asc_api_for_text()
+    with patch("asc.web.routes_listing.Config", return_value=MagicMock()), \
+         patch("asc.web.routes_listing.make_api_from_config", return_value=(mock_api, "app123")):
+        r = client.get(
+            "/api/listing/diff",
+            params={"csv_path": str(p), "screenshots_dir": str(tmp_path / "screenshots")},
+            cookies={"asc_profile": "test"},
+        )
+
+    assert r.status_code == 200
+    data = r.json()
+    locales = {x["locale"]: x for x in data["diff"]["locales"]}
+    shot_types = {s["display_type"]: s for s in locales["en-US"]["screenshots"]}
+    assert "APP_IPHONE_67" in shot_types
+    assert len(shot_types["APP_IPHONE_67"]["local"]) == 1
+    assert shot_types["APP_IPHONE_67"]["asc"] == []
+
+
+def test_listing_pull_text_writes_selected_fields(client, tmp_path):
+    p = tmp_path / "app.csv"
+    p.write_text(
+        "locale,name,subtitle,description\nen-US,Local,KeepMe,OldDesc\n",
+        encoding="utf-8-sig",
+    )
+    mtime = p.stat().st_mtime
+    mock_api = _mock_asc_api_for_text()
+
+    with patch("asc.web.routes_listing.Config", return_value=MagicMock()), \
+         patch("asc.web.routes_listing.make_api_from_config", return_value=(mock_api, "app123")):
+        r = client.post(
+            "/api/listing/pull/text",
+            cookies={"asc_profile": "test"},
+            json={
+                "csv_path": str(p),
+                "expected_mtime": mtime,
+                "selections": [{"locale": "en-US", "fields": ["name", "description"]}],
+            },
+        )
+
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is True
+    assert data["mtime"] > mtime
+    text = p.read_text(encoding="utf-8-sig")
+    assert "ASC Name" in text
+    assert "ASC Desc" in text
+    assert "KeepMe" in text  # unselected field preserved
+
+
+def test_listing_pull_text_requires_profile(client, tmp_path):
+    p = tmp_path / "app.csv"
+    p.write_text("locale,name\nen-US,Local\n", encoding="utf-8-sig")
+    r = client.post(
+        "/api/listing/pull/text",
+        json={
+            "csv_path": str(p),
+            "expected_mtime": p.stat().st_mtime,
+            "selections": [{"locale": "en-US", "fields": ["name"]}],
+        },
+    )
+    assert r.status_code == 400
+    assert r.json()["ok"] is False
+
+
+def test_listing_pull_text_conflict_returns_409(client, tmp_path):
+    p = tmp_path / "app.csv"
+    p.write_text("locale,name\nen-US,Local\n", encoding="utf-8-sig")
+    mock_api = _mock_asc_api_for_text()
+
+    with patch("asc.web.routes_listing.Config", return_value=MagicMock()), \
+         patch("asc.web.routes_listing.make_api_from_config", return_value=(mock_api, "app123")):
+        r = client.post(
+            "/api/listing/pull/text",
+            cookies={"asc_profile": "test"},
+            json={
+                "csv_path": str(p),
+                "expected_mtime": 1.0,  # stale
+                "selections": [{"locale": "en-US", "fields": ["name"]}],
+            },
+        )
+
+    assert r.status_code == 409
+    assert r.json()["ok"] is False
+
+
+def test_metadata_page_has_diff_tab_ui(client):
+    r = client.get("/metadata")
+    assert r.status_code == 200
+    assert "diffLoad" in r.text or "wbDiffLoad" in r.text
+    assert "diffSelectDiffsOnly" in r.text or "wbSelectDiffsOnly" in r.text
+    assert "/api/listing/diff" in r.text
+    assert "/api/listing/pull/text" in r.text
