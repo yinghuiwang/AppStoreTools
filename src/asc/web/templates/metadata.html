@@ -388,11 +388,12 @@
           this.diff.version = data.version || null;
           this.diff.locales = (data.diff && data.diff.locales || []).map(loc => ({
             locale: loc.locale,
-            selected: true,
+            selected: (loc.fields || []).some(f => f.status === 'changed' || f.status === 'asc_only'),
             expanded: true,
             fields: (loc.fields || []).map(f => ({
               ...f,
-              selected: f.status !== 'equal',
+              // Pull defaults: never auto-select local_only (would wipe local with empty ASC)
+              selected: f.status === 'changed' || f.status === 'asc_only',
             })),
             screenshots: loc.screenshots || [],
           }));
@@ -404,13 +405,14 @@
     },
 
     wbSelectDiffsOnly() {
+      // Upload checkboxes only: pushable from local = changed + local_only (not asc_only)
       if (!this.diff.loaded) return;
       const byLocale = {};
       this.diff.locales.forEach(loc => {
-        const diffFields = loc.fields.filter(f => f.status !== 'equal').map(f => f.field);
-        byLocale[loc.locale] = new Set(diffFields);
-        loc.selected = diffFields.length > 0;
-        loc.fields.forEach(f => { f.selected = f.status !== 'equal'; });
+        const pushFields = loc.fields
+          .filter(f => f.status === 'changed' || f.status === 'local_only')
+          .map(f => f.field);
+        byLocale[loc.locale] = new Set(pushFields);
       });
       // Mirror onto local workbench upload checkboxes
       this.wb.locales.forEach(loc => {
@@ -423,18 +425,19 @@
         loc.selected = set.size > 0;
         this.wb.fieldNames.forEach(f => { loc.fieldSelected[f] = set.has(f); });
       });
-      // Ensure diff-only locales appear in workbench selection maps for upload
+      // Ensure diff-only locales with pushable fields appear in workbench selection maps
       this.diff.locales.forEach(loc => {
         if (this.wb.locales.some(l => l.locale === loc.locale)) return;
+        const set = byLocale[loc.locale] || new Set();
+        if (!set.size) return;
         const fieldSelected = {};
         const fields = {};
-        const set = byLocale[loc.locale] || new Set();
         this.wb.fieldNames.forEach(f => {
           fieldSelected[f] = set.has(f);
           fields[f] = '';
         });
         this.wb.locales.push({
-          locale: loc.locale, selected: set.size > 0, expanded: false, fieldSelected, fields,
+          locale: loc.locale, selected: true, expanded: false, fieldSelected, fields,
           screenshotGroups: [], shotsExpanded: false,
         });
       });
@@ -443,6 +446,10 @@
     },
 
     wbDiffPull() {
+      if (this.wb.dirty) {
+        alert(window.t('metadata.diff_dirty_block'));
+        return;
+      }
       const selections = this.diff.locales
         .filter(l => l.selected)
         .map(l => ({

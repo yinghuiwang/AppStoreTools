@@ -815,7 +815,14 @@ def test_listing_pull_text_conflict_returns_409(client, tmp_path):
 def test_metadata_page_has_diff_tab_ui(client):
     r = client.get("/metadata")
     assert r.status_code == 200
-    assert "diffLoad" in r.text or "wbDiffLoad" in r.text
-    assert "diffSelectDiffsOnly" in r.text or "wbSelectDiffsOnly" in r.text
+    assert "wbDiffLoad" in r.text
+    assert "wbSelectDiffsOnly" in r.text
+    assert "wbDiffPull" in r.text
     assert "/api/listing/diff" in r.text
     assert "/api/listing/pull/text" in r.text
+    # Pull defaults: changed + asc_only only (not local_only)
+    assert "f.status === 'changed' || f.status === 'asc_only'" in r.text
+    # Upload「仅勾选有差异项」: changed + local_only (not asc_only)
+    assert "f.status === 'changed' || f.status === 'local_only'" in r.text
+    # Pull / tab / load all gate on dirty via the same i18n key
+    assert r.text.count("metadata.diff_dirty_block") >= 3
