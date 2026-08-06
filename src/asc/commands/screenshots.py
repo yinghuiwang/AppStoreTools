@@ -45,6 +45,61 @@ def _get_sorted_screenshots(folder: Path) -> list[Path]:
     return sorted(files, key=sort_key)
 
 
+def _group_files_by_display_type(folder: Path) -> dict[str, list[Path]]:
+    """Group screenshot files in *folder* by per-image display type."""
+    groups: dict[str, list[Path]] = {}
+    for path in _get_sorted_screenshots(folder):
+        display_type = _detect_display_type(path)
+        if not display_type:
+            continue
+        groups.setdefault(display_type, []).append(path)
+    return groups
+
+
+def _filter_screenshot_jobs(
+    jobs: list[tuple[str, str, list[Path]]],
+    scopes: list[dict] | None,
+) -> list[tuple[str, str, list[Path]]]:
+    """Filter (locale, display_type, files) jobs by upload scopes.
+
+    Each scope item: ``{"locale", "display_type", "file_names"}``.
+    ``scopes is None`` keeps all jobs. Non-empty ``file_names`` further
+    filters files by basename.
+    """
+    if scopes is None:
+        return list(jobs)
+
+    wanted: dict[tuple[str, str], list[str] | None] = {}
+    for scope in scopes:
+        locale = scope.get("locale")
+        display_type = scope.get("display_type")
+        if not locale or not display_type:
+            continue
+        file_names = scope.get("file_names")
+        key = (locale, display_type)
+        if key not in wanted:
+            wanted[key] = file_names if file_names else None
+        elif file_names:
+            existing = wanted[key]
+            if existing is None:
+                wanted[key] = list(file_names)
+            else:
+                wanted[key] = list(dict.fromkeys([*existing, *file_names]))
+
+    out: list[tuple[str, str, list[Path]]] = []
+    for locale, display_type, files in jobs:
+        key = (locale, display_type)
+        if key not in wanted:
+            continue
+        file_names = wanted[key]
+        if file_names:
+            name_set = set(file_names)
+            files = [p for p in files if p.name in name_set]
+        if files:
+            out.append((locale, display_type, files))
+    return out
+
+
 def _finish_screenshots(reporter: TaskReporter, finalize: bool) -> None:
     if finalize:
         reporter.done("截图上传完成")
@@ -63,6 +118,7 @@ def _upload_screenshots_core(
     verbose: bool = False,
     manage_phases: bool = True,
     finalize: bool = True,
+    screenshot_scopes: list[dict] | None = None,
 ):
     """Core screenshots upload logic"""
     if reporter is None:
@@ -119,7 +175,7 @@ def _upload_screenshots_core(
                 en_us_folder = folder
                 break
 
-    # Scan: collect per-locale upload jobs; total = image file count.
+    # Scan: collect per-(locale, display_type) upload jobs.
     jobs: list[tuple[str, dict, Path, list[Path], str, bool]] = []
     for resolved, loc_data in sorted(ver_loc_map.items()):
         if cancel_event is not None and cancel_event.is_set():
@@ -144,10 +200,14 @@ def _upload_screenshots_core(
             reporter.log("    没有找到截图文件，跳过")
             continue
 
-        display_type = display_type_override
-        if not display_type:
-            display_type = _detect_display_type(files[0])
-        if not display_type:
+        if display_type_override:
+            jobs.append(
+                (resolved, loc_data, folder, files, display_type_override, used_fallback)
+            )
+            continue
+
+        groups = _group_files_by_display_type(folder)
+        if not groups:
             with Image.open(files[0]) as img:
                 size = img.size
             reporter.log(
@@ -157,10 +217,24 @@ def _upload_screenshots_core(
             reporter.log("💡 无法确定设备类型，请使用 --display-type 手动指定")
             continue
 
-        jobs.append((resolved, loc_data, folder, files, display_type, used_fallback))
+        for display_type, typed_files in groups.items():
+            jobs.append(
+                (resolved, loc_data, folder, typed_files, display_type, used_fallback)
+            )
+
+    if screenshot_scopes is not None:
+        simple = [(locale, display_type, files) for locale, _, _, files, display_type, _ in jobs]
+        filtered = _filter_screenshot_jobs(simple, screenshot_scopes)
+        keep = {(locale, display_type): files for locale, display_type, files in filtered}
+        jobs = [
+            (locale, loc_data, folder, keep[(locale, display_type)], display_type, used_fallback)
+            for locale, loc_data, folder, files, display_type, used_fallback in jobs
+            if (locale, display_type) in keep
+        ]
 
     total_files = sum(len(files) for _, _, _, files, _, _ in jobs)
-    reporter.log(f"  待上传截图: {total_files} 张（{len(jobs)} 个语言）")
+    locales_count = len({locale for locale, _, _, _, _, _ in jobs})
+    reporter.log(f"  待上传截图: {total_files} 张（{locales_count} 个语言，{len(jobs)} 个任务）")
     reporter.progress(1, 1, msg="ok")
     reporter.phase("upload")
 

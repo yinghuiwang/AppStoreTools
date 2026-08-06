@@ -355,6 +355,7 @@ def _start_metadata_task(
     verbose: bool = False,
     locales: list[str] | None = None,
     fields_by_locale: dict | None = None,
+    screenshot_scopes: list[dict] | None = None,
 ) -> str:
     guard_enforcer = enforce_config_guard
     task_id = _task_store.create("metadata", profile=profile)
@@ -414,6 +415,7 @@ def _start_metadata_task(
                     reporter=reporter,
                     manage_phases=not combined,
                     finalize=True,
+                    screenshot_scopes=screenshot_scopes,
                 )
 
             if cancel_event.is_set():
@@ -468,6 +470,7 @@ async def metadata_run(
     verbose: str = _Form(""),
     locales_json: str = _Form(""),
     fields_by_locale_json: str = _Form(""),
+    screenshot_scopes_json: str = _Form(""),
 ):
     lang = _lang(request)
     profile = _cookie_profile(request)
@@ -496,6 +499,21 @@ async def metadata_run(
             return JSONResponse({"error": "fields_by_locale_json must be an object"}, status_code=400)
         fields_by_locale = parsed_fields or None
 
+    screenshot_scopes: list[dict] | None = None
+    if screenshot_scopes_json.strip():
+        try:
+            parsed_scopes = json.loads(screenshot_scopes_json)
+        except json.JSONDecodeError:
+            return JSONResponse({"error": "Invalid screenshot_scopes_json"}, status_code=400)
+        if not isinstance(parsed_scopes, list) or not all(
+            isinstance(item, dict) for item in parsed_scopes
+        ):
+            return JSONResponse(
+                {"error": "screenshot_scopes_json must be a list of objects"},
+                status_code=400,
+            )
+        screenshot_scopes = parsed_scopes or None
+
     include_metadata_bool = bool(include_metadata)
     include_screenshots_bool = bool(include_screenshots)
 
@@ -523,6 +541,7 @@ async def metadata_run(
         verbose=bool(verbose),
         locales=locale_list,
         fields_by_locale=fields_by_locale,
+        screenshot_scopes=screenshot_scopes,
     )
     return {"task_id": task_id}
 
