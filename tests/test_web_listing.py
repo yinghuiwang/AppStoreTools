@@ -386,6 +386,44 @@ def test_listing_screenshots_reorder(client, tmp_path):
     assert data["ok"] is True
     names = sorted(f.name for f in (shots / "en-US").iterdir())
     assert names == ["01_b.png", "02_a.png"]
+    assert "groups" in data
+    assert [i["file_name"] for i in data["groups"]["APP_IPHONE_67"]] == ["01_b.png", "02_a.png"]
+    assert [i["file_name"] for i in data["items"]] == ["01_b.png", "02_a.png"]
+
+
+def test_listing_screenshots_reorder_returns_sibling_display_types(client, tmp_path):
+    """N1: renumbering the folder must refresh sibling displayType filenames in the response."""
+    from urllib.parse import unquote
+
+    shots = tmp_path / "screenshots"
+    # Gap in numbering so sibling is renumbered (05 → 03), not only the reordered type.
+    _make_png(shots / "en-US" / "01_iphone_a.png", size=(1290, 2796))
+    _make_png(shots / "en-US" / "03_iphone_b.png", size=(1290, 2796))
+    _make_png(shots / "en-US" / "05_ipad.png", size=(2048, 2732))
+
+    r = client.post(
+        "/api/listing/screenshots/reorder",
+        json={
+            "root": str(shots),
+            "locale": "en-US",
+            "display_type": "APP_IPHONE_67",
+            "file_names": ["03_iphone_b.png", "01_iphone_a.png"],
+        },
+        cookies={"asc_profile": "test"},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is True
+    groups = data["groups"]
+    assert set(groups.keys()) == {"APP_IPHONE_67", "APP_IPAD_PRO_3GEN_129"}
+    assert [i["file_name"] for i in groups["APP_IPHONE_67"]] == [
+        "01_iphone_b.png",
+        "02_iphone_a.png",
+    ]
+    ipad = groups["APP_IPAD_PRO_3GEN_129"]
+    assert [i["file_name"] for i in ipad] == ["03_ipad.png"]
+    assert ipad[0]["local_path"].endswith("03_ipad.png")
+    assert "03_ipad.png" in unquote(ipad[0]["thumb_url"])
 
 
 def test_listing_screenshots_reorder_requires_profile(client, tmp_path):
@@ -566,8 +604,9 @@ def test_metadata_page_has_screenshot_workbench_markup(client):
     assert "wbTriggerReplace" in r.text
     assert "wbDeleteScreenshot" in r.text
     assert "wbTriggerAdd" in r.text
-    # I3: selection remapped by index after reorder rename
-    assert "selectedFlags" in r.text
+    # I3 / N1: selection remapped by index; all locale groups refreshed after reorder
+    assert "selectedByType" in r.text
+    assert "data.groups" in r.text
 
 
 def test_listing_screenshots_add_requires_profile(client, tmp_path):

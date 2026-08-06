@@ -242,9 +242,21 @@ async def listing_screenshots_reorder(request: Request):
 
     apply_screenshot_order(locale_dir, display_type, file_names)
 
+    # Full-folder renumber may rename sibling displayTypes too — return every
+    # group for this locale so the UI can refresh stale file_name/path/thumb URLs.
     by_type = scan_local_screenshots(root).get(locale, {})
-    items = [_screenshot_item_to_dict(root, Path(i.local_path), i.order) for i in by_type.get(display_type, [])]
-    return {"ok": True, "items": items}
+    groups = {
+        dtype: [
+            _screenshot_item_to_dict(root, Path(item.local_path), item.order) for item in items
+        ]
+        for dtype, items in by_type.items()
+    }
+    return {
+        "ok": True,
+        "groups": groups,
+        # Kept for callers that only care about the reordered type.
+        "items": groups.get(display_type, []),
+    }
 
 
 @router.post("/screenshots/replace")

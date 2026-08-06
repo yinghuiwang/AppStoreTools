@@ -170,13 +170,27 @@
           return data;
         })
         .then(data => {
-          // Remap selection by index: reorder renames files (01_stem…), so
-          // old→new name lookup would miss and unchecked state would be lost.
-          const selectedFlags = group.items.map(it => it.selected);
-          group.items = (data.items || []).map((it, i) => ({
-            ...it,
-            selected: selectedFlags[i] !== undefined ? selectedFlags[i] : true,
-          }));
+          // Full-folder renumber may rename sibling displayTypes; refresh all
+          // groups. Remap selection per group by index (names change to 01_…).
+          const selectedByType = {};
+          (loc.screenshotGroups || []).forEach(g => {
+            selectedByType[g.displayType] = g.items.map(it => it.selected);
+          });
+          let groups = data.groups || {};
+          // Fallback: older responses with only `items` for the reordered type.
+          if (!Object.keys(groups).length && data.items) {
+            groups = { [group.displayType]: data.items };
+          }
+          loc.screenshotGroups = Object.keys(groups).sort().map(displayType => {
+            const flags = selectedByType[displayType] || [];
+            return {
+              displayType,
+              items: (groups[displayType] || []).map((it, i) => ({
+                ...it,
+                selected: flags[i] !== undefined ? flags[i] : true,
+              })),
+            };
+          });
           this.wbSyncHidden();
         })
         .catch(e => { this.wb.shotsError = e.message; })
