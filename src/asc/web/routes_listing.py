@@ -539,7 +539,10 @@ async def listing_screenshots_reorder(request: Request):
     if locale_dir is None:
         raise HTTPException(status_code=404, detail="locale folder not found under root")
 
-    apply_screenshot_order(locale_dir, display_type, file_names)
+    try:
+        apply_screenshot_order(locale_dir, display_type, file_names, root=root)
+    except PathTraversalError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     # Full-folder renumber may rename sibling displayTypes too — return every
     # group for this locale so the UI can refresh stale file_name/path/thumb URLs.

@@ -129,6 +129,37 @@ def test_reorder_matches_sorted_screenshots(tmp_path):
     assert names[1].startswith("02_")
 
 
+def test_reorder_rejects_path_traversal(tmp_path):
+    """Reorder must reject `../` / absolute names and never pull outside files in."""
+    import pytest
+    from PIL import Image
+
+    from asc.listing.local import PathTraversalError, apply_screenshot_order
+
+    root = tmp_path / "screenshots"
+    locale_dir = root / "en-US"
+    locale_dir.mkdir(parents=True)
+    Image.new("RGB", (1290, 2796)).save(locale_dir / "a.png")
+
+    outside = tmp_path / "outside.png"
+    Image.new("RGB", (200, 200), color=(9, 9, 9)).save(outside)
+    outside_bytes = outside.read_bytes()
+
+    with pytest.raises(PathTraversalError):
+        apply_screenshot_order(
+            locale_dir,
+            "APP_IPHONE_67",
+            ["../outside.png"],
+            root=root,
+        )
+
+    assert outside.exists()
+    assert outside.read_bytes() == outside_bytes
+    assert not (locale_dir / "outside.png").exists()
+    assert (locale_dir / "a.png").exists()
+    assert [p.name for p in locale_dir.iterdir()] == ["a.png"]
+
+
 def test_reorder_strips_old_numeric_prefix(tmp_path):
     from PIL import Image
 

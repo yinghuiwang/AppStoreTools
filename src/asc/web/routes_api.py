@@ -477,7 +477,11 @@ async def metadata_run(
     if not profile:
         return JSONResponse({"error": t("api.no_profile", lang=lang)}, status_code=400)
 
+    # Missing / blank form fields → None (legacy: no filter / upload all).
+    # Explicit empty JSON from the workbench (`[]` / `{}`) must NOT collapse to
+    # None — that would silently upload everything.
     locale_list: list[str] | None = None
+    locales_explicit_empty = False
     if locales_json.strip():
         try:
             parsed_locales = json.loads(locales_json)
@@ -487,9 +491,14 @@ async def metadata_run(
             isinstance(item, str) for item in parsed_locales
         ):
             return JSONResponse({"error": "locales_json must be a list of strings"}, status_code=400)
-        locale_list = parsed_locales or None
+        if not parsed_locales:
+            locales_explicit_empty = True
+            locale_list = []
+        else:
+            locale_list = parsed_locales
 
     fields_by_locale: dict | None = None
+    fields_explicit_empty = False
     if fields_by_locale_json.strip():
         try:
             parsed_fields = json.loads(fields_by_locale_json)
@@ -497,9 +506,14 @@ async def metadata_run(
             return JSONResponse({"error": "Invalid fields_by_locale_json"}, status_code=400)
         if not isinstance(parsed_fields, dict):
             return JSONResponse({"error": "fields_by_locale_json must be an object"}, status_code=400)
-        fields_by_locale = parsed_fields or None
+        if not parsed_fields:
+            fields_explicit_empty = True
+            fields_by_locale = {}
+        else:
+            fields_by_locale = parsed_fields
 
     screenshot_scopes: list[dict] | None = None
+    scopes_explicit_empty = False
     if screenshot_scopes_json.strip():
         try:
             parsed_scopes = json.loads(screenshot_scopes_json)
@@ -511,28 +525,37 @@ async def metadata_run(
                     {"error": "screenshot_scopes_json must be a list of objects"},
                     status_code=400,
                 )
-            screenshot_scopes = parsed_scopes or None
+            if not parsed_scopes:
+                scopes_explicit_empty = True
+                screenshot_scopes = []
+            else:
+                screenshot_scopes = parsed_scopes
         elif isinstance(parsed_scopes, dict):
-            # Task 5 UI shape: {locale: {displayType: [file_names]}}
-            normalized: list[dict] = []
-            for locale, groups in parsed_scopes.items():
-                if not isinstance(groups, dict):
-                    return JSONResponse(
-                        {"error": "screenshot_scopes_json nested values must be objects"},
-                        status_code=400,
-                    )
-                for display_type, file_names in groups.items():
-                    if file_names is not None and not isinstance(file_names, list):
+            if not parsed_scopes:
+                # Workbench shape: explicit empty object → no screenshots selected.
+                scopes_explicit_empty = True
+                screenshot_scopes = []
+            else:
+                # Task 5 UI shape: {locale: {displayType: [file_names]}}
+                normalized: list[dict] = []
+                for locale, groups in parsed_scopes.items():
+                    if not isinstance(groups, dict):
                         return JSONResponse(
-                            {"error": "screenshot_scopes_json file_names must be a list"},
+                            {"error": "screenshot_scopes_json nested values must be objects"},
                             status_code=400,
                         )
-                    normalized.append({
-                        "locale": locale,
-                        "display_type": display_type,
-                        "file_names": file_names,
-                    })
-            screenshot_scopes = normalized or None
+                    for display_type, file_names in groups.items():
+                        if file_names is not None and not isinstance(file_names, list):
+                            return JSONResponse(
+                                {"error": "screenshot_scopes_json file_names must be a list"},
+                                status_code=400,
+                            )
+                        normalized.append({
+                            "locale": locale,
+                            "display_type": display_type,
+                            "file_names": file_names,
+                        })
+                screenshot_scopes = normalized or None
         else:
             return JSONResponse(
                 {"error": "screenshot_scopes_json must be a list or object"},
@@ -541,6 +564,12 @@ async def metadata_run(
 
     include_metadata_bool = bool(include_metadata)
     include_screenshots_bool = bool(include_screenshots)
+
+    if include_metadata_bool and (locales_explicit_empty or fields_explicit_empty):
+        return JSONResponse({"error": "no metadata rows selected"}, status_code=400)
+
+    if include_screenshots_bool and scopes_explicit_empty:
+        return JSONResponse({"error": "no screenshots selected"}, status_code=400)
 
     if include_metadata_bool and not include_screenshots_bool and (
         locale_list or fields_by_locale is not None

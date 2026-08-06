@@ -96,6 +96,7 @@
     },
 
     wbLocalesJson() {
+      // Workbench loaded with zero locales checked still emits `[]` (explicit empty).
       if (!this.wb.loaded) return '';
       return JSON.stringify(this.wb.locales.filter(l => l.selected).map(l => l.locale));
     },
@@ -107,6 +108,20 @@
         out[l.locale] = this.wb.fieldNames.filter(f => l.fieldSelected[f]);
       });
       return JSON.stringify(out);
+    },
+
+    wbHasMetadataSelection() {
+      if (!this.wb.loaded) return false;
+      return this.wb.locales.some(l =>
+        l.selected && this.wb.fieldNames.some(f => l.fieldSelected[f])
+      );
+    },
+
+    wbHasScreenshotSelection() {
+      if (!this.wb.loaded) return false;
+      return this.wb.locales.some(loc =>
+        (loc.screenshotGroups || []).some(g => g.items.some(it => it.selected))
+      );
     },
 
     wbSyncHidden() {
@@ -630,9 +645,18 @@
               startTaskLogs(taskId);
             "
             @htmx:before-request.camel="
+              wbSyncHidden();
               if (wb.loaded && wb.dirty) {
                 event.preventDefault();
                 alert(window.t('metadata.wb_dirty_block'));
+                return;
+              }
+              const form = document.getElementById('metadata-form');
+              const wantMeta = form && form.querySelector('[name=include_metadata]')?.checked;
+              const wantShots = form && form.querySelector('[name=include_screenshots]')?.checked;
+              if (wb.loaded && (wantMeta || wantShots) && !wbHasMetadataSelection() && !wbHasScreenshotSelection()) {
+                event.preventDefault();
+                alert(window.t('metadata.wb_empty_selection'));
                 return;
               }
               submitting = true;

@@ -226,6 +226,7 @@
   "metadata.wb_save_ok": "已保存",
   "metadata.wb_conflict": "文件已被外部修改，请重新加载预览后再保存",
   "metadata.wb_dirty_block": "本地工作台有未保存的修改，请先保存到 CSV 或重新加载预览后再上传",
+  "metadata.wb_empty_selection": "工作台未勾选任何元数据字段或截图，请先勾选后再上传",
   "metadata.field_name": "名称",
   "metadata.field_subtitle": "副标题",
   "metadata.field_description": "描述",

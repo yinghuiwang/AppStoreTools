@@ -226,6 +226,7 @@
   "metadata.wb_save_ok": "Saved",
   "metadata.wb_conflict": "The file was changed on disk. Reload the preview before saving again.",
   "metadata.wb_dirty_block": "The local workbench has unsaved changes. Save to CSV or reload the preview before uploading.",
+  "metadata.wb_empty_selection": "No metadata fields or screenshots selected in the workbench. Select something before uploading.",
   "metadata.field_name": "Name",
   "metadata.field_subtitle": "Subtitle",
   "metadata.field_description": "Description",

@@ -233,7 +233,13 @@ def find_locale_screenshot_dir(screenshots_dir: str, locale: str) -> Path | None
     return None
 
 
-def apply_screenshot_order(locale_dir: Path, display_type: str, ordered_file_names: list[str]) -> None:
+def apply_screenshot_order(
+    locale_dir: Path,
+    display_type: str,
+    ordered_file_names: list[str],
+    *,
+    root: Path | str | None = None,
+) -> None:
     """Reorder `ordered_file_names` and renumber the entire locale folder consistently.
 
     Files named in `ordered_file_names` fill the slots previously occupied by
@@ -244,13 +250,27 @@ def apply_screenshot_order(locale_dir: Path, display_type: str, ordered_file_nam
     order prefix as the sort key. `display_type` is accepted for
     interface/documentation purposes; callers should only pass names from that
     displayType group.
+
+    Every entry in `ordered_file_names` must pass `_safe_basename` (no `..` /
+    absolute paths). Resolved paths are asserted under `root` (or `locale_dir`
+    when `root` is omitted) via `_assert_under_root`.
     """
     # Imported lazily — same rationale as `scan_local_screenshots`.
     from asc.commands.screenshots import _get_sorted_screenshots
 
     locale_dir = Path(locale_dir)
+    root_r = Path(root).resolve() if root is not None else locale_dir.resolve()
+    _assert_under_root(root_r, locale_dir)
+
+    safe_names = [_safe_basename(n) for n in ordered_file_names]
+    ordered_existing: list[str] = []
+    for name in safe_names:
+        candidate = locale_dir / name
+        _assert_under_root(root_r, candidate)
+        if candidate.exists():
+            ordered_existing.append(name)
+
     all_files = _get_sorted_screenshots(locale_dir)
-    ordered_existing = [n for n in ordered_file_names if (locale_dir / n).exists()]
     ordered_set = set(ordered_existing)
 
     # Preserve other types' slots: walk current sorted order and replace only

@@ -195,6 +195,113 @@ def test_metadata_run_invalid_fields_by_locale_json_returns_400(client):
     assert "error" in data
 
 
+def test_metadata_run_explicit_empty_locales_json_returns_400(client):
+    """Workbench-style locales_json=`[]` must not mean upload-all when metadata is included."""
+    response = client.post(
+        "/api/metadata/run",
+        cookies={"asc_profile": "test"},
+        data={
+            "include_metadata": "1",
+            "include_screenshots": "",
+            "dry_run": "1",
+            "locales_json": "[]",
+            "fields_by_locale_json": "",
+        },
+    )
+    assert response.status_code == 400
+    assert response.json()["error"] == "no metadata rows selected"
+
+
+def test_metadata_run_explicit_empty_fields_by_locale_returns_400(client):
+    """Workbench-style fields_by_locale_json=`{}` is explicit empty → 400."""
+    response = client.post(
+        "/api/metadata/run",
+        cookies={"asc_profile": "test"},
+        data={
+            "include_metadata": "1",
+            "include_screenshots": "",
+            "dry_run": "1",
+            "locales_json": "",
+            "fields_by_locale_json": "{}",
+        },
+    )
+    assert response.status_code == 400
+    assert response.json()["error"] == "no metadata rows selected"
+
+
+def test_metadata_run_explicit_empty_screenshot_scopes_object_returns_400(client):
+    """Workbench-style screenshot_scopes_json=`{}` is explicit empty → 400."""
+    response = client.post(
+        "/api/metadata/run",
+        cookies={"asc_profile": "test"},
+        data={
+            "include_metadata": "",
+            "include_screenshots": "1",
+            "dry_run": "1",
+            "screenshot_scopes_json": "{}",
+        },
+    )
+    assert response.status_code == 400
+    assert response.json()["error"] == "no screenshots selected"
+
+
+def test_metadata_run_explicit_empty_screenshot_scopes_list_returns_400(client):
+    """Explicit screenshot_scopes_json=`[]` is empty selection → 400."""
+    response = client.post(
+        "/api/metadata/run",
+        cookies={"asc_profile": "test"},
+        data={
+            "include_metadata": "",
+            "include_screenshots": "1",
+            "dry_run": "1",
+            "screenshot_scopes_json": "[]",
+        },
+    )
+    assert response.status_code == 400
+    assert response.json()["error"] == "no screenshots selected"
+
+
+def test_metadata_run_omitted_filter_fields_legacy_unfiltered_200(client, tmp_path):
+    """Omitted filter fields (not present in form) keep legacy unfiltered upload."""
+    from asc.web import routes_api
+
+    csv_path = tmp_path / "appstore_info.csv"
+    csv_path.write_text(
+        "locale,name\nen-US,A\nzh-Hans,中\n",
+        encoding="utf-8",
+    )
+
+    mock_config = MagicMock()
+    mock_api = MagicMock()
+    captured = {}
+
+    def fake_upload_metadata_core(api, app_id, metadata_list, **kwargs):
+        captured["metadata_list"] = metadata_list
+        return {"success": True}
+
+    with patch("asc.web.routes_api.Config", return_value=mock_config), \
+         patch("asc.web.routes_api.make_api_from_config", return_value=(mock_api, "app123")), \
+         patch("asc.commands.metadata._upload_metadata_core", side_effect=fake_upload_metadata_core):
+        response = client.post(
+            "/api/metadata/run",
+            cookies={"asc_profile": "test"},
+            data={
+                "csv_path": str(csv_path),
+                "include_metadata": "1",
+                "include_screenshots": "",
+                "dry_run": "1",
+                # locales_json / fields_by_locale_json intentionally omitted
+            },
+        )
+        assert response.status_code == 200
+        task_id = response.json()["task_id"]
+        task = _wait_for_task(routes_api, task_id)
+
+    assert task is not None
+    assert task["status"] == TaskStatus.DONE
+    assert len(captured["metadata_list"]) == 2
+
+
 # ---------- /api/listing/local (local text workbench) ----------
 
 
