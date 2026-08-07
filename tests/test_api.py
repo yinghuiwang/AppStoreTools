@@ -96,6 +96,66 @@ def test_request_retries_on_429(api):
     assert mock_req.call_args.kwargs["timeout"] == (10, 60)
 
 
+def test_request_inflight_semaphore_serializes_when_limit_one(api, monkeypatch):
+    """ASC_API_MAX_INFLIGHT=1: second request waits until the first releases the slot."""
+    import threading
+
+    import asc.api as api_mod
+
+    monkeypatch.setenv("ASC_API_MAX_INFLIGHT", "1")
+    api_mod._asc_inflight_sem = None
+    api_mod._asc_inflight_limit = None
+
+    release_first = threading.Event()
+    second_entered = threading.Event()
+    call_order: list[str] = []
+    order_lock = threading.Lock()
+
+    def slow_request(*_args, **_kwargs):
+        with order_lock:
+            call_order.append("enter")
+            is_second = call_order.count("enter") == 2
+        if is_second:
+            second_entered.set()
+            resp = MagicMock()
+            resp.status_code = 200
+            resp.json.return_value = {"data": "second"}
+            return resp
+        assert release_first.wait(timeout=2.0)
+        with order_lock:
+            call_order.append("first_done")
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"data": "first"}
+        return resp
+
+    errors: list[BaseException] = []
+
+    def worker() -> None:
+        try:
+            api._request("GET", "/v1/apps/123")
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    with patch("requests.request", side_effect=slow_request):
+        t1 = threading.Thread(target=worker)
+        t2 = threading.Thread(target=worker)
+        t1.start()
+        time.sleep(0.05)
+        t2.start()
+        time.sleep(0.2)
+        assert not second_entered.is_set()
+        release_first.set()
+        assert second_entered.wait(timeout=2.0)
+        t1.join(timeout=2.0)
+        t2.join(timeout=2.0)
+
+    assert not errors
+    assert call_order[0] == "enter"
+    assert "first_done" in call_order
+    assert call_order.index("first_done") < call_order.index("enter", 1)
+
+
 # ── _request: 4xx 抛出异常 ──
 
 def test_request_raises_on_404(api):
