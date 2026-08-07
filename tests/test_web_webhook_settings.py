@@ -139,6 +139,15 @@ def test_settings_webhooks_test_non_object_json_returns_400(client: TestClient):
     assert "error" in response.json()
 
 
+def test_settings_webhooks_test_route_offloads_to_thread():
+    import inspect
+    from asc.web import routes_api
+
+    src = inspect.getsource(routes_api.test_webhook_config)
+    assert "to_thread" in src
+    assert "send_test_notification" in src
+
+
 def test_send_test_notification_all_configured_providers_in_order(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

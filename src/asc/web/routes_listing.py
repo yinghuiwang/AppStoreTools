@@ -1,6 +1,7 @@
 """Local listing (CSV text + screenshots) routes for asc Web UI (/api/listing/*)."""
 from __future__ import annotations
 
+import asyncio
 import mimetypes
 import os
 from dataclasses import asdict
@@ -256,12 +257,15 @@ def _asc_error_response(exc: Exception, lang: str) -> JSONResponse:
 
 
 @router.get("/diff")
-async def listing_diff(
+def listing_diff(
     request: Request,
     csv_path: str,
     screenshots_dir: str = "",
 ):
-    """Compare local CSV (+ screenshots) against ASC text + screenshot sets."""
+    """Compare local CSV (+ screenshots) against ASC text + screenshot sets.
+
+    Sync ``def`` so ASC HTTP stays off the event loop (Starlette threadpool).
+    """
     lang = _lang(request)
     profile = _require_profile(request)
     if not profile:
@@ -298,54 +302,19 @@ async def listing_diff(
     }
 
 
-@router.get("/asc-thumb")
-async def listing_asc_thumb(request: Request, screenshot_id: str):
-    """Proxy a small ASC screenshot preview by `screenshot_id`.
-
-    Resolves `imageAsset.templateUrl` (100×100) from the screenshot resource and
-    streams the CDN bytes so the browser does not need cross-origin CDN access.
-    """
-    lang = _lang(request)
-    profile = _require_profile(request)
-    if not profile:
-        return JSONResponse(_no_profile_payload(lang), status_code=400)
-    sid = (screenshot_id or "").strip()
-    if not sid:
-        raise HTTPException(status_code=400, detail="screenshot_id is required")
-
-    try:
-        api, _app_id = _api_for_profile(profile)
-        detail = api.get(f"/v1/appScreenshots/{sid}")
-        attrs = ((detail or {}).get("data") or {}).get("attributes") or {}
+def _fetch_asc_screenshot_bytes(
+    profile: str, screenshot_id: str, *, thumb: bool
+) -> tuple[bytes, str]:
+    """Blocking ASC metadata + CDN download. Raises HTTPException on missing asset."""
+    api, _app_id = _api_for_profile(profile)
+    detail = api.get(f"/v1/appScreenshots/{screenshot_id}")
+    attrs = ((detail or {}).get("data") or {}).get("attributes") or {}
+    if thumb:
         url = screenshot_thumb_url(attrs)
         if not url:
             raise HTTPException(status_code=404, detail="thumb URL not available")
-        resp = requests.get(url, timeout=(10, 60))
-        resp.raise_for_status()
-    except HTTPException:
-        raise
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
-
-    content_type = resp.headers.get("Content-Type") or "image/png"
-    return Response(content=resp.content, media_type=content_type)
-
-
-@router.get("/asc-image")
-async def listing_asc_image(request: Request, screenshot_id: str):
-    """Proxy the full ASC screenshot image by `screenshot_id` for lightbox viewing."""
-    lang = _lang(request)
-    profile = _require_profile(request)
-    if not profile:
-        return JSONResponse(_no_profile_payload(lang), status_code=400)
-    sid = (screenshot_id or "").strip()
-    if not sid:
-        raise HTTPException(status_code=400, detail="screenshot_id is required")
-
-    try:
-        api, _app_id = _api_for_profile(profile)
-        detail = api.get(f"/v1/appScreenshots/{sid}")
-        attrs = ((detail or {}).get("data") or {}).get("attributes") or {}
+        timeout = (10, 60)
+    else:
         asset = (attrs or {}).get("imageAsset") or {}
         template = asset.get("templateUrl") or ""
         if not template:
@@ -362,15 +331,62 @@ async def listing_asc_image(request: Request, screenshot_id: str):
             if suffix == "jpeg":
                 suffix = "jpg"
             url = url.replace("{f}", suffix if suffix in ("png", "jpg") else "png")
-        resp = requests.get(url, timeout=(10, 120))
-        resp.raise_for_status()
+        timeout = (10, 120)
+    resp = requests.get(url, timeout=timeout)
+    resp.raise_for_status()
+    content_type = resp.headers.get("Content-Type") or "image/png"
+    return resp.content, content_type
+
+
+@router.get("/asc-thumb")
+def listing_asc_thumb(request: Request, screenshot_id: str):
+    """Proxy a small ASC screenshot preview by `screenshot_id`.
+
+    Resolves `imageAsset.templateUrl` (100×100) from the screenshot resource and
+    streams the CDN bytes so the browser does not need cross-origin CDN access.
+
+    Sync ``def`` so ASC + CDN ``requests.get`` stay off the event loop.
+    """
+    lang = _lang(request)
+    profile = _require_profile(request)
+    if not profile:
+        return JSONResponse(_no_profile_payload(lang), status_code=400)
+    sid = (screenshot_id or "").strip()
+    if not sid:
+        raise HTTPException(status_code=400, detail="screenshot_id is required")
+
+    try:
+        content, content_type = _fetch_asc_screenshot_bytes(profile, sid, thumb=True)
     except HTTPException:
         raise
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
 
-    content_type = resp.headers.get("Content-Type") or "image/png"
-    return Response(content=resp.content, media_type=content_type)
+    return Response(content=content, media_type=content_type)
+
+
+@router.get("/asc-image")
+def listing_asc_image(request: Request, screenshot_id: str):
+    """Proxy the full ASC screenshot image by `screenshot_id` for lightbox viewing.
+
+    Sync ``def`` so ASC + CDN ``requests.get`` stay off the event loop.
+    """
+    lang = _lang(request)
+    profile = _require_profile(request)
+    if not profile:
+        return JSONResponse(_no_profile_payload(lang), status_code=400)
+    sid = (screenshot_id or "").strip()
+    if not sid:
+        raise HTTPException(status_code=400, detail="screenshot_id is required")
+
+    try:
+        content, content_type = _fetch_asc_screenshot_bytes(profile, sid, thumb=False)
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+    return Response(content=content, media_type=content_type)
 
 
 @router.post("/pull/screenshots")
@@ -446,50 +462,14 @@ async def listing_pull_screenshots(request: Request):
     return {"ok": True, "task_id": task_id}
 
 
-@router.post("/pull/text")
-async def listing_pull_text(request: Request):
-    """Pull selected ASC text fields into the local CSV (mtime-guarded)."""
-    lang = _lang(request)
-    profile = _require_profile(request)
-    if not profile:
-        return JSONResponse(_no_profile_payload(lang), status_code=400)
-
-    try:
-        body = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON") from None
-    if not isinstance(body, dict):
-        raise HTTPException(status_code=400, detail="JSON body must be an object")
-
-    csv_path = body.get("csv_path")
-    if not isinstance(csv_path, str) or not csv_path.strip():
-        raise HTTPException(status_code=400, detail="csv_path is required")
-
-    expected_mtime = body.get("expected_mtime")
-    if expected_mtime is not None and not isinstance(expected_mtime, (int, float)):
-        raise HTTPException(status_code=400, detail="expected_mtime must be a number")
-
-    selections = body.get("selections")
-    if not isinstance(selections, list) or not selections:
-        raise HTTPException(status_code=400, detail="selections must be a non-empty list")
-
-    parsed: list[tuple[str, list[str]]] = []
-    for item in selections:
-        if not isinstance(item, dict):
-            raise HTTPException(status_code=400, detail="invalid selection entry")
-        locale = item.get("locale")
-        fields = item.get("fields")
-        if not isinstance(locale, str) or not locale.strip():
-            raise HTTPException(status_code=400, detail="invalid selection entry")
-        if not isinstance(fields, list) or not all(isinstance(f, str) for f in fields):
-            raise HTTPException(status_code=400, detail="invalid selection entry")
-        allowed = [f for f in fields if f in FIELD_NAMES]
-        if allowed:
-            parsed.append((locale, allowed))
-
-    if not parsed:
-        raise HTTPException(status_code=400, detail="no valid field selections")
-
+def _do_listing_pull_text(
+    profile: str,
+    csv_path: str,
+    expected_mtime: float | int | None,
+    parsed: list[tuple[str, list[str]]],
+    lang: str,
+):
+    """Blocking ASC snapshot + CSV write (runs in a worker thread)."""
     try:
         local = load_local_text_snapshot(csv_path)
     except (FileNotFoundError, OSError) as e:
@@ -535,6 +515,61 @@ async def listing_pull_text(request: Request):
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
 
     return {"ok": True, "mtime": new_mtime}
+
+
+@router.post("/pull/text")
+async def listing_pull_text(request: Request):
+    """Pull selected ASC text fields into the local CSV (mtime-guarded)."""
+    lang = _lang(request)
+    profile = _require_profile(request)
+    if not profile:
+        return JSONResponse(_no_profile_payload(lang), status_code=400)
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON") from None
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="JSON body must be an object")
+
+    csv_path = body.get("csv_path")
+    if not isinstance(csv_path, str) or not csv_path.strip():
+        raise HTTPException(status_code=400, detail="csv_path is required")
+
+    expected_mtime = body.get("expected_mtime")
+    if expected_mtime is not None and not isinstance(expected_mtime, (int, float)):
+        raise HTTPException(status_code=400, detail="expected_mtime must be a number")
+
+    selections = body.get("selections")
+    if not isinstance(selections, list) or not selections:
+        raise HTTPException(status_code=400, detail="selections must be a non-empty list")
+
+    parsed: list[tuple[str, list[str]]] = []
+    for item in selections:
+        if not isinstance(item, dict):
+            raise HTTPException(status_code=400, detail="invalid selection entry")
+        locale = item.get("locale")
+        fields = item.get("fields")
+        if not isinstance(locale, str) or not locale.strip():
+            raise HTTPException(status_code=400, detail="invalid selection entry")
+        if not isinstance(fields, list) or not all(isinstance(f, str) for f in fields):
+            raise HTTPException(status_code=400, detail="invalid selection entry")
+        allowed = [f for f in fields if f in FIELD_NAMES]
+        if allowed:
+            parsed.append((locale, allowed))
+
+    if not parsed:
+        raise HTTPException(status_code=400, detail="no valid field selections")
+
+    # ASC snapshot + CSV IO are sync — keep them off the event loop.
+    return await asyncio.to_thread(
+        _do_listing_pull_text,
+        profile,
+        csv_path,
+        expected_mtime,
+        parsed,
+        lang,
+    )
 
 
 def _screenshot_item_to_dict(root: str, file_path: Path, order: int) -> dict:

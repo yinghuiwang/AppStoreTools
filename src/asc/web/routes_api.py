@@ -450,13 +450,13 @@ def _start_metadata_task(
 
 
 @router.post("/metadata/check")
-async def metadata_check(request: Request):
+def metadata_check(request: Request):
+    """Sync ``def`` so ASC connectivity checks stay off the event loop."""
     lang = _lang(request)
     profile = _cookie_profile(request)
     if not profile:
         return _no_profile_payload(lang)
-    result = _run_metadata_check(profile, lang=lang)
-    return result
+    return _run_metadata_check(profile, lang=lang)
 
 
 @router.post("/metadata/run")
@@ -1064,7 +1064,7 @@ async def create_profile(
 
     from asc.config import Config
     config = Config()
-    _enforce_web_profile_guard(app_id, name, key_id, issuer_id)
+    await _asyncio.to_thread(_enforce_web_profile_guard, app_id, name, key_id, issuer_id)
 
     if not key_file.filename or not key_file.filename.lower().endswith(".p8"):
         raise HTTPException(status_code=400, detail="Invalid key filename")
@@ -1179,7 +1179,7 @@ async def update_profile(
     if new_name != name and config.get_app_profile(new_name) is not None:
         raise HTTPException(status_code=409, detail="Profile name already exists")
 
-    _enforce_web_profile_guard(app_id, new_name, key_id, issuer_id)
+    await _asyncio.to_thread(_enforce_web_profile_guard, app_id, new_name, key_id, issuer_id)
 
     key_file_path = existing["key_file"]
     if key_file and key_file.filename:
@@ -1294,7 +1294,8 @@ def _empty_current_environment() -> dict:
 
 
 @router.get("/guard/status")
-async def guard_status(request: Request):
+def guard_status(request: Request):
+    """Sync ``def`` so Guard public-IP lookup stays off the event loop."""
     from asc.guard import Guard
     try:
         guard = Guard()
@@ -2210,8 +2211,11 @@ def _get_available_locales(api, app_id: str) -> list[dict]:
 
 
 @router.get("/urls/check")
-async def urls_check(request: Request):
-    """Check environment for URL settings."""
+def urls_check(request: Request):
+    """Check environment for URL settings.
+
+    Sync ``def`` so ASC connectivity checks stay off the event loop.
+    """
     lang = _lang(request)
     profile = _cookie_profile(request)
     if not profile:
@@ -2355,8 +2359,11 @@ def _start_urls_task(
 # ---------- Update API ----------
 
 @router.get("/update/check")
-async def update_check(request: Request):
-    """Check for updates."""
+def update_check(request: Request):
+    """Check for updates.
+
+    Sync ``def`` so GitHub HTTP stays off the event loop.
+    """
     from asc.commands.update_cmd import (
         _current_version,
         _is_editable,
@@ -2552,8 +2559,11 @@ async def update_post_restart_ack():
 
 
 @router.get("/update/versions")
-async def update_versions(request: Request):
-    """List installable release versions."""
+def update_versions(request: Request):
+    """List installable release versions.
+
+    Sync ``def`` so GitHub HTTP stays off the event loop.
+    """
     from asc.commands.update_cmd import _all_versions_from_github
 
     lang = _lang(request)
@@ -2574,8 +2584,11 @@ async def update_versions(request: Request):
 
 
 @router.get("/update/branches")
-async def update_branches(request: Request):
-    """List installable branches."""
+def update_branches(request: Request):
+    """List installable branches.
+
+    Sync ``def`` so GitHub HTTP stays off the event loop.
+    """
     from asc.commands.update_cmd import _branches_from_github
 
     lang = _lang(request)
@@ -2819,7 +2832,12 @@ async def test_webhook_config(request: Request):
         return JSONResponse({"error": "JSON body must be an object"}, status_code=400)
 
     try:
-        return {"results": notifications.send_test_notification(provider=data.get("provider"))}
+        # Outbound webhook HTTP is sync — keep it off the event loop.
+        results = await _asyncio.to_thread(
+            notifications.send_test_notification,
+            data.get("provider"),
+        )
+        return {"results": results}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 

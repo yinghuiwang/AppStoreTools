@@ -502,6 +502,23 @@ def test_blocking_web_probes_run_in_threadpool():
     assert not inspect.iscoroutinefunction(routes_api.build_schemes)
     assert not inspect.iscoroutinefunction(routes_api.build_options)
     assert not inspect.iscoroutinefunction(routes_api.whats_new_check)
+    assert not inspect.iscoroutinefunction(routes_api.metadata_check)
+    assert not inspect.iscoroutinefunction(routes_api.urls_check)
+    assert not inspect.iscoroutinefunction(routes_api.update_check)
+    assert not inspect.iscoroutinefunction(routes_api.update_versions)
+    assert not inspect.iscoroutinefunction(routes_api.update_branches)
+    assert not inspect.iscoroutinefunction(routes_api.guard_status)
+
+
+def test_profile_guard_and_webhook_routes_offload_to_thread():
+    from asc.web import routes_api
+
+    create_src = inspect.getsource(routes_api.create_profile)
+    update_src = inspect.getsource(routes_api.update_profile)
+    assert "to_thread" in create_src
+    assert "_enforce_web_profile_guard" in create_src
+    assert "to_thread" in update_src
+    assert "_enforce_web_profile_guard" in update_src
 
 
 def test_homepage_dashboard_storage_query_runs_in_threadpool():

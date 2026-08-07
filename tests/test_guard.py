@@ -140,7 +140,8 @@ def test_get_machine_fingerprint_fallback(tmp_path):
 
 
 def test_get_public_ip_success(tmp_path):
-    from asc.guard import Guard
+    from asc.guard import Guard, _clear_public_ip_cache
+    _clear_public_ip_cache()
     with patch("asc.guard.GUARD_FILE", tmp_path / "guard.json"):
         with patch("asc.guard._fetch_public_ip", return_value="1.2.3.4"):
             g = Guard()
@@ -149,12 +150,38 @@ def test_get_public_ip_success(tmp_path):
 
 
 def test_get_public_ip_failure(tmp_path):
-    from asc.guard import Guard
+    from asc.guard import Guard, _clear_public_ip_cache
+    _clear_public_ip_cache()
     with patch("asc.guard.GUARD_FILE", tmp_path / "guard.json"):
         with patch("asc.guard._fetch_public_ip", side_effect=Exception("timeout")):
             g = Guard()
             ip = g._get_public_ip()
             assert ip == "unknown"
+
+
+def test_get_public_ip_caches_successful_lookup(tmp_path):
+    from asc.guard import Guard, _clear_public_ip_cache
+    _clear_public_ip_cache()
+    with patch("asc.guard.GUARD_FILE", tmp_path / "guard.json"):
+        with patch("asc.guard._fetch_public_ip", side_effect=["1.2.3.4", "9.9.9.9"]) as fetch:
+            g = Guard()
+            assert g._get_public_ip() == "1.2.3.4"
+            assert g._get_public_ip() == "1.2.3.4"
+            assert fetch.call_count == 1
+
+
+def test_get_public_ip_does_not_cache_unknown(tmp_path):
+    from asc.guard import Guard, _clear_public_ip_cache
+    _clear_public_ip_cache()
+    with patch("asc.guard.GUARD_FILE", tmp_path / "guard.json"):
+        with patch(
+            "asc.guard._fetch_public_ip",
+            side_effect=[Exception("timeout"), "1.2.3.4"],
+        ) as fetch:
+            g = Guard()
+            assert g._get_public_ip() == "unknown"
+            assert g._get_public_ip() == "1.2.3.4"
+            assert fetch.call_count == 2
 
 
 def test_bind_creates_entries(tmp_path):

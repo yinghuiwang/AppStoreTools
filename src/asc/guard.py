@@ -50,6 +50,18 @@ def _fetch_public_ip() -> str:
     raise RuntimeError(t(ERRORS['ip_fetch_failed']))
 
 
+# Short-lived cache so Guard status / profile checks do not hit the public IP
+# service on every Web request (TTL 10 minutes).
+_IP_CACHE_TTL_SEC = 600
+_ip_cache: tuple[float, str] | None = None
+
+
+def _clear_public_ip_cache() -> None:
+    """Test helper / forced refresh."""
+    global _ip_cache
+    _ip_cache = None
+
+
 class GuardError(Exception):
     pass
 
@@ -113,11 +125,22 @@ class Guard:
             return f"{platform.node()}-{uuid.getnode()}"
 
     def _get_public_ip(self) -> str:
+        global _ip_cache
+        import time
+
+        now = time.monotonic()
+        if _ip_cache is not None:
+            cached_at, cached_ip = _ip_cache
+            if now - cached_at < _IP_CACHE_TTL_SEC:
+                return cached_ip
         try:
-            return _fetch_public_ip()
+            ip = _fetch_public_ip()
         except Exception:
             typer.echo("⚠️  无法获取公网 IP，跳过 IP 绑定检查", err=True)
             return "unknown"
+        # Only cache successful lookups so transient failures can retry soon.
+        _ip_cache = (now, ip)
+        return ip
 
     def get_status(self) -> dict:
         return self._data

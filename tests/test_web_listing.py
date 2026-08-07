@@ -1058,3 +1058,16 @@ def test_listing_pull_screenshots_requires_profile(client, tmp_path):
     )
     assert r.status_code == 400
     assert r.json()["ok"] is False
+
+
+def test_listing_blocking_routes_offload_event_loop():
+    """ASC/CDN listing probes must not block the async event loop."""
+    import inspect
+    from asc.web import routes_listing
+
+    assert not inspect.iscoroutinefunction(routes_listing.listing_diff)
+    assert not inspect.iscoroutinefunction(routes_listing.listing_asc_thumb)
+    assert not inspect.iscoroutinefunction(routes_listing.listing_asc_image)
+    pull_src = inspect.getsource(routes_listing.listing_pull_text)
+    assert "to_thread" in pull_src
+    assert "_do_listing_pull_text" in pull_src
