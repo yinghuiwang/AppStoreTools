@@ -186,6 +186,9 @@ def _upload_subscriptions_core(
 
     validate_subscription_config(groups)
 
+    if cancel_event is not None:
+        api.cancel_event = cancel_event
+
     if manage_phases:
         reporter.set_phases([("subscriptions", 100, "订阅")])
     reporter.phase("subscriptions")

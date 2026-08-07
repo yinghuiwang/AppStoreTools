@@ -96,6 +96,30 @@ def test_request_retries_on_429(api):
     assert mock_req.call_args.kwargs["timeout"] == (10, 60)
 
 
+def test_request_429_wait_respects_cancel_event(api):
+    import threading
+
+    from asc.progress import ProcessCanceled
+
+    rate_limited = MagicMock()
+    rate_limited.status_code = 429
+    rate_limited.headers = {"Retry-After": "30"}
+
+    cancel = threading.Event()
+    api.cancel_event = cancel
+
+    def set_cancel_soon():
+        time.sleep(0.05)
+        cancel.set()
+
+    with patch("requests.request", return_value=rate_limited):
+        t = threading.Thread(target=set_cancel_soon)
+        t.start()
+        with pytest.raises(ProcessCanceled, match="rate-limit"):
+            api._request("GET", "/v1/apps/123")
+        t.join(timeout=2.0)
+
+
 def test_request_inflight_semaphore_serializes_when_limit_one(api, monkeypatch):
     """ASC_API_MAX_INFLIGHT=1: second request waits until the first releases the slot."""
     import threading
@@ -200,7 +224,7 @@ def test_find_subscription_price_point_requests_all_price_points(api):
     assert result == "pp1"
     mock_get.assert_called_once_with(
         "/v1/subscriptions/sub1/pricePoints",
-        limit=8000,
+        limit=200,
         **{"filter[territory]": "USA"},
     )
 
@@ -286,7 +310,7 @@ def test_list_in_app_purchase_price_point_equalizations_uses_official_endpoint(a
     assert result == []
     mock_get.assert_called_once_with(
         "/v1/inAppPurchasePricePoints/pp1/equalizations",
-        limit=8000,
+        limit=200,
         include="territory",
         **{"filter[inAppPurchaseV2]": "iap1"},
     )
@@ -299,7 +323,7 @@ def test_list_subscription_price_point_equalizations_uses_official_endpoint(api)
     assert result == []
     mock_get.assert_called_once_with(
         "/v1/subscriptionPricePoints/pp1/equalizations",
-        limit=8000,
+        limit=200,
         include="territory",
         **{"filter[subscription]": "sub1"},
     )
@@ -393,6 +417,65 @@ def test_list_territories_cached_across_calls(api):
     assert first == second == [{"id": "USA"}, {"id": "CHN"}]
     assert mock_get.call_count == 1
     mock_get.assert_called_once_with("/v1/territories", limit=200)
+
+
+def test_list_territories_follows_pagination(api):
+    with patch.object(
+        api,
+        "get",
+        side_effect=[
+            {
+                "data": [{"id": "USA"}],
+                "links": {
+                    "next": "https://api.appstoreconnect.apple.com/v1/territories?cursor=2"
+                },
+            },
+            {"data": [{"id": "CHN"}], "links": {}},
+        ],
+    ) as mock_get:
+        result = api.list_territories()
+
+    assert [t["id"] for t in result] == ["USA", "CHN"]
+    assert mock_get.call_count == 2
+    assert api.list_territories() == result
+    assert mock_get.call_count == 2
+
+
+def test_list_subscription_prices_follows_pagination(api):
+    with patch.object(
+        api,
+        "get",
+        side_effect=[
+            {
+                "data": [{"id": "p1"}],
+                "links": {"next": "https://api.appstoreconnect.apple.com/v1/prices2"},
+            },
+            {"data": [{"id": "p2"}], "links": {}},
+        ],
+    ) as mock_get:
+        result = api.list_subscription_prices("sub1")
+
+    assert [p["id"] for p in result] == ["p1", "p2"]
+    assert mock_get.call_args_list == [
+        call("/v1/subscriptions/sub1/prices", limit=200),
+        call("https://api.appstoreconnect.apple.com/v1/prices2"),
+    ]
+
+
+def test_list_subscription_localizations_follows_pagination(api):
+    with patch.object(
+        api,
+        "get",
+        side_effect=[
+            {
+                "data": [{"id": "loc1"}],
+                "links": {"next": "https://api.appstoreconnect.apple.com/v1/locs2"},
+            },
+            {"data": [{"id": "loc2"}], "links": {}},
+        ],
+    ):
+        result = api.list_subscription_localizations("sub1")
+    assert [item["id"] for item in result] == ["loc1", "loc2"]
 
 
 def test_update_subscription_prices_inline_builds_compound_request(api):

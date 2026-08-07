@@ -15,6 +15,7 @@ import jwt
 import requests
 
 from asc.constants import BASE_URL
+from asc.progress import ProcessCanceled
 
 API_TIMEOUT = (10, 60)
 UPLOAD_TIMEOUT = (10, 300)
@@ -23,6 +24,30 @@ DEFAULT_ASC_MAX_INFLIGHT = 4
 _asc_inflight_lock = threading.Lock()
 _asc_inflight_sem: Optional[threading.Semaphore] = None
 _asc_inflight_limit: Optional[int] = None
+
+
+def _interruptible_sleep(
+    seconds: float,
+    cancel_event: Optional[threading.Event] = None,
+    chunk: float = 0.5,
+) -> None:
+    """Sleep that cooperatively checks ``cancel_event`` in small chunks.
+
+    Used for HTTP 429 Retry-After waits so Web/task cancel is not blocked on
+    a long ``time.sleep``.
+    """
+    if seconds <= 0:
+        return
+    if cancel_event is None:
+        time.sleep(seconds)
+        return
+    deadline = time.monotonic() + float(seconds)
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return
+        if cancel_event.wait(timeout=min(chunk, remaining)):
+            raise ProcessCanceled("ASC request canceled during rate-limit wait")
 
 
 def _asc_max_inflight() -> int:
@@ -66,6 +91,8 @@ class AppStoreConnectAPI:
         self._token = None
         self._token_expiry = None
         self._territories_cache: Optional[list] = None
+        # Optional cooperative cancel for 429 waits (set by command cores / Web).
+        self.cancel_event: Optional[threading.Event] = None
 
     @property
     def token(self) -> str:
@@ -111,7 +138,7 @@ class AppStoreConnectAPI:
                         file=sys.stderr,
                         flush=True,
                     )
-                    time.sleep(retry_after)
+                    _interruptible_sleep(retry_after, self.cancel_event)
                     continue
 
                 if resp.status_code >= 400:
@@ -182,8 +209,9 @@ class AppStoreConnectAPI:
         return resp.get("data", [])
 
     def get_app_info_localizations(self, app_info_id: str) -> list:
-        resp = self.get(f"/v1/appInfos/{app_info_id}/appInfoLocalizations")
-        return resp.get("data", [])
+        return self._get_paginated_data(
+            f"/v1/appInfos/{app_info_id}/appInfoLocalizations", limit=200
+        )
 
     def update_app_info_localization(self, loc_id: str, attributes: dict) -> dict:
         return self.patch(
@@ -237,10 +265,10 @@ class AppStoreConnectAPI:
         return versions[0] if versions else None
 
     def get_version_localizations(self, version_id: str) -> list:
-        resp = self.get(
-            f"/v1/appStoreVersions/{version_id}/appStoreVersionLocalizations"
+        return self._get_paginated_data(
+            f"/v1/appStoreVersions/{version_id}/appStoreVersionLocalizations",
+            limit=200,
         )
-        return resp.get("data", [])
 
     def update_version_localization(self, loc_id: str, attributes: dict) -> dict:
         return self.patch(
@@ -512,13 +540,8 @@ class AppStoreConnectAPI:
     def find_in_app_purchase_price_point(
         self, iap_id: str, territory: str, amount: str
     ) -> Optional[str]:
-        resp = self.get(
-            f"/v2/inAppPurchases/{iap_id}/pricePoints",
-            limit=8000,
-            **{"filter[territory]": territory},
-        )
         target = str(amount).strip()
-        for pp in resp.get("data", []):
+        for pp in self.list_in_app_purchase_price_points(iap_id, territory):
             price = str(pp.get("attributes", {}).get("customerPrice", "")).strip()
             if price == target:
                 return pp["id"]
@@ -527,12 +550,11 @@ class AppStoreConnectAPI:
     def list_in_app_purchase_price_points(
         self, iap_id: str, territory: str
     ) -> list:
-        resp = self.get(
+        return self._get_paginated_data(
             f"/v2/inAppPurchases/{iap_id}/pricePoints",
-            limit=8000,
+            limit=200,
             **{"filter[territory]": territory},
         )
-        return resp.get("data", [])
 
     def list_in_app_purchase_price_point_equalizations(
         self,
@@ -540,20 +562,20 @@ class AppStoreConnectAPI:
         iap_id: Optional[str] = None,
         territory: Optional[str] = None,
     ) -> list:
-        params = {"limit": 8000, "include": "territory"}
+        params = {"limit": 200, "include": "territory"}
         if iap_id:
             params["filter[inAppPurchaseV2]"] = iap_id
         if territory:
             params["filter[territory]"] = territory
-        resp = self.get(
+        return self._get_paginated_data(
             f"/v1/inAppPurchasePricePoints/{price_point_id}/equalizations",
             **params,
         )
-        return resp.get("data", [])
 
     def get_in_app_purchase_localizations(self, iap_id: str) -> list:
-        resp = self.get(f"/v2/inAppPurchases/{iap_id}/inAppPurchaseLocalizations")
-        return resp.get("data", [])
+        return self._get_paginated_data(
+            f"/v2/inAppPurchases/{iap_id}/inAppPurchaseLocalizations", limit=200
+        )
 
     def create_in_app_purchase_localization(
         self, iap_id: str, locale: str, attributes: dict
@@ -681,11 +703,10 @@ class AppStoreConnectAPI:
         )
 
     def list_subscription_group_localizations(self, group_id: str) -> list:
-        resp = self.get(
+        return self._get_paginated_data(
             f"/v1/subscriptionGroups/{group_id}/subscriptionGroupLocalizations",
             limit=200,
         )
-        return resp.get("data", [])
 
     def create_subscription_group_localization(
         self, group_id: str, locale: str, name: str, custom_app_name: Optional[str] = None
@@ -756,10 +777,9 @@ class AppStoreConnectAPI:
         )
 
     def list_subscription_localizations(self, sub_id: str) -> list:
-        resp = self.get(
+        return self._get_paginated_data(
             f"/v1/subscriptions/{sub_id}/subscriptionLocalizations", limit=200
         )
-        return resp.get("data", [])
 
     def create_subscription_localization(
         self, sub_id: str, locale: str, name: str, description: str
@@ -799,13 +819,8 @@ class AppStoreConnectAPI:
         self, sub_id: str, territory: str, amount: str
     ) -> Optional[str]:
         # filter[territory] is required to get territory-specific price points
-        resp = self.get(
-            f"/v1/subscriptions/{sub_id}/pricePoints",
-            limit=8000,
-            **{"filter[territory]": territory},
-        )
         target = str(amount).strip()
-        for pp in resp.get("data", []):
+        for pp in self.list_subscription_price_points(sub_id, territory):
             price = str(pp.get("attributes", {}).get("customerPrice", "")).strip()
             if price == target:
                 return pp["id"]
@@ -814,12 +829,11 @@ class AppStoreConnectAPI:
     def list_subscription_price_points(
         self, sub_id: str, territory: str
     ) -> list:
-        resp = self.get(
+        return self._get_paginated_data(
             f"/v1/subscriptions/{sub_id}/pricePoints",
-            limit=8000,
+            limit=200,
             **{"filter[territory]": territory},
         )
-        return resp.get("data", [])
 
     def list_subscription_price_point_equalizations(
         self,
@@ -827,16 +841,15 @@ class AppStoreConnectAPI:
         sub_id: Optional[str] = None,
         territory: Optional[str] = None,
     ) -> list:
-        params = {"limit": 8000, "include": "territory"}
+        params = {"limit": 200, "include": "territory"}
         if sub_id:
             params["filter[subscription]"] = sub_id
         if territory:
             params["filter[territory]"] = territory
-        resp = self.get(
+        return self._get_paginated_data(
             f"/v1/subscriptionPricePoints/{price_point_id}/equalizations",
             **params,
         )
-        return resp.get("data", [])
 
     def create_subscription_price(
         self,
@@ -932,8 +945,9 @@ class AppStoreConnectAPI:
         )
 
     def list_subscription_prices(self, sub_id: str) -> list:
-        resp = self.get(f"/v1/subscriptions/{sub_id}/prices", limit=200)
-        return resp.get("data", [])
+        return self._get_paginated_data(
+            f"/v1/subscriptions/{sub_id}/prices", limit=200
+        )
 
     def delete_subscription_price(self, price_id: str):
         return self.delete(f"/v1/subscriptionPrices/{price_id}")
@@ -942,8 +956,9 @@ class AppStoreConnectAPI:
 
     def list_territories(self) -> list:
         if self._territories_cache is None:
-            resp = self.get("/v1/territories", limit=200)
-            self._territories_cache = resp.get("data", [])
+            self._territories_cache = self._get_paginated_data(
+                "/v1/territories", limit=200
+            )
         return self._territories_cache
 
     def get_subscription_availability(self, sub_id: str) -> Optional[dict]:
@@ -986,10 +1001,9 @@ class AppStoreConnectAPI:
     # ── 入门优惠 ──
 
     def list_subscription_intro_offers(self, sub_id: str) -> list:
-        resp = self.get(
+        return self._get_paginated_data(
             f"/v1/subscriptions/{sub_id}/introductoryOffers", limit=200
         )
-        return resp.get("data", [])
 
     def create_subscription_intro_offer(
         self, sub_id: str, attrs: dict, price_point_id: Optional[str] = None, territory: Optional[str] = None
@@ -1022,10 +1036,9 @@ class AppStoreConnectAPI:
     # ── 促销优惠 ──
 
     def list_subscription_promo_offers(self, sub_id: str) -> list:
-        resp = self.get(
+        return self._get_paginated_data(
             f"/v1/subscriptions/{sub_id}/promotionalOffers", limit=200
         )
-        return resp.get("data", [])
 
     def create_subscription_promo_offer(
         self, sub_id: str, attrs: dict, price_point_id: str

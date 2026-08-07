@@ -266,6 +266,8 @@ def _upload_screenshots_core(
     fallback_en_us: bool = False,
 ):
     """Core screenshots upload logic"""
+    if cancel_event is not None:
+        api.cancel_event = cancel_event
     if reporter is None:
         reporter = make_cli_reporter(verbose=verbose)
 

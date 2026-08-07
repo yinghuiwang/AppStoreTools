@@ -180,6 +180,9 @@ def _whats_new_core(
     if reporter is None:
         reporter = make_cli_reporter(verbose=verbose)
 
+    if cancel_event is not None:
+        api.cancel_event = cancel_event
+
     version = api.get_editable_version(app_id)
     if not version:
         reporter.fail(t(ERRORS["no_editable_version"]))
@@ -310,6 +313,9 @@ def _whats_new_translate_only_core(
     """Preview-translate only: phase translate 100%."""
     if reporter is None:
         reporter = make_cli_reporter(verbose=verbose)
+
+    if cancel_event is not None:
+        api.cancel_event = cancel_event
 
     version = api.get_editable_version(app_id)
     if not version:

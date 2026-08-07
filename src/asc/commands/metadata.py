@@ -65,6 +65,8 @@ def _upload_metadata_core(
     finalize: bool = True,
 ):
     """Core metadata upload logic"""
+    if cancel_event is not None:
+        api.cancel_event = cancel_event
     if reporter is None:
         reporter = make_cli_reporter(verbose=verbose)
 
@@ -267,6 +269,8 @@ def _update_app_info_field_core(
     verbose: bool = False,
 ):
     """Core implementation for set-*-url commands that target appInfoLocalizations"""
+    if cancel_event is not None:
+        api.cancel_event = cancel_event
     if reporter is None:
         reporter = make_cli_reporter(verbose=verbose)
 
@@ -339,6 +343,8 @@ def _update_version_field_core(
     verbose: bool = False,
 ):
     """Core implementation for set-*-url commands"""
+    if cancel_event is not None:
+        api.cancel_event = cancel_event
     if reporter is None:
         reporter = make_cli_reporter(verbose=verbose)
 

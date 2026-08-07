@@ -191,6 +191,9 @@ def _upload_iap_core(
         reporter.set_phases([("iap_items", 100, "IAP")])
     reporter.phase("iap_items")
 
+    if cancel_event is not None:
+        api.cancel_event = cancel_event
+
     reporter.log("=" * 60)
     reporter.log("🛍️  上传 IAP 包")
     reporter.log("=" * 60)
