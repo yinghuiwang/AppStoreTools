@@ -560,3 +560,39 @@ def test_append_logs_trims_to_limit(tmp_path, monkeypatch):
     assert logs[0]["message"] == "L4"  # keep newest 5; original seq retained
     assert logs[-1]["message"] == "L8"
     assert store.count_logs(tid) == 5
+    store.close()
+
+
+def test_concurrent_append_logs_single_writer_preserves_all_lines(tmp_path):
+    import threading
+
+    store = TaskStore(tmp_path / "tasks.db")
+    tid = store.create("build")
+    errors: list[BaseException] = []
+
+    def worker(n: int) -> None:
+        try:
+            for i in range(50):
+                store.append_logs(tid, [f"w{n}-{i}"])
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10)
+    store.close()  # drain
+    assert not errors
+    assert store.count_logs(tid) == 200  # 4*50
+
+
+def test_create_waits_until_visible_to_get_state(tmp_path):
+    store = TaskStore(tmp_path / "tasks.db")
+    tid = store.create("build", profile="demo")
+    state = store.get_state(tid)
+    assert state is not None
+    assert state["id"] == tid
+    assert state["status"] == TaskStatus.PENDING
+    assert state["profile"] == "demo"
+    store.close()

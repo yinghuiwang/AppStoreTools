@@ -1,16 +1,19 @@
 """Task state store for Web UI background jobs."""
 from __future__ import annotations
 
+import atexit
 import json
 import os
+import queue
 import sqlite3
 import sys
 import time
 import uuid
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from threading import Event, Lock
+from threading import Event, Lock, Thread
 from typing import Any, Callable, Optional
 
 
@@ -59,8 +62,23 @@ def _task_log_limit() -> int:
     return max(1, value)
 
 
+@dataclass
+class _WriteOp:
+    kind: str
+    task_id: Optional[str] = None
+    payload: dict = field(default_factory=dict)
+    done: Optional[Event] = None
+    error: list = field(default_factory=list)
+    critical: bool = False
+    result_box: list = field(default_factory=list)
+
+
 class TaskStore:
     """Thread-safe task store with optional JSON persistence."""
+
+    _WRITE_BATCH_SIZE = 64
+    _WRITE_BATCH_WAIT_SEC = 0.05
+    _WRITE_WAIT_TIMEOUT_SEC = 30.0
 
     def __init__(self, storage_path: Optional[Path] = None) -> None:
         self._tasks: dict[str, dict] = {}
@@ -71,6 +89,10 @@ class TaskStore:
         self._db_path = self._resolve_db_path(storage_path)
         self._last_db_error: str = ""
         self._db_write_failures: int = 0
+        self._write_q: queue.Queue[_WriteOp] = queue.Queue()
+        self._writer_stop = Event()
+        self._writer: Optional[Thread] = None
+        self._closed = False
         if self._storage_path is not None:
             self._load()
         if self._db_path is not None:
@@ -81,6 +103,12 @@ class TaskStore:
             if self._db_is_empty() and self._tasks:
                 self._save()
             self._load_db(recover=True)
+            self._writer = Thread(
+                target=self._writer_loop,
+                name="asc-task-writer",
+                daemon=True,
+            )
+            self._writer.start()
 
     def create(self, kind: str, *, profile: str = "") -> str:
         task_id = str(uuid.uuid4())
@@ -106,21 +134,17 @@ class TaskStore:
             "cancel_requested": False,
         }
         if self._db_path is not None:
-
-            def _write(conn: sqlite3.Connection) -> None:
-                conn.execute(
-                    """INSERT INTO task_runs
-                    (id, kind, profile, status, created_at, updated_at,
-                     progress_pct, progress_msg, progress_phase, progress_phase_label,
-                     phase_index, phase_total)
-                    VALUES (?, ?, ?, ?, ?, ?, 0, '', '', '', 0, 0)""",
-                    (task_id, kind, profile, TaskStatus.PENDING.value, now, now),
-                )
-                conn.execute("INSERT INTO task_order (task_id) VALUES (?)", (task_id,))
-
-            # SQLite serializes writers; do not hold ``_lock`` across disk I/O or
-            # the asyncio/threadpool waiters pile up behind every log flush.
-            self._db_write(_write, critical=True)
+            self._enqueue(
+                "create",
+                task_id,
+                {
+                    "kind": kind,
+                    "profile": profile,
+                    "now": now,
+                },
+                wait=True,
+                critical=True,
+            )
             with self._lock:
                 self._cancel_events[task_id] = Event()
             return task_id
@@ -162,42 +186,15 @@ class TaskStore:
         if not lines:
             return True
         if self._db_path is not None:
-            now = self._now()
-
-            def _write(conn: sqlite3.Connection) -> None:
-                conn.execute("BEGIN IMMEDIATE")
-                exists = conn.execute(
-                    "SELECT 1 FROM task_runs WHERE id = ?", (task_id,)
-                ).fetchone()
-                if exists is None:
-                    conn.rollback()
-                    return
-                seq = conn.execute(
-                    "SELECT COALESCE(MAX(seq), 0) + 1 FROM task_logs WHERE task_id = ?",
-                    (task_id,),
-                ).fetchone()[0]
-                conn.executemany(
-                    "INSERT INTO task_logs (task_id, seq, message, created_at) VALUES (?, ?, ?, ?)",
-                    [
-                        (task_id, seq + index, str(line), now)
-                        for index, line in enumerate(lines)
-                    ],
-                )
-                limit = _task_log_limit()
-                conn.execute(
-                    """DELETE FROM task_logs
-                       WHERE task_id = ?
-                         AND seq <= (
-                           SELECT COALESCE(MAX(seq), 0) - ? FROM task_logs WHERE task_id = ?
-                         )""",
-                    (task_id, limit, task_id),
-                )
-                conn.execute(
-                    "UPDATE task_runs SET updated_at = ? WHERE id = ?", (now, task_id)
-                )
-                conn.commit()
-
-            return self._db_write(_write, critical=False)
+            # Soft path waits on the writer Event (not SQLite) so callers still see
+            # durable seqs; enqueue remains the only thread that touches the DB.
+            return self._enqueue(
+                "append_logs",
+                task_id,
+                {"lines": [str(line) for line in lines], "now": self._now()},
+                wait=True,
+                critical=False,
+            )
         with self._lock:
             self._refresh_db()
             if task_id in self._tasks:
@@ -232,15 +229,17 @@ class TaskStore:
             normalized = self._normalize_status(status)
             now = self._now()
             completed_at = now if normalized in TERMINAL_STATUSES else None
-
-            def _write(conn: sqlite3.Connection) -> None:
-                conn.execute(
-                    "UPDATE task_runs SET status = ?, updated_at = ?, "
-                    "completed_at = COALESCE(?, completed_at) WHERE id = ?",
-                    (normalized.value, now, completed_at, task_id),
-                )
-
-            return self._db_write(_write, critical=True)
+            return self._enqueue(
+                "set_status",
+                task_id,
+                {
+                    "status": normalized.value,
+                    "now": now,
+                    "completed_at": completed_at,
+                },
+                wait=True,
+                critical=True,
+            )
         with self._lock:
             self._refresh_db()
             if task_id in self._tasks:
@@ -255,20 +254,18 @@ class TaskStore:
 
     def request_cancel(self, task_id: str) -> bool:
         if self._db_path is not None:
-            now = self._now()
-            with self._connect() as conn:
-                row = conn.execute("SELECT status FROM task_runs WHERE id = ?", (task_id,)).fetchone()
-                if row is None:
-                    return False
-                if self._normalize_status(row["status"]) not in TERMINAL_STATUSES:
-                    conn.execute(
-                        "UPDATE task_runs SET cancel_requested = 1, updated_at = ? WHERE id = ?",
-                        (now, task_id),
-                    )
-            with self._lock:
-                event = self._cancel_events.setdefault(task_id, Event())
-                event.set()
-            return True
+            ok = self._enqueue(
+                "request_cancel",
+                task_id,
+                {"now": self._now()},
+                wait=True,
+                critical=True,
+            )
+            if ok:
+                with self._lock:
+                    event = self._cancel_events.setdefault(task_id, Event())
+                    event.set()
+            return ok
         with self._lock:
             self._refresh_db()
             task = self._tasks.get(task_id)
@@ -307,16 +304,16 @@ class TaskStore:
 
     def set_result(self, task_id: str, result: Any) -> bool:
         if self._db_path is not None:
-            now = self._now()
-            payload = json.dumps(result, ensure_ascii=False)
-
-            def _write(conn: sqlite3.Connection) -> None:
-                conn.execute(
-                    "UPDATE task_runs SET result_json = ?, updated_at = ? WHERE id = ?",
-                    (payload, now, task_id),
-                )
-
-            return self._db_write(_write, critical=True)
+            return self._enqueue(
+                "set_result",
+                task_id,
+                {
+                    "payload": json.dumps(result, ensure_ascii=False),
+                    "now": self._now(),
+                },
+                wait=True,
+                critical=True,
+            )
         with self._lock:
             self._refresh_db()
             if task_id in self._tasks:
@@ -345,27 +342,13 @@ class TaskStore:
             "phase_total": int(phase_total),
         }
         if self._db_path is not None:
-            now = self._now()
-
-            def _write(conn: sqlite3.Connection) -> None:
-                conn.execute(
-                    """UPDATE task_runs SET progress_pct = ?, progress_msg = ?,
-                       progress_phase = ?, progress_phase_label = ?,
-                       phase_index = ?, phase_total = ?, updated_at = ?
-                       WHERE id = ?""",
-                    (
-                        progress["pct"],
-                        progress["msg"],
-                        progress["phase"],
-                        progress["phase_label"],
-                        progress["phase_index"],
-                        progress["phase_total"],
-                        now,
-                        task_id,
-                    ),
-                )
-
-            return self._db_write(_write, critical=False)
+            return self._enqueue(
+                "set_progress",
+                task_id,
+                {"progress": progress, "now": self._now()},
+                wait=True,
+                critical=False,
+            )
         with self._lock:
             self._refresh_db()
             if task_id in self._tasks:
@@ -374,6 +357,28 @@ class TaskStore:
                 self._save()
             return True
 
+    def close(self) -> None:
+        """Drain the write queue and stop the writer thread."""
+        if self._db_path is None or self._writer is None:
+            self._closed = True
+            return
+        if self._closed:
+            return
+        self._closed = True
+        done = Event()
+        self._write_q.put(_WriteOp(kind="shutdown", done=done))
+        if not done.wait(timeout=self._WRITE_WAIT_TIMEOUT_SEC):
+            print("⚠️  TaskStore writer shutdown timed out", file=sys.stderr)
+        if self._writer.is_alive():
+            self._writer.join(timeout=1.0)
+
+    def flush(self, timeout: float = 5.0) -> None:
+        """Wait until previously enqueued writes have been committed."""
+        if self._db_path is None or self._writer is None or self._closed:
+            return
+        done = Event()
+        self._write_q.put(_WriteOp(kind="flush", done=done))
+        done.wait(timeout=timeout)
     def list_recent(self, limit: int = 20) -> list[dict]:
         if self._db_path is not None:
             with self._connect() as conn:
@@ -748,8 +753,252 @@ class TaskStore:
         self._last_db_error = msg
         print(f"⚠️  {msg}", file=sys.stderr)
 
+    def _enqueue(
+        self,
+        kind: str,
+        task_id: Optional[str],
+        payload: dict,
+        *,
+        wait: bool,
+        critical: bool,
+    ) -> bool:
+        if self._closed or self._writer_stop.is_set():
+            exc = sqlite3.OperationalError("TaskStore writer is closed")
+            self._note_db_error(exc)
+            if critical:
+                raise exc
+            return False
+        done = Event() if wait else None
+        op = _WriteOp(
+            kind=kind,
+            task_id=task_id,
+            payload=payload,
+            done=done,
+            critical=critical,
+        )
+        self._write_q.put(op)
+        if not wait or done is None:
+            return True
+        if not done.wait(timeout=self._WRITE_WAIT_TIMEOUT_SEC):
+            exc = sqlite3.OperationalError(
+                self._format_db_error(
+                    TimeoutError(f"TaskStore write timed out ({kind})")
+                )
+            )
+            self._note_db_error(exc)
+            if critical:
+                raise exc
+            return False
+        if op.error:
+            exc = op.error[0]
+            if critical:
+                if isinstance(exc, sqlite3.Error):
+                    raise sqlite3.OperationalError(self._format_db_error(exc)) from exc
+                raise exc
+            return False
+        if op.result_box:
+            return bool(op.result_box[0])
+        return True
+
+    def _writer_loop(self) -> None:
+        while True:
+            op = self._write_q.get()
+            if op.kind == "shutdown":
+                self._writer_drain_remaining()
+                if op.done is not None:
+                    op.done.set()
+                self._writer_stop.set()
+                return
+            batch = [op]
+            deadline = time.monotonic() + self._WRITE_BATCH_WAIT_SEC
+            while len(batch) < self._WRITE_BATCH_SIZE:
+                timeout = deadline - time.monotonic()
+                if timeout <= 0:
+                    try:
+                        nxt = self._write_q.get_nowait()
+                    except queue.Empty:
+                        break
+                else:
+                    try:
+                        nxt = self._write_q.get(timeout=timeout)
+                    except queue.Empty:
+                        break
+                if nxt.kind == "shutdown":
+                    self._write_q.put(nxt)
+                    break
+                batch.append(nxt)
+            self._writer_run_batch(batch)
+
+    def _writer_drain_remaining(self) -> None:
+        remaining: list[_WriteOp] = []
+        while True:
+            try:
+                remaining.append(self._write_q.get_nowait())
+            except queue.Empty:
+                break
+        writes = [op for op in remaining if op.kind not in {"shutdown", "flush"}]
+        flushes = [op for op in remaining if op.kind == "flush"]
+        shutdowns = [op for op in remaining if op.kind == "shutdown"]
+        if writes:
+            self._writer_run_batch(writes)
+        for op in flushes:
+            if op.done is not None:
+                op.done.set()
+        for op in shutdowns:
+            if op.done is not None:
+                op.done.set()
+
+    def _writer_run_batch(self, ops: list[_WriteOp]) -> None:
+        flushes = [op for op in ops if op.kind == "flush"]
+        writes = [op for op in ops if op.kind != "flush"]
+        if writes:
+            critical = any(op.critical for op in writes)
+            attempts = 3 if critical else 2
+            last_exc: BaseException | None = None
+            for attempt in range(attempts):
+                try:
+                    with self._connect() as conn:
+                        conn.execute("BEGIN IMMEDIATE")
+                        for op in writes:
+                            result = self._apply_op(conn, op)
+                            if op.result_box is not None:
+                                op.result_box.append(result)
+                        conn.commit()
+                    last_exc = None
+                    break
+                except (OSError, sqlite3.Error) as exc:
+                    last_exc = exc
+                    if attempt + 1 < attempts:
+                        time.sleep(0.05 * (attempt + 1))
+                        continue
+                    self._note_db_error(exc)
+                    for op in writes:
+                        op.error.append(exc)
+            if last_exc is None:
+                for op in writes:
+                    if op.done is not None:
+                        op.done.set()
+            else:
+                for op in writes:
+                    if not op.error:
+                        op.error.append(last_exc)
+                    if op.done is not None:
+                        op.done.set()
+        for op in flushes:
+            if op.done is not None:
+                op.done.set()
+
+    def _apply_op(self, conn: sqlite3.Connection, op: _WriteOp) -> Any:
+        kind = op.kind
+        task_id = op.task_id
+        payload = op.payload
+        if kind == "create":
+            assert task_id is not None
+            conn.execute(
+                """INSERT INTO task_runs
+                (id, kind, profile, status, created_at, updated_at,
+                 progress_pct, progress_msg, progress_phase, progress_phase_label,
+                 phase_index, phase_total)
+                VALUES (?, ?, ?, ?, ?, ?, 0, '', '', '', 0, 0)""",
+                (
+                    task_id,
+                    payload["kind"],
+                    payload["profile"],
+                    TaskStatus.PENDING.value,
+                    payload["now"],
+                    payload["now"],
+                ),
+            )
+            conn.execute("INSERT INTO task_order (task_id) VALUES (?)", (task_id,))
+            return True
+        if kind == "append_logs":
+            assert task_id is not None
+            lines = payload["lines"]
+            now = payload["now"]
+            exists = conn.execute(
+                "SELECT 1 FROM task_runs WHERE id = ?", (task_id,)
+            ).fetchone()
+            if exists is None:
+                return False
+            seq = conn.execute(
+                "SELECT COALESCE(MAX(seq), 0) + 1 FROM task_logs WHERE task_id = ?",
+                (task_id,),
+            ).fetchone()[0]
+            conn.executemany(
+                "INSERT INTO task_logs (task_id, seq, message, created_at) VALUES (?, ?, ?, ?)",
+                [
+                    (task_id, seq + index, str(line), now)
+                    for index, line in enumerate(lines)
+                ],
+            )
+            limit = _task_log_limit()
+            conn.execute(
+                """DELETE FROM task_logs
+                   WHERE task_id = ?
+                     AND seq <= (
+                       SELECT COALESCE(MAX(seq), 0) - ? FROM task_logs WHERE task_id = ?
+                     )""",
+                (task_id, limit, task_id),
+            )
+            conn.execute(
+                "UPDATE task_runs SET updated_at = ? WHERE id = ?", (now, task_id)
+            )
+            return True
+        if kind == "set_status":
+            assert task_id is not None
+            conn.execute(
+                "UPDATE task_runs SET status = ?, updated_at = ?, "
+                "completed_at = COALESCE(?, completed_at) WHERE id = ?",
+                (payload["status"], payload["now"], payload["completed_at"], task_id),
+            )
+            return True
+        if kind == "set_result":
+            assert task_id is not None
+            conn.execute(
+                "UPDATE task_runs SET result_json = ?, updated_at = ? WHERE id = ?",
+                (payload["payload"], payload["now"], task_id),
+            )
+            return True
+        if kind == "set_progress":
+            assert task_id is not None
+            progress = payload["progress"]
+            conn.execute(
+                """UPDATE task_runs SET progress_pct = ?, progress_msg = ?,
+                   progress_phase = ?, progress_phase_label = ?,
+                   phase_index = ?, phase_total = ?, updated_at = ?
+                   WHERE id = ?""",
+                (
+                    progress["pct"],
+                    progress["msg"],
+                    progress["phase"],
+                    progress["phase_label"],
+                    progress["phase_index"],
+                    progress["phase_total"],
+                    payload["now"],
+                    task_id,
+                ),
+            )
+            return True
+        if kind == "request_cancel":
+            assert task_id is not None
+            row = conn.execute(
+                "SELECT status FROM task_runs WHERE id = ?", (task_id,)
+            ).fetchone()
+            if row is None:
+                return False
+            if self._normalize_status(row["status"]) not in TERMINAL_STATUSES:
+                conn.execute(
+                    "UPDATE task_runs SET cancel_requested = 1, updated_at = ? WHERE id = ?",
+                    (payload["now"], task_id),
+                )
+            return True
+        raise ValueError(f"unknown write op: {kind}")
+
     def _db_write(self, writer: Callable[[sqlite3.Connection], None], *, critical: bool) -> bool:
-        """Run *writer* with retries. Soft-fail (return False) unless *critical*."""
+        """Run *writer* with retries. Soft-fail (return False) unless *critical*.
+
+        Prefer ``_enqueue`` for hot-path mutations; kept for init-time ``_save`` helpers.
+        """
         attempts = 3 if critical else 2
         last_exc: BaseException | None = None
         for attempt in range(attempts):
@@ -994,3 +1243,4 @@ def _default_storage_path() -> Optional[Path]:
 
 # Module-level singleton used by server.py
 task_store = TaskStore(_default_storage_path())
+atexit.register(task_store.close)

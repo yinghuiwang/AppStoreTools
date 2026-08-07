@@ -55,6 +55,8 @@ def start_background_task(
         cancel_event = store.cancel_event(task_id)
         try:
             result = run(reporter, cancel_event)
+            # Flush before terminal status so status pollers see durable logs.
+            reporter.flush()
             if _is_terminal(store, task_id):
                 return
             if cancel_event.is_set():
@@ -65,6 +67,10 @@ def start_background_task(
                 store.set_result(task_id, result)
             store.set_status(task_id, TaskStatus.DONE)
         except ProcessCanceled:
+            try:
+                reporter.flush()
+            except Exception:  # noqa: BLE001
+                pass
             if _is_terminal(store, task_id):
                 return
             try:
@@ -78,6 +84,10 @@ def start_background_task(
             else:
                 # Core already logged a friendly fail; still attach traceback for the drawer.
                 reporter.log(tb, level="error")
+            try:
+                reporter.flush()
+            except Exception:  # noqa: BLE001
+                pass
             if _is_terminal(store, task_id):
                 return
             try:
