@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import atexit
 import os
 import queue
 import sys
@@ -259,3 +260,7 @@ def start_background_task(
     pool = scheduler if scheduler is not None else get_scheduler(store)
     pool.submit(task_id, run, kind=kind, profile=profile, verbose=verbose)
     return task_id
+
+
+# LIFO atexit: register after TaskStore so scheduler drains before writer close.
+atexit.register(lambda: shutdown_scheduler(wait=True, timeout=5.0))

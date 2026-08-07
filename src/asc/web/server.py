@@ -20,6 +20,12 @@ _STATIC_DIR = Path(__file__).parent / "static"
 async def _lifespan(app: FastAPI):
     yield
     try:
+        from asc.web.task_runner import shutdown_scheduler
+
+        shutdown_scheduler(task_store, wait=True, timeout=30.0)
+    except Exception as exc:  # noqa: BLE001
+        print(f"⚠️  TaskScheduler shutdown failed: {exc}")
+    try:
         task_store.close()
     except Exception as exc:  # noqa: BLE001
         print(f"⚠️  TaskStore shutdown failed: {exc}")
