@@ -1,6 +1,7 @@
 """FastAPI application factory and route registration for asc Web UI."""
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -15,6 +16,15 @@ _TEMPLATES_DIR = Path(__file__).parent / "templates"
 _STATIC_DIR = Path(__file__).parent / "static"
 
 
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    yield
+    try:
+        task_store.close()
+    except Exception as exc:  # noqa: BLE001
+        print(f"⚠️  TaskStore shutdown failed: {exc}")
+
+
 def create_app() -> FastAPI:
     from asc.web.i18n import (
         COOKIE_NAME,
@@ -24,7 +34,7 @@ def create_app() -> FastAPI:
         t as translate,
     )
 
-    app = FastAPI(title="asc Web UI", docs_url=None, redoc_url=None)
+    app = FastAPI(title="asc Web UI", docs_url=None, redoc_url=None, lifespan=_lifespan)
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
     templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 

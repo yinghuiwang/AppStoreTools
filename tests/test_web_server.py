@@ -2263,7 +2263,12 @@ def test_tasks_recent_markup_preserves_log_toggle_state(client, monkeypatch):
     task_id = store.create("build", profile="staging")
     store.set_status(task_id, TaskStatus.RUNNING)
     store.append_log(task_id, "build line")
+
+    def fail_full_logs(limit=20):
+        raise AssertionError("recent HTMX fragment must not load full logs")
+
     monkeypatch.setattr(routes_api, "_task_store", store)
+    monkeypatch.setattr(store, "list_recent", fail_full_logs)
 
     resp = client.get("/api/tasks/recent")
 
@@ -2271,6 +2276,7 @@ def test_tasks_recent_markup_preserves_log_toggle_state(client, monkeypatch):
     assert f'data-task-id="{task_id}"' in resp.text
     assert f"toggleTaskLogs('{task_id}')" in resp.text
     assert f'data-task-log-panel="{task_id}"' in resp.text
+    assert "build line" not in resp.text
 
 
 def test_task_store_set_progress():

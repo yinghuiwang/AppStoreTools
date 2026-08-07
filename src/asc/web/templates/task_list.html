@@ -54,9 +54,7 @@
     </div>
   </div>
   <div class="hidden mt-3 log-panel max-h-48" data-task-log-panel="{{ task.id }}">
-    {% for line in task.logs %}
-    <div>{{ line }}</div>
-    {% endfor %}
+    {# Logs load via the drawer/SSE; recent list only carries metadata. #}
   </div>
 </div>
 {% endfor %}

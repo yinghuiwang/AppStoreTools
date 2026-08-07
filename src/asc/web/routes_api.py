@@ -1398,7 +1398,7 @@ async def guard_manual_bind(
 @router.get("/tasks/recent", response_class=HTMLResponse)
 async def tasks_recent_html(request: Request):
     """Return HTML fragment of recent tasks for HTMX polling."""
-    tasks = await _asyncio.to_thread(_task_store.list_recent, 20)
+    tasks = await _asyncio.to_thread(_task_store.list_recent_states, 20)
     return _templates.TemplateResponse(
         request,
         "task_list.html",
