@@ -195,6 +195,10 @@ HELP = {
         'en': 'Device type override (e.g. APP_IPHONE_67, APP_IPAD_PRO_129_EQ, APP_IPHONE_61). Auto-detected from image dimensions if not specified.',
         'zh': '设备类型覆盖（例如 APP_IPHONE_67, APP_IPAD_PRO_129_EQ, APP_IPHONE_61）。如果不指定，则从图片尺寸自动检测。'
     },
+    'screenshots_fallback_en_us': {
+        'en': 'For version locales without a local screenshots folder, upload en-US screenshots as fallback (default: skip those locales).',
+        'zh': '对没有本地截图文件夹的版本语言，用 en-US 截图回退上传（默认跳过这些语言）。',
+    },
     # Command descriptions (shown in command list)
     'cmd_upload': {
         'en': 'Upload all content: metadata (from CSV) + screenshots.',

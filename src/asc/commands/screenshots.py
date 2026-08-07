@@ -107,6 +107,150 @@ def _finish_screenshots(reporter: TaskReporter, finalize: bool) -> None:
         reporter.log("截图上传完成")
 
 
+# Poll screenshot asset processing: check first, then exponential backoff.
+_SCREENSHOT_POLL_BASE_DELAY = 0.5
+_SCREENSHOT_POLL_MAX_DELAY = 8.0
+_SCREENSHOT_POLL_MAX_WAIT = 60.0
+
+
+def _wait_for_screenshot_processing(
+    api,
+    screenshot_id: str,
+    *,
+    cancel_event=None,
+    log=None,
+    max_wait: float = _SCREENSHOT_POLL_MAX_WAIT,
+    base_delay: float = _SCREENSHOT_POLL_BASE_DELAY,
+    max_delay: float = _SCREENSHOT_POLL_MAX_DELAY,
+    sleep_fn=time.sleep,
+    monotonic_fn=time.monotonic,
+) -> tuple[str, dict]:
+    """Poll until COMPLETE/FAILED or timeout. Checks before sleeping.
+
+    Returns ``(outcome, response)`` where outcome is COMPLETE, FAILED, or TIMEOUT.
+    """
+    deadline = monotonic_fn() + max_wait
+    delay = base_delay
+    attempt = 0
+    last_check: dict = {}
+
+    while True:
+        if cancel_event is not None and cancel_event.is_set():
+            raise ProcessCanceled("screenshots upload canceled")
+
+        last_check = api.get(f"/v1/appScreenshots/{screenshot_id}")
+        state = last_check["data"]["attributes"]["assetDeliveryState"]["state"]
+        if state == "COMPLETE":
+            return "COMPLETE", last_check
+        if state == "FAILED":
+            return "FAILED", last_check
+
+        remaining = deadline - monotonic_fn()
+        if remaining <= 0:
+            return "TIMEOUT", last_check
+
+        sleep_for = min(delay, remaining, max_delay)
+        if log is not None and attempt > 0 and attempt % 5 == 0:
+            log(f"         ⏳ 处理中 ({state})...")
+
+        if cancel_event is not None and hasattr(cancel_event, "wait"):
+            if cancel_event.wait(timeout=sleep_for):
+                raise ProcessCanceled("screenshots upload canceled")
+        else:
+            sleep_fn(sleep_for)
+
+        delay = min(delay * 2, max_delay)
+        attempt += 1
+
+
+def _collect_locale_screenshot_jobs(
+    *,
+    ver_loc_map: dict[str, dict],
+    locale_to_folder: dict[str, Path],
+    en_us_folder: Optional[Path],
+    fallback_en_us: bool,
+    display_type_override: Optional[str],
+    reporter: TaskReporter,
+    cancel_event=None,
+) -> list[tuple[str, dict, Path, list[Path], str, bool]]:
+    """Build upload jobs from local screenshot folders (optionally en-US fallback)."""
+    jobs: list[tuple[str, dict, Path, list[Path], str, bool]] = []
+
+    missing_local = sorted(
+        locale for locale in ver_loc_map if locale not in locale_to_folder
+    )
+    if missing_local and not fallback_en_us:
+        reporter.log(
+            f"  跳过 {len(missing_local)} 个无本地截图文件夹的 locale"
+            f"（仅上传有文件夹的语言）: {', '.join(missing_local)}"
+        )
+
+    def _append_jobs(
+        resolved: str,
+        loc_data: dict,
+        folder: Path,
+        used_fallback: bool,
+    ) -> None:
+        if cancel_event is not None and cancel_event.is_set():
+            raise ProcessCanceled("screenshots upload canceled")
+
+        files = _get_sorted_screenshots(folder)
+        if not files:
+            reporter.log(
+                f"  ── 文件夹: {folder.name} → locale: {resolved} ──"
+            )
+            reporter.log("    没有找到截图文件，跳过")
+            return
+
+        if display_type_override:
+            jobs.append(
+                (resolved, loc_data, folder, files, display_type_override, used_fallback)
+            )
+            return
+
+        groups = _group_files_by_display_type(folder)
+        if not groups:
+            with Image.open(files[0]) as img:
+                size = img.size
+            reporter.log(
+                f"  ── 文件夹: {folder.name} → locale: {resolved} ──"
+            )
+            reporter.log(f"  ⚠️  无法从尺寸 {size} 自动识别设备类型")
+            reporter.log("💡 无法确定设备类型，请使用 --display-type 手动指定")
+            return
+
+        for display_type, typed_files in groups.items():
+            jobs.append(
+                (resolved, loc_data, folder, typed_files, display_type, used_fallback)
+            )
+
+    for resolved, folder in sorted(locale_to_folder.items()):
+        loc_data = ver_loc_map.get(resolved)
+        if loc_data is None:
+            reporter.log(
+                f"  ── 文件夹: {folder.name} → locale: {resolved} "
+                f"不在版本本地化中，跳过 ──"
+            )
+            continue
+        _append_jobs(resolved, loc_data, folder, used_fallback=False)
+
+    if fallback_en_us and en_us_folder is not None and missing_local:
+        reporter.log(
+            f"  ⚠️  --fallback-en-us: 用 en-US 截图回退到 "
+            f"{len(missing_local)} 个缺文件夹 locale: {', '.join(missing_local)}"
+        )
+        for resolved in missing_local:
+            loc_data = ver_loc_map[resolved]
+            _append_jobs(resolved, loc_data, en_us_folder, used_fallback=True)
+    elif fallback_en_us and missing_local and en_us_folder is None:
+        reporter.log(
+            "  ⚠️  --fallback-en-us 已开启，但本地无 en-US 截图文件夹，无法回退；"
+            f"仍跳过: {', '.join(missing_local)}"
+        )
+
+    return jobs
+
+
 def _upload_screenshots_core(
     api,
     app_id: str,
@@ -119,6 +263,7 @@ def _upload_screenshots_core(
     manage_phases: bool = True,
     finalize: bool = True,
     screenshot_scopes: list[dict] | None = None,
+    fallback_en_us: bool = False,
 ):
     """Core screenshots upload logic"""
     if reporter is None:
@@ -175,52 +320,16 @@ def _upload_screenshots_core(
                 en_us_folder = folder
                 break
 
-    # Scan: collect per-(locale, display_type) upload jobs.
-    jobs: list[tuple[str, dict, Path, list[Path], str, bool]] = []
-    for resolved, loc_data in sorted(ver_loc_map.items()):
-        if cancel_event is not None and cancel_event.is_set():
-            raise ProcessCanceled("screenshots upload canceled")
-
-        folder = locale_to_folder.get(resolved)
-        used_fallback = False
-        if folder is None:
-            if en_us_folder is None:
-                reporter.log(
-                    f"  ── locale: {resolved} → 无截图文件夹且无 en-US 可回退，跳过 ──"
-                )
-                continue
-            folder = en_us_folder
-            used_fallback = True
-
-        files = _get_sorted_screenshots(folder)
-        if not files:
-            reporter.log(
-                f"  ── 文件夹: {folder.name} → locale: {resolved} ──"
-            )
-            reporter.log("    没有找到截图文件，跳过")
-            continue
-
-        if display_type_override:
-            jobs.append(
-                (resolved, loc_data, folder, files, display_type_override, used_fallback)
-            )
-            continue
-
-        groups = _group_files_by_display_type(folder)
-        if not groups:
-            with Image.open(files[0]) as img:
-                size = img.size
-            reporter.log(
-                f"  ── 文件夹: {folder.name} → locale: {resolved} ──"
-            )
-            reporter.log(f"  ⚠️  无法从尺寸 {size} 自动识别设备类型")
-            reporter.log("💡 无法确定设备类型，请使用 --display-type 手动指定")
-            continue
-
-        for display_type, typed_files in groups.items():
-            jobs.append(
-                (resolved, loc_data, folder, typed_files, display_type, used_fallback)
-            )
+    # Scan: only locales with local folders (en-US fallback is opt-in).
+    jobs = _collect_locale_screenshot_jobs(
+        ver_loc_map=ver_loc_map,
+        locale_to_folder=locale_to_folder,
+        en_us_folder=en_us_folder,
+        fallback_en_us=fallback_en_us,
+        display_type_override=display_type_override,
+        reporter=reporter,
+        cancel_event=cancel_event,
+    )
 
     if screenshot_scopes is not None:
         simple = [(locale, display_type, files) for locale, _, _, files, display_type, _ in jobs]
@@ -331,25 +440,20 @@ def _upload_screenshots_core(
             checksum = md5_of_file(file_path)
             api.commit_screenshot(screenshot_id, checksum)
 
-            for retry in range(30):
-                if cancel_event is not None and cancel_event.is_set():
-                    raise ProcessCanceled("screenshots upload canceled")
-                time.sleep(2)
-                check = api.get(f"/v1/appScreenshots/{screenshot_id}")
-                state = check["data"]["attributes"]["assetDeliveryState"]["state"]
-                if state == "COMPLETE":
-                    reporter.log("         ✅ 上传完成")
-                    break
-                elif state == "FAILED":
-                    errors = check["data"]["attributes"]["assetDeliveryState"].get(
-                        "errors", []
-                    )
-                    reporter.log(f"         ❌ 上传失败: {errors}")
-                    reporter.log("💡 请检查网络连接后重试")
-                    break
-                else:
-                    if retry % 5 == 4:
-                        reporter.debug(f"         ⏳ 处理中 ({state})...")
+            outcome, check = _wait_for_screenshot_processing(
+                api,
+                screenshot_id,
+                cancel_event=cancel_event,
+                log=reporter.debug,
+            )
+            if outcome == "COMPLETE":
+                reporter.log("         ✅ 上传完成")
+            elif outcome == "FAILED":
+                errors = check["data"]["attributes"]["assetDeliveryState"].get(
+                    "errors", []
+                )
+                reporter.log(f"         ❌ 上传失败: {errors}")
+                reporter.log("💡 请检查网络连接后重试")
             else:
                 reporter.log("         ⚠️  处理超时，请在 App Store Connect 中检查状态")
 
@@ -371,12 +475,18 @@ def cmd_screenshots(
     display_type: Optional[str] = typer.Option(None, "--display-type",
         help=t(HELP['screenshots_display_type']),
     ),
+    fallback_en_us: bool = typer.Option(
+        False,
+        "--fallback-en-us",
+        help=t(HELP["screenshots_fallback_en_us"]),
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed progress logs"),
 ):
     """Upload screenshots to App Store Connect.
 
     Screenshots are uploaded per locale. The tool looks for subfolders in the
     screenshots directory named after locales (e.g. en-US, zh-CN).
+    By default only locales with a local folder are uploaded.
 
     \b
     Device types (auto-detected from image dimensions):
@@ -391,6 +501,7 @@ def cmd_screenshots(
     Notes:
     - Existing screenshots for the same device type are deleted before upload
     - Screenshots are sorted by filename number in upload order
+    - Use --fallback-en-us to copy en-US screenshots to locales without a folder
 
     \b
     Example:
@@ -398,6 +509,7 @@ def cmd_screenshots(
         asc --app myapp screenshots --dry-run
         asc --app myapp screenshots --screenshots ./custom_screenshots/
         asc --app myapp screenshots --display-type APP_IPHONE_67
+        asc --app myapp screenshots --fallback-en-us
         asc --app myapp screenshots --screenshots ./custom_screenshots/ --display-type APP_IPHONE_67
     """
     config = Config(app)
@@ -429,7 +541,13 @@ def cmd_screenshots(
     screenshots_dir = screenshots or config.screenshots_path
     try:
         _upload_screenshots_core(
-            api, app_id, screenshots_dir, display_type, dry_run, verbose=verbose
+            api,
+            app_id,
+            screenshots_dir,
+            display_type,
+            dry_run,
+            verbose=verbose,
+            fallback_en_us=fallback_en_us,
         )
     except RuntimeError:
         raise typer.Exit(1)

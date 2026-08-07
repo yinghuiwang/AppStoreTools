@@ -23,6 +23,51 @@ def _seed_price_point(api, sub_id, territory, amount, pp_id):
     )
 
 
+def test_lists_subscription_groups_once_for_multiple_groups(fake_api, tmp_png):
+    groups = [
+        {
+            "referenceName": "Pro",
+            "localizations": {"en-US": {"name": "Pro"}},
+            "subscriptions": [_min_sub(tmp_png, "com.a.monthly", 1)],
+        },
+        {
+            "referenceName": "Basic",
+            "localizations": {"en-US": {"name": "Basic"}},
+            "subscriptions": [_min_sub(tmp_png, "com.a.basic", 1)],
+        },
+    ]
+    fake_api.find_subscription_price_point = lambda s, t, a: "pp_usd_999"
+
+    failed = _upload_subscriptions_core(
+        fake_api, "app1", groups, update_existing=False, dry_run=False
+    )
+    assert failed == 0
+
+    group_lists = [c for c in fake_api.calls if c[0] == "list_subscription_groups"]
+    assert len(group_lists) == 1
+
+
+def test_lists_subscriptions_once_per_group(fake_api, tmp_png):
+    groups = [{
+        "referenceName": "Pro",
+        "localizations": {"en-US": {"name": "Pro"}},
+        "subscriptions": [
+            _min_sub(tmp_png, "com.a.monthly", 1),
+            _min_sub(tmp_png, "com.a.yearly", 2),
+        ],
+    }]
+    fake_api.find_subscription_price_point = lambda s, t, a: "pp_usd_999"
+
+    failed = _upload_subscriptions_core(
+        fake_api, "app1", groups, update_existing=False, dry_run=False
+    )
+    assert failed == 0
+    assert len(fake_api.subs) == 2
+
+    sub_lists = [c for c in fake_api.calls if c[0] == "list_subscriptions"]
+    assert len(sub_lists) == 1
+
+
 def test_creates_new_group(fake_api, tmp_png):
     groups = [{
         "referenceName": "Pro",

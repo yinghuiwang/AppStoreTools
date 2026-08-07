@@ -182,7 +182,28 @@ def test_upload_screenshots_happy_path(tmp_path):
     assert "commit_screenshot" in call_names
 
 
-def test_upload_screenshots_en_us_fallback(tmp_path):
+def test_upload_screenshots_skips_locales_without_local_folder(tmp_path):
+    """Default: only locales with a local screenshots folder are uploaded."""
+    en_dir = tmp_path / "en-US"
+    en_dir.mkdir()
+    _make_png(en_dir / "1.png", 1290, 2796)
+
+    class MultiLocaleAPI(ScreenshotFakeAPI):
+        def get_version_localizations(self, version_id):
+            return [
+                {"id": "loc_en", "attributes": {"locale": "en-US"}},
+                {"id": "loc_ja", "attributes": {"locale": "ja"}},
+            ]
+
+    api2 = MultiLocaleAPI()
+    with patch("time.sleep"):
+        _upload_screenshots_core(api2, "app1", str(tmp_path))
+
+    reserve_calls = [c for c in api2.calls if c[0] == "reserve_screenshot"]
+    assert len(reserve_calls) == 1
+
+
+def test_upload_screenshots_en_us_fallback_opt_in(tmp_path):
     en_dir = tmp_path / "en-US"
     en_dir.mkdir()
     _make_png(en_dir / "1.png", 1290, 2796)
@@ -196,10 +217,99 @@ def test_upload_screenshots_en_us_fallback(tmp_path):
 
     api2 = FallbackAPI()
     with patch("time.sleep"):
-        _upload_screenshots_core(api2, "app1", str(tmp_path))
+        _upload_screenshots_core(
+            api2, "app1", str(tmp_path), fallback_en_us=True
+        )
 
     reserve_calls = [c for c in api2.calls if c[0] == "reserve_screenshot"]
     assert len(reserve_calls) == 2
+
+
+def test_wait_for_screenshot_processing_checks_before_sleep():
+    from asc.commands.screenshots import _wait_for_screenshot_processing
+
+    class PollAPI:
+        def __init__(self):
+            self.gets = 0
+            self.states = ["PROCESSING", "COMPLETE"]
+
+        def get(self, path, **params):
+            state = self.states[min(self.gets, len(self.states) - 1)]
+            self.gets += 1
+            return {
+                "data": {
+                    "attributes": {"assetDeliveryState": {"state": state}}
+                }
+            }
+
+    sleeps: list[float] = []
+    api = PollAPI()
+    outcome, _ = _wait_for_screenshot_processing(
+        api,
+        "shot_1",
+        sleep_fn=lambda s: sleeps.append(s),
+        monotonic_fn=lambda: 0.0 if not sleeps else min(len(sleeps) * 0.5, 10.0),
+        max_wait=30.0,
+        base_delay=0.5,
+        max_delay=8.0,
+    )
+    assert outcome == "COMPLETE"
+    assert api.gets == 2
+    assert sleeps == [0.5]
+
+
+def test_wait_for_screenshot_processing_stops_on_failed():
+    from asc.commands.screenshots import _wait_for_screenshot_processing
+
+    class FailAPI:
+        def get(self, path, **params):
+            return {
+                "data": {
+                    "attributes": {
+                        "assetDeliveryState": {
+                            "state": "FAILED",
+                            "errors": [{"code": "X"}],
+                        }
+                    }
+                }
+            }
+
+    sleeps: list[float] = []
+    outcome, check = _wait_for_screenshot_processing(
+        FailAPI(),
+        "shot_1",
+        sleep_fn=lambda s: sleeps.append(s),
+        monotonic_fn=lambda: 0.0,
+    )
+    assert outcome == "FAILED"
+    assert sleeps == []
+    assert check["data"]["attributes"]["assetDeliveryState"]["errors"]
+
+
+def test_wait_for_screenshot_processing_respects_cancel():
+    from threading import Event
+
+    from asc.commands.screenshots import _wait_for_screenshot_processing
+    from asc.progress import ProcessCanceled
+
+    class SlowAPI:
+        def get(self, path, **params):
+            return {
+                "data": {
+                    "attributes": {"assetDeliveryState": {"state": "PROCESSING"}}
+                }
+            }
+
+    cancel = Event()
+    cancel.set()
+    with pytest.raises(ProcessCanceled):
+        _wait_for_screenshot_processing(
+            SlowAPI(),
+            "shot_1",
+            cancel_event=cancel,
+            sleep_fn=lambda s: None,
+            monotonic_fn=lambda: 0.0,
+        )
 
 
 def test_upload_screenshots_core_reports_progress_per_file(tmp_path):

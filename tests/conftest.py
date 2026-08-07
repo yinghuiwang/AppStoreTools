@@ -76,6 +76,7 @@ class FakeAPI:
 
     # Subscriptions
     def list_subscriptions(self, group_id):
+        self.calls.append(("list_subscriptions", group_id))
         return [
             {"id": sid, "attributes": s["attrs"]}
             for sid, s in self.subs.items() if s["groupId"] == group_id

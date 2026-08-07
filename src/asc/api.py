@@ -27,6 +27,7 @@ class AppStoreConnectAPI:
             self._private_key_bytes = f.read()
         self._token = None
         self._token_expiry = None
+        self._territories_cache: Optional[list] = None
 
     @property
     def token(self) -> str:
@@ -901,8 +902,10 @@ class AppStoreConnectAPI:
     # ── 订阅销售地区 ──
 
     def list_territories(self) -> list:
-        resp = self.get("/v1/territories", limit=200)
-        return resp.get("data", [])
+        if self._territories_cache is None:
+            resp = self.get("/v1/territories", limit=200)
+            self._territories_cache = resp.get("data", [])
+        return self._territories_cache
 
     def get_subscription_availability(self, sub_id: str) -> Optional[dict]:
         resp = self.get(

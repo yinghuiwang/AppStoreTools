@@ -321,6 +321,20 @@ def test_list_subscriptions_follows_pagination(api):
     ]
 
 
+def test_list_territories_cached_across_calls(api):
+    with patch.object(
+        api,
+        "get",
+        return_value={"data": [{"id": "USA"}, {"id": "CHN"}]},
+    ) as mock_get:
+        first = api.list_territories()
+        second = api.list_territories()
+
+    assert first == second == [{"id": "USA"}, {"id": "CHN"}]
+    assert mock_get.call_count == 1
+    mock_get.assert_called_once_with("/v1/territories", limit=200)
+
+
 def test_update_subscription_prices_inline_builds_compound_request(api):
     with patch.object(api, "patch", return_value={"data": {"id": "sub1"}}) as mock_patch:
         api.update_subscription_prices_inline(

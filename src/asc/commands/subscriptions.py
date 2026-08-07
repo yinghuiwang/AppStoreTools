@@ -210,17 +210,30 @@ def _upload_subscriptions_core(
         return 0
 
     completed = 0
+    existing_groups = api.list_subscription_groups(app_id)
     for group_cfg in groups:
         if cancel_event is not None and cancel_event.is_set():
             raise ProcessCanceled("subscription upload canceled")
         ref_name = group_cfg["referenceName"]
         reporter.log(f"── 订阅组: {ref_name} ──")
         group_id, group_status = _sync_group(
-            api, app_id, group_cfg, update_existing, dry_run, log=log
+            api,
+            app_id,
+            group_cfg,
+            update_existing,
+            dry_run,
+            log=log,
+            existing_groups=existing_groups,
         )
         stats[f"groups_{group_status}"] += 1
         if group_id is None:
             group_id = "DRY_RUN_GROUP"
+
+        existing_subs = (
+            []
+            if group_id == "DRY_RUN_GROUP"
+            else api.list_subscriptions(group_id)
+        )
 
         for sub_cfg in group_cfg["subscriptions"]:
             if cancel_event is not None and cancel_event.is_set():
@@ -235,6 +248,7 @@ def _upload_subscriptions_core(
                     dry_run,
                     log=log,
                     cancel_event=cancel_event,
+                    existing_subs=existing_subs,
                 )
                 stats[f"subs_{status}"] += 1
             except ProcessCanceled:
@@ -275,9 +289,11 @@ def _print_summary(stats: dict, failures: list, log: Callable[..., None] = print
 def _sync_group(
     api, app_id: str, group_cfg: dict, update_existing: bool, dry_run: bool,
     log: Callable[..., None] = print,
+    existing_groups: Optional[list] = None,
 ) -> Tuple[Optional[str], str]:
     ref_name = group_cfg["referenceName"]
-    existing_groups = api.list_subscription_groups(app_id)
+    if existing_groups is None:
+        existing_groups = api.list_subscription_groups(app_id)
     existing_by_ref = {
         g["attributes"]["referenceName"]: g for g in existing_groups
     }
@@ -305,6 +321,9 @@ def _sync_group(
     log(f"    不存在，创建中...")
     resp = api.create_subscription_group(app_id, ref_name)
     group_id = resp["data"]["id"]
+    existing_groups.append(
+        {"id": group_id, "attributes": {"referenceName": ref_name}}
+    )
     log(f"    ✅ 已创建，ID: {group_id}")
     _sync_group_localizations(
         api, group_id, group_cfg.get("localizations", {}),
@@ -359,12 +378,19 @@ def _sync_subscription(
     api, group_id: str, sub_cfg: dict, update_existing: bool, dry_run: bool,
     log: Callable[..., None] = print,
     cancel_event=None,
+    existing_subs: Optional[list] = None,
 ) -> str:
     pid = sub_cfg["productId"]
     log(f"\n  ── 订阅: {pid} ──")
 
     sub_id, status = _sync_subscription_main(
-        api, group_id, sub_cfg, update_existing, dry_run, log=log
+        api,
+        group_id,
+        sub_cfg,
+        update_existing,
+        dry_run,
+        log=log,
+        existing_subs=existing_subs,
     )
 
     if sub_id is None:
@@ -408,9 +434,11 @@ def _sync_subscription(
 def _sync_subscription_main(
     api, group_id: str, sub_cfg: dict, update_existing: bool, dry_run: bool,
     log: Callable[..., None] = print,
+    existing_subs: Optional[list] = None,
 ) -> Tuple[Optional[str], str]:
     pid = sub_cfg["productId"]
-    existing_subs = api.list_subscriptions(group_id)
+    if existing_subs is None:
+        existing_subs = api.list_subscriptions(group_id)
     by_pid = {s["attributes"]["productId"]: s for s in existing_subs}
 
     attrs = {
@@ -443,6 +471,7 @@ def _sync_subscription_main(
 
     resp = api.create_subscription(group_id, attrs)
     sub_id = resp["data"]["id"]
+    existing_subs.append({"id": sub_id, "attributes": dict(attrs)})
     log(f"    已创建，ID: {sub_id} ✅")
     return sub_id, "created"
 
