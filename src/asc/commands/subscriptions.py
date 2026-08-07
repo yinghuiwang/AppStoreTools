@@ -584,10 +584,6 @@ def _sync_subscription_price(
     if existing and not update_existing:
         log(f"    价格: 已存在 {len(existing)} 条，跳过")
         return
-    if existing and update_existing:
-        for p in existing:
-            api.delete_subscription_price(p["id"])
-        log(f"    价格: 已删除 {len(existing)} 条旧价格")
 
     price_points = [(territory, pp_id)]
     if apply_equalized:
@@ -599,13 +595,41 @@ def _sync_subscription_price(
         except Exception as e:
             log(f"    ⚠️  等价价格点查询失败，仅设置基准地区: {e}")
 
+    matched_territories: set[str] = set()
+    if existing and update_existing:
+        if cancel_event is not None and cancel_event.is_set():
+            raise ProcessCanceled("subscription upload canceled")
+        to_delete, matched_territories = _diff_subscription_prices_for_update(
+            existing, price_points
+        )
+        if to_delete:
+            _delete_subscription_prices(
+                api,
+                to_delete,
+                max_workers,
+                cancel_event=cancel_event,
+            )
+            log(f"    价格: 已删除 {len(to_delete)} 条旧价格")
+        elif matched_territories:
+            log(f"    价格: {len(matched_territories)} 个地区已匹配，跳过删除")
+
+    price_points_to_create = [
+        (t, target_pp) for t, target_pp in price_points if t not in matched_territories
+    ]
+    if not price_points_to_create:
+        if amount:
+            log(f"    价格: 基准 {territory} {amount} → 已匹配全部地区 ✅")
+        else:
+            log(f"    价格: Price Point {pp_id} → 已匹配全部地区 ✅")
+        return
+
     if cancel_event is not None and cancel_event.is_set():
         raise ProcessCanceled("subscription upload canceled")
 
     created, failed = _create_subscription_prices(
         api,
         sub_id,
-        price_points,
+        price_points_to_create,
         price_cfg,
         max_workers,
         log=log,
@@ -622,6 +646,81 @@ def _sync_subscription_price(
             f"    价格: Price Point {pp_id} → 已设置 {created} 个地区"
             f"{f' / {failed} 失败' if failed else ''} ✅"
         )
+
+
+def _parse_existing_subscription_price(price: dict) -> tuple[Optional[str], Optional[str]]:
+    """Extract (territory_id, price_point_id) from ASC or flat FakeAPI shapes."""
+    relationships = price.get("relationships") or {}
+    territory = (
+        (relationships.get("territory") or {}).get("data") or {}
+    ).get("id") or price.get("territory")
+    price_point_id = (
+        (relationships.get("subscriptionPricePoint") or {}).get("data") or {}
+    ).get("id") or price.get("pricePointId")
+    return territory, price_point_id
+
+
+def _diff_subscription_prices_for_update(
+    existing: list, target_price_points: list[tuple[str, str]]
+) -> tuple[list, set[str]]:
+    """Return (prices_to_delete, matched_territories).
+
+    Falls back to deleting all existing prices when any item lacks territory /
+    price-point linkage (cannot safely compute a differential).
+    """
+    target_by_territory = {t: pp for t, pp in target_price_points}
+    parsed: list[tuple[dict, str, str]] = []
+    for price in existing:
+        territory, price_point_id = _parse_existing_subscription_price(price)
+        if not territory or not price_point_id:
+            return list(existing), set()
+        parsed.append((price, territory, price_point_id))
+
+    to_delete: list = []
+    matched_territories: set[str] = set()
+    for price, territory, price_point_id in parsed:
+        if target_by_territory.get(territory) == price_point_id:
+            matched_territories.add(territory)
+        else:
+            to_delete.append(price)
+    return to_delete, matched_territories
+
+
+def _delete_subscription_prices(
+    api, prices, max_workers, cancel_event=None
+):
+    if not prices:
+        return
+
+    if len(prices) <= 1 or max_workers <= 1:
+        for price in prices:
+            if cancel_event is not None and cancel_event.is_set():
+                raise ProcessCanceled("subscription upload canceled")
+            api.delete_subscription_price(price["id"])
+        return
+
+    workers = min(max_workers, len(prices))
+
+    def _delete_one(price_id: str):
+        if cancel_event is not None and cancel_event.is_set():
+            raise ProcessCanceled("subscription upload canceled")
+        api.delete_subscription_price(price_id)
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        future_map = {
+            executor.submit(_delete_one, price["id"]): price["id"] for price in prices
+        }
+        try:
+            for future in as_completed(future_map):
+                if cancel_event is not None and cancel_event.is_set():
+                    for pending in future_map:
+                        pending.cancel()
+                    raise ProcessCanceled("subscription upload canceled")
+                future.result()
+        except ProcessCanceled:
+            for pending in future_map:
+                pending.cancel()
+            raise
 
 
 def _positive_int(value: Any, default: int) -> int:

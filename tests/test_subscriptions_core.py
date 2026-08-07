@@ -726,3 +726,186 @@ def test_subscriptions_respect_cancel_event_before_first_group(fake_api, tmp_png
         )
 
     assert fake_api.groups == {}
+
+
+def test_update_existing_deletes_prices_in_parallel(fake_api):
+    import threading
+    import time
+
+    from asc.commands.subscriptions import _sync_subscription_price
+
+    sub_id = "sub_parallel_del"
+    for i, territory in enumerate(["USA", "CHN", "JPN", "GBR", "DEU", "FRA"]):
+        fake_api.prices.setdefault(sub_id, []).append(
+            {
+                "id": f"price_old_{i}",
+                "pricePointId": f"pp_old_{territory}",
+                "territory": territory,
+            }
+        )
+
+    active = 0
+    max_active = 0
+    lock = threading.Lock()
+    real_delete = fake_api.delete_subscription_price
+
+    def slow_delete(price_id):
+        nonlocal active, max_active
+        with lock:
+            active += 1
+            max_active = max(max_active, active)
+        time.sleep(0.05)
+        try:
+            return real_delete(price_id)
+        finally:
+            with lock:
+                active -= 1
+
+    fake_api.delete_subscription_price = slow_delete
+    fake_api.find_subscription_price_point = lambda s, t, a: "pp_usd_999"
+    fake_api.price_points[sub_id] = [
+        {"id": "pp_usd_999", "territory": "USA", "customerPrice": "9.99"},
+    ]
+
+    _sync_subscription_price(
+        fake_api,
+        sub_id,
+        {
+            "baseTerritory": "USA",
+            "baseAmount": "9.99",
+            "applyEqualizedPrices": False,
+            "maxWorkers": 4,
+            "creationMode": "post",
+        },
+        update_existing=True,
+        dry_run=False,
+    )
+
+    deletes = [c for c in fake_api.calls if c[0] == "delete_subscription_price"]
+    assert len(deletes) == 6
+    assert max_active > 1
+
+
+def test_update_existing_price_delete_respects_cancel_event(fake_api):
+    import threading
+
+    import pytest
+
+    from asc.commands.subscriptions import _sync_subscription_price
+    from asc.progress import ProcessCanceled
+
+    sub_id = "sub_cancel_del"
+    for i in range(8):
+        fake_api.prices.setdefault(sub_id, []).append(
+            {
+                "id": f"price_c_{i}",
+                "pricePointId": "pp_old",
+                "territory": f"T{i}",
+            }
+        )
+
+    cancel = threading.Event()
+    cancel.set()
+    fake_api.find_subscription_price_point = lambda s, t, a: "pp_usd_999"
+
+    with pytest.raises(ProcessCanceled):
+        _sync_subscription_price(
+            fake_api,
+            sub_id,
+            {
+                "baseTerritory": "USA",
+                "baseAmount": "9.99",
+                "applyEqualizedPrices": False,
+                "maxWorkers": 4,
+                "creationMode": "post",
+            },
+            update_existing=True,
+            dry_run=False,
+            cancel_event=cancel,
+        )
+
+    deletes = [c for c in fake_api.calls if c[0] == "delete_subscription_price"]
+    assert deletes == []
+
+
+def test_update_existing_skips_matching_prices(fake_api):
+    from asc.commands.subscriptions import _sync_subscription_price
+
+    sub_id = "sub_diff_match"
+    fake_api.prices[sub_id] = [
+        {"id": "price_usa", "pricePointId": "pp_usd_999", "territory": "USA"},
+        {"id": "price_chn", "pricePointId": "pp_chn_68", "territory": "CHN"},
+    ]
+    fake_api.price_points[sub_id] = [
+        {"id": "pp_usd_999", "territory": "USA", "customerPrice": "9.99"},
+        {
+            "id": "pp_chn_68",
+            "territory": "CHN",
+            "customerPrice": "68",
+            "equalizationOf": "pp_usd_999",
+        },
+    ]
+    fake_api.find_subscription_price_point = lambda s, t, a: "pp_usd_999"
+
+    _sync_subscription_price(
+        fake_api,
+        sub_id,
+        {
+            "baseTerritory": "USA",
+            "baseAmount": "9.99",
+            "applyEqualizedPrices": True,
+            "creationMode": "post",
+        },
+        update_existing=True,
+        dry_run=False,
+    )
+
+    deletes = [c for c in fake_api.calls if c[0] == "delete_subscription_price"]
+    creates = [c for c in fake_api.calls if c[0] == "create_subscription_price"]
+    assert deletes == []
+    assert creates == []
+    assert {p["id"] for p in fake_api.prices[sub_id]} == {"price_usa", "price_chn"}
+
+
+def test_update_existing_deletes_only_mismatched_price_points(fake_api):
+    from asc.commands.subscriptions import _sync_subscription_price
+
+    sub_id = "sub_diff_mismatch"
+    fake_api.prices[sub_id] = [
+        {"id": "price_usa", "pricePointId": "pp_usd_999", "territory": "USA"},
+        {"id": "price_chn_old", "pricePointId": "pp_chn_old", "territory": "CHN"},
+    ]
+    fake_api.price_points[sub_id] = [
+        {"id": "pp_usd_999", "territory": "USA", "customerPrice": "9.99"},
+        {
+            "id": "pp_chn_68",
+            "territory": "CHN",
+            "customerPrice": "68",
+            "equalizationOf": "pp_usd_999",
+        },
+    ]
+    fake_api.find_subscription_price_point = lambda s, t, a: "pp_usd_999"
+
+    _sync_subscription_price(
+        fake_api,
+        sub_id,
+        {
+            "baseTerritory": "USA",
+            "baseAmount": "9.99",
+            "applyEqualizedPrices": True,
+            "maxWorkers": 2,
+            "creationMode": "post",
+        },
+        update_existing=True,
+        dry_run=False,
+    )
+
+    deletes = [c for c in fake_api.calls if c[0] == "delete_subscription_price"]
+    creates = [c for c in fake_api.calls if c[0] == "create_subscription_price"]
+    assert deletes == [("delete_subscription_price", "price_chn_old")]
+    assert len(creates) == 1
+    assert creates[0][2] == "pp_chn_68"
+    assert creates[0][3] == "CHN"
+    remaining = {p["territory"]: p["pricePointId"] for p in fake_api.prices[sub_id]}
+    assert remaining["USA"] == "pp_usd_999"
+    assert remaining["CHN"] == "pp_chn_68"

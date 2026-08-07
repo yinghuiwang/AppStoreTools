@@ -209,7 +209,29 @@ class FakeAPI:
         return {"data": {"id": sub_id}}
 
     def list_subscription_prices(self, sub_id):
-        return [{"id": p["id"], "attributes": {}} for p in self.prices.get(sub_id, [])]
+        result = []
+        for p in self.prices.get(sub_id, []):
+            relationships = {}
+            if p.get("territory"):
+                relationships["territory"] = {
+                    "data": {"type": "territories", "id": p["territory"]}
+                }
+            if p.get("pricePointId"):
+                relationships["subscriptionPricePoint"] = {
+                    "data": {
+                        "type": "subscriptionPricePoints",
+                        "id": p["pricePointId"],
+                    }
+                }
+            result.append(
+                {
+                    "id": p["id"],
+                    "type": "subscriptionPrices",
+                    "attributes": {},
+                    "relationships": relationships,
+                }
+            )
+        return result
 
     def delete_subscription_price(self, price_id):
         self.calls.append(("delete_subscription_price", price_id))
