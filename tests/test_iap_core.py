@@ -785,6 +785,42 @@ def test_iap_web_starter_uses_start_background_task():
     assert "_PROGRESS_RE" not in starter
     assert "reporter=" in starter
     assert "reporter._sinks" not in starter
+    assert "cancel_event=" in starter
+    assert "ProcessCanceled" in starter
+
+
+def test_iap_respects_cancel_event_between_items():
+    from threading import Event
+
+    from asc.progress import ProcessCanceled
+    from asc.reporting import TaskReporter
+
+    sink = RecordingSink()
+    reporter = TaskReporter(sinks=[sink], verbose=False)
+    api = IapFakeAPI()
+    items = [
+        {"productId": "com.example.item1", "name": "Item 1"},
+        {"productId": "com.example.item2", "name": "Item 2"},
+    ]
+    cancel = Event()
+    cancel.set()
+
+    with pytest.raises(ProcessCanceled):
+        _upload_iap_core(
+            api, "app1", items, reporter=reporter, cancel_event=cancel
+        )
+
+    assert not any(c[0] == "create_in_app_purchase" for c in api.calls)
+    assert len(api._iaps) == 0
+
+
+def test_iap_review_scan_route_offloads_to_thread():
+    import inspect
+    from asc.web import routes_api
+
+    src = inspect.getsource(routes_api.iap_review_screenshots_scan)
+    assert "to_thread" in src
+    assert "_scan_iap_review_screenshot_targets" in src
 
 
 def test_iap_phase_plan_folds_when_no_subscriptions():

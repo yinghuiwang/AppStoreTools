@@ -266,6 +266,19 @@ def test_list_in_app_purchases_follows_pagination(api):
     ]
 
 
+def test_get_paginated_data_stops_on_repeated_next_link(api):
+    """Broken ASC pagination that repeats links.next must not spin forever."""
+    looping = {
+        "data": [{"id": "iap1"}],
+        "links": {"next": "https://api.appstoreconnect.apple.com/v1/same"},
+    }
+    with patch.object(api, "get", return_value=looping) as mock_get:
+        result = api._get_paginated_data("/v1/apps/app123/inAppPurchasesV2", limit=200)
+
+    assert [item["id"] for item in result] == ["iap1", "iap1"]
+    assert mock_get.call_count == 2
+
+
 def test_list_subscription_groups_follows_pagination(api):
     with patch.object(
         api,

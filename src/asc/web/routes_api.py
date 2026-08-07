@@ -964,20 +964,23 @@ async def task_cancel(task_id: str):
     """Request cooperative cancellation; the worker sets the terminal status."""
     from fastapi import HTTPException
 
-    task = _task_store.get(task_id)
-    if task is None:
-        raise HTTPException(status_code=404, detail="Task not found")
-    status_value = getattr(task.get("status"), "value", task.get("status"))
-    if status_value in {"done", "error", "canceled"}:
-        return {
-            "task_id": task_id,
-            "cancel_requested": True,
-            "status": status_value,
-        }
+    def _cancel() -> dict:
+        task = _task_store.get_state(task_id) or _task_store.get(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail="Task not found")
+        status_value = getattr(task.get("status"), "value", task.get("status"))
+        if status_value in {"done", "error", "canceled"}:
+            return {
+                "task_id": task_id,
+                "cancel_requested": True,
+                "status": status_value,
+            }
 
-    _task_store.request_cancel(task_id)
-    _task_store.append_log(task_id, "⏹ 已请求终止，正在停止当前步骤...")
-    return {"task_id": task_id, "cancel_requested": True, "status": status_value}
+        _task_store.request_cancel(task_id)
+        _task_store.append_log(task_id, "⏹ 已请求终止，正在停止当前步骤...")
+        return {"task_id": task_id, "cancel_requested": True, "status": status_value}
+
+    return await _asyncio.to_thread(_cancel)
 
 
 import shutil as _shutil
@@ -1393,7 +1396,7 @@ async def guard_manual_bind(
 @router.get("/tasks/recent", response_class=HTMLResponse)
 async def tasks_recent_html(request: Request):
     """Return HTML fragment of recent tasks for HTMX polling."""
-    tasks = _task_store.list_recent(limit=20)
+    tasks = await _asyncio.to_thread(_task_store.list_recent, 20)
     return _templates.TemplateResponse(
         request,
         "task_list.html",
@@ -1982,8 +1985,11 @@ def _start_iap_task(
                     reporter=reporter,
                     manage_phases=False,
                     finalize=not bool(groups),
+                    cancel_event=cancel_event,
                 )
             if groups:
+                if cancel_event.is_set():
+                    raise ProcessCanceled("iap upload canceled")
                 total_subs = sum(len(g.get("subscriptions", [])) for g in groups)
                 reporter.log(f"🔁 订阅: {len(groups)} 组 / {total_subs} 商品")
                 failed = _upload_subscriptions_core(
@@ -1995,12 +2001,23 @@ def _start_iap_task(
                     reporter=reporter,
                     manage_phases=False,
                     finalize=True,
+                    cancel_event=cancel_event,
                 )
                 if failed:
                     raise RuntimeError(f"subscription upload failed: {failed} item(s)")
 
+            if cancel_event.is_set():
+                raise ProcessCanceled("iap upload canceled")
             _finish_task(task_id, _TaskStatus.DONE, {"success": True})
             return {"success": True}
+        except ProcessCanceled:
+            reporter.log("⏹ 用户已终止 IAP 上传")
+            _finish_task(
+                task_id,
+                _TaskStatus.CANCELED,
+                {"success": False, "canceled": True},
+            )
+            raise
         except Exception as e:
             current = _task_store.get_state(task_id) or _task_store.get(task_id)
             current_status = (
@@ -2100,7 +2117,10 @@ async def iap_review_screenshots_scan(request: Request):
     if iap_file is not None and not isinstance(iap_file, str):
         raise HTTPException(status_code=400, detail="iapFile must be a string")
     try:
-        return _scan_iap_review_screenshot_targets(profile, iap_file=iap_file)
+        # ASC scan is sync HTTP — keep it off the event loop (same pattern as SSE).
+        return await _asyncio.to_thread(
+            _scan_iap_review_screenshot_targets, profile, iap_file
+        )
     except Exception as exc:
         return JSONResponse(
             {

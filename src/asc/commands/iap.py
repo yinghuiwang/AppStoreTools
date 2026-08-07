@@ -14,6 +14,7 @@ import typer
 from asc.config import Config
 from asc.error_handler import get_action_hint
 from asc.guard import Guard, GuardViolationError
+from asc.progress import ProcessCanceled
 from asc.reporting import TaskReporter, make_cli_reporter
 from asc.utils import make_api_from_config, resolve_app_profile
 from asc.i18n import t, ERRORS, HELP
@@ -181,6 +182,7 @@ def _upload_iap_core(
     verbose: bool = False,
     manage_phases: bool = True,
     finalize: bool = True,
+    cancel_event=None,
 ):
     if reporter is None:
         reporter = make_cli_reporter(verbose=verbose)
@@ -207,6 +209,8 @@ def _upload_iap_core(
         return
 
     for idx, item in enumerate(iap_items):
+        if cancel_event is not None and cancel_event.is_set():
+            raise ProcessCanceled("iap upload canceled")
         product_id = str(item.get("productId", "")).strip()
         if not product_id:
             reporter.log("  ❌ 跳过：缺少 productId")

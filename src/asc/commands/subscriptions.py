@@ -5,8 +5,10 @@ import hashlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+import sys
 from typing import Any, Callable, Optional, Tuple
 
+from asc.progress import ProcessCanceled
 from asc.reporting import TaskReporter, make_cli_reporter
 
 
@@ -99,7 +101,9 @@ def _validate_subscription(sub: dict, tag: str) -> None:
     if size > SCREENSHOT_WARNING_BYTES:
         print(
             f"⚠️  {tag}.review.screenshot exceeds 5MB ({size} bytes); "
-            "continuing and leaving final validation to App Store Connect"
+            "continuing and leaving final validation to App Store Connect",
+            file=sys.stderr,
+            flush=True,
         )
     intro = sub.get("introductoryOffer")
     if intro is not None:
@@ -175,6 +179,7 @@ def _upload_subscriptions_core(
     verbose: bool = False,
     manage_phases: bool = True,
     finalize: bool = True,
+    cancel_event=None,
 ) -> int:
     if reporter is None:
         reporter = make_cli_reporter(verbose=verbose)
@@ -206,6 +211,8 @@ def _upload_subscriptions_core(
 
     completed = 0
     for group_cfg in groups:
+        if cancel_event is not None and cancel_event.is_set():
+            raise ProcessCanceled("subscription upload canceled")
         ref_name = group_cfg["referenceName"]
         reporter.log(f"── 订阅组: {ref_name} ──")
         group_id, group_status = _sync_group(
@@ -216,12 +223,22 @@ def _upload_subscriptions_core(
             group_id = "DRY_RUN_GROUP"
 
         for sub_cfg in group_cfg["subscriptions"]:
+            if cancel_event is not None and cancel_event.is_set():
+                raise ProcessCanceled("subscription upload canceled")
             pid = sub_cfg["productId"]
             try:
                 status = _sync_subscription(
-                    api, group_id, sub_cfg, update_existing, dry_run, log=log
+                    api,
+                    group_id,
+                    sub_cfg,
+                    update_existing,
+                    dry_run,
+                    log=log,
+                    cancel_event=cancel_event,
                 )
                 stats[f"subs_{status}"] += 1
+            except ProcessCanceled:
+                raise
             except Exception as e:
                 stats["subs_failed"] += 1
                 failures.append((pid, str(e)))
@@ -341,6 +358,7 @@ def _sync_group_localizations(
 def _sync_subscription(
     api, group_id: str, sub_cfg: dict, update_existing: bool, dry_run: bool,
     log: Callable[..., None] = print,
+    cancel_event=None,
 ) -> str:
     pid = sub_cfg["productId"]
     log(f"\n  ── 订阅: {pid} ──")
@@ -352,6 +370,9 @@ def _sync_subscription(
     if sub_id is None:
         return status
 
+    if cancel_event is not None and cancel_event.is_set():
+        raise ProcessCanceled("subscription upload canceled")
+
     _sync_subscription_availability(
         api, sub_id, sub_cfg, update_existing, dry_run, log=log
     )
@@ -362,8 +383,16 @@ def _sync_subscription(
         api, sub_id, sub_cfg["review"]["screenshot"],
         update_existing, dry_run, log=log,
     )
+    if cancel_event is not None and cancel_event.is_set():
+        raise ProcessCanceled("subscription upload canceled")
     _sync_subscription_price(
-        api, sub_id, sub_cfg["price"], update_existing, dry_run, log=log
+        api,
+        sub_id,
+        sub_cfg["price"],
+        update_existing,
+        dry_run,
+        log=log,
+        cancel_event=cancel_event,
     )
     _sync_intro_offer(
         api, sub_id, sub_cfg.get("introductoryOffer"),
@@ -492,7 +521,9 @@ def _sync_subscription_localizations(api, sub_id, loc_cfg, update_existing, dry_
             log(f"    本地化 {locale}: 创建 ✅")
 
 
-def _sync_subscription_price(api, sub_id, price_cfg, update_existing, dry_run, log=print):
+def _sync_subscription_price(
+    api, sub_id, price_cfg, update_existing, dry_run, log=print, cancel_event=None
+):
     territory = price_cfg.get("territory") or price_cfg.get("baseTerritory")
     amount = price_cfg.get("baseAmount")
     pp_id = str(price_cfg.get("pricePointId") or "").strip()
@@ -536,8 +567,17 @@ def _sync_subscription_price(api, sub_id, price_cfg, update_existing, dry_run, l
         except Exception as e:
             log(f"    ⚠️  等价价格点查询失败，仅设置基准地区: {e}")
 
+    if cancel_event is not None and cancel_event.is_set():
+        raise ProcessCanceled("subscription upload canceled")
+
     created, failed = _create_subscription_prices(
-        api, sub_id, price_points, price_cfg, max_workers, log=log
+        api,
+        sub_id,
+        price_points,
+        price_cfg,
+        max_workers,
+        log=log,
+        cancel_event=cancel_event,
     )
 
     if amount:
@@ -560,7 +600,9 @@ def _positive_int(value: Any, default: int) -> int:
     return parsed if parsed > 0 else default
 
 
-def _create_subscription_prices(api, sub_id, price_points, price_cfg, max_workers, log=print):
+def _create_subscription_prices(
+    api, sub_id, price_points, price_cfg, max_workers, log=print, cancel_event=None
+):
     mode = str(price_cfg.get("creationMode", "inlinePatch")).strip()
     if (
         mode != "post"
@@ -568,21 +610,37 @@ def _create_subscription_prices(api, sub_id, price_points, price_cfg, max_worker
         and hasattr(api, "update_subscription_prices_inline")
     ):
         created, failed, fallback_points = _create_subscription_prices_inline(
-            api, sub_id, price_points, price_cfg, log=log
+            api, sub_id, price_points, price_cfg, log=log, cancel_event=cancel_event
         )
         if not fallback_points:
             return created, failed
+        if cancel_event is not None and cancel_event.is_set():
+            raise ProcessCanceled("subscription upload canceled")
         fallback_created, fallback_failed = _create_subscription_prices_post(
-            api, sub_id, fallback_points, price_cfg, max_workers, log=log
+            api,
+            sub_id,
+            fallback_points,
+            price_cfg,
+            max_workers,
+            log=log,
+            cancel_event=cancel_event,
         )
         return created + fallback_created, failed + fallback_failed
 
     return _create_subscription_prices_post(
-        api, sub_id, price_points, price_cfg, max_workers, log=log
+        api,
+        sub_id,
+        price_points,
+        price_cfg,
+        max_workers,
+        log=log,
+        cancel_event=cancel_event,
     )
 
 
-def _create_subscription_prices_inline(api, sub_id, price_points, price_cfg, log=print):
+def _create_subscription_prices_inline(
+    api, sub_id, price_points, price_cfg, log=print, cancel_event=None
+):
     batch_size = min(_positive_int(price_cfg.get("inlineBatchSize"), default=50), 50)
     created = 0
     failed = 0
@@ -590,6 +648,8 @@ def _create_subscription_prices_inline(api, sub_id, price_points, price_cfg, log
     log(f"    价格: inline PATCH 创建 {len(price_points)} 个地区（batch={batch_size}）")
 
     for idx, batch in enumerate(batches):
+        if cancel_event is not None and cancel_event.is_set():
+            raise ProcessCanceled("subscription upload canceled")
         try:
             api.update_subscription_prices_inline(
                 sub_id,
@@ -614,10 +674,12 @@ def _chunks(items, size):
         yield items[idx:idx + size]
 
 
-def _create_subscription_prices_post(api, sub_id, price_points, price_cfg, max_workers, log=print):
+def _create_subscription_prices_post(
+    api, sub_id, price_points, price_cfg, max_workers, log=print, cancel_event=None
+):
     if len(price_points) <= 1 or max_workers <= 1:
         return _create_subscription_prices_sequential(
-            api, sub_id, price_points, price_cfg, log=log
+            api, sub_id, price_points, price_cfg, log=log, cancel_event=cancel_event
         )
 
     created = 0
@@ -637,22 +699,35 @@ def _create_subscription_prices_post(api, sub_id, price_points, price_cfg, max_w
             ): target_territory
             for target_territory, target_pp_id in price_points
         }
-        for future in as_completed(future_map):
-            target_territory = future_map[future]
-            try:
-                future.result()
-                created += 1
-            except Exception as e:
-                failed += 1
-                log(f"    ⚠️  价格创建跳过 {target_territory}: {e}")
+        try:
+            for future in as_completed(future_map):
+                if cancel_event is not None and cancel_event.is_set():
+                    for pending in future_map:
+                        pending.cancel()
+                    raise ProcessCanceled("subscription upload canceled")
+                target_territory = future_map[future]
+                try:
+                    future.result()
+                    created += 1
+                except Exception as e:
+                    failed += 1
+                    log(f"    ⚠️  价格创建跳过 {target_territory}: {e}")
+        except ProcessCanceled:
+            for pending in future_map:
+                pending.cancel()
+            raise
 
     return created, failed
 
 
-def _create_subscription_prices_sequential(api, sub_id, price_points, price_cfg, log=print):
+def _create_subscription_prices_sequential(
+    api, sub_id, price_points, price_cfg, log=print, cancel_event=None
+):
     created = 0
     failed = 0
     for target_territory, target_pp_id in price_points:
+        if cancel_event is not None and cancel_event.is_set():
+            raise ProcessCanceled("subscription upload canceled")
         try:
             api.create_subscription_price(
                 sub_id,

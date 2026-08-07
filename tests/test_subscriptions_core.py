@@ -653,3 +653,31 @@ def test_subscriptions_source_has_no_progress_protocol():
 
     src = Path(__file__).resolve().parents[1] / "src" / "asc" / "commands" / "subscriptions.py"
     assert "[PROGRESS:" not in src.read_text(encoding="utf-8")
+
+
+def test_subscriptions_respect_cancel_event_before_first_group(fake_api, tmp_png):
+    from threading import Event
+
+    import pytest
+
+    from asc.progress import ProcessCanceled
+
+    groups = [{
+        "referenceName": "Pro",
+        "localizations": {"en-US": {"name": "Pro"}},
+        "subscriptions": [_min_sub(tmp_png)],
+    }]
+    cancel = Event()
+    cancel.set()
+
+    with pytest.raises(ProcessCanceled):
+        _upload_subscriptions_core(
+            fake_api,
+            "app1",
+            groups,
+            update_existing=False,
+            dry_run=False,
+            cancel_event=cancel,
+        )
+
+    assert fake_api.groups == {}

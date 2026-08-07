@@ -3,6 +3,7 @@
 from __future__ import annotations
 from typing import Optional
 
+import sys
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -64,7 +65,12 @@ class AppStoreConnectAPI:
 
             if resp.status_code == 429:
                 retry_after = int(resp.headers.get("Retry-After", 30))
-                print(f"  ⏳ 速率限制，等待 {retry_after} 秒...")
+                # stderr + flush: avoid blocking if stdout is a captured/unpiped stream
+                print(
+                    f"  ⏳ 速率限制，等待 {retry_after} 秒...",
+                    file=sys.stderr,
+                    flush=True,
+                )
                 time.sleep(retry_after)
                 continue
 
@@ -92,16 +98,27 @@ class AppStoreConnectAPI:
         return self._request("GET", path, params=params)
 
     def _get_paginated_data(self, path: str, **params) -> list:
+        """Follow ``links.next`` until exhausted.
+
+        Guards against broken ASC pagination that repeats the same ``next`` URL
+        (would otherwise spin forever and freeze the calling Web worker).
+        """
         resp = self.get(path, **params)
         data = list(resp.get("data", []))
+        seen_pages = {path}
+        max_pages = 500
 
-        while True:
+        for _ in range(max_pages - 1):
             links = resp.get("links", {}) or {}
             next_page = links.get("next") if isinstance(links, dict) else None
-            if not next_page:
+            if not next_page or next_page in seen_pages:
                 return data
+            seen_pages.add(next_page)
             resp = self.get(next_page)
             data.extend(resp.get("data", []))
+        raise Exception(
+            f"分页结果过多或 links.next 循环，已中止（>{max_pages} 页）: {path}"
+        )
 
     def post(self, path: str, data: dict) -> dict:
         return self._request("POST", path, json=data)
