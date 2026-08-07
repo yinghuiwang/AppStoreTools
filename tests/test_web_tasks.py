@@ -488,3 +488,63 @@ def test_connect_rejects_directory_path_as_database(tmp_path):
 
     with pytest.raises(sqlite3.OperationalError, match="directory"):
         store._connect()
+
+
+def test_sqlite_busy_writer_does_not_block_state_readers(tmp_path):
+    """Regression: Python lock must not wrap SQLite busy waits (UI freeze)."""
+    import sqlite3
+    import threading
+    import time
+
+    db_path = tmp_path / "tasks.db"
+    store = TaskStore(db_path)
+    task_id = store.create("build", profile="p")
+
+    ready = threading.Event()
+    release = threading.Event()
+
+    def blocker() -> None:
+        conn = sqlite3.connect(str(db_path), timeout=1)
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("UPDATE task_runs SET updated_at = ? WHERE id = ?", ("x", task_id))
+        ready.set()
+        release.wait(5)
+        conn.rollback()
+        conn.close()
+
+    threading.Thread(target=blocker, daemon=True).start()
+    assert ready.wait(2)
+
+    results: dict[str, float] = {}
+
+    def writer() -> None:
+        started = time.perf_counter()
+        store.append_logs(task_id, ["while-busy"])
+        results["append"] = time.perf_counter() - started
+
+    def reader() -> None:
+        time.sleep(0.05)
+        started = time.perf_counter()
+        assert store.get_state(task_id) is not None
+        store.list_recent_states(5)
+        results["read"] = time.perf_counter() - started
+
+    threads = [threading.Thread(target=writer), threading.Thread(target=reader)]
+    for thread in threads:
+        thread.start()
+    time.sleep(0.2)
+    # Reader must finish while writer is still waiting on the DB lock.
+    assert "read" in results
+    assert results["read"] < 0.1
+    release.set()
+    for thread in threads:
+        thread.join(5)
+    assert results["append"] >= 0.05
+
+
+def test_count_logs_without_loading_messages(tmp_path):
+    store = TaskStore(tmp_path / "tasks.db")
+    task_id = store.create("build")
+    store.append_logs(task_id, ["a", "b", "c"])
+    assert store.count_logs(task_id) == 3
+    assert store.get_state(task_id)["logs"] == []

@@ -93,23 +93,26 @@ class TaskStore:
             },
             "cancel_requested": False,
         }
-        with self._lock:
-            if self._db_path is not None:
+        if self._db_path is not None:
 
-                def _write(conn: sqlite3.Connection) -> None:
-                    conn.execute(
-                        """INSERT INTO task_runs
-                        (id, kind, profile, status, created_at, updated_at,
-                         progress_pct, progress_msg, progress_phase, progress_phase_label,
-                         phase_index, phase_total)
-                        VALUES (?, ?, ?, ?, ?, ?, 0, '', '', '', 0, 0)""",
-                        (task_id, kind, profile, TaskStatus.PENDING.value, now, now),
-                    )
-                    conn.execute("INSERT INTO task_order (task_id) VALUES (?)", (task_id,))
+            def _write(conn: sqlite3.Connection) -> None:
+                conn.execute(
+                    """INSERT INTO task_runs
+                    (id, kind, profile, status, created_at, updated_at,
+                     progress_pct, progress_msg, progress_phase, progress_phase_label,
+                     phase_index, phase_total)
+                    VALUES (?, ?, ?, ?, ?, ?, 0, '', '', '', 0, 0)""",
+                    (task_id, kind, profile, TaskStatus.PENDING.value, now, now),
+                )
+                conn.execute("INSERT INTO task_order (task_id) VALUES (?)", (task_id,))
 
-                self._db_write(_write, critical=True)
+            # SQLite serializes writers; do not hold ``_lock`` across disk I/O or
+            # the asyncio/threadpool waiters pile up behind every log flush.
+            self._db_write(_write, critical=True)
+            with self._lock:
                 self._cancel_events[task_id] = Event()
-                return task_id
+            return task_id
+        with self._lock:
             self._refresh_db()
             self._tasks[task_id] = task
             self._order.append(task_id)
@@ -118,16 +121,16 @@ class TaskStore:
         return task_id
 
     def get(self, task_id: str) -> Optional[dict]:
+        if self._db_path is not None:
+            with self._connect() as conn:
+                row = conn.execute("SELECT * FROM task_runs WHERE id = ?", (task_id,)).fetchone()
+                if row is None:
+                    return None
+                logs = conn.execute(
+                    "SELECT message FROM task_logs WHERE task_id = ? ORDER BY seq", (task_id,)
+                ).fetchall()
+            return self._public_task(self._task_from_row(row, logs))
         with self._lock:
-            if self._db_path is not None:
-                with self._connect() as conn:
-                    row = conn.execute("SELECT * FROM task_runs WHERE id = ?", (task_id,)).fetchone()
-                    if row is None:
-                        return None
-                    logs = conn.execute(
-                        "SELECT message FROM task_logs WHERE task_id = ? ORDER BY seq", (task_id,)
-                    ).fetchall()
-                return self._public_task(self._task_from_row(row, logs))
             self._refresh_db()
             task = self._tasks.get(task_id)
             if task is None:
@@ -146,35 +149,35 @@ class TaskStore:
         """
         if not lines:
             return True
+        if self._db_path is not None:
+            now = self._now()
+
+            def _write(conn: sqlite3.Connection) -> None:
+                conn.execute("BEGIN IMMEDIATE")
+                exists = conn.execute(
+                    "SELECT 1 FROM task_runs WHERE id = ?", (task_id,)
+                ).fetchone()
+                if exists is None:
+                    conn.rollback()
+                    return
+                seq = conn.execute(
+                    "SELECT COALESCE(MAX(seq), 0) + 1 FROM task_logs WHERE task_id = ?",
+                    (task_id,),
+                ).fetchone()[0]
+                conn.executemany(
+                    "INSERT INTO task_logs (task_id, seq, message, created_at) VALUES (?, ?, ?, ?)",
+                    [
+                        (task_id, seq + index, str(line), now)
+                        for index, line in enumerate(lines)
+                    ],
+                )
+                conn.execute(
+                    "UPDATE task_runs SET updated_at = ? WHERE id = ?", (now, task_id)
+                )
+                conn.commit()
+
+            return self._db_write(_write, critical=False)
         with self._lock:
-            if self._db_path is not None:
-                now = self._now()
-
-                def _write(conn: sqlite3.Connection) -> None:
-                    conn.execute("BEGIN IMMEDIATE")
-                    exists = conn.execute(
-                        "SELECT 1 FROM task_runs WHERE id = ?", (task_id,)
-                    ).fetchone()
-                    if exists is None:
-                        conn.rollback()
-                        return
-                    seq = conn.execute(
-                        "SELECT COALESCE(MAX(seq), 0) + 1 FROM task_logs WHERE task_id = ?",
-                        (task_id,),
-                    ).fetchone()[0]
-                    conn.executemany(
-                        "INSERT INTO task_logs (task_id, seq, message, created_at) VALUES (?, ?, ?, ?)",
-                        [
-                            (task_id, seq + index, str(line), now)
-                            for index, line in enumerate(lines)
-                        ],
-                    )
-                    conn.execute(
-                        "UPDATE task_runs SET updated_at = ? WHERE id = ?", (now, task_id)
-                    )
-                    conn.commit()
-
-                return self._db_write(_write, critical=False)
             self._refresh_db()
             if task_id in self._tasks:
                 self._tasks[task_id]["logs"].extend(str(line) for line in lines)
@@ -191,31 +194,30 @@ class TaskStore:
                     (task_id, int(seq)),
                 ).fetchall()
             return [{"seq": row[0], "message": row[1]} for row in rows]
-        self._refresh_db()
-        if self._db_path is None:
+        with self._lock:
+            self._refresh_db()
             task = self._tasks.get(task_id, {})
             return [
                 {"seq": index, "message": message}
                 for index, message in enumerate(task.get("logs", []), start=1)
                 if index > seq
             ]
-        return []
 
     def set_status(self, task_id: str, status: TaskStatus) -> bool:
+        if self._db_path is not None:
+            normalized = self._normalize_status(status)
+            now = self._now()
+            completed_at = now if normalized in TERMINAL_STATUSES else None
+
+            def _write(conn: sqlite3.Connection) -> None:
+                conn.execute(
+                    "UPDATE task_runs SET status = ?, updated_at = ?, "
+                    "completed_at = COALESCE(?, completed_at) WHERE id = ?",
+                    (normalized.value, now, completed_at, task_id),
+                )
+
+            return self._db_write(_write, critical=True)
         with self._lock:
-            if self._db_path is not None:
-                normalized = self._normalize_status(status)
-                now = self._now()
-                completed_at = now if normalized in TERMINAL_STATUSES else None
-
-                def _write(conn: sqlite3.Connection) -> None:
-                    conn.execute(
-                        "UPDATE task_runs SET status = ?, updated_at = ?, "
-                        "completed_at = COALESCE(?, completed_at) WHERE id = ?",
-                        (normalized.value, now, completed_at, task_id),
-                    )
-
-                return self._db_write(_write, critical=True)
             self._refresh_db()
             if task_id in self._tasks:
                 normalized = self._normalize_status(status)
@@ -228,21 +230,22 @@ class TaskStore:
             return True
 
     def request_cancel(self, task_id: str) -> bool:
-        with self._lock:
-            if self._db_path is not None:
-                now = self._now()
-                with self._connect() as conn:
-                    row = conn.execute("SELECT status FROM task_runs WHERE id = ?", (task_id,)).fetchone()
-                    if row is None:
-                        return False
-                    if self._normalize_status(row["status"]) not in TERMINAL_STATUSES:
-                        conn.execute(
-                            "UPDATE task_runs SET cancel_requested = 1, updated_at = ? WHERE id = ?",
-                            (now, task_id),
-                        )
+        if self._db_path is not None:
+            now = self._now()
+            with self._connect() as conn:
+                row = conn.execute("SELECT status FROM task_runs WHERE id = ?", (task_id,)).fetchone()
+                if row is None:
+                    return False
+                if self._normalize_status(row["status"]) not in TERMINAL_STATUSES:
+                    conn.execute(
+                        "UPDATE task_runs SET cancel_requested = 1, updated_at = ? WHERE id = ?",
+                        (now, task_id),
+                    )
+            with self._lock:
                 event = self._cancel_events.setdefault(task_id, Event())
                 event.set()
-                return True
+            return True
+        with self._lock:
             self._refresh_db()
             task = self._tasks.get(task_id)
             if task is None:
@@ -260,11 +263,11 @@ class TaskStore:
             return True
 
     def is_cancel_requested(self, task_id: str) -> bool:
+        if self._db_path is not None:
+            with self._connect() as conn:
+                row = conn.execute("SELECT cancel_requested FROM task_runs WHERE id = ?", (task_id,)).fetchone()
+            return bool(row and row[0])
         with self._lock:
-            if self._db_path is not None:
-                with self._connect() as conn:
-                    row = conn.execute("SELECT cancel_requested FROM task_runs WHERE id = ?", (task_id,)).fetchone()
-                return bool(row and row[0])
             task = self._tasks.get(task_id)
             return bool(task and task.get("cancel_requested"))
 
@@ -279,18 +282,18 @@ class TaskStore:
             return event
 
     def set_result(self, task_id: str, result: Any) -> bool:
+        if self._db_path is not None:
+            now = self._now()
+            payload = json.dumps(result, ensure_ascii=False)
+
+            def _write(conn: sqlite3.Connection) -> None:
+                conn.execute(
+                    "UPDATE task_runs SET result_json = ?, updated_at = ? WHERE id = ?",
+                    (payload, now, task_id),
+                )
+
+            return self._db_write(_write, critical=True)
         with self._lock:
-            if self._db_path is not None:
-                now = self._now()
-                payload = json.dumps(result, ensure_ascii=False)
-
-                def _write(conn: sqlite3.Connection) -> None:
-                    conn.execute(
-                        "UPDATE task_runs SET result_json = ?, updated_at = ? WHERE id = ?",
-                        (payload, now, task_id),
-                    )
-
-                return self._db_write(_write, critical=True)
             self._refresh_db()
             if task_id in self._tasks:
                 self._tasks[task_id]["result"] = result
@@ -317,29 +320,29 @@ class TaskStore:
             "phase_index": int(phase_index),
             "phase_total": int(phase_total),
         }
+        if self._db_path is not None:
+            now = self._now()
+
+            def _write(conn: sqlite3.Connection) -> None:
+                conn.execute(
+                    """UPDATE task_runs SET progress_pct = ?, progress_msg = ?,
+                       progress_phase = ?, progress_phase_label = ?,
+                       phase_index = ?, phase_total = ?, updated_at = ?
+                       WHERE id = ?""",
+                    (
+                        progress["pct"],
+                        progress["msg"],
+                        progress["phase"],
+                        progress["phase_label"],
+                        progress["phase_index"],
+                        progress["phase_total"],
+                        now,
+                        task_id,
+                    ),
+                )
+
+            return self._db_write(_write, critical=False)
         with self._lock:
-            if self._db_path is not None:
-                now = self._now()
-
-                def _write(conn: sqlite3.Connection) -> None:
-                    conn.execute(
-                        """UPDATE task_runs SET progress_pct = ?, progress_msg = ?,
-                           progress_phase = ?, progress_phase_label = ?,
-                           phase_index = ?, phase_total = ?, updated_at = ?
-                           WHERE id = ?""",
-                        (
-                            progress["pct"],
-                            progress["msg"],
-                            progress["phase"],
-                            progress["phase_label"],
-                            progress["phase_index"],
-                            progress["phase_total"],
-                            now,
-                            task_id,
-                        ),
-                    )
-
-                return self._db_write(_write, critical=False)
             self._refresh_db()
             if task_id in self._tasks:
                 self._tasks[task_id]["progress"] = progress
@@ -348,27 +351,27 @@ class TaskStore:
             return True
 
     def list_recent(self, limit: int = 20) -> list[dict]:
+        if self._db_path is not None:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    """SELECT r.*, o.position FROM task_order o
+                    JOIN task_runs r ON r.id = o.task_id
+                    ORDER BY o.position DESC LIMIT ?""",
+                    (int(limit),),
+                ).fetchall()
+                logs = conn.execute(
+                    "SELECT task_id, message FROM task_logs WHERE task_id IN "
+                    "(SELECT task_id FROM task_order ORDER BY position DESC LIMIT ?) ORDER BY task_id, seq",
+                    (int(limit),),
+                ).fetchall()
+            logs_by_id: dict[str, list] = {}
+            for log in logs:
+                logs_by_id.setdefault(log["task_id"], []).append(log)
+            return [
+                self._public_task(self._task_from_row(row, logs_by_id.get(row["id"], [])))
+                for row in rows
+            ]
         with self._lock:
-            if self._db_path is not None:
-                with self._connect() as conn:
-                    rows = conn.execute(
-                        """SELECT r.*, o.position FROM task_order o
-                        JOIN task_runs r ON r.id = o.task_id
-                        ORDER BY o.position DESC LIMIT ?""",
-                        (int(limit),),
-                    ).fetchall()
-                    logs = conn.execute(
-                        "SELECT task_id, message FROM task_logs WHERE task_id IN "
-                        "(SELECT task_id FROM task_order ORDER BY position DESC LIMIT ?) ORDER BY task_id, seq",
-                        (int(limit),),
-                    ).fetchall()
-                logs_by_id: dict[str, list] = {}
-                for log in logs:
-                    logs_by_id.setdefault(log["task_id"], []).append(log)
-                return [
-                    self._public_task(self._task_from_row(row, logs_by_id.get(row["id"], [])))
-                    for row in rows
-                ]
             self._refresh_db()
             ordered = []
             for tid in reversed(self._order):
@@ -380,16 +383,16 @@ class TaskStore:
     def list_recent_states(self, limit: int = 500) -> list[dict]:
         """Return recent task metadata without loading log history."""
         normalized_limit = max(1, min(int(limit), 5000))
+        if self._db_path is not None:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    """SELECT r.*, o.position FROM task_order o
+                    JOIN task_runs r ON r.id = o.task_id
+                    ORDER BY o.position DESC LIMIT ?""",
+                    (normalized_limit,),
+                ).fetchall()
+            return [self._public_task(self._task_from_row(row, [])) for row in rows]
         with self._lock:
-            if self._db_path is not None:
-                with self._connect() as conn:
-                    rows = conn.execute(
-                        """SELECT r.*, o.position FROM task_order o
-                        JOIN task_runs r ON r.id = o.task_id
-                        ORDER BY o.position DESC LIMIT ?""",
-                        (normalized_limit,),
-                    ).fetchall()
-                return [self._public_task(self._task_from_row(row, [])) for row in rows]
             self._refresh_db()
             ordered = []
             for task_id in reversed(self._order):
@@ -404,15 +407,28 @@ class TaskStore:
     def get_state(self, task_id: str) -> Optional[dict]:
         """Return task metadata without loading its log history."""
         if self._db_path is None:
-            task = self._tasks.get(task_id)
-            if task is None:
-                return None
-            state = dict(task)
-            state["logs"] = []
-            return self._public_task(state)
+            with self._lock:
+                task = self._tasks.get(task_id)
+                if task is None:
+                    return None
+                state = dict(task)
+                state["logs"] = []
+                return self._public_task(state)
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM task_runs WHERE id = ?", (task_id,)).fetchone()
         return self._public_task(self._task_from_row(row, [])) if row is not None else None
+
+    def count_logs(self, task_id: str) -> int:
+        """Return log line count without loading messages."""
+        if self._db_path is not None:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM task_logs WHERE task_id = ?", (task_id,)
+                ).fetchone()
+            return int(row[0]) if row else 0
+        with self._lock:
+            task = self._tasks.get(task_id)
+            return len(task.get("logs", [])) if task else 0
 
     def _task_from_row(self, row: Any, log_rows: list[Any]) -> dict:
         logs = [row["message"] for row in log_rows]
@@ -735,17 +751,22 @@ class TaskStore:
         assert self._db_path is not None
         self._ensure_db_dir()
         try:
-            conn = sqlite3.connect(str(self._db_path), timeout=30)
+            # timeout covers sqlite busy waits; keep moderate so a stuck writer
+            # cannot pin callers for tens of seconds after we stopped holding
+            # the Python lock across I/O.
+            conn = sqlite3.connect(str(self._db_path), timeout=5.0, check_same_thread=False)
         except sqlite3.Error as exc:
             raise sqlite3.OperationalError(
                 f"unable to open database file: {self._db_path} ({exc})"
             ) from exc
         conn.row_factory = sqlite3.Row
+        # Persist/confirm WAL on every connection; cheap no-op once enabled.
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
         return conn
 
     def _init_db(self) -> None:
         with self._connect() as conn:
-            conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS task_runs (

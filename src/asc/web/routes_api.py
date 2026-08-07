@@ -947,7 +947,8 @@ async def task_stream(
 @router.get("/task/{task_id}/status")
 def task_status(task_id: str):
     """Return current task status and result as JSON."""
-    task = _task_store.get(task_id)
+    # Prefer get_state: avoid loading thousands of log rows just for status/preflight.
+    task = _task_store.get_state(task_id)
     if task is None:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Task not found")
@@ -955,7 +956,7 @@ def task_status(task_id: str):
         "task_id": task_id,
         "status": task["status"],
         "result": task["result"],
-        "log_count": len(task["logs"]),
+        "log_count": _task_store.count_logs(task_id),
     }
 
 
