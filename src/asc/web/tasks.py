@@ -46,6 +46,18 @@ TASK_KIND_RETRY_PATHS = {
 
 TERMINAL_STATUSES = {TaskStatus.DONE, TaskStatus.ERROR, TaskStatus.CANCELED}
 
+DEFAULT_TASK_LOG_LIMIT = 2000
+
+
+def _task_log_limit() -> int:
+    """Return per-task log row cap (ASC_WEB_TASK_LOG_LIMIT, default 2000)."""
+    raw = os.getenv("ASC_WEB_TASK_LOG_LIMIT", str(DEFAULT_TASK_LOG_LIMIT))
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_TASK_LOG_LIMIT
+    return max(1, value)
+
 
 class TaskStore:
     """Thread-safe task store with optional JSON persistence."""
@@ -171,6 +183,15 @@ class TaskStore:
                         for index, line in enumerate(lines)
                     ],
                 )
+                limit = _task_log_limit()
+                conn.execute(
+                    """DELETE FROM task_logs
+                       WHERE task_id = ?
+                         AND seq <= (
+                           SELECT COALESCE(MAX(seq), 0) - ? FROM task_logs WHERE task_id = ?
+                         )""",
+                    (task_id, limit, task_id),
+                )
                 conn.execute(
                     "UPDATE task_runs SET updated_at = ? WHERE id = ?", (now, task_id)
                 )
@@ -181,6 +202,9 @@ class TaskStore:
             self._refresh_db()
             if task_id in self._tasks:
                 self._tasks[task_id]["logs"].extend(str(line) for line in lines)
+                limit = _task_log_limit()
+                if len(self._tasks[task_id]["logs"]) > limit:
+                    self._tasks[task_id]["logs"] = self._tasks[task_id]["logs"][-limit:]
                 self._tasks[task_id]["updated_at"] = self._now()
                 self._save()
             return True

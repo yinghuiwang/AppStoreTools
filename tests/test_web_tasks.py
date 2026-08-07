@@ -548,3 +548,15 @@ def test_count_logs_without_loading_messages(tmp_path):
     store.append_logs(task_id, ["a", "b", "c"])
     assert store.count_logs(task_id) == 3
     assert store.get_state(task_id)["logs"] == []
+
+
+def test_append_logs_trims_to_limit(tmp_path, monkeypatch):
+    monkeypatch.setenv("ASC_WEB_TASK_LOG_LIMIT", "5")
+    store = TaskStore(tmp_path / "tasks.db")
+    tid = store.create("build")
+    store.append_logs(tid, [f"L{i}" for i in range(1, 9)])
+    logs = store.get_logs_after(tid, 0)
+    assert len(logs) == 5
+    assert logs[0]["message"] == "L4"  # keep newest 5; original seq retained
+    assert logs[-1]["message"] == "L8"
+    assert store.count_logs(tid) == 5
