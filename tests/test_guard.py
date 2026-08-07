@@ -102,7 +102,8 @@ def test_guard_disable_via_env(tmp_path, monkeypatch):
 
 
 def test_get_machine_fingerprint_macos(tmp_path):
-    from asc.guard import Guard
+    from asc.guard import Guard, _clear_machine_fingerprint_cache
+    _clear_machine_fingerprint_cache()
     with patch("asc.guard.GUARD_FILE", tmp_path / "guard.json"):
         with patch("asc.guard._get_machine_fingerprint_macos", return_value="SERIAL-C02ABC123456"):
             g = Guard()
@@ -111,7 +112,8 @@ def test_get_machine_fingerprint_macos(tmp_path):
 
 
 def test_get_machine_fingerprint_macos_uses_serial_number(tmp_path):
-    from asc.guard import Guard
+    from asc.guard import Guard, _clear_machine_fingerprint_cache
+    _clear_machine_fingerprint_cache()
 
     ioreg_output = '''
     | |   "IOPlatformUUID" = "FAKE-UUID-1234"
@@ -129,7 +131,8 @@ def test_get_machine_fingerprint_macos_uses_serial_number(tmp_path):
 
 
 def test_get_machine_fingerprint_fallback(tmp_path):
-    from asc.guard import Guard
+    from asc.guard import Guard, _clear_machine_fingerprint_cache
+    _clear_machine_fingerprint_cache()
     with patch("asc.guard.GUARD_FILE", tmp_path / "guard.json"):
         with patch("asc.guard._get_machine_fingerprint_macos", side_effect=Exception("fail")), \
              patch("asc.guard.platform.node", return_value="host1"), \
@@ -137,6 +140,20 @@ def test_get_machine_fingerprint_fallback(tmp_path):
             g = Guard()
             fp = g._get_machine_fingerprint()
             assert fp == "host1-12345"
+
+
+def test_get_machine_fingerprint_cached_across_calls(tmp_path):
+    from asc.guard import Guard, _clear_machine_fingerprint_cache
+    _clear_machine_fingerprint_cache()
+    with patch("asc.guard.GUARD_FILE", tmp_path / "guard.json"), \
+         patch(
+             "asc.guard._get_machine_fingerprint_macos",
+             side_effect=["SERIAL-A", "SERIAL-B"],
+         ) as mock_fp:
+        g = Guard()
+        assert g._get_machine_fingerprint() == "SERIAL-A"
+        assert g._get_machine_fingerprint() == "SERIAL-A"
+        assert mock_fp.call_count == 1
 
 
 def test_get_public_ip_success(tmp_path):

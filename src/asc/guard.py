@@ -55,11 +55,21 @@ def _fetch_public_ip() -> str:
 _IP_CACHE_TTL_SEC = 600
 _ip_cache: tuple[float, str] | None = None
 
+# Process-lifetime machine fingerprint cache (IOPlatformSerialNumber / fallback).
+# Avoids repeated `ioreg` subprocess calls on Guard hot paths.
+_machine_fp_cache: str | None = None
+
 
 def _clear_public_ip_cache() -> None:
     """Test helper / forced refresh."""
     global _ip_cache
     _ip_cache = None
+
+
+def _clear_machine_fingerprint_cache() -> None:
+    """Test helper / forced refresh."""
+    global _machine_fp_cache
+    _machine_fp_cache = None
 
 
 class GuardError(Exception):
@@ -119,10 +129,15 @@ class Guard:
         return bool(self._data.get("enabled", True))
 
     def _get_machine_fingerprint(self) -> str:
+        global _machine_fp_cache
+        if _machine_fp_cache is not None:
+            return _machine_fp_cache
         try:
-            return _get_machine_fingerprint_macos()
+            fp = _get_machine_fingerprint_macos()
         except Exception:
-            return f"{platform.node()}-{uuid.getnode()}"
+            fp = f"{platform.node()}-{uuid.getnode()}"
+        _machine_fp_cache = fp
+        return fp
 
     def _get_public_ip(self) -> str:
         global _ip_cache
