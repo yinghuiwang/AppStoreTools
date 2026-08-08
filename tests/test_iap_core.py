@@ -823,6 +823,17 @@ def test_iap_review_scan_route_offloads_to_thread():
     assert "_scan_iap_review_screenshot_targets" in src
 
 
+def test_iap_web_entrypoints_do_not_block_event_loop():
+    """Regression: IAP upload/check must stay off the asyncio loop."""
+    import inspect
+    from asc.web import routes_api
+
+    assert not inspect.iscoroutinefunction(routes_api.iap_run)
+    assert not inspect.iscoroutinefunction(routes_api.iap_check)
+    upload_src = inspect.getsource(routes_api.iap_review_screenshots_upload)
+    assert "to_thread" in upload_src
+
+
 def test_iap_phase_plan_folds_when_no_subscriptions():
     from asc.commands.iap import _iap_phase_plan
 

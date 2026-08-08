@@ -125,41 +125,44 @@ class AppStoreConnectAPI:
         if "headers" in kwargs:
             headers.update(kwargs.pop("headers"))
 
-        with _asc_request_slot():
-            for attempt in range(3):
-                kwargs.setdefault("timeout", API_TIMEOUT)
+        # Acquire a slot only around the HTTP call — never during 429 Retry-After
+        # sleeps. Holding the process-wide gate across rate-limit waits starves
+        # other Web pages that share ASC_API_MAX_INFLIGHT (looks like a freeze).
+        for attempt in range(3):
+            kwargs.setdefault("timeout", API_TIMEOUT)
+            with _asc_request_slot():
                 resp = requests.request(method, url, headers=headers, **kwargs)
 
-                if resp.status_code == 429:
-                    retry_after = int(resp.headers.get("Retry-After", 30))
-                    # stderr + flush: avoid blocking if stdout is a captured/unpiped stream
-                    print(
-                        f"  ⏳ 速率限制，等待 {retry_after} 秒...",
-                        file=sys.stderr,
-                        flush=True,
+            if resp.status_code == 429:
+                retry_after = int(resp.headers.get("Retry-After", 30))
+                # stderr + flush: avoid blocking if stdout is a captured/unpiped stream
+                print(
+                    f"  ⏳ 速率限制，等待 {retry_after} 秒...",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                _interruptible_sleep(retry_after, self.cancel_event)
+                continue
+
+            if resp.status_code >= 400:
+                error_detail = ""
+                try:
+                    err = resp.json()
+                    errors = err.get("errors", [])
+                    error_detail = "; ".join(
+                        e.get("detail", e.get("title", "")) for e in errors
                     )
-                    _interruptible_sleep(retry_after, self.cancel_event)
-                    continue
+                except Exception:
+                    error_detail = resp.text[:500]
+                raise Exception(
+                    f"API 错误 [{resp.status_code}] {method} {url}: {error_detail}"
+                )
 
-                if resp.status_code >= 400:
-                    error_detail = ""
-                    try:
-                        err = resp.json()
-                        errors = err.get("errors", [])
-                        error_detail = "; ".join(
-                            e.get("detail", e.get("title", "")) for e in errors
-                        )
-                    except Exception:
-                        error_detail = resp.text[:500]
-                    raise Exception(
-                        f"API 错误 [{resp.status_code}] {method} {url}: {error_detail}"
-                    )
+            if resp.status_code == 204:
+                return {}
+            return resp.json()
 
-                if resp.status_code == 204:
-                    return {}
-                return resp.json()
-
-            raise Exception(f"请求失败，已达最大重试次数: {method} {path}")
+        raise Exception(f"请求失败，已达最大重试次数: {method} {path}")
 
     def get(self, path: str, **params) -> dict:
         return self._request("GET", path, params=params)

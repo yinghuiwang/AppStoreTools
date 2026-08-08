@@ -120,6 +120,41 @@ def test_request_429_wait_respects_cancel_event(api):
         t.join(timeout=2.0)
 
 
+def test_request_releases_inflight_slot_during_429_wait(api, monkeypatch):
+    """429 Retry-After must not hold ASC_API_MAX_INFLIGHT (starves other pages)."""
+    import threading
+
+    import asc.api as api_mod
+
+    monkeypatch.setenv("ASC_API_MAX_INFLIGHT", "1")
+    api_mod._asc_inflight_sem = None
+    api_mod._asc_inflight_limit = None
+
+    rate_limited = MagicMock()
+    rate_limited.status_code = 429
+    rate_limited.headers = {"Retry-After": "30"}
+
+    ok_response = MagicMock()
+    ok_response.status_code = 200
+    ok_response.json.return_value = {"data": "ok"}
+
+    slot_free_during_wait = threading.Event()
+
+    def fake_sleep(_seconds, cancel_event=None, chunk=0.5):
+        del cancel_event, chunk
+        sem = api_mod._get_asc_request_semaphore()
+        if sem.acquire(blocking=False):
+            slot_free_during_wait.set()
+            sem.release()
+
+    with patch("requests.request", side_effect=[rate_limited, ok_response]):
+        with patch("asc.api._interruptible_sleep", side_effect=fake_sleep):
+            result = api._request("GET", "/v1/apps/123")
+
+    assert result == {"data": "ok"}
+    assert slot_free_during_wait.is_set()
+
+
 def test_request_inflight_semaphore_serializes_when_limit_one(api, monkeypatch):
     """ASC_API_MAX_INFLIGHT=1: second request waits until the first releases the slot."""
     import threading

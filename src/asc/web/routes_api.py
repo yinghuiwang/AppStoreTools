@@ -197,7 +197,7 @@ async def switch_profile(profile: str):
 
 
 @router.get("/browse", response_class=HTMLResponse)
-async def browse(request: Request, path: str = ".", mode: str = "dir", ext: str = ""):
+def browse(request: Request, path: str = ".", mode: str = "dir", ext: str = ""):
     """Return an HTML fragment listing files/dirs at `path` for the file browser modal."""
     target = Path(path).expanduser().resolve()
     if not _is_under_allowed_root(target):
@@ -2044,13 +2044,14 @@ def _start_iap_task(
         task_id=task_id,
     )
 @router.post("/iap/run")
-async def iap_run(
+def iap_run(
         request: Request,
         iap_file: str = _Form("data/iap_packages.json"),
         dry_run: str = _Form(""),
         update_existing: str = _Form(""),
         verbose: str = _Form(""),
 ):
+    """Sync ``def`` so TaskStore.create(wait=True) stays off the event loop."""
     lang = _lang(request)
     profile = _cookie_profile(request)
     if not profile:
@@ -2066,7 +2067,8 @@ async def iap_run(
 
 
 @router.post("/iap/check")
-async def iap_check(request: Request):
+def iap_check(request: Request):
+    """Sync ``def`` so Config + JSON parse stay off the event loop."""
     lang = _lang(request)
     profile = _cookie_profile(request)
     if not profile:
@@ -2190,12 +2192,17 @@ async def iap_review_screenshots_upload(request: Request):
     if not items:
         raise HTTPException(status_code=400, detail="items required")
 
-    task_id = _start_iap_review_screenshots_task(
-        profile=profile,
-        items=items,
-        dry_run=dry_run,
-        verbose=verbose,
-    )
+    # TaskStore.create(wait=True) must not run on the event loop while IAP
+    # workers are flushing dense logs through the single writer.
+    def _start():
+        return _start_iap_review_screenshots_task(
+            profile=profile,
+            items=items,
+            dry_run=dry_run,
+            verbose=verbose,
+        )
+
+    task_id = await _asyncio.to_thread(_start)
     return {"task_id": task_id}
 
 

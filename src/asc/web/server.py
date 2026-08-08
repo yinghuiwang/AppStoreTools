@@ -143,51 +143,51 @@ def create_app() -> FastAPI:
         return _render(request, "index.html", ctx)
 
     @app.get("/metadata", response_class=HTMLResponse)
-    async def metadata_page(request: Request):
+    def metadata_page(request: Request):
         ctx = _get_profile_context(request)
         action = request.query_params.get("action", "")
         ctx["workflow_action"] = action if action in {"check", "all", "metadata", "screenshots"} else ""
         return _render(request, "metadata.html", ctx)
 
     @app.get("/build", response_class=HTMLResponse)
-    async def build_page(request: Request):
+    def build_page(request: Request):
         ctx = _get_profile_context(request)
         action = request.query_params.get("action", "")
         ctx["workflow_action"] = action if action == "build-upload" else ""
         return _render(request, "build.html", ctx)
 
     @app.get("/profiles", response_class=HTMLResponse)
-    async def profiles_page(request: Request):
+    def profiles_page(request: Request):
         ctx = _get_profile_context(request)
         return _render(request, "profiles.html", ctx)
 
     @app.get("/iap", response_class=HTMLResponse)
-    async def iap_page(request: Request):
+    def iap_page(request: Request):
         ctx = _get_profile_context(request)
         return _render(request, "iap.html", ctx)
 
     @app.get("/settings", response_class=HTMLResponse)
-    async def settings_page(request: Request):
+    def settings_page(request: Request):
         ctx = _get_profile_context(request)
         return _render(request, "settings.html", ctx)
 
     @app.get("/guard", response_class=HTMLResponse)
-    async def guard_page(request: Request):
+    def guard_page(request: Request):
         ctx = _get_profile_context(request)
         return _render(request, "guard.html", ctx)
 
     @app.get("/whats-new", response_class=HTMLResponse)
-    async def whats_new_page(request: Request):
+    def whats_new_page(request: Request):
         ctx = _get_profile_context(request)
         return _render(request, "whats_new.html", ctx)
 
     @app.get("/urls", response_class=HTMLResponse)
-    async def urls_page(request: Request):
+    def urls_page(request: Request):
         ctx = _get_profile_context(request)
         return _render(request, "urls.html", ctx)
 
     @app.get("/update", response_class=HTMLResponse)
-    async def update_page(request: Request):
+    def update_page(request: Request):
         ctx = _get_profile_context(request)
         from asc.commands.update_cmd import _current_version, _is_editable
         from asc.cli import _installed_commit_short

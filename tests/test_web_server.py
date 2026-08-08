@@ -508,6 +508,39 @@ def test_blocking_web_probes_run_in_threadpool():
     assert not inspect.iscoroutinefunction(routes_api.update_versions)
     assert not inspect.iscoroutinefunction(routes_api.update_branches)
     assert not inspect.iscoroutinefunction(routes_api.guard_status)
+    # IAP upload/check must not block the asyncio loop on TaskStore.create / file IO.
+    assert not inspect.iscoroutinefunction(routes_api.iap_run)
+    assert not inspect.iscoroutinefunction(routes_api.iap_check)
+    assert not inspect.iscoroutinefunction(routes_api.browse)
+
+
+def test_iap_review_upload_offloads_task_start_to_thread():
+    from asc.web import routes_api
+
+    src = inspect.getsource(routes_api.iap_review_screenshots_upload)
+    assert "to_thread" in src
+    assert "_start_iap_review_screenshots_task" in src
+
+
+def test_html_pages_run_in_threadpool():
+    """Guard/Config profile context must not run on the asyncio event loop."""
+    app = create_app()
+    paths = {
+        "/",
+        "/metadata",
+        "/build",
+        "/profiles",
+        "/iap",
+        "/settings",
+        "/guard",
+        "/whats-new",
+        "/urls",
+        "/update",
+    }
+    for route in app.routes:
+        path = getattr(route, "path", None)
+        if path in paths:
+            assert not inspect.iscoroutinefunction(route.endpoint), path
 
 
 def test_profile_guard_and_webhook_routes_offload_to_thread():

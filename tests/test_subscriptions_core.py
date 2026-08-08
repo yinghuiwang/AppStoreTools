@@ -786,6 +786,55 @@ def test_update_existing_deletes_prices_in_parallel(fake_api):
     assert max_active > 1
 
 
+def test_subscription_price_workers_capped_by_asc_inflight(fake_api, monkeypatch):
+    """maxWorkers above ASC_API_MAX_INFLIGHT must not open a larger ThreadPool."""
+    import asc.api as api_mod
+    from asc.commands import subscriptions as subs_mod
+
+    monkeypatch.setenv("ASC_API_MAX_INFLIGHT", "2")
+    api_mod._asc_inflight_sem = None
+    api_mod._asc_inflight_limit = None
+
+    seen_workers: list[int] = []
+    real_delete = subs_mod._delete_subscription_prices
+
+    def capture_delete(api, prices, max_workers, cancel_event=None):
+        seen_workers.append(max_workers)
+        return real_delete(api, prices, max_workers, cancel_event=cancel_event)
+
+    monkeypatch.setattr(subs_mod, "_delete_subscription_prices", capture_delete)
+
+    sub_id = "sub_cap_workers"
+    for i, territory in enumerate(["USA", "CHN", "JPN", "GBR"]):
+        fake_api.prices.setdefault(sub_id, []).append(
+            {
+                "id": f"price_cap_{i}",
+                "pricePointId": f"pp_old_{territory}",
+                "territory": territory,
+            }
+        )
+    fake_api.find_subscription_price_point = lambda s, t, a: "pp_usd_999"
+    fake_api.price_points[sub_id] = [
+        {"id": "pp_usd_999", "territory": "USA", "customerPrice": "9.99"},
+    ]
+
+    subs_mod._sync_subscription_price(
+        fake_api,
+        sub_id,
+        {
+            "baseTerritory": "USA",
+            "baseAmount": "9.99",
+            "applyEqualizedPrices": False,
+            "maxWorkers": 16,
+            "creationMode": "post",
+        },
+        update_existing=True,
+        dry_run=False,
+    )
+
+    assert seen_workers == [2]
+
+
 def test_update_existing_price_delete_respects_cancel_event(fake_api):
     import threading
 

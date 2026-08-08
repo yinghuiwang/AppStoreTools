@@ -8,6 +8,7 @@ from pathlib import Path
 import sys
 from typing import Any, Callable, Optional, Tuple
 
+from asc.api import _asc_max_inflight
 from asc.progress import ProcessCanceled
 from asc.reporting import TaskReporter, make_cli_reporter
 
@@ -560,7 +561,13 @@ def _sync_subscription_price(
     amount = price_cfg.get("baseAmount")
     pp_id = str(price_cfg.get("pricePointId") or "").strip()
     apply_equalized = bool(price_cfg.get("applyEqualizedPrices", True))
-    max_workers = _positive_int(price_cfg.get("maxWorkers"), default=6)
+    # Never fan out more ASC calls than the process-wide inflight gate allows;
+    # otherwise price POST/DELETE pools saturate ASC_API_MAX_INFLIGHT and other
+    # pages that share the same client appear frozen.
+    max_workers = min(
+        _positive_int(price_cfg.get("maxWorkers"), default=6),
+        _asc_max_inflight(),
+    )
 
     if not pp_id:
         pp_id = api.find_subscription_price_point(sub_id, territory, amount)
