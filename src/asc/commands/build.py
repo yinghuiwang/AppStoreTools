@@ -85,7 +85,7 @@ def _build_phase_plan(
 def _spinner_log_callback(reporter: TaskReporter | None) -> Callable[[str], None] | None:
     if reporter is None:
         return None
-    return lambda line: reporter.log(line)
+    return reporter.make_raw_log_callback()
 
 
 class UploadProgressReporter:

@@ -190,27 +190,33 @@ class Spinner:
             self._clear_line()
             log_file.close()
 
+        flush_callback = getattr(self.on_log_line, "flush", None)
         elapsed = format_elapsed(time.monotonic() - start)
-        if cancel_event is not None and cancel_event.is_set():
-            canceled_msg = f"⏹ {self.label} 已终止 ({elapsed})"
-            sys.stderr.write(canceled_msg + "\n")
+        try:
+            if cancel_event is not None and cancel_event.is_set():
+                canceled_msg = f"⏹ {self.label} 已终止 ({elapsed})"
+                sys.stderr.write(canceled_msg + "\n")
+                sys.stderr.flush()
+                self._emit_log_line(canceled_msg)
+                raise ProcessCanceled(f"{self.label} canceled")
+            if returncode == 0:
+                ok_msg = f"✅ {self.label} 完成 ({elapsed})"
+                sys.stderr.write(ok_msg + "\n")
+                self._emit_log_line(ok_msg)
+            else:
+                fail_msg = f"❌ {self.label} 失败 ({elapsed})"
+                log_hint = f"   完整日志: {self.log_path}"
+                sys.stderr.write(fail_msg + "\n")
+                sys.stderr.write(log_hint + "\n")
+                self._emit_log_line(fail_msg)
+                self._emit_log_line(log_hint)
+                self._print_tail()
             sys.stderr.flush()
-            self._emit_log_line(canceled_msg)
-            raise ProcessCanceled(f"{self.label} canceled")
-        if returncode == 0:
-            ok_msg = f"✅ {self.label} 完成 ({elapsed})"
-            sys.stderr.write(ok_msg + "\n")
-            self._emit_log_line(ok_msg)
-        else:
-            fail_msg = f"❌ {self.label} 失败 ({elapsed})"
-            log_hint = f"   完整日志: {self.log_path}"
-            sys.stderr.write(fail_msg + "\n")
-            sys.stderr.write(log_hint + "\n")
-            self._emit_log_line(fail_msg)
-            self._emit_log_line(log_hint)
-            self._print_tail()
-        sys.stderr.flush()
 
-        return subprocess.CompletedProcess(
-            args=cmd, returncode=returncode, stdout="", stderr=""
-        )
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=returncode, stdout="", stderr=""
+            )
+        finally:
+            # Include any terminal callback emissions in the final summary.
+            if callable(flush_callback):
+                flush_callback()

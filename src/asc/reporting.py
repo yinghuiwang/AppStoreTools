@@ -2,9 +2,18 @@
 
 from __future__ import annotations
 
+import re
 import sys
 import time
 from typing import Any, Protocol, Sequence
+
+
+_CRITICAL_RAW_LOG_RE = re.compile(
+    r"\b(?:fail|failed|failure|error|fatal|exception|traceback)\b"
+    r"|\b(?-i:[A-Z][A-Za-z0-9_]*Error)\b"
+    r"|错误|失败|异常",
+    re.IGNORECASE,
+)
 
 
 class ProgressSink(Protocol):
@@ -126,6 +135,43 @@ class TaskStoreSink:
         self._pending_logs = merged[-self._MAX_PENDING_LOGS :]
 
 
+class _RateLimitedRawLogCallback:
+    """Bound high-volume subprocess output before it reaches the Web task DB."""
+
+    def __init__(self, reporter: "TaskReporter", max_per_second: int) -> None:
+        self._reporter = reporter
+        self._max_per_second = max(1, max_per_second)
+        self._window_started = time.monotonic()
+        self._emitted = 0
+        self._suppressed = 0
+
+    def __call__(self, message: str) -> None:
+        now = time.monotonic()
+        if now - self._window_started >= 1.0:
+            self._flush_summary()
+            self._window_started = now
+            self._emitted = 0
+        # Errors must be visible immediately, even during a compiler log burst.
+        if _CRITICAL_RAW_LOG_RE.search(message):
+            self._reporter.log(message)
+            return
+        if self._emitted < self._max_per_second:
+            self._reporter.log(message)
+            self._emitted += 1
+        else:
+            self._suppressed += 1
+
+    def flush(self) -> None:
+        self._flush_summary()
+
+    def _flush_summary(self) -> None:
+        if self._suppressed:
+            self._reporter.log(
+                f"… 已省略 {self._suppressed} 行原始子进程输出；完整内容见本地日志文件。"
+            )
+            self._suppressed = 0
+
+
 class TaskReporter:
     """Map phased fine-grained progress to a monotonic global percentage."""
 
@@ -134,9 +180,11 @@ class TaskReporter:
         sinks: Sequence[ProgressSink] | None = None,
         *,
         verbose: bool = False,
+        raw_log_lines_per_second: int | None = None,
     ) -> None:
         self._sinks: list[ProgressSink] = list(sinks or [])
         self.verbose = verbose
+        self._raw_log_lines_per_second = raw_log_lines_per_second
         self.failed: bool = False
         self._phases: list[tuple[str, float, str]] = []
         self._phase_id: str = ""
@@ -194,6 +242,16 @@ class TaskReporter:
         for sink in self._sinks:
             sink.on_log(message, level=level)
 
+    def make_raw_log_callback(self):
+        """Return a callback suitable for a subprocess output tee.
+
+        CLI reporters remain lossless. Web reporters protect SQLite, SSE, and
+        the browser from compiler output bursts while preserving error lines.
+        """
+        if self._raw_log_lines_per_second is None:
+            return self.log
+        return _RateLimitedRawLogCallback(self, self._raw_log_lines_per_second)
+
     def debug(self, message: str) -> None:
         if not self.verbose:
             return
@@ -244,4 +302,8 @@ def make_cli_reporter(*, verbose: bool = False) -> TaskReporter:
 
 
 def make_web_reporter(task_store: Any, task_id: str, *, verbose: bool = False) -> TaskReporter:
-    return TaskReporter(sinks=[TaskStoreSink(task_store, task_id)], verbose=verbose)
+    return TaskReporter(
+        sinks=[TaskStoreSink(task_store, task_id)],
+        verbose=verbose,
+        raw_log_lines_per_second=20,
+    )

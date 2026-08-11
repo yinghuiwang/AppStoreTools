@@ -1,3 +1,10 @@
+import subprocess
+import sys
+import threading
+
+import pytest
+
+from asc.progress import ProcessCanceled, Spinner
 from asc.reporting import TaskReporter, CliSink, make_web_reporter
 
 
@@ -53,6 +60,107 @@ class MockTaskStore:
             "phase_index": phase_index,
             "phase_total": phase_total,
         })
+
+
+@pytest.mark.parametrize(
+    ("returncode", "cancel", "terminal_prefix"),
+    [
+        (0, False, "✅"),
+        (1, False, "❌"),
+        (0, True, "⏹"),
+    ],
+)
+def test_spinner_flushes_callback_after_terminal_message(
+    tmp_path, returncode, cancel, terminal_prefix
+):
+    events = []
+
+    class RecordingCallback:
+        def __call__(self, message):
+            events.append(("log", message))
+
+        def flush(self):
+            events.append(("flush", None))
+
+    callback = RecordingCallback()
+    cancel_event = threading.Event() if cancel else None
+    if cancel_event is not None:
+        cancel_event.set()
+    command = (
+        [sys.executable, "-c", "import time; print('raw'); time.sleep(10)"]
+        if cancel
+        else [sys.executable, "-c", f"print('raw'); raise SystemExit({returncode})"]
+    )
+    spinner = Spinner(
+        "测试",
+        log_path=tmp_path / "subprocess.log",
+        tty=False,
+        on_log_line=callback,
+    )
+
+    if cancel:
+        with pytest.raises(ProcessCanceled):
+            spinner.run(command, cancel_event=cancel_event)
+    else:
+        result = spinner.run(command)
+        assert isinstance(result, subprocess.CompletedProcess)
+        assert result.returncode == returncode
+
+    assert events[-1] == ("flush", None)
+    assert any(
+        kind == "log" and message.startswith(terminal_prefix)
+        for kind, message in events[:-1]
+    )
+
+
+@pytest.mark.parametrize(
+    "diagnostic",
+    [
+        "fail",
+        "failed",
+        "failure",
+        "error",
+        "RuntimeError: boom",
+        "ValueError: bad value",
+        "fatal: linker stopped",
+        "exception raised",
+        "Traceback (most recent call last):",
+        "错误：签名无效",
+        "失败：无法导出",
+        "异常：构建中断",
+    ],
+)
+def test_web_raw_subprocess_logs_preserve_common_diagnostics(diagnostic):
+    sink = RecordingSink()
+    reporter = TaskReporter(sinks=[sink], raw_log_lines_per_second=1)
+    callback = reporter.make_raw_log_callback()
+
+    callback("ordinary allowance")
+    callback(diagnostic)
+    callback("ordinary suppressed")
+    callback.flush()
+
+    messages = [message for _, message in sink.logs]
+    assert diagnostic in messages
+    assert "ordinary suppressed" not in messages
+    assert any("已省略 1 行" in message for message in messages)
+
+
+def test_web_raw_subprocess_logs_are_rate_limited_but_keep_errors():
+    store = MockTaskStore()
+    reporter = make_web_reporter(store, "task-1")
+    callback = reporter.make_raw_log_callback()
+
+    for index in range(30):
+        callback(f"CompileSwift File{index}.swift")
+    callback("error: signing failed")
+    callback.flush()
+    reporter.flush()
+
+    lines = [line for _, batch in store.log_batches for line in batch]
+    assert len([line for line in lines if line.startswith("CompileSwift")]) == 20
+    assert "error: signing failed" in lines
+    assert any("已省略 10 行" in line for line in lines)
 
 
 def test_phase_and_progress_map_to_global_pct():
