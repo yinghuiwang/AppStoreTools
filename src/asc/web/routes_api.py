@@ -251,8 +251,11 @@ def _finish_task(task_id: str, status: _TaskStatus, result: dict) -> None:
         if current_value in {"done", "error", "canceled"}:
             return
     try:
-        _task_store.set_status(task_id, status)
         _task_store.set_result(task_id, result)
+        # Terminal status is the public completion signal for SSE/status
+        # consumers. Persist the result first so they cannot observe
+        # DONE/ERROR/CANCELED with result=None between two writer commits.
+        _task_store.set_status(task_id, status)
     except Exception as exc:  # noqa: BLE001 — surface DB path; avoid silent hang
         print(
             f"⚠️  Failed to finalize task {task_id} in TaskStore: {exc}",
@@ -460,7 +463,7 @@ def metadata_check(request: Request):
 
 
 @router.post("/metadata/run")
-async def metadata_run(
+def metadata_run(
     request: Request,
     csv_path: str = _Form("data/appstore_info.csv"),
     screenshots_dir: str = _Form("data/screenshots"),
@@ -562,8 +565,8 @@ async def metadata_run(
                 status_code=400,
             )
 
-    include_metadata_bool = bool(include_metadata)
-    include_screenshots_bool = bool(include_screenshots)
+    include_metadata_bool = _as_bool(include_metadata)
+    include_screenshots_bool = _as_bool(include_screenshots)
 
     if include_metadata_bool and (locales_explicit_empty or fields_explicit_empty):
         return JSONResponse({"error": "no metadata rows selected"}, status_code=400)
@@ -591,8 +594,8 @@ async def metadata_run(
         screenshots_dir=screenshots_dir,
         include_metadata=include_metadata_bool,
         include_screenshots=include_screenshots_bool,
-        dry_run=bool(dry_run),
-        verbose=bool(verbose),
+        dry_run=_as_bool(dry_run),
+        verbose=_as_bool(verbose),
         locales=locale_list,
         fields_by_locale=fields_by_locale,
         screenshot_scopes=screenshot_scopes,
@@ -742,7 +745,7 @@ def _archive_summary(archive):
 
 
 @router.post("/build/run")
-async def build_run(
+def build_run(
     request: Request,
     mode: str = _Form("full"),
     project: str = _Form(""),
@@ -767,11 +770,11 @@ async def build_run(
         scheme=scheme,
         destination=destination,
         ipa_path=ipa_path,
-        verbose=bool(verbose),
+        verbose=_as_bool(verbose),
         signing=signing,
         certificate=certificate,
         provisioning_profile=provisioning_profile,
-        dry_run=bool(dry_run),
+        dry_run=_as_bool(dry_run),
         reuse_archive=reuse_archive,
     )
     return {"task_id": task_id}
@@ -1587,7 +1590,11 @@ async def whats_new_translate(request: Request):
                 {"error": "LLM API key not configured. Set it in Web settings or OPENAI_API_KEY."},
                 status_code=400,
             )
-        task_id = _start_whats_new_translate_task(
+        # TaskStore.create(wait=True) can wait behind dense task-log writes.
+        # Keep that synchronous work off the event loop so SSE/status/cancel
+        # requests remain responsive while a translation task is queued.
+        task_id = await _asyncio.to_thread(
+            _start_whats_new_translate_task,
             profile=profile,
             text=text,
             source_locale=source_locale,
@@ -1794,7 +1801,10 @@ async def whats_new_run(
     else:
         return JSONResponse({"error": "Either translations_json or text is required"}, status_code=400)
 
-    task_id = _start_whats_new_task(
+    # JSON parsing above is asynchronous, but task creation performs a
+    # synchronous, durable TaskStore write. Do not block the event loop on it.
+    task_id = await _asyncio.to_thread(
+        _start_whats_new_task,
         profile=profile,
         dry_run=_as_bool(dry_run),
         translations=translations,
@@ -1897,6 +1907,9 @@ def _start_iap_review_screenshots_task(
                     ],
                     "error": f"{message}: {labels}",
                 }
+                # The terminal status below can be observed immediately by
+                # SSE/status clients; persist the explanatory log first.
+                reporter.flush()
                 _finish_task(task_id, _TaskStatus.ERROR, payload)
                 raise RuntimeError(payload["error"])
 
@@ -2059,9 +2072,9 @@ def iap_run(
     task_id = _start_iap_task(
         profile=profile,
         iap_file=iap_file,
-        dry_run=bool(dry_run),
-        update_existing=bool(update_existing),
-        verbose=bool(verbose),
+        dry_run=_as_bool(dry_run),
+        update_existing=_as_bool(update_existing),
+        verbose=_as_bool(verbose),
     )
     return {"task_id": task_id}
 
@@ -2256,7 +2269,7 @@ def _parse_urls_locales(locales: str) -> list[str]:
 
 
 @router.post("/urls/set")
-async def urls_set(
+def urls_set(
     request: Request,
     field: str = _Form(...),  # supportUrl, marketingUrl, privacyPolicyUrl
     url: str = _Form(...),
@@ -2280,8 +2293,8 @@ async def urls_set(
         field=field,
         url=url,
         locales=locale_list,
-        dry_run=bool(dry_run),
-        verbose=bool(verbose),
+        dry_run=_as_bool(dry_run),
+        verbose=_as_bool(verbose),
     )
     return {"task_id": task_id}
 
@@ -2617,7 +2630,7 @@ def update_branches(request: Request):
 
 
 @router.post("/update/run")
-async def update_run(
+def update_run(
     version: str = _Form(""),
     branch: str = _Form(""),
     dry_run: str = _Form(""),
@@ -2627,7 +2640,7 @@ async def update_run(
     task_id = _start_update_task(
         version=version or None,
         branch=branch or None,
-        verbose=bool(verbose),
+        verbose=_as_bool(verbose),
     )
     return {"task_id": task_id}
 

@@ -508,9 +508,14 @@ def test_blocking_web_probes_run_in_threadpool():
     assert not inspect.iscoroutinefunction(routes_api.update_versions)
     assert not inspect.iscoroutinefunction(routes_api.update_branches)
     assert not inspect.iscoroutinefunction(routes_api.guard_status)
-    # IAP upload/check must not block the asyncio loop on TaskStore.create / file IO.
+    # Task creation waits for a durable SQLite write. Entry points that do not
+    # await a request body must use FastAPI's sync threadpool.
+    assert not inspect.iscoroutinefunction(routes_api.metadata_run)
+    assert not inspect.iscoroutinefunction(routes_api.build_run)
     assert not inspect.iscoroutinefunction(routes_api.iap_run)
     assert not inspect.iscoroutinefunction(routes_api.iap_check)
+    assert not inspect.iscoroutinefunction(routes_api.urls_set)
+    assert not inspect.iscoroutinefunction(routes_api.update_run)
     assert not inspect.iscoroutinefunction(routes_api.browse)
 
 
@@ -520,6 +525,19 @@ def test_iap_review_upload_offloads_task_start_to_thread():
     src = inspect.getsource(routes_api.iap_review_screenshots_upload)
     assert "to_thread" in src
     assert "_start_iap_review_screenshots_task" in src
+
+
+def test_async_task_entrypoints_offload_task_creation_to_thread():
+    """Routes that await request parsing must still keep TaskStore writes off-loop."""
+    from asc.web import routes_api
+
+    for endpoint, starter in (
+        (routes_api.whats_new_run, "_start_whats_new_task"),
+        (routes_api.whats_new_translate, "_start_whats_new_translate_task"),
+    ):
+        src = inspect.getsource(endpoint)
+        assert "to_thread" in src
+        assert starter in src
 
 
 def test_html_pages_run_in_threadpool():
@@ -983,6 +1001,21 @@ def test_build_run_api_passes_interactive_release_options(client):
         assert kwargs["provisioning_profile"] == "/tmp/acme.mobileprovision"
         assert kwargs["reuse_archive"] == "reuse"
         assert kwargs["dry_run"] is True
+
+
+def test_build_run_parses_false_form_values_as_false(client):
+    from unittest.mock import patch
+
+    with patch("asc.web.routes_api._start_build_task", return_value="task-1") as mock_start:
+        resp = client.post(
+            "/api/build/run",
+            cookies={"asc_profile": "myapp"},
+            data={"verbose": "false", "dry_run": "false"},
+        )
+
+    assert resp.status_code == 200
+    assert mock_start.call_args.kwargs["verbose"] is False
+    assert mock_start.call_args.kwargs["dry_run"] is False
 
 
 def test_iap_review_screenshots_scan_returns_targets_with_default_path(client, tmp_path):
@@ -2822,4 +2855,3 @@ def test_profiles_import_local_api_404_when_none(client, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     resp = client.post("/api/profiles/import", json={})
     assert resp.status_code == 404
-
