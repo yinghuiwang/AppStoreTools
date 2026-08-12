@@ -16,6 +16,63 @@ def client():
     return TestClient(create_app())
 
 
+def test_lifespan_logs_runtime_version_and_commit(caplog, monkeypatch):
+    import logging
+    from asc.web import server
+    from asc.web.tasks import TaskStore
+
+    caplog.set_level(logging.INFO, logger="asc.web")
+    monkeypatch.setattr(server, "task_store", TaskStore())
+    monkeypatch.setattr(
+        "asc.web.server.runtime_identity",
+        lambda: ("0.1.25", "b211c90"),
+        raising=False,
+    )
+
+    with TestClient(create_app()):
+        pass
+
+    assert "asc_version=0.1.25" in caplog.text
+    assert "commit=b211c90" in caplog.text
+
+
+def test_runtime_identity_falls_back_when_commit_lookup_fails(monkeypatch):
+    from asc.web import server
+
+    monkeypatch.setattr(server, "__version__", "0.1.25", raising=False)
+    monkeypatch.setattr(
+        server,
+        "_installed_commit_short",
+        lambda: (_ for _ in ()).throw(RuntimeError("git unavailable")),
+        raising=False,
+    )
+
+    assert server.runtime_identity() == ("0.1.25", "unknown")
+
+
+def test_lifespan_resolves_runtime_identity_off_event_loop(monkeypatch):
+    import asyncio
+
+    from asc.web import server
+    from asc.web.tasks import TaskStore
+
+    calls = []
+    monkeypatch.setattr(server, "task_store", TaskStore())
+
+    async def fake_to_thread(function):
+        calls.append(function)
+        return ("0.1.25", "b211c90")
+
+    monkeypatch.setattr(server.asyncio, "to_thread", fake_to_thread)
+
+    async def run_lifespan():
+        async with server._lifespan(None):
+            pass
+
+    asyncio.run(run_lifespan())
+    assert calls == [server.runtime_identity]
+
+
 @pytest.fixture(autouse=True)
 def isolated_web_task_guard(monkeypatch):
     from unittest.mock import MagicMock
@@ -1380,6 +1437,262 @@ def test_task_stream_canceled_task(client):
 def test_task_stream_not_found(client):
     resp = client.get("/api/task/nonexistent/stream")
     assert resp.status_code == 404
+
+
+def test_task_stream_uses_one_snapshot_per_poll(client, monkeypatch):
+    from asc.web import routes_api
+    from asc.web.tasks import TaskStatus
+
+    snapshots = [
+        {
+            "task": {
+                "status": TaskStatus.DONE,
+                "progress": {"pct": 100, "msg": "done"},
+                "result": {"success": True},
+            },
+            "logs": [{"seq": 8, "message": "last business line"}],
+        }
+    ]
+    calls = []
+
+    def get_snapshot(task_id, after):
+        calls.append((task_id, after))
+        return snapshots[0]
+
+    monkeypatch.setattr(routes_api._task_store, "get_stream_snapshot", get_snapshot)
+    monkeypatch.setattr(
+        routes_api._task_store,
+        "get_state",
+        lambda task_id: pytest.fail("SSE must not call get_state"),
+    )
+    monkeypatch.setattr(
+        routes_api._task_store,
+        "get_logs_after",
+        lambda task_id, after: pytest.fail("SSE must not call get_logs_after"),
+    )
+
+    response = client.get(
+        "/api/task/task-1/stream?after=3",
+        headers={"Last-Event-ID": "7"},
+    )
+
+    assert response.status_code == 200
+    assert calls == [("task-1", 7)]
+    assert response.text.index("id: 8") < response.text.index("event: progress")
+    assert response.text.index("event: progress") < response.text.index("event: done")
+
+
+def test_task_stream_invalid_last_event_id_falls_back_to_after(client, monkeypatch):
+    from asc.web import routes_api
+    from asc.web.tasks import TaskStatus
+
+    calls = []
+
+    def get_snapshot(task_id, after):
+        calls.append((task_id, after))
+        return {
+            "task": {"status": TaskStatus.DONE, "progress": None, "result": None},
+            "logs": [{"seq": 5, "message": "resumed"}],
+        }
+
+    monkeypatch.setattr(routes_api._task_store, "get_stream_snapshot", get_snapshot)
+
+    response = client.get(
+        "/api/task/task-2/stream?after=4",
+        headers={"Last-Event-ID": "invalid"},
+    )
+
+    assert calls == [("task-2", 4)]
+    assert "id: 5\nevent: log\ndata: resumed" in response.text
+    assert response.text.count("data: resumed") == 1
+
+
+def test_task_stream_preserves_progress_heartbeat_and_error_event_names(client, monkeypatch):
+    from asc.web import routes_api
+    from asc.web.tasks import TaskStatus
+
+    snapshots = iter(
+        [
+            {
+                "task": {
+                    "status": TaskStatus.RUNNING,
+                    "progress": {"pct": 25, "msg": "working"},
+                    "result": None,
+                },
+                "logs": [],
+            },
+            {
+                "task": {
+                    "status": TaskStatus.ERROR,
+                    "progress": {"pct": 25, "msg": "working"},
+                    "result": {"success": False},
+                },
+                "logs": [],
+            },
+        ]
+    )
+    monkeypatch.setattr(
+        routes_api._task_store,
+        "get_stream_snapshot",
+        lambda task_id, after: next(snapshots),
+    )
+    monkeypatch.setattr(routes_api._asyncio, "sleep", lambda delay: _immediate_async())
+
+    response = client.get("/api/task/task-3/stream")
+
+    assert "event: progress" in response.text
+    assert ": heartbeat\n\n" in response.text
+    assert "event: error_event\ndata: \n\n" in response.text
+
+
+def test_task_stream_preserves_timeout_error_event(client, monkeypatch):
+    from asc.web import routes_api
+    from asc.web.tasks import TaskStatus
+
+    monkeypatch.setattr(
+        routes_api._task_store,
+        "get_stream_snapshot",
+        lambda task_id, after: {
+            "task": {"status": TaskStatus.RUNNING, "progress": None, "result": None},
+            "logs": [],
+        },
+    )
+    monkeypatch.setattr(routes_api, "SSE_ABSOLUTE_TIMEOUT_SEC", 0)
+
+    response = client.get("/api/task/task-4/stream")
+
+    assert "event: error_event\ndata: timeout\n\n" in response.text
+
+
+def test_task_stream_reports_task_disappearing_after_stream_starts(client, monkeypatch):
+    from asc.web import routes_api
+    from asc.web.tasks import TaskStatus
+
+    snapshots = iter(
+        [
+            {
+                "task": {"status": TaskStatus.RUNNING, "progress": None, "result": None},
+                "logs": [{"seq": 1, "message": "started"}],
+            },
+            None,
+        ]
+    )
+    calls = []
+
+    def get_snapshot(task_id, after):
+        calls.append((task_id, after))
+        return next(snapshots)
+
+    monkeypatch.setattr(routes_api._task_store, "get_stream_snapshot", get_snapshot)
+    monkeypatch.setattr(routes_api._asyncio, "sleep", lambda delay: _immediate_async())
+
+    response = client.get("/api/task/vanishing-task/stream")
+
+    assert response.status_code == 200
+    assert calls == [("vanishing-task", 0), ("vanishing-task", 1)]
+    assert "id: 1\nevent: log\ndata: started\n\n" in response.text
+    assert "event: error_event\ndata: task not found\n\n" in response.text
+
+
+@pytest.mark.parametrize("resume_with", ["after", "Last-Event-ID"])
+def test_task_stream_reconnects_without_duplicate_or_missing_logs(client, resume_with):
+    from asc.web.tasks import task_store, TaskStatus
+
+    task_id = task_store.create("metadata")
+    task_store.append_logs(task_id, ["one", "two"])
+    task_store.set_status(task_id, TaskStatus.DONE)
+
+    first = client.get(f"/api/task/{task_id}/stream")
+    first_ids = [
+        int(line.removeprefix("id: "))
+        for line in first.text.splitlines()
+        if line.startswith("id: ")
+    ]
+    last_event_id = first_ids[-1]
+
+    task_store.append_logs(task_id, ["three", "four"])
+    if resume_with == "after":
+        second = client.get(f"/api/task/{task_id}/stream?after={last_event_id}")
+    else:
+        second = client.get(
+            f"/api/task/{task_id}/stream",
+            headers={"Last-Event-ID": str(last_event_id)},
+        )
+    second_ids = [
+        int(line.removeprefix("id: "))
+        for line in second.text.splitlines()
+        if line.startswith("id: ")
+    ]
+
+    assert first.status_code == second.status_code == 200
+    assert first_ids == [1, 2]
+    assert second_ids == [3, 4]
+    assert first_ids + second_ids == [1, 2, 3, 4]
+    assert len(set(first_ids + second_ids)) == 4
+
+
+def test_reconnect_cursor_has_no_gaps_and_terminal_has_result(
+    client, tmp_path, monkeypatch
+):
+    from asc.web import routes_api
+    from asc.web.tasks import TaskStore, TaskStatus
+
+    store = TaskStore(tmp_path / "tasks.db")
+    monkeypatch.setattr(routes_api, "_task_store", store)
+    try:
+        task_id = store.create("build")
+        store.append_logs(task_id, [f"L{index}" for index in range(1, 101)])
+        store.set_result(task_id, {"success": True})
+        store.set_status(task_id, TaskStatus.DONE)
+
+        first_ids = []
+        with client.stream("GET", f"/api/task/{task_id}/stream?after=0") as response:
+            assert response.status_code == 200
+            for line in response.iter_lines():
+                if line.startswith("id: "):
+                    first_ids.append(int(line.removeprefix("id: ")))
+                    if first_ids[-1] == 40:
+                        break
+
+        second = client.get(
+            f"/api/task/{task_id}/stream?after=40",
+            headers={"Last-Event-ID": "40"},
+        )
+        second_ids = [
+            int(line.removeprefix("id: "))
+            for line in second.text.splitlines()
+            if line.startswith("id: ")
+        ]
+        frames = [
+            frame
+            for frame in second.text.split("\n\n")
+            if frame.strip()
+        ]
+        log_frame_indexes = [
+            index
+            for index, frame in enumerate(frames)
+            if "\nevent: log\n" in f"\n{frame}\n"
+        ]
+        done_frame_index = next(
+            index
+            for index, frame in enumerate(frames)
+            if "\nevent: done\n" in f"\n{frame}\n"
+        )
+        terminal_snapshot = store.get_stream_snapshot(task_id, 100)
+
+        assert first_ids + second_ids == list(range(1, 101))
+        assert second_ids == list(range(41, 101))
+        assert log_frame_indexes
+        assert max(log_frame_indexes) < done_frame_index
+        assert terminal_snapshot is not None
+        assert terminal_snapshot["task"]["status"] == TaskStatus.DONE
+        assert terminal_snapshot["task"]["result"] == {"success": True}
+    finally:
+        store.close()
+
+
+async def _immediate_async():
+    return None
 
 
 def test_task_cancel_endpoint(client):

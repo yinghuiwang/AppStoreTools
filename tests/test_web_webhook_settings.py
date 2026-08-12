@@ -251,51 +251,71 @@ def test_send_test_notification_configured_provider_uses_fixed_message(
     ]
 
 
-def test_finish_task_sets_result_then_notifies(monkeypatch: pytest.MonkeyPatch):
-    from asc.web import routes_api
+def test_finalize_task_sets_result_then_notifies(monkeypatch: pytest.MonkeyPatch):
+    from asc.reporting import make_web_reporter
+    from asc.web import notifications
+    from asc.web.task_runner import _notify_task_finished, finalize_task
     from asc.web.tasks import TaskStatus, TaskStore
 
     task_store = TaskStore()
-    monkeypatch.setattr(routes_api, "_task_store", task_store)
-
     task_id = task_store.create("build", profile="demoapp")
+    reporter = make_web_reporter(task_store, task_id, "build")
     calls = []
     monkeypatch.setattr(
-        routes_api.notifications,
+        notifications,
         "notify_task_finished",
         lambda notified_task_id, task_store: calls.append(
             (notified_task_id, task_store.get(notified_task_id)["result"])
         ),
     )
 
-    routes_api._finish_task(task_id, TaskStatus.DONE, {"success": True})
+    assert finalize_task(
+        task_store,
+        reporter,
+        task_id,
+        TaskStatus.DONE,
+        {"success": True},
+    )
+    _notify_task_finished(task_store, reporter, task_id)
 
-    task = routes_api._task_store.get(task_id)
+    task = task_store.get(task_id)
     assert task["status"] == TaskStatus.DONE
-    assert task["result"] == {"success": True}
-    assert calls == [(task_id, {"success": True})]
+    assert task["result"]["success"] is True
+    assert task["result"]["_asc_terminal_recovery"]["status"] == "done"
+    assert calls == [(task_id, task["result"])]
 
 
-def test_finish_task_keeps_result_when_notification_raises(monkeypatch: pytest.MonkeyPatch):
-    from asc.web import routes_api
+def test_notification_failure_keeps_business_result(monkeypatch: pytest.MonkeyPatch):
+    from asc.reporting import make_web_reporter
+    from asc.web import notifications
+    from asc.web.task_runner import _notify_task_finished, finalize_task
     from asc.web.tasks import TaskStatus, TaskStore
 
     task_store = TaskStore()
-    monkeypatch.setattr(routes_api, "_task_store", task_store)
 
     def raise_notification_error(notified_task_id: str, task_store: TaskStore):
         raise RuntimeError("notification failed")
 
     task_id = task_store.create("build", profile="demoapp")
+    reporter = make_web_reporter(task_store, task_id, "build")
     monkeypatch.setattr(
-        routes_api.notifications,
+        notifications,
         "notify_task_finished",
         raise_notification_error,
     )
 
-    routes_api._finish_task(task_id, TaskStatus.ERROR, {"success": False, "error": "build failed"})
+    assert finalize_task(
+        task_store,
+        reporter,
+        task_id,
+        TaskStatus.ERROR,
+        {"success": False, "error": "build failed"},
+    )
+    _notify_task_finished(task_store, reporter, task_id)
 
     task = task_store.get(task_id)
     assert task["status"] == TaskStatus.ERROR
-    assert task["result"] == {"success": False, "error": "build failed"}
+    assert task["result"]["success"] is False
+    assert task["result"]["error"] == "build failed"
+    assert task["result"]["notification_error"] == "notification failed"
     assert any("群通知处理失败：RuntimeError" in line for line in task["logs"])

@@ -5,7 +5,6 @@ import copy
 import hashlib
 import json
 import re
-import sys
 import tempfile
 import time
 import uuid
@@ -30,7 +29,15 @@ from asc.utils import make_api_from_config
 from asc.web import notifications
 from asc.web.dashboard import MANUAL_BASELINE_MINUTES, build_dashboard_summary
 from asc.web.i18n import t
-from asc.web.task_runner import SSE_ABSOLUTE_TIMEOUT_SEC, start_background_task
+from asc.web.task_runner import (
+    SSE_ABSOLUTE_TIMEOUT_SEC,
+    TERMINAL_RECOVERY_KEY,
+    TaskTerminalError,
+    TerminalWriteState,
+    _notify_task_finished,
+    finalize_task_outcome,
+    start_background_task,
+)
 
 router = APIRouter()
 
@@ -243,39 +250,6 @@ from asc.web.tasks import task_store as _task_store, TaskStatus as _TaskStatus
 from asc.progress import ProcessCanceled
 
 
-def _finish_task(task_id: str, status: _TaskStatus, result: dict) -> None:
-    current = _task_store.get_state(task_id) or _task_store.get(task_id)
-    if current is not None:
-        current_status = current.get("status")
-        current_value = getattr(current_status, "value", current_status)
-        if current_value in {"done", "error", "canceled"}:
-            return
-    try:
-        _task_store.set_result(task_id, result)
-        # Terminal status is the public completion signal for SSE/status
-        # consumers. Persist the result first so they cannot observe
-        # DONE/ERROR/CANCELED with result=None between two writer commits.
-        _task_store.set_status(task_id, status)
-    except Exception as exc:  # noqa: BLE001 — surface DB path; avoid silent hang
-        print(
-            f"⚠️  Failed to finalize task {task_id} in TaskStore: {exc}",
-            file=sys.stderr,
-        )
-        # Best-effort breadcrumb; may also fail if DB is down.
-        try:
-            _task_store.append_log(
-                task_id,
-                f"⚠️  任务状态写入失败（{exc}），请检查 ~/.config/asc/ 下的 tasks 数据库",
-            )
-        except Exception:  # noqa: BLE001
-            pass
-        raise
-    try:
-        notifications.notify_task_finished(task_id, task_store=_task_store)
-    except Exception as exc:
-        _task_store.append_log(task_id, f"群通知处理失败：{exc.__class__.__name__}")
-
-
 def _enforce_web_profile_guard(
     app_id: str,
     app_name: str,
@@ -424,22 +398,9 @@ def _start_metadata_task(
             if cancel_event.is_set():
                 raise ProcessCanceled("metadata upload canceled")
 
-            _finish_task(task_id, _TaskStatus.DONE, {"success": True})
             return {"success": True}
         except ProcessCanceled:
             reporter.log("⏹ 用户已终止上传")
-            _finish_task(
-                task_id,
-                _TaskStatus.CANCELED,
-                {"success": False, "canceled": True},
-            )
-            raise
-        except Exception as e:
-            _finish_task(
-                task_id,
-                _TaskStatus.ERROR,
-                {"success": False, "error": str(e)},
-            )
             raise
 
     return start_background_task(
@@ -704,22 +665,9 @@ def _start_build_task(
             if cancel_event.is_set():
                 raise ProcessCanceled("build canceled")
             result = {"success": True}
-            _finish_task(task_id, _TaskStatus.DONE, result)
             return result
         except ProcessCanceled:
             reporter.log("⏹ 用户已终止上传")
-            _finish_task(
-                task_id,
-                _TaskStatus.CANCELED,
-                {"success": False, "canceled": True},
-            )
-            raise
-        except Exception as e:
-            _finish_task(
-                task_id,
-                _TaskStatus.ERROR,
-                {"success": False, "error": str(e)},
-            )
             raise
 
     return start_background_task(
@@ -893,28 +841,30 @@ async def task_stream(
     last_event_id: str | None = Header(None, alias="Last-Event-ID"),
 ):
     """SSE stream: replay sequenced logs after a cursor until task completes."""
-    task = await _asyncio.to_thread(_task_store.get_state, task_id)
-    if task is None:
+    cursor = after
+    if last_event_id is not None:
+        try:
+            cursor = max(cursor, int(last_event_id))
+        except ValueError:
+            pass
+    first_snapshot = await _asyncio.to_thread(
+        _task_store.get_stream_snapshot,
+        task_id,
+        cursor,
+    )
+    if first_snapshot is None:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Task not found")
 
     async def _generate():
-        sent = after
-        if last_event_id is not None:
-            try:
-                sent = max(sent, int(last_event_id))
-            except ValueError:
-                pass
+        sent = cursor
+        snapshot = first_snapshot
         last_progress = None
         polls = 0
         started = time.monotonic()
         while True:
-            current = await _asyncio.to_thread(_task_store.get_state, task_id)
-            if current is None:
-                yield _fmt_sse("error_event", "task not found")
-                break
-            logs = await _asyncio.to_thread(_task_store.get_logs_after, task_id, sent)
-            for log in logs:
+            current = snapshot["task"]
+            for log in snapshot["logs"]:
                 yield _fmt_sse("log", log["message"], event_id=log["seq"])
                 sent = log["seq"]
             # Emit progress event if changed
@@ -939,6 +889,14 @@ async def task_stream(
                 yield ": heartbeat\n\n"
             polls += 1
             await _asyncio.sleep(0.2)
+            snapshot = await _asyncio.to_thread(
+                _task_store.get_stream_snapshot,
+                task_id,
+                sent,
+            )
+            if snapshot is None:
+                yield _fmt_sse("error_event", "task not found")
+                break
 
     return _StreamingResponse(
         _generate(),
@@ -1638,23 +1596,12 @@ def _start_whats_new_translate_task(
             )
             if cancel_event.is_set():
                 raise ProcessCanceled("whats-new translate canceled")
-            _finish_task(task_id, _TaskStatus.DONE, result)
             return result
         except ProcessCanceled:
             reporter.log("⏹ 用户已终止翻译")
-            _finish_task(
-                task_id,
-                _TaskStatus.CANCELED,
-                {"success": False, "canceled": True},
-            )
             raise
         except Exception as e:
             reporter.fail(str(e))
-            _finish_task(
-                task_id,
-                _TaskStatus.ERROR,
-                {"success": False, "error": str(e)},
-            )
             raise
 
     return start_background_task(
@@ -1713,23 +1660,12 @@ def _start_whats_new_task(
             )
             if cancel_event.is_set():
                 raise ProcessCanceled("whats-new upload canceled")
-            _finish_task(task_id, _TaskStatus.DONE, result)
             return result
         except ProcessCanceled:
             reporter.log("⏹ 用户已终止上传")
-            _finish_task(
-                task_id,
-                _TaskStatus.CANCELED,
-                {"success": False, "canceled": True},
-            )
             raise
         except Exception as e:
             reporter.fail(str(e))
-            _finish_task(
-                task_id,
-                _TaskStatus.ERROR,
-                {"success": False, "error": str(e)},
-            )
             raise
 
     return start_background_task(
@@ -1907,11 +1843,7 @@ def _start_iap_review_screenshots_task(
                     ],
                     "error": f"{message}: {labels}",
                 }
-                # The terminal status below can be observed immediately by
-                # SSE/status clients; persist the explanatory log first.
-                reporter.flush()
-                _finish_task(task_id, _TaskStatus.ERROR, payload)
-                raise RuntimeError(payload["error"])
+                raise TaskTerminalError(payload["error"], payload)
 
             result = upload_review_screenshots(
                 api, items, dry_run=dry_run, reporter=reporter
@@ -1927,24 +1859,16 @@ def _start_iap_review_screenshots_task(
                 ],
             }
             if result.failed == 0:
-                _finish_task(task_id, _TaskStatus.DONE, payload)
                 return payload
-            _finish_task(task_id, _TaskStatus.ERROR, payload)
-            raise RuntimeError(
-                f"review screenshot upload failed: {result.failed} item(s)"
+            raise TaskTerminalError(
+                f"review screenshot upload failed: {result.failed} item(s)",
+                payload,
             )
         except Exception as e:
-            current = _task_store.get_state(task_id) or _task_store.get(task_id)
-            current_status = (
-                getattr(current.get("status"), "value", current.get("status"))
-                if current
-                else None
-            )
-            if current_status not in {"done", "error", "canceled"}:
+            if not isinstance(e, TaskTerminalError):
                 reporter.fail(f"❌ 错误：{e}")
-                _finish_task(
-                    task_id,
-                    _TaskStatus.ERROR,
+                raise TaskTerminalError(
+                    str(e),
                     {
                         "success": False,
                         "uploaded": 0,
@@ -2023,29 +1947,9 @@ def _start_iap_task(
 
             if cancel_event.is_set():
                 raise ProcessCanceled("iap upload canceled")
-            _finish_task(task_id, _TaskStatus.DONE, {"success": True})
             return {"success": True}
         except ProcessCanceled:
             reporter.log("⏹ 用户已终止 IAP 上传")
-            _finish_task(
-                task_id,
-                _TaskStatus.CANCELED,
-                {"success": False, "canceled": True},
-            )
-            raise
-        except Exception as e:
-            current = _task_store.get_state(task_id) or _task_store.get(task_id)
-            current_status = (
-                getattr(current.get("status"), "value", current.get("status"))
-                if current
-                else None
-            )
-            if current_status not in {"done", "error", "canceled"}:
-                _finish_task(
-                    task_id,
-                    _TaskStatus.ERROR,
-                    {"success": False, "error": str(e)},
-                )
             raise
 
     return start_background_task(
@@ -2348,23 +2252,9 @@ def _start_urls_task(
             if cancel_event.is_set():
                 raise ProcessCanceled("urls update canceled")
             result = {"success": True}
-            _finish_task(task_id, _TaskStatus.DONE, result)
             return result
         except ProcessCanceled:
             reporter.log("⏹ 用户已终止上传")
-            _finish_task(
-                task_id,
-                _TaskStatus.CANCELED,
-                {"success": False, "canceled": True},
-            )
-            raise
-        except Exception as e:
-            # Core already called reporter.fail for RuntimeError; avoid duplicate.
-            _finish_task(
-                task_id,
-                _TaskStatus.ERROR,
-                {"success": False, "error": str(e)},
-            )
             raise
 
     return start_background_task(
@@ -2478,13 +2368,17 @@ def _finalize_update_task_after_restart(task_id: str) -> dict | None:
         merged["restarting"] = False
         merged["restarted"] = True
         merged["error"] = str(install_error)
-        if status_value != "error":
-            _task_store.set_status(task_id, _TaskStatus.ERROR)
-        _task_store.set_result(task_id, merged)
         _task_store.append_log(
             task_id,
             f"❌ 重启后安装失败：{install_error}",
         )
+        _task_store.set_result(task_id, merged)
+        if status_value != "error":
+            _task_store.set_status(
+                task_id,
+                _TaskStatus.ERROR,
+                overwrite_terminal=True,
+            )
         return _task_store.get(task_id)
 
     looks_ok = (
@@ -2503,9 +2397,9 @@ def _finalize_update_task_after_restart(task_id: str) -> dict | None:
         if marker_installed or result.get("pending_install"):
             merged["installed"] = True
             merged["pending_install"] = False
-        _task_store.set_status(task_id, _TaskStatus.DONE)
-        _task_store.set_result(task_id, merged)
         _task_store.append_log(task_id, "✅ 服务已重启，更新任务已收尾")
+        _task_store.set_result(task_id, merged)
+        _task_store.set_status(task_id, _TaskStatus.DONE)
         return _task_store.get(task_id)
     if status_value == "done" and (
         result.get("restarting") is True or result.get("pending_install") is True
@@ -2517,8 +2411,8 @@ def _finalize_update_task_after_restart(task_id: str) -> dict | None:
             merged["installed"] = True
             merged["pending_install"] = False
         merged["success"] = True
-        _task_store.set_result(task_id, merged)
         _task_store.append_log(task_id, "✅ Web UI 已重启，更新完成")
+        _task_store.set_result(task_id, merged)
         return _task_store.get(task_id)
     return task
 
@@ -2695,43 +2589,96 @@ def _start_update_task(
                     reporter.log("🔄 即将重启 Web UI 以加载新版本...")
                 result["restarting"] = True
 
-            # Flush + persist DONE *before* scheduling kill so SSE clients receive
-            # the terminal event, and recover-on-boot will not mark this task ERROR.
-            reporter.flush()
-            try:
-                _finish_task(task_id, _TaskStatus.DONE, result)
-            except Exception as finish_exc:  # noqa: BLE001
-                # Plan already prepared; keep going so restart/install can proceed.
-                # Post-restart recover may finalize the task.
-                result["db_finalize_error"] = str(finish_exc)
-                reporter.log(
-                    f"⚠️  更新已准备，但任务状态写入失败：{finish_exc}",
-                    level="error",
+            # A restart can kill this process immediately. Publish durable logs,
+            # result, and DONE before marker/notification/restart side effects.
+            terminal = finalize_task_outcome(
+                _task_store,
+                reporter,
+                task_id,
+                _TaskStatus.DONE,
+                result,
+            )
+            if terminal.blocked and not terminal.recovery_confirmed:
+                # Match ordinary worker retry_terminal: one more full finalize
+                # after a transient failure (e.g. soft log flush) so restart
+                # side effects can still run on COMMITTED / durable PENDING.
+                terminal = finalize_task_outcome(
+                    _task_store,
+                    reporter,
+                    task_id,
+                    _TaskStatus.DONE,
+                    result,
                 )
-                reporter.flush()
+            if terminal.blocked:
+                if terminal.recovery_confirmed:
+                    # The result contains a durable terminal intent. Do not
+                    # publish success or rewrite it as a false failure; startup
+                    # recovery will converge this non-terminal row.
+                    return result
+                # Soft finalize failure must not fabricate ERROR/restart_blocked.
+                # Leave the successful business result; _execute_task can still
+                # finish(DONE) / retry_terminal without notify or restart here.
+                return result
+            if terminal.state is TerminalWriteState.PENDING_COMMIT:
+                # Preserve the durable recovery hint in later result refreshes.
+                result[TERMINAL_RECOVERY_KEY] = {
+                    "version": 1,
+                    "status": _TaskStatus.DONE.value,
+                }
+                result["terminal_write_pending"] = True
+            if terminal.persisted:
+                notification_error = _notify_task_finished(
+                    _task_store,
+                    reporter,
+                    task_id,
+                )
+                if notification_error:
+                    result["notification_error"] = notification_error
 
             if outcome.changed:
-                from asc.web.daemon import write_update_restart_marker
-
-                write_update_restart_marker(
-                    task_id,
-                    installed=not outcome.deferred,
-                    pending_install=bool(outcome.deferred),
-                    install_ref=outcome.install_ref,
-                    commit=outcome.commit,
+                from asc.web.daemon import (
+                    clear_update_restart_marker,
+                    write_update_restart_marker,
                 )
-                # Give the event loop a beat to push the SSE "done" frame.
-                _time.sleep(0.8)
-                restart_kwargs: dict = {"delay": 1.5}
-                if outcome.deferred and outcome.install_ref:
-                    restart_kwargs.update(
-                        {
-                            "install_ref": outcome.install_ref,
-                            "commit": outcome.commit,
-                            "task_id": task_id,
-                        }
+
+                try:
+                    write_update_restart_marker(
+                        task_id,
+                        installed=not outcome.deferred,
+                        pending_install=bool(outcome.deferred),
+                        install_ref=outcome.install_ref,
+                        commit=outcome.commit,
                     )
-                restart_info = schedule_restart(**restart_kwargs)
+                    # Give the event loop a beat to push the SSE "done" frame.
+                    _time.sleep(0.8)
+                    restart_kwargs: dict = {"delay": 1.5}
+                    if outcome.deferred and outcome.install_ref:
+                        restart_kwargs.update(
+                            {
+                                "install_ref": outcome.install_ref,
+                                "commit": outcome.commit,
+                                "task_id": task_id,
+                            }
+                        )
+                    restart_info = schedule_restart(**restart_kwargs)
+                except Exception as restart_exc:
+                    clear_update_restart_marker()
+                    result["restarting"] = False
+                    result["pending_install"] = False
+                    result["restart_error"] = str(restart_exc)
+                    try:
+                        _task_store.set_result(task_id, result)
+                    except Exception as result_exc:  # noqa: BLE001
+                        reporter.log(
+                            f"⚠️  无法记录自动重启失败结果：{result_exc}",
+                            level="error",
+                        )
+                    reporter.log(
+                        f"❌ 自动重启安排失败：{restart_exc}",
+                        level="error",
+                    )
+                    raise
+
                 result["restart"] = restart_info
                 result["restarting"] = restart_info.get("status") == "scheduled"
                 if result["restarting"]:
@@ -2748,6 +2695,14 @@ def _start_update_task(
                             f"（{restart_info.get('url', '')}）"
                         )
                 else:
+                    clear_update_restart_marker()
+                    result["pending_install"] = False
+                    result["restart_error"] = str(
+                        restart_info.get(
+                            "message",
+                            restart_info.get("status") or "restart not scheduled",
+                        )
+                    )
                     msg = (
                         f"⚠️  自动重启未安排："
                         f"{restart_info.get('message', restart_info.get('status'))}"
@@ -2762,30 +2717,12 @@ def _start_update_task(
             return result
         except ProcessCanceled:
             reporter.log("⏹ 用户已终止更新")
-            reporter.flush()
-            _finish_task(
-                task_id,
-                _TaskStatus.CANCELED,
-                {"success": False, "canceled": True},
-            )
             raise
-        except UpdateError as e:
+        except UpdateError:
             # Core already called reporter.fail; do not fail again.
-            reporter.flush()
-            _finish_task(
-                task_id,
-                _TaskStatus.ERROR,
-                {"success": False, "error": str(e)},
-            )
             raise
         except Exception as e:
             reporter.fail(str(e))
-            reporter.flush()
-            _finish_task(
-                task_id,
-                _TaskStatus.ERROR,
-                {"success": False, "error": str(e)},
-            )
             raise
 
     return start_background_task(

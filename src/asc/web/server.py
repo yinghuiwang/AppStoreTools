@@ -1,7 +1,9 @@
 """FastAPI application factory and route registration for asc Web UI."""
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -9,6 +11,8 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from asc import __version__
+from asc.cli import _installed_commit_short
 from asc.web.dashboard import build_dashboard_summary
 from asc.web.tasks import task_store
 
@@ -16,8 +20,23 @@ _TEMPLATES_DIR = Path(__file__).parent / "templates"
 _STATIC_DIR = Path(__file__).parent / "static"
 
 
+def runtime_identity() -> tuple[str, str]:
+    """Return startup version and commit without making boot depend on git."""
+    try:
+        commit = _installed_commit_short() or "unknown"
+    except Exception:  # noqa: BLE001
+        commit = "unknown"
+    return __version__, commit
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
+    version, commit = await asyncio.to_thread(runtime_identity)
+    logging.getLogger("asc.web").info(
+        "Web UI started asc_version=%s commit=%s",
+        version,
+        commit,
+    )
     yield
     try:
         from asc.web.task_runner import shutdown_scheduler

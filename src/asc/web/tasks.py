@@ -9,12 +9,13 @@ import sqlite3
 import sys
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from threading import Event, Lock, Thread
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Iterator, Optional, TypedDict
 
 
 class TaskStatus(str, Enum):
@@ -52,6 +53,11 @@ TERMINAL_STATUSES = {TaskStatus.DONE, TaskStatus.ERROR, TaskStatus.CANCELED}
 DEFAULT_TASK_LOG_LIMIT = 2000
 
 
+class StreamSnapshot(TypedDict):
+    task: dict[str, Any]
+    logs: list[dict[str, Any]]
+
+
 def _task_log_limit() -> int:
     """Return per-task log row cap (ASC_WEB_TASK_LOG_LIMIT, default 2000)."""
     raw = os.getenv("ASC_WEB_TASK_LOG_LIMIT", str(DEFAULT_TASK_LOG_LIMIT))
@@ -60,6 +66,14 @@ def _task_log_limit() -> int:
     except (TypeError, ValueError):
         return DEFAULT_TASK_LOG_LIMIT
     return max(1, value)
+
+
+WRITE_OP_PENDING = "pending"
+WRITE_OP_APPLYING = "applying"
+WRITE_OP_APPLIED = "applied"
+WRITE_OP_REJECTED = "rejected"
+WRITE_OP_SKIPPED = "skipped"
+WRITE_OP_ERROR = "error"
 
 
 @dataclass
@@ -71,6 +85,64 @@ class _WriteOp:
     error: list = field(default_factory=list)
     critical: bool = False
     result_box: list = field(default_factory=list)
+    abandoned: Event = field(default_factory=Event)
+    settled: Event = field(default_factory=Event)
+    claimed: Event = field(default_factory=Event)
+    gate: Lock = field(default_factory=Lock)
+
+    def claim(self) -> bool:
+        """Writer takes ownership; False once a caller has abandoned the op."""
+        with self.gate:
+            if self.abandoned.is_set():
+                return False
+            self.claimed.set()
+            return True
+
+    def abandon(self) -> bool:
+        """Caller gives up; False once the writer started applying the op."""
+        with self.gate:
+            if self.claimed.is_set():
+                return False
+            self.abandoned.set()
+            return True
+
+    def outcome(self) -> str:
+        """Report how far this op got, so callers never guess from timing."""
+        if not self.settled.is_set():
+            return WRITE_OP_APPLYING if self.claimed.is_set() else WRITE_OP_PENDING
+        if self.error:
+            return WRITE_OP_ERROR
+        if not self.claimed.is_set():
+            return WRITE_OP_SKIPPED
+        if self.result_box and self.result_box[0] is False:
+            return WRITE_OP_REJECTED
+        return WRITE_OP_APPLIED
+
+
+class TaskStoreWritePending(sqlite3.OperationalError):
+    """A timed-out writer operation that may still be queued."""
+
+    def __init__(self, message: str, op: _WriteOp) -> None:
+        super().__init__(message)
+        self.kind = op.kind
+        self.task_id = op.task_id
+        self._op = op
+
+    def wait(self, timeout: float) -> bool:
+        return bool(self._op.done and self._op.done.wait(timeout=max(0.0, timeout)))
+
+    def wait_settled(self, timeout: float) -> bool:
+        return self._op.settled.wait(timeout=max(0.0, timeout))
+
+    def abandon(self) -> bool:
+        """Cancel the queued op; False when the writer already claimed it."""
+        return self._op.abandon()
+
+    def outcome(self) -> str:
+        return self._op.outcome()
+
+    def op_error(self) -> BaseException | None:
+        return self._op.error[0] if self._op.error else None
 
 
 class TaskStore:
@@ -158,7 +230,7 @@ class TaskStore:
 
     def get(self, task_id: str) -> Optional[dict]:
         if self._db_path is not None:
-            with self._connect() as conn:
+            with self._connection() as conn:
                 row = conn.execute("SELECT * FROM task_runs WHERE id = ?", (task_id,)).fetchone()
                 if row is None:
                     return None
@@ -209,7 +281,7 @@ class TaskStore:
     def get_logs_after(self, task_id: str, seq: int = 0) -> list[dict[str, Any]]:
         """Return sequenced task logs after the supplied cursor."""
         if self._db_path is not None:
-            with self._connect() as conn:
+            with self._connection() as conn:
                 rows = conn.execute(
                     "SELECT seq, message FROM task_logs WHERE task_id = ? AND seq > ? ORDER BY seq",
                     (task_id, int(seq)),
@@ -224,7 +296,13 @@ class TaskStore:
                 if index > seq
             ]
 
-    def set_status(self, task_id: str, status: TaskStatus) -> bool:
+    def set_status(
+        self,
+        task_id: str,
+        status: TaskStatus,
+        *,
+        overwrite_terminal: bool = False,
+    ) -> bool:
         if self._db_path is not None:
             normalized = self._normalize_status(status)
             now = self._now()
@@ -236,6 +314,7 @@ class TaskStore:
                     "status": normalized.value,
                     "now": now,
                     "completed_at": completed_at,
+                    "overwrite_terminal": overwrite_terminal,
                 },
                 wait=True,
                 critical=True,
@@ -244,11 +323,14 @@ class TaskStore:
             self._refresh_db()
             if task_id in self._tasks:
                 normalized = self._normalize_status(status)
-                self._tasks[task_id]["status"] = normalized
+                task = self._tasks[task_id]
+                if self._normalize_status(task.get("status")) == normalized:
+                    return True
+                task["status"] = normalized
                 now = self._now()
-                self._tasks[task_id]["updated_at"] = now
+                task["updated_at"] = now
                 if normalized in TERMINAL_STATUSES:
-                    self._tasks[task_id]["completed_at"] = now
+                    task["completed_at"] = task.get("completed_at") or now
                 self._save()
             return True
 
@@ -285,7 +367,7 @@ class TaskStore:
 
     def is_cancel_requested(self, task_id: str) -> bool:
         if self._db_path is not None:
-            with self._connect() as conn:
+            with self._connection() as conn:
                 row = conn.execute("SELECT cancel_requested FROM task_runs WHERE id = ?", (task_id,)).fetchone()
             return bool(row and row[0])
         with self._lock:
@@ -320,6 +402,37 @@ class TaskStore:
                 self._tasks[task_id]["result"] = result
                 self._tasks[task_id]["updated_at"] = self._now()
                 self._save()
+            return True
+
+    def set_result_if_nonterminal(
+        self,
+        task_id: str,
+        result: Any,
+        *,
+        wait: bool = True,
+    ) -> bool:
+        """Set result only while no terminal status has won the race."""
+        if self._db_path is not None:
+            return self._enqueue(
+                "set_result_if_nonterminal",
+                task_id,
+                {
+                    "payload": json.dumps(result, ensure_ascii=False),
+                    "now": self._now(),
+                },
+                wait=wait,
+                critical=wait,
+            )
+        with self._lock:
+            self._refresh_db()
+            task = self._tasks.get(task_id)
+            if task is None:
+                return False
+            if self._normalize_status(task.get("status")) in TERMINAL_STATUSES:
+                return False
+            task["result"] = result
+            task["updated_at"] = self._now()
+            self._save()
             return True
 
     def set_progress(
@@ -365,23 +478,45 @@ class TaskStore:
         if self._closed:
             return
         self._closed = True
+        if self._writer_stop.is_set() or not self._writer.is_alive():
+            # Writer already gone: settle leftovers instead of waiting for a
+            # shutdown op nobody will ever consume.
+            self._abort_writer(RuntimeError("TaskStore writer already stopped"))
+            return
         done = Event()
-        self._write_q.put(_WriteOp(kind="shutdown", done=done))
-        if not done.wait(timeout=self._WRITE_WAIT_TIMEOUT_SEC):
+        shutdown_op = _WriteOp(kind="shutdown", done=done)
+        self._write_q.put(shutdown_op)
+        deadline = time.monotonic() + self._WRITE_WAIT_TIMEOUT_SEC
+        while not done.wait(timeout=0.05):
+            if self._writer_stop.is_set() or not self._writer.is_alive():
+                error = RuntimeError("TaskStore writer stopped during shutdown")
+                self._abort_writer(error)
+                if not shutdown_op.settled.is_set():
+                    self._settle_write_op(shutdown_op, error=error)
+                self._note_db_error(error, operation="shutdown")
+                break
+            if time.monotonic() >= deadline:
+                break
+        if not shutdown_op.settled.is_set():
             print("⚠️  TaskStore writer shutdown timed out", file=sys.stderr)
         if self._writer.is_alive():
             self._writer.join(timeout=1.0)
 
     def flush(self, timeout: float = 5.0) -> None:
         """Wait until previously enqueued writes have been committed."""
-        if self._db_path is None or self._writer is None or self._closed:
+        if (
+            self._db_path is None
+            or self._writer is None
+            or self._closed
+            or self._writer_stop.is_set()
+        ):
             return
         done = Event()
         self._write_q.put(_WriteOp(kind="flush", done=done))
         done.wait(timeout=timeout)
     def list_recent(self, limit: int = 20) -> list[dict]:
         if self._db_path is not None:
-            with self._connect() as conn:
+            with self._connection() as conn:
                 rows = conn.execute(
                     """SELECT r.*, o.position FROM task_order o
                     JOIN task_runs r ON r.id = o.task_id
@@ -413,7 +548,7 @@ class TaskStore:
         """Return recent task metadata without loading log history."""
         normalized_limit = max(1, min(int(limit), 5000))
         if self._db_path is not None:
-            with self._connect() as conn:
+            with self._connection() as conn:
                 rows = conn.execute(
                     """SELECT r.*, o.position FROM task_order o
                     JOIN task_runs r ON r.id = o.task_id
@@ -443,14 +578,52 @@ class TaskStore:
                 state = dict(task)
                 state["logs"] = []
                 return self._public_task(state)
-        with self._connect() as conn:
+        with self._connection() as conn:
             row = conn.execute("SELECT * FROM task_runs WHERE id = ?", (task_id,)).fetchone()
         return self._public_task(self._task_from_row(row, [])) if row is not None else None
+
+    def get_stream_snapshot(self, task_id: str, after: int) -> StreamSnapshot | None:
+        """Return task state and incremental logs from one consistent snapshot."""
+        cursor = max(0, int(after))
+        if self._db_path is not None:
+            with self._connection() as conn:
+                row = conn.execute(
+                    "SELECT * FROM task_runs WHERE id = ?",
+                    (task_id,),
+                ).fetchone()
+                if row is None:
+                    return None
+                log_rows = conn.execute(
+                    "SELECT seq, message FROM task_logs "
+                    "WHERE task_id = ? AND seq > ? ORDER BY seq",
+                    (task_id, cursor),
+                ).fetchall()
+                task = self._public_task(self._task_from_row(row, []))
+                logs = [
+                    {"seq": int(log["seq"]), "message": log["message"]}
+                    for log in log_rows
+                ]
+                return {"task": task, "logs": logs}
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if task is None:
+                return None
+            state = dict(task)
+            messages = list(task.get("logs", []))
+            state["logs"] = []
+            return {
+                "task": self._public_task(state),
+                "logs": [
+                    {"seq": index, "message": message}
+                    for index, message in enumerate(messages, start=1)
+                    if index > cursor
+                ],
+            }
 
     def count_logs(self, task_id: str) -> int:
         """Return log line count without loading messages."""
         if self._db_path is not None:
-            with self._connect() as conn:
+            with self._connection() as conn:
                 row = conn.execute(
                     "SELECT COUNT(*) FROM task_logs WHERE task_id = ?", (task_id,)
                 ).fetchone()
@@ -586,6 +759,8 @@ class TaskStore:
     def _update_result_looks_successful(result: Any) -> bool:
         if not isinstance(result, dict):
             return False
+        if result.get("restart_blocked") is True:
+            return False
         return bool(
             result.get("success") is True
             or result.get("restarting") is True
@@ -614,7 +789,27 @@ class TaskStore:
         kind = str(task.get("kind") or "")
         result = task.get("result") if isinstance(task.get("result"), dict) else None
         logs = list(task.get("logs") or [])
-        if kind == "update" and self._update_result_looks_successful(result):
+        recovery = (
+            result.get("_asc_terminal_recovery")
+            if isinstance(result, dict)
+            else None
+        )
+        intended_status: TaskStatus | None = None
+        if isinstance(recovery, dict) and recovery.get("version") == 1:
+            try:
+                candidate = TaskStatus(recovery.get("status"))
+            except (TypeError, ValueError):
+                candidate = None
+            if candidate in TERMINAL_STATUSES:
+                intended_status = candidate
+
+        if (
+            kind == "update"
+            and isinstance(result, dict)
+            and result.get("restarting") is True
+            and self._update_result_looks_successful(result)
+            and intended_status in {None, TaskStatus.DONE}
+        ):
             marker = self._read_update_marker_for_task(str(task.get("id") or ""))
             if marker and marker.get("install_error"):
                 merged = dict(result or {})
@@ -654,10 +849,31 @@ class TaskStore:
                 "updated_at": now,
                 "completed_at": task.get("completed_at") or now,
             }
+        if intended_status is not None:
+            logs.append(
+                f"⚠️ 服务重启，已按持久化终态意图恢复为 {intended_status.value}"
+            )
+            return {
+                "status": intended_status,
+                "result": dict(result or {}),
+                "logs": logs,
+                "updated_at": now,
+                "completed_at": task.get("completed_at") or now,
+            }
         logs.append("⚠️ 服务重启，任务已中断")
+        interrupted = dict(result or {})
+        interrupted.update(
+            {
+                "success": False,
+                "installed": False,
+                "pending_install": False,
+                "restarting": False,
+                "error": "Task interrupted by server restart",
+            }
+        )
         return {
             "status": TaskStatus.ERROR,
-            "result": {"success": False, "error": "Task interrupted by server restart"},
+            "result": interrupted,
             "logs": logs,
             "updated_at": now,
             "completed_at": now,
@@ -719,7 +935,7 @@ class TaskStore:
         path = path.expanduser()
         if not path.is_absolute():
             path = Path.cwd() / path
-        # strict=False so missing parent dirs do not raise; we create them in _connect.
+        # strict=False so missing parent dirs do not raise; the connection opener creates them.
         return path.resolve(strict=False)
 
     def _ensure_db_dir(self) -> Path:
@@ -745,9 +961,18 @@ class TaskStore:
     def _format_db_error(self, exc: BaseException) -> str:
         return f"TaskStore DB error ({self._db_path}): {exc}"
 
-    def _note_db_error(self, exc: BaseException) -> None:
+    def _note_db_error(
+        self,
+        exc: BaseException,
+        *,
+        task_id: str | None = None,
+        operation: str = "unknown",
+    ) -> None:
         self._db_write_failures += 1
-        msg = self._format_db_error(exc)
+        msg = (
+            f"TaskStore DB error task_id={task_id or '-'} "
+            f"operation={operation} path={self._db_path}: {exc}"
+        )
         if msg == self._last_db_error:
             return
         self._last_db_error = msg
@@ -764,7 +989,7 @@ class TaskStore:
     ) -> bool:
         if self._closed or self._writer_stop.is_set():
             exc = sqlite3.OperationalError("TaskStore writer is closed")
-            self._note_db_error(exc)
+            self._note_db_error(exc, task_id=task_id, operation=kind)
             if critical:
                 raise exc
             return False
@@ -777,15 +1002,24 @@ class TaskStore:
             critical=critical,
         )
         self._write_q.put(op)
+        if self._writer_stop.is_set() and not op.settled.is_set():
+            # The writer died between the guard above and this put; settle here so
+            # the caller fails fast instead of waiting out the write timeout.
+            if op.abandon():
+                exc = sqlite3.OperationalError("TaskStore writer stopped")
+                self._settle_write_op(op, error=exc)
+                self._note_db_error(exc, task_id=task_id, operation=kind)
+                if critical:
+                    raise exc
+                return False
         if not wait or done is None:
             return True
         if not done.wait(timeout=self._WRITE_WAIT_TIMEOUT_SEC):
-            exc = sqlite3.OperationalError(
-                self._format_db_error(
-                    TimeoutError(f"TaskStore write timed out ({kind})")
-                )
+            message = self._format_db_error(
+                TimeoutError(f"TaskStore write timed out ({kind}); operation still pending")
             )
-            self._note_db_error(exc)
+            exc = TaskStoreWritePending(message, op)
+            self._note_db_error(exc, task_id=task_id, operation=kind)
             if critical:
                 raise exc
             return False
@@ -801,33 +1035,89 @@ class TaskStore:
         return True
 
     def _writer_loop(self) -> None:
+        """Serve writes; any exit path stops the writer and settles pending ops."""
+        try:
+            self._writer_serve()
+        except BaseException as exc:
+            self._note_db_error(exc, operation="writer_loop")
+            self._abort_writer(exc)
+            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                raise
+        finally:
+            self._writer_stop.set()
+
+    def _writer_serve(self) -> None:
         while True:
             op = self._write_q.get()
             if op.kind == "shutdown":
-                self._writer_drain_remaining()
-                if op.done is not None:
-                    op.done.set()
-                self._writer_stop.set()
+                try:
+                    self._writer_drain_remaining()
+                finally:
+                    self._settle_write_op(op)
+                    self._writer_stop.set()
+                    self._write_q.task_done()
                 return
             batch = [op]
-            deadline = time.monotonic() + self._WRITE_BATCH_WAIT_SEC
-            while len(batch) < self._WRITE_BATCH_SIZE:
-                timeout = deadline - time.monotonic()
-                if timeout <= 0:
-                    try:
-                        nxt = self._write_q.get_nowait()
-                    except queue.Empty:
+            try:
+                deadline = time.monotonic() + self._WRITE_BATCH_WAIT_SEC
+                while len(batch) < self._WRITE_BATCH_SIZE:
+                    timeout = deadline - time.monotonic()
+                    if timeout <= 0:
+                        try:
+                            nxt = self._write_q.get_nowait()
+                        except queue.Empty:
+                            break
+                    else:
+                        try:
+                            nxt = self._write_q.get(timeout=timeout)
+                        except queue.Empty:
+                            break
+                    if nxt.kind == "shutdown":
+                        self._write_q.task_done()
+                        self._write_q.put(nxt)
                         break
-                else:
-                    try:
-                        nxt = self._write_q.get(timeout=timeout)
-                    except queue.Empty:
-                        break
-                if nxt.kind == "shutdown":
-                    self._write_q.put(nxt)
-                    break
-                batch.append(nxt)
-            self._writer_run_batch(batch)
+                    batch.append(nxt)
+                self._writer_run_batch(batch)
+            except BaseException as exc:
+                self._abort_writer(exc, batch=batch)
+                raise
+            finally:
+                for _ in batch:
+                    self._write_q.task_done()
+
+    def _abort_writer(
+        self,
+        exc: BaseException,
+        *,
+        batch: Optional[list[_WriteOp]] = None,
+    ) -> None:
+        """Stop the writer and settle every op so callers never wait for a dead thread."""
+        self._writer_stop.set()
+        error = sqlite3.OperationalError(
+            f"TaskStore writer terminated ({exc.__class__.__name__}): {exc}"
+        )
+        current = [op for op in (batch or []) if not op.settled.is_set()]
+        orphans: list[_WriteOp] = []
+        while True:
+            try:
+                orphans.append(self._write_q.get_nowait())
+            except queue.Empty:
+                break
+        for op in (*current, *orphans):
+            if not op.settled.is_set():
+                self._settle_write_op(op, error=error)
+        pending = [*current, *orphans]
+        if pending:
+            self._note_db_error(
+                error,
+                task_id=next(
+                    (op.task_id for op in pending if op.task_id is not None),
+                    None,
+                ),
+                operation=",".join(dict.fromkeys(op.kind for op in pending)),
+            )
+        for _ in orphans:
+            self._write_q.task_done()
 
     def _writer_drain_remaining(self) -> None:
         remaining: list[_WriteOp] = []
@@ -839,31 +1129,51 @@ class TaskStore:
         writes = [op for op in remaining if op.kind not in {"shutdown", "flush"}]
         flushes = [op for op in remaining if op.kind == "flush"]
         shutdowns = [op for op in remaining if op.kind == "shutdown"]
-        if writes:
-            self._writer_run_batch(writes)
-        for op in flushes:
-            if op.done is not None:
-                op.done.set()
-        for op in shutdowns:
-            if op.done is not None:
-                op.done.set()
+        try:
+            if writes:
+                self._writer_run_batch(writes)
+        finally:
+            for op in (*flushes, *shutdowns):
+                self._settle_write_op(op)
+            for _ in remaining:
+                self._write_q.task_done()
+
+    @staticmethod
+    def _settle_write_op(
+        op: _WriteOp,
+        *,
+        error: BaseException | None = None,
+    ) -> None:
+        if error is not None and not op.error:
+            op.error.append(error)
+        op.settled.set()
+        if op.done is not None:
+            op.done.set()
 
     def _writer_run_batch(self, ops: list[_WriteOp]) -> None:
         flushes = [op for op in ops if op.kind == "flush"]
-        writes = [op for op in ops if op.kind != "flush"]
+        writes: list[_WriteOp] = []
+        for op in ops:
+            if op.kind == "flush":
+                continue
+            # Claim atomically so an abandoning caller learns whether this op is
+            # definitely skipped or already being applied.
+            if op.claim():
+                writes.append(op)
+            else:
+                op.result_box.append(False)
+                self._settle_write_op(op)
+        fatal_exc: BaseException | None = None
         if writes:
             critical = any(op.critical for op in writes)
             attempts = 3 if critical else 2
             last_exc: BaseException | None = None
             for attempt in range(attempts):
                 try:
-                    with self._connect() as conn:
-                        conn.execute("BEGIN IMMEDIATE")
+                    with self._connection(write=True) as conn:
                         for op in writes:
-                            result = self._apply_op(conn, op)
-                            if op.result_box is not None:
-                                op.result_box.append(result)
-                        conn.commit()
+                            op.result_box.clear()
+                            op.result_box.append(self._apply_op(conn, op))
                     last_exc = None
                     break
                 except (OSError, sqlite3.Error) as exc:
@@ -871,22 +1181,36 @@ class TaskStore:
                     if attempt + 1 < attempts:
                         time.sleep(0.05 * (attempt + 1))
                         continue
-                    self._note_db_error(exc)
+                    self._note_db_error(
+                        exc,
+                        task_id=writes[0].task_id,
+                        operation=",".join(dict.fromkeys(op.kind for op in writes)),
+                    )
                     for op in writes:
                         op.error.append(exc)
-            if last_exc is None:
-                for op in writes:
-                    if op.done is not None:
-                        op.done.set()
-            else:
-                for op in writes:
-                    if not op.error:
-                        op.error.append(last_exc)
-                    if op.done is not None:
-                        op.done.set()
+                except Exception as exc:  # noqa: BLE001
+                    last_exc = exc
+                    self._note_db_error(
+                        exc,
+                        task_id=writes[0].task_id,
+                        operation=",".join(dict.fromkeys(op.kind for op in writes)),
+                    )
+                    break
+                except BaseException as exc:
+                    last_exc = exc
+                    fatal_exc = exc
+                    self._note_db_error(
+                        exc,
+                        task_id=writes[0].task_id,
+                        operation=",".join(dict.fromkeys(op.kind for op in writes)),
+                    )
+                    break
+            for op in writes:
+                self._settle_write_op(op, error=last_exc)
         for op in flushes:
-            if op.done is not None:
-                op.done.set()
+            self._settle_write_op(op)
+        if fatal_exc is not None:
+            raise fatal_exc
 
     def _apply_op(self, conn: sqlite3.Connection, op: _WriteOp) -> Any:
         kind = op.kind
@@ -946,19 +1270,51 @@ class TaskStore:
             return True
         if kind == "set_status":
             assert task_id is not None
-            conn.execute(
-                "UPDATE task_runs SET status = ?, updated_at = ?, "
-                "completed_at = COALESCE(?, completed_at) WHERE id = ?",
-                (payload["status"], payload["now"], payload["completed_at"], task_id),
+            desired = self._normalize_status(payload["status"])
+            terminal_values = tuple(status.value for status in TERMINAL_STATUSES)
+            placeholders = ", ".join("?" for _ in terminal_values)
+            # A same-terminal retry must stay a no-op: keep the original
+            # completion/update timestamps instead of restamping "now".
+            params: list[Any] = [
+                desired.value,
+                desired.value,
+                payload["now"],
+                desired.value,
+                payload["completed_at"],
+                task_id,
+            ]
+            if payload.get("overwrite_terminal"):
+                condition = "1 = 1"
+            else:
+                condition = f"status NOT IN ({placeholders})"
+                params.extend(terminal_values)
+                if desired in TERMINAL_STATUSES:
+                    condition = f"({condition} OR status = ?)"
+                    params.append(desired.value)
+            cursor = conn.execute(
+                "UPDATE task_runs SET status = ?, "
+                "updated_at = CASE WHEN status = ? THEN updated_at ELSE ? END, "
+                "completed_at = CASE WHEN status = ? THEN completed_at "
+                "ELSE COALESCE(?, completed_at) END "
+                f"WHERE id = ? AND {condition}",
+                params,
             )
-            return True
-        if kind == "set_result":
+            return cursor.rowcount > 0
+        if kind in {"set_result", "set_result_if_nonterminal"}:
             assert task_id is not None
-            conn.execute(
-                "UPDATE task_runs SET result_json = ?, updated_at = ? WHERE id = ?",
-                (payload["payload"], payload["now"], task_id),
+            params = [payload["payload"], payload["now"], task_id]
+            condition = ""
+            if kind == "set_result_if_nonterminal":
+                terminal_values = tuple(status.value for status in TERMINAL_STATUSES)
+                placeholders = ", ".join("?" for _ in terminal_values)
+                condition = f" AND status NOT IN ({placeholders})"
+                params.extend(terminal_values)
+            cursor = conn.execute(
+                "UPDATE task_runs SET result_json = ?, updated_at = ? "
+                f"WHERE id = ?{condition}",
+                params,
             )
-            return True
+            return cursor.rowcount > 0
         if kind == "set_progress":
             assert task_id is not None
             progress = payload["progress"]
@@ -1003,7 +1359,7 @@ class TaskStore:
         last_exc: BaseException | None = None
         for attempt in range(attempts):
             try:
-                with self._connect() as conn:
+                with self._connection(write=True) as conn:
                     writer(conn)
                 return True
             except (OSError, sqlite3.Error) as exc:
@@ -1011,7 +1367,7 @@ class TaskStore:
                 if attempt + 1 < attempts:
                     time.sleep(0.05 * (attempt + 1))
                     continue
-                self._note_db_error(exc)
+                self._note_db_error(exc, operation="db_write")
                 if critical:
                     # Keep a clear path-bearing message for callers / task fail logs.
                     raise sqlite3.OperationalError(self._format_db_error(exc)) from exc
@@ -1020,28 +1376,43 @@ class TaskStore:
             raise sqlite3.OperationalError(self._format_db_error(last_exc)) from last_exc
         return False
 
-    def _connect(self) -> sqlite3.Connection:
+    def _open_configured_connection(self) -> sqlite3.Connection:
         assert self._db_path is not None
         self._ensure_db_dir()
+        conn: sqlite3.Connection | None = None
         try:
             # timeout covers sqlite busy waits; keep moderate so a stuck writer
             # cannot pin callers for tens of seconds after we stopped holding
             # the Python lock across I/O.
             conn = sqlite3.connect(str(self._db_path), timeout=5.0, check_same_thread=False)
-        except sqlite3.Error as exc:
-            raise sqlite3.OperationalError(
-                f"unable to open database file: {self._db_path} ({exc})"
-            ) from exc
-        conn.row_factory = sqlite3.Row
-        # Persist/confirm WAL on every connection; cheap no-op once enabled.
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA busy_timeout=5000")
-        return conn
+            conn.row_factory = sqlite3.Row
+            # Persist/confirm WAL on every connection; cheap no-op once enabled.
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=5000")
+            return conn
+        except BaseException:
+            if conn is not None:
+                conn.close()
+            raise
+
+    @contextmanager
+    def _connection(self, *, write: bool = False) -> Iterator[sqlite3.Connection]:
+        conn = self._open_configured_connection()
+        try:
+            conn.execute("BEGIN IMMEDIATE" if write else "BEGIN")
+            yield conn
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def _init_db(self) -> None:
-        with self._connect() as conn:
-            conn.executescript(
-                """
+        try:
+            with self._connection(write=True) as conn:
+                conn.execute(
+                    """
                 CREATE TABLE IF NOT EXISTS task_runs (
                     id TEXT PRIMARY KEY,
                     kind TEXT NOT NULL,
@@ -1058,36 +1429,47 @@ class TaskStore:
                     phase_index INTEGER NOT NULL DEFAULT 0,
                     phase_total INTEGER NOT NULL DEFAULT 0,
                     cancel_requested INTEGER NOT NULL DEFAULT 0
-                );
+                )
+                """
+                )
+                conn.execute(
+                    """
                 CREATE TABLE IF NOT EXISTS task_order (
                     position INTEGER PRIMARY KEY AUTOINCREMENT,
                     task_id TEXT NOT NULL UNIQUE
-                );
+                )
+                """
+                )
+                conn.execute(
+                    """
                 CREATE TABLE IF NOT EXISTS task_logs (
                     task_id TEXT NOT NULL,
                     seq INTEGER NOT NULL,
                     message TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     PRIMARY KEY (task_id, seq)
-                );
+                )
                 """
-            )
-            existing = {row[1] for row in conn.execute("PRAGMA table_info(task_runs)")}
-            for column, declaration in (
-                ("progress_phase", "TEXT NOT NULL DEFAULT ''"),
-                ("progress_phase_label", "TEXT NOT NULL DEFAULT ''"),
-                ("phase_index", "INTEGER NOT NULL DEFAULT 0"),
-                ("phase_total", "INTEGER NOT NULL DEFAULT 0"),
-            ):
-                if column not in existing:
-                    conn.execute(f"ALTER TABLE task_runs ADD COLUMN {column} {declaration}")
+                )
+                existing = {row[1] for row in conn.execute("PRAGMA table_info(task_runs)")}
+                for column, declaration in (
+                    ("progress_phase", "TEXT NOT NULL DEFAULT ''"),
+                    ("progress_phase_label", "TEXT NOT NULL DEFAULT ''"),
+                    ("phase_index", "INTEGER NOT NULL DEFAULT 0"),
+                    ("phase_total", "INTEGER NOT NULL DEFAULT 0"),
+                ):
+                    if column not in existing:
+                        conn.execute(f"ALTER TABLE task_runs ADD COLUMN {column} {declaration}")
+        except (OSError, sqlite3.Error) as exc:
+            self._note_db_error(exc, operation="init_db")
+            raise
 
     def _db_is_empty(self) -> bool:
-        with self._connect() as conn:
+        with self._connection() as conn:
             return conn.execute("SELECT 1 FROM task_runs LIMIT 1").fetchone() is None
 
     def _load_db(self, *, recover: bool = False) -> None:
-        with self._connect() as conn:
+        with self._connection() as conn:
             rows = conn.execute("SELECT * FROM task_runs ORDER BY id").fetchall()
             order_rows = conn.execute("SELECT task_id FROM task_order ORDER BY position").fetchall()
             logs = conn.execute("SELECT task_id, message FROM task_logs ORDER BY task_id, seq").fetchall()
@@ -1132,6 +1514,7 @@ class TaskStore:
                     str(task.get("kind") or "") == "update"
                     and self._normalize_status(task["status"]) == TaskStatus.DONE
                     and isinstance(task.get("result"), dict)
+                    and task["result"].get("restart_blocked") is not True
                     and (
                         task["result"].get("restarting") is True
                         or task["result"].get("pending_install") is True
@@ -1189,8 +1572,7 @@ class TaskStore:
         if self._db_path is None:
             return
         try:
-            with self._connect() as conn:
-                conn.execute("BEGIN")
+            with self._connection(write=True) as conn:
                 for task in self._tasks.values():
                     result_json = json.dumps(task["result"], ensure_ascii=False) if task["result"] is not None else None
                     progress = self._normalize_progress(task.get("progress"))
@@ -1225,7 +1607,6 @@ class TaskStore:
                     )
                 conn.execute("DELETE FROM task_order")
                 conn.executemany("INSERT INTO task_order (task_id) VALUES (?)", [(task_id,) for task_id in self._order])
-                conn.commit()
         except (OSError, sqlite3.Error, TypeError):
             return
 

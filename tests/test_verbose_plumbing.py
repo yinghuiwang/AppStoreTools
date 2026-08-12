@@ -125,11 +125,11 @@ def test_start_background_task_persists_debug_only_when_verbose(tmp_path):
 
 def test_make_web_reporter_debug_gated_by_verbose():
     store = MagicMock()
-    quiet = make_web_reporter(store, "t1", verbose=False)
+    quiet = make_web_reporter(store, "t1", "urls", verbose=False)
     quiet.debug("hidden")
     store.append_log.assert_not_called()
 
-    noisy = make_web_reporter(store, "t2", verbose=True)
+    noisy = make_web_reporter(store, "t2", "urls", verbose=True)
     noisy.debug("shown")
     noisy.flush()
     store.append_logs.assert_called_once_with("t2", ["shown"])

@@ -427,6 +427,21 @@ async def listing_pull_screenshots(request: Request):
     if not scopes:
         raise HTTPException(status_code=400, detail="no valid scopes")
 
+    task_id = await asyncio.to_thread(
+        _start_listing_pull_screenshots_task,
+        profile,
+        screenshots_dir.strip(),
+        scopes,
+    )
+    return {"ok": True, "task_id": task_id}
+
+
+def _start_listing_pull_screenshots_task(
+    profile: str,
+    screenshots_dir: str,
+    scopes: list[dict],
+) -> str:
+    """Create and enqueue a blocking ASC screenshot download task."""
     task_id = task_store.create("listing-pull-screenshots", profile=profile)
 
     def run(reporter, cancel_event):
@@ -437,7 +452,7 @@ async def listing_pull_screenshots(request: Request):
             download_asc_screenshots(
                 api,
                 app_id,
-                screenshots_dir.strip(),
+                screenshots_dir,
                 scopes,
                 reporter=reporter,
             )
@@ -459,7 +474,7 @@ async def listing_pull_screenshots(request: Request):
         run=run,
         task_id=task_id,
     )
-    return {"ok": True, "task_id": task_id}
+    return task_id
 
 
 def _do_listing_pull_text(

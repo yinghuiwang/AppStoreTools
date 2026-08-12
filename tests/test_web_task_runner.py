@@ -58,6 +58,22 @@ def test_start_background_task_reports_progress(tmp_path):
     assert any("finished" in line for line in task["logs"])
 
 
+def test_scheduler_passes_task_kind_to_web_reporter(tmp_path):
+    store = TaskStore(tmp_path / "kind.db")
+    observed = []
+
+    def run(reporter, cancel_event: Event):
+        observed.append(reporter.task_kind)
+        return {"success": True}
+
+    task_id = start_background_task(
+        store, kind="iap", profile="demo", verbose=False, run=run
+    )
+    task = _wait_terminal(store, task_id)
+    assert task["status"] == TaskStatus.DONE
+    assert observed == ["iap"]
+
+
 def test_cancel_then_worker_completes_stays_canceled(tmp_path):
     """If cancel finishes the task first, a later successful run must not overwrite."""
     store = TaskStore(tmp_path / "cancel.db")
@@ -103,7 +119,9 @@ def test_cancel_request_waits_for_worker_then_marks_canceled(tmp_path):
 
     task = _wait_terminal(store, task_id)
     assert task["status"] == TaskStatus.CANCELED
-    assert task["result"] == {"success": False, "canceled": True}
+    assert task["result"]["success"] is False
+    assert task["result"]["canceled"] is True
+    assert task["result"]["_asc_terminal_recovery"]["status"] == "canceled"
 
 
 def test_cancel_before_start_skips_running(tmp_path):
@@ -284,7 +302,9 @@ def test_cancel_pending_never_runs(tmp_path):
     assert _wait_terminal(store, tid1)["status"] == TaskStatus.DONE
     task2 = _wait_terminal(store, tid2)
     assert task2["status"] == TaskStatus.CANCELED
-    assert task2["result"] == {"success": False, "canceled": True}
+    assert task2["result"]["success"] is False
+    assert task2["result"]["canceled"] is True
+    assert task2["result"]["_asc_terminal_recovery"]["status"] == "canceled"
     assert not ran.is_set()
     scheduler.shutdown(wait=True, timeout=5.0)
 
@@ -339,3 +359,138 @@ def test_two_tasks_run_in_parallel(tmp_path):
     assert _wait_terminal(store, tid1)["status"] == TaskStatus.DONE
     assert _wait_terminal(store, tid2)["status"] == TaskStatus.DONE
     scheduler.shutdown(wait=True, timeout=5.0)
+
+
+def test_terminal_waits_for_soft_log_flush_and_retries_pending_diagnostics(
+    tmp_path, monkeypatch, capsys
+):
+    from asc.reporting import make_web_reporter
+    from asc.web.task_runner import TerminalWriteState, finalize_task_outcome
+
+    store = TaskStore(tmp_path / "flush-retry.db")
+    task_id = store.create("build")
+    store.set_status(task_id, TaskStatus.RUNNING)
+    reporter = make_web_reporter(store, task_id, "build")
+    raw = reporter.make_raw_log_callback("xcodebuild", "archive")
+    raw("raw-before-error")
+    raw("error: archive exploded")
+    raw("traceback-tail")
+    reporter.fail("archive failed")
+
+    original_append_logs = store.append_logs
+    fail_once = True
+
+    def soft_fail_once(tid, lines):
+        nonlocal fail_once
+        if fail_once:
+            fail_once = False
+            return False
+        return original_append_logs(tid, lines)
+
+    monkeypatch.setattr(store, "append_logs", soft_fail_once)
+    first = finalize_task_outcome(
+        store,
+        reporter,
+        task_id,
+        TaskStatus.ERROR,
+        {"success": False, "error": "archive exploded"},
+    )
+
+    assert first.state is TerminalWriteState.BLOCKED
+    snapshot = store.get_stream_snapshot(task_id, 0)
+    assert snapshot is not None
+    assert snapshot["task"]["status"] == TaskStatus.RUNNING
+    assert snapshot["task"]["result"] is None
+    assert snapshot["logs"] == []
+    assert "operation=flush" in capsys.readouterr().err
+
+    second = finalize_task_outcome(
+        store,
+        reporter,
+        task_id,
+        TaskStatus.ERROR,
+        {"success": False, "error": "archive exploded"},
+    )
+
+    assert second.state is TerminalWriteState.COMMITTED
+    snapshot = store.get_stream_snapshot(task_id, 0)
+    assert snapshot is not None
+    assert snapshot["task"]["status"] == TaskStatus.ERROR
+    messages = [entry["message"] for entry in snapshot["logs"]]
+    assert "raw-before-error" in messages
+    assert "error: archive exploded" in messages
+    assert "traceback-tail" in messages
+    assert "archive failed" in messages
+    assert [entry["seq"] for entry in snapshot["logs"]] == list(
+        range(1, len(snapshot["logs"]) + 1)
+    )
+    store.close()
+
+
+def test_pending_commit_never_notifies_ordinary_task(monkeypatch):
+    from unittest.mock import patch
+
+    from asc.web.task_runner import (
+        TerminalWriteOutcome,
+        TerminalWriteState,
+        _execute_task,
+    )
+
+    store = TaskStore()
+    task_id = store.create("metadata")
+    pending = TerminalWriteOutcome(
+        TerminalWriteState.PENDING_COMMIT,
+        TaskStatus.DONE,
+        recovery_confirmed=True,
+    )
+
+    with patch(
+        "asc.web.task_runner.finalize_task_outcome",
+        return_value=pending,
+    ), patch("asc.web.task_runner._notify_task_finished") as notify:
+        _execute_task(
+            store,
+            task_id,
+            "metadata",
+            lambda *_: {"success": True},
+            verbose=False,
+        )
+
+    assert store.get_state(task_id)["status"] == TaskStatus.RUNNING
+    notify.assert_not_called()
+
+
+def test_worker_retries_terminal_after_transient_final_log_flush(
+    tmp_path, monkeypatch
+):
+    store = TaskStore(tmp_path / "worker-flush-retry.db")
+    original_append_logs = store.append_logs
+    failed = False
+
+    def soft_fail_once(task_id, lines):
+        nonlocal failed
+        if not failed and "final diagnostic" in lines:
+            failed = True
+            return False
+        return original_append_logs(task_id, lines)
+
+    monkeypatch.setattr(store, "append_logs", soft_fail_once)
+
+    def run(reporter, _cancel_event):
+        reporter.log("final diagnostic")
+        return {"success": True, "uploaded": 1}
+
+    task_id = start_background_task(
+        store,
+        kind="metadata",
+        profile="demo",
+        verbose=False,
+        run=run,
+    )
+    task = _wait_terminal(store, task_id)
+
+    assert failed is True
+    assert task["status"] == TaskStatus.DONE
+    assert task["result"]["uploaded"] == 1
+    assert "final diagnostic" in task["logs"]
+    store.close()

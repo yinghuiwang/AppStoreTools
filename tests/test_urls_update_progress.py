@@ -382,17 +382,20 @@ def test_update_web_starter_flushes_before_finish(tmp_path, monkeypatch):
         reporter = MagicMock()
         reporter.failed = False
 
-        def flush():
+        def flush(*, failed=None):
             flush_order.append("flush")
 
         reporter.flush.side_effect = flush
-        original_finish = routes_api._finish_task
+        original_finalize = routes_api.finalize_task_outcome
 
-        def finish_wrapper(tid, status, result):
+        def finish_wrapper(store_arg, reporter_arg, tid, status, result):
+            finalized = original_finalize(store_arg, reporter_arg, tid, status, result)
             flush_order.append("finish")
-            return original_finish(tid, status, result)
+            return finalized
 
-        with patch.object(routes_api, "_finish_task", side_effect=finish_wrapper):
+        with patch.object(
+            routes_api, "finalize_task_outcome", side_effect=finish_wrapper
+        ):
             run(reporter, MagicMock(is_set=MagicMock(return_value=False)))
         return task_id
 
@@ -425,11 +428,12 @@ def test_update_web_starter_schedules_restart_after_install(tmp_path, monkeypatc
         run(reporter, MagicMock(is_set=MagicMock(return_value=False)))
         return task_id
 
-    original_finish = routes_api._finish_task
+    original_finalize = routes_api.finalize_task_outcome
 
-    def tracked_finish(tid, status, result):
+    def tracked_finish(store_arg, reporter_arg, tid, status, result):
+        finalized = original_finalize(store_arg, reporter_arg, tid, status, result)
         order.append("finish")
-        return original_finish(tid, status, result)
+        return finalized
 
     def tracked_restart(**kwargs):
         order.append("restart")
@@ -453,7 +457,9 @@ def test_update_web_starter_schedules_restart_after_install(tmp_path, monkeypatc
     )
     with patch("asc.web.routes_api.start_background_task", side_effect=fake_run), \
             patch("asc.commands.update_cmd._update_core", return_value=outcome) as update_core, \
-            patch.object(routes_api, "_finish_task", side_effect=tracked_finish), \
+            patch.object(
+                routes_api, "finalize_task_outcome", side_effect=tracked_finish
+            ), \
             patch("asc.web.daemon.schedule_restart", side_effect=tracked_restart) as restart, \
             patch("asc.web.daemon.write_update_restart_marker", side_effect=tracked_marker), \
             patch("time.sleep"):
@@ -479,13 +485,17 @@ def test_update_web_starter_schedules_restart_after_install(tmp_path, monkeypatc
     assert task["result"]["restarting"] is True
 
 
-def test_update_web_starter_continues_restart_when_finish_db_fails(tmp_path, monkeypatch):
-    """Install success must not be aborted by TaskStore finalize failures."""
+def test_update_web_starter_blocks_restart_when_terminal_write_fails(tmp_path, monkeypatch):
+    """Restart side effects require a durable result and terminal status."""
     from unittest.mock import MagicMock, patch
 
     from asc.commands.update_cmd import UpdateResult
     from asc.web import routes_api
-    from asc.web.tasks import TaskStore
+    from asc.web.task_runner import (
+        TerminalWriteOutcome,
+        TerminalWriteState,
+    )
+    from asc.web.tasks import TaskStatus, TaskStore
 
     store = TaskStore(tmp_path / "tasks.db")
     monkeypatch.setattr(routes_api, "_task_store", store)
@@ -496,12 +506,17 @@ def test_update_web_starter_continues_restart_when_finish_db_fails(tmp_path, mon
         reporter.failed = False
         result = run(reporter, MagicMock(is_set=MagicMock(return_value=False)))
         assert result["success"] is True
-        assert "db_finalize_error" in result
+        assert result.get("restart_blocked") is not True
+        assert result.get("restarting") is True
         return task_id
 
-    def boom_finish(*args, **kwargs):
+    def failed_finalize(*args, **kwargs):
         order.append("finish")
-        raise RuntimeError("unable to open database file")
+        return TerminalWriteOutcome(
+            state=TerminalWriteState.BLOCKED,
+            status=TaskStatus.DONE,
+            detail="injected terminal write failure",
+        )
 
     def tracked_restart(**kwargs):
         order.append("restart")
@@ -519,19 +534,506 @@ def test_update_web_starter_continues_restart_when_finish_db_fails(tmp_path, mon
     )
     with patch("asc.web.routes_api.start_background_task", side_effect=fake_run), \
             patch("asc.commands.update_cmd._update_core", return_value=outcome), \
-            patch.object(routes_api, "_finish_task", side_effect=boom_finish), \
+            patch.object(
+                routes_api, "finalize_task_outcome", side_effect=failed_finalize
+            ), \
             patch("asc.web.daemon.schedule_restart", side_effect=tracked_restart) as restart, \
             patch("asc.web.daemon.write_update_restart_marker", side_effect=tracked_marker), \
             patch("time.sleep"):
+        routes_api._start_update_task(version="0.1.25")
+
+    restart.assert_not_called()
+    assert order == ["finish", "finish"]
+
+
+def test_unchanged_update_commit_failure_recovers_done_without_side_effects(
+    tmp_path, monkeypatch
+):
+    import sqlite3
+    from contextlib import contextmanager
+    from unittest.mock import MagicMock, patch
+
+    from asc.commands.update_cmd import UpdateResult
+    from asc.web import routes_api
+    from asc.web.tasks import TaskStatus, TaskStore
+
+    db_path = tmp_path / "unchanged-update.db"
+    store = TaskStore(db_path)
+    monkeypatch.setattr(routes_api, "_task_store", store)
+    original_connection = store._connection
+
+    class TrackingConnection:
+        def __init__(self, connection):
+            self._connection = connection
+            self.terminal_status_written = False
+
+        def execute(self, sql, parameters=()):
+            if sql.lstrip().startswith("UPDATE task_runs SET status ="):
+                self.terminal_status_written = True
+            return self._connection.execute(sql, parameters)
+
+        def __getattr__(self, name):
+            return getattr(self._connection, name)
+
+    @contextmanager
+    def fail_terminal_commit(*, write=False):
+        with original_connection(write=write) as connection:
+            tracked = TrackingConnection(connection)
+            yield tracked
+            if tracked.terminal_status_written:
+                raise sqlite3.OperationalError("injected update terminal commit failure")
+
+    def run_inline(store_arg, *, task_id=None, run=None, **kwargs):
+        reporter = MagicMock()
+        reporter.failed = False
+        reporter.flush.return_value = True
+        run(reporter, MagicMock(is_set=MagicMock(return_value=False)))
+        return task_id
+
+    monkeypatch.setattr(store, "_connection", fail_terminal_commit)
+    with patch("asc.web.routes_api.start_background_task", side_effect=run_inline), \
+            patch(
+                "asc.commands.update_cmd._update_core",
+                return_value=UpdateResult(changed=False),
+            ), \
+            patch.object(routes_api, "_notify_task_finished") as notify, \
+            patch("asc.web.daemon.write_update_restart_marker") as marker, \
+            patch("asc.web.daemon.schedule_restart") as restart:
+        task_id = routes_api._start_update_task()
+
+    current = store.get_state(task_id)
+    assert current["status"] == TaskStatus.PENDING
+    assert current["result"]["success"] is True
+    assert current["result"]["installed"] is False
+    assert current["result"]["pending_install"] is False
+    assert current["result"]["_asc_terminal_recovery"]["status"] == "done"
+    notify.assert_not_called()
+    marker.assert_not_called()
+    restart.assert_not_called()
+
+    monkeypatch.setattr(store, "_connection", original_connection)
+    store.close()
+    recovered = TaskStore(db_path)
+    task = recovered.get(task_id)
+    assert task["status"] == TaskStatus.DONE
+    assert task["result"]["success"] is True
+    assert task["result"]["installed"] is False
+    assert task["result"]["pending_install"] is False
+    assert task["result"].get("restarted") is not True
+    recovered.close()
+
+
+def test_update_retries_done_after_transient_final_flush(tmp_path, monkeypatch):
+    """Successful update + soft final flush must retry to DONE, not ERROR."""
+    from unittest.mock import patch
+
+    from asc.commands.update_cmd import UpdateResult
+    from asc.web import routes_api
+    from asc.web.task_runner import _execute_task
+    from asc.web.tasks import TaskStatus, TaskStore
+
+    store = TaskStore(tmp_path / "update-flush-retry.db")
+    monkeypatch.setattr(routes_api, "_task_store", store)
+    original_append_logs = store.append_logs
+    soft_failed = False
+
+    def soft_fail_once(task_id, lines):
+        nonlocal soft_failed
+        if not soft_failed:
+            soft_failed = True
+            return False
+        return original_append_logs(task_id, lines)
+
+    monkeypatch.setattr(store, "append_logs", soft_fail_once)
+
+    def run_inline(
+        store_arg, *, task_id=None, run=None, kind=None, verbose=False, **kwargs
+    ):
+        _execute_task(store_arg, task_id, kind, run, verbose=verbose)
+        return task_id
+
+    outcome = UpdateResult(
+        changed=True,
+        deferred=True,
+        install_ref="v0.1.25",
+        commit="c" * 40,
+    )
+    with patch("asc.web.routes_api.start_background_task", side_effect=run_inline), \
+            patch("asc.commands.update_cmd._update_core", return_value=outcome), \
+            patch("asc.web.daemon.write_update_restart_marker") as marker, \
+            patch(
+                "asc.web.daemon.schedule_restart",
+                return_value={
+                    "status": "scheduled",
+                    "delay": 1.5,
+                    "url": "http://127.0.0.1:8080",
+                },
+            ) as restart, \
+            patch("time.sleep"):
         task_id = routes_api._start_update_task(version="0.1.25")
 
-    restart.assert_called_once_with(
-        delay=1.5,
-        install_ref="v0.1.25",
-        commit="b" * 40,
-        task_id=task_id,
+    task = store.get(task_id)
+    assert soft_failed is True
+    assert task["status"] == TaskStatus.DONE
+    assert task["result"]["success"] is True
+    assert task["result"].get("restart_blocked") is not True
+    assert task["result"]["pending_install"] is True
+    assert task["result"]["install_ref"] == "v0.1.25"
+    assert task["result"]["commit"] == "c" * 40
+    marker.assert_called_once()
+    restart.assert_called_once()
+    store.close()
+
+
+def test_update_finalize_soft_block_stays_non_terminal_without_restart(
+    tmp_path, monkeypatch
+):
+    """Soft finalize BLOCKED must not fabricate ERROR/restart_blocked or restart."""
+    from unittest.mock import patch
+
+    from asc.commands.update_cmd import UpdateResult
+    from asc.web import routes_api
+    from asc.web.task_runner import (
+        TerminalWriteOutcome,
+        TerminalWriteState,
+        _execute_task,
     )
-    assert order == ["finish", "marker", "restart"]
+    from asc.web.tasks import TaskStatus, TaskStore
+
+    db_path = tmp_path / "tasks.db"
+    store = TaskStore(db_path)
+    monkeypatch.setattr(routes_api, "_task_store", store)
+
+    def run_inline(store_arg, *, task_id=None, run=None, kind=None, verbose=False, **kwargs):
+        _execute_task(store_arg, task_id, kind, run, verbose=verbose)
+        return task_id
+
+    outcome = UpdateResult(
+        changed=True,
+        deferred=False,
+        install_ref="v0.1.25",
+        commit="c" * 40,
+    )
+    blocked_outcome = TerminalWriteOutcome(
+        state=TerminalWriteState.BLOCKED,
+        status=TaskStatus.DONE,
+        detail="injected terminal write failure",
+    )
+    with patch("asc.web.routes_api.start_background_task", side_effect=run_inline), \
+            patch("asc.commands.update_cmd._update_core", return_value=outcome), \
+            patch.object(
+                routes_api, "finalize_task_outcome", return_value=blocked_outcome
+            ), \
+            patch("asc.web.daemon.write_update_restart_marker") as marker, \
+            patch("asc.web.daemon.schedule_restart") as restart:
+        task_id = routes_api._start_update_task(version="0.1.25")
+
+    task = store.get(task_id)
+    # Update's finalize stayed soft-blocked (no side effects). Worker may still
+    # publish DONE via its own finalize; never ERROR/restart_blocked.
+    assert task["status"] != TaskStatus.ERROR
+    assert task["result"]["success"] is True
+    assert task["result"].get("restart_blocked") is not True
+    assert task["result"]["install_ref"] == "v0.1.25"
+    marker.assert_not_called()
+    restart.assert_not_called()
+
+    store.close()
+    recovered = TaskStore(db_path)
+    recovered_task = recovered.get(task_id)
+    assert recovered_task["status"] != TaskStatus.ERROR
+    assert recovered_task["result"]["success"] is True
+    assert recovered_task["result"].get("restart_blocked") is not True
+    recovered.close()
+
+
+def test_update_restart_exception_keeps_done_and_persists_failure_details(
+    tmp_path, monkeypatch
+):
+    from unittest.mock import patch
+
+    from asc.commands.update_cmd import UpdateResult
+    from asc.web import routes_api
+    from asc.web.task_runner import _execute_task
+    from asc.web.tasks import TaskStatus, TaskStore
+
+    store = TaskStore(tmp_path / "tasks.db")
+    monkeypatch.setattr(routes_api, "_task_store", store)
+
+    def run_inline(store_arg, *, task_id=None, run=None, kind=None, verbose=False, **kwargs):
+        _execute_task(store_arg, task_id, kind, run, verbose=verbose)
+        return task_id
+
+    outcome = UpdateResult(
+        changed=True,
+        deferred=True,
+        install_ref="v0.1.25",
+        commit="d" * 40,
+    )
+    with patch("asc.web.routes_api.start_background_task", side_effect=run_inline), \
+            patch("asc.commands.update_cmd._update_core", return_value=outcome), \
+            patch("asc.web.daemon.write_update_restart_marker") as marker, \
+            patch(
+                "asc.web.daemon.schedule_restart",
+                side_effect=RuntimeError("restart exploded"),
+            ), \
+            patch("asc.web.daemon.clear_update_restart_marker") as clear_marker, \
+            patch("time.sleep"):
+        task_id = routes_api._start_update_task(version="0.1.25")
+
+    task = store.get(task_id)
+    assert task["status"] == TaskStatus.DONE
+    assert task["result"]["success"] is True
+    assert task["result"]["restarting"] is False
+    assert task["result"]["pending_install"] is False
+    assert "restart exploded" in task["result"]["restart_error"]
+    assert any("restart exploded" in line for line in task["logs"])
+    assert any("Traceback" in line for line in task["logs"])
+    marker.assert_called_once()
+    clear_marker.assert_called_once()
+
+
+def test_update_timeout_after_status_update_still_runs_restart_side_effects(
+    tmp_path, monkeypatch
+):
+    import threading
+    from unittest.mock import patch
+
+    from asc.commands.update_cmd import UpdateResult
+    from asc.web import routes_api, task_runner
+    from asc.web.task_runner import _execute_task
+    from asc.web.tasks import TaskStatus, TaskStore
+
+    store = TaskStore(tmp_path / "tasks.db")
+    monkeypatch.setattr(routes_api, "_task_store", store)
+    store._WRITE_WAIT_TIMEOUT_SEC = 0.08
+    monkeypatch.setattr(task_runner, "TERMINAL_STATUS_CONFIRM_TIMEOUT_SEC", 0.04)
+    original_apply = store._apply_op
+    update_executed = threading.Event()
+
+    def block_after_done_update(conn, op):
+        result = original_apply(conn, op)
+        if (
+            op.kind == "set_status"
+            and op.payload.get("status") == TaskStatus.DONE.value
+        ):
+            update_executed.set()
+            threading.Event().wait(0.15)
+        return result
+
+    monkeypatch.setattr(store, "_apply_op", block_after_done_update)
+
+    def run_inline(
+        store_arg,
+        *,
+        task_id=None,
+        run=None,
+        kind=None,
+        verbose=False,
+        **kwargs,
+    ):
+        _execute_task(store_arg, task_id, kind, run, verbose=verbose)
+        return task_id
+
+    outcome = UpdateResult(
+        changed=True,
+        deferred=False,
+        install_ref="v0.1.25",
+        commit="e" * 40,
+    )
+    with patch("asc.web.routes_api.start_background_task", side_effect=run_inline), \
+            patch("asc.commands.update_cmd._update_core", return_value=outcome), \
+            patch("asc.web.daemon.write_update_restart_marker") as marker, \
+            patch(
+                "asc.web.daemon.schedule_restart",
+                return_value={
+                    "status": "scheduled",
+                    "delay": 1.5,
+                    "url": "http://127.0.0.1:8080",
+                },
+            ) as restart, \
+            patch("time.sleep"):
+        task_id = routes_api._start_update_task(version="0.1.25")
+
+    task = store.get(task_id)
+    assert update_executed.is_set()
+    assert task["status"] == TaskStatus.DONE
+    assert "terminal_write_uncertainty" not in task["result"]
+    marker.assert_called_once()
+    restart.assert_called_once()
+    store.close()
+
+
+def test_update_pending_commit_runs_restart_side_effects_exactly_once(
+    tmp_path, monkeypatch
+):
+    """DONE committing after the settle window must still schedule the restart."""
+    import threading
+    from unittest.mock import patch
+
+    from asc.commands.update_cmd import UpdateResult
+    from asc.web import routes_api, task_runner
+    from asc.web.task_runner import _execute_task
+    from asc.web.tasks import TaskStatus, TaskStore
+
+    store = TaskStore(tmp_path / "tasks.db")
+    monkeypatch.setattr(routes_api, "_task_store", store)
+    store._WRITE_WAIT_TIMEOUT_SEC = 0.08
+    monkeypatch.setattr(task_runner, "TERMINAL_STATUS_CONFIRM_TIMEOUT_SEC", 0.04)
+    original_apply = store._apply_op
+    update_executed = threading.Event()
+
+    def block_after_done_update(conn, op):
+        result = original_apply(conn, op)
+        if (
+            op.kind == "set_status"
+            and op.payload.get("status") == TaskStatus.DONE.value
+            and not update_executed.is_set()
+        ):
+            update_executed.set()
+            # Beyond the bounded 0.45s confirm/settle window.
+            threading.Event().wait(0.6)
+        return result
+
+    monkeypatch.setattr(store, "_apply_op", block_after_done_update)
+
+    def run_inline(
+        store_arg,
+        *,
+        task_id=None,
+        run=None,
+        kind=None,
+        verbose=False,
+        **kwargs,
+    ):
+        _execute_task(store_arg, task_id, kind, run, verbose=verbose)
+        return task_id
+
+    outcome = UpdateResult(
+        changed=True,
+        deferred=True,
+        install_ref="v0.1.25",
+        commit="f" * 40,
+    )
+    with patch("asc.web.routes_api.start_background_task", side_effect=run_inline), \
+            patch("asc.commands.update_cmd._update_core", return_value=outcome), \
+            patch("asc.web.daemon.write_update_restart_marker") as marker, \
+            patch(
+                "asc.web.daemon.schedule_restart",
+                return_value={
+                    "status": "scheduled",
+                    "delay": 1.5,
+                    "url": "http://127.0.0.1:8080",
+                },
+            ) as restart, \
+            patch("time.sleep"):
+        task_id = routes_api._start_update_task(version="0.1.25")
+
+    store.flush()
+    task = store.get(task_id)
+    assert update_executed.is_set()
+    marker.assert_called_once()
+    restart.assert_called_once()
+    assert task["status"] == TaskStatus.DONE
+    assert task["result"]["success"] is True
+    assert task["result"].get("restart_blocked") is not True
+    assert "terminal_write_uncertainty" not in task["result"]
+    store.close()
+
+
+def test_update_pending_commit_recovers_via_marker_after_process_restart(
+    tmp_path, monkeypatch
+):
+    """A never-committed DONE must still finish through the durable restart marker."""
+    import sqlite3
+    import threading
+    from unittest.mock import patch
+
+    from asc.commands.update_cmd import UpdateResult
+    from asc.web import daemon, routes_api, task_runner
+    from asc.web.task_runner import _execute_task
+    from asc.web.tasks import TaskStatus, TaskStore
+
+    monkeypatch.setattr(daemon, "_STATE_DIR", tmp_path)
+    db_path = tmp_path / "tasks.db"
+    store = TaskStore(db_path)
+    monkeypatch.setattr(routes_api, "_task_store", store)
+    store._WRITE_WAIT_TIMEOUT_SEC = 0.08
+    monkeypatch.setattr(task_runner, "TERMINAL_STATUS_CONFIRM_TIMEOUT_SEC", 0.04)
+    original_apply = store._apply_op
+    update_executed = threading.Event()
+
+    def block_then_lose_commit(conn, op):
+        if (
+            op.kind == "set_status"
+            and op.payload.get("status") == TaskStatus.DONE.value
+        ):
+            result = original_apply(conn, op)
+            if not update_executed.is_set():
+                update_executed.set()
+                threading.Event().wait(0.6)
+            # Commit never lands: emulate the process dying mid-transaction.
+            raise sqlite3.OperationalError("disk I/O error")
+        return original_apply(conn, op)
+
+    monkeypatch.setattr(store, "_apply_op", block_then_lose_commit)
+
+    def run_inline(
+        store_arg,
+        *,
+        task_id=None,
+        run=None,
+        kind=None,
+        verbose=False,
+        **kwargs,
+    ):
+        _execute_task(store_arg, task_id, kind, run, verbose=verbose)
+        return task_id
+
+    outcome = UpdateResult(
+        changed=True,
+        deferred=True,
+        install_ref="v0.1.25",
+        commit="a" * 40,
+    )
+    with patch("asc.web.routes_api.start_background_task", side_effect=run_inline), \
+            patch("asc.commands.update_cmd._update_core", return_value=outcome), \
+            patch(
+                "asc.web.daemon.schedule_restart",
+                return_value={
+                    "status": "scheduled",
+                    "delay": 1.5,
+                    "url": "http://127.0.0.1:8080",
+                },
+            ) as restart, \
+            patch("time.sleep"):
+        task_id = routes_api._start_update_task(version="0.1.25")
+
+    store.flush()
+    restart.assert_called_once()
+    marker = daemon.read_update_restart_marker()
+    assert marker is not None
+    assert marker["task_id"] == task_id
+    assert marker["pending_install"] is True
+    assert marker["install_ref"] == "v0.1.25"
+    interrupted = store.get(task_id)
+    assert interrupted["status"] != TaskStatus.ERROR
+    assert interrupted["result"]["success"] is True
+    assert interrupted["result"].get("restart_blocked") is not True
+    store.close()
+
+    recovered_store = TaskStore(db_path)
+    recovered = recovered_store.get(task_id)
+    assert recovered["status"] == TaskStatus.DONE
+    assert recovered["result"]["success"] is True
+    assert recovered["result"]["restarted"] is True
+    assert recovered["result"]["restarting"] is False
+    assert recovered["result"].get("restart_blocked") is not True
+    # Marker still reports the deferred install, so it stays visible as pending
+    # instead of being lost with the never-committed DONE status.
+    assert recovered["result"]["pending_install"] is True
+    assert recovered["result"]["install_ref"] == "v0.1.25"
+    recovered_store.close()
 
 
 def test_update_web_starter_skips_restart_when_not_installed(tmp_path, monkeypatch):

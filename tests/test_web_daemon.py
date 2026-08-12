@@ -255,3 +255,43 @@ def test_run_deferred_package_install_updates_marker(isolated_state, tmp_path, m
     assert marker is not None
     assert marker["installed"] is True
     assert marker.get("pending_install") is False
+
+
+def test_deferred_install_real_stream_persists_semantic_pip_events(
+    isolated_state,
+    tmp_path,
+    monkeypatch,
+):
+    from asc.web.tasks import TaskStore
+
+    store = TaskStore(tmp_path / "tasks.db")
+    task_id = store.create("update", profile="system")
+    monkeypatch.setattr("asc.web.tasks.task_store", store)
+    daemon.write_update_restart_marker(task_id, pending_install=True, installed=False)
+    lines = [
+        *(f"Collecting package-{index}\n" for index in range(100)),
+        "Downloading package-a (25%)\n",
+        "Installing collected packages: package-a\n",
+        "Successfully installed package-a\n",
+    ]
+    proc = MagicMock()
+    proc.stdout = iter(lines)
+    proc.poll.return_value = 0
+    proc.wait.return_value = 0
+
+    with patch("asc.commands.update_cmd.subprocess.Popen", return_value=proc):
+        result = daemon.run_deferred_package_install(
+            install_ref="main",
+            commit="b" * 40,
+            task_id=task_id,
+        )
+
+    assert result["status"] == "installed"
+    task = store.get(task_id)
+    assert task is not None
+    logs = task["logs"]
+    assert any("Collecting 100" in line for line in logs)
+    assert not any(line == "Collecting package-99" for line in logs)
+    assert any("Deferred pip install after Web UI stop" in line for line in logs)
+    assert any("Deferred package install completed" in line for line in logs)
+    assert any("Downloading 25%" in line for line in logs)

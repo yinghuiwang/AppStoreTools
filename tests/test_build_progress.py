@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import inspect
+import os
+import re
+import shutil
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
@@ -15,7 +18,151 @@ from asc.commands.build import (
     deploy_core,
 )
 from asc.commands.build_inputs import ResolvedInputs
-from asc.reporting import TaskReporter
+from asc.reporting import TaskReporter, make_web_reporter
+from asc.web.tasks import TaskStore
+
+
+def _verification_document_shell_blocks():
+    document = (
+        Path(__file__).resolve().parents[1]
+        / "docs"
+        / "web-task-log-stability-verification.md"
+    ).read_text(encoding="utf-8")
+    return re.findall(r"```bash\n(.*?)```", document, flags=re.DOTALL)
+
+
+def _write_executable(path, content):
+    path.write_text(content, encoding="utf-8")
+    path.chmod(0o755)
+
+
+def test_web_task_stability_document_shell_blocks_parse_with_zsh():
+    zsh = shutil.which("zsh")
+    if zsh is None:
+        pytest.skip("zsh is required for deployment document syntax validation")
+    blocks = _verification_document_shell_blocks()
+
+    assert blocks
+    for index, block in enumerate(blocks, start=1):
+        result = subprocess.run(
+            [zsh, "-n"],
+            input=block,
+            text=True,
+            capture_output=True,
+        )
+        assert result.returncode == 0, (
+            f"shell block {index} failed zsh -n:\n{result.stderr}"
+        )
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected_returncode"),
+    [("success", 0), ("release-fail", 23), ("cmp-fail", 31)],
+)
+def test_raw_capture_block_preserves_failure_and_cleans_wrapper(
+    tmp_path, mode, expected_returncode
+):
+    zsh = shutil.which("zsh")
+    if zsh is None:
+        pytest.skip("zsh is required for deployment document semantics")
+    block = next(
+        block
+        for block in _verification_document_shell_blocks()
+        if "WRAPPER_DIR=" in block and "ASC_ARCHIVE_CAPTURE" in block
+    )
+    stub_dir = tmp_path / "stubs"
+    output_dir = tmp_path / "output"
+    verify_dir = output_dir / "web-task-verification"
+    temp_dir = tmp_path / "tmp"
+    sentinel_dir = tmp_path / "sentinels"
+    for directory in (stub_dir, output_dir, verify_dir, temp_dir, sentinel_dir):
+        directory.mkdir(parents=True, exist_ok=True)
+
+    real_xcodebuild = stub_dir / "real-xcodebuild"
+    _write_executable(
+        real_xcodebuild,
+        """#!/bin/zsh
+if [[ " $* " == *" -exportArchive "* ]]; then
+  print -rn -- 'export-bytes\n'
+else
+  print -rn -- 'archive-bytes\n'
+fi
+""",
+    )
+    real_xcrun = stub_dir / "real-xcrun"
+    _write_executable(
+        real_xcrun,
+        """#!/bin/zsh
+print -rn -- 'upload-bytes\n'
+""",
+    )
+    _write_executable(
+        stub_dir / "asc",
+        """#!/bin/zsh
+set -eu
+if [[ "$ASC_STUB_MODE" == 'release-fail' ]]; then
+  exit 23
+fi
+print -r -- release > "$ASC_SENTINEL_DIR/release"
+mkdir -p "$ASC_OUTPUT_DIR/export"
+xcodebuild archive > "$ASC_OUTPUT_DIR/build.log" 2>&1
+print -r -- archive > "$ASC_SENTINEL_DIR/archive"
+xcodebuild -exportArchive > "$ASC_OUTPUT_DIR/export.log" 2>&1
+print -r -- export > "$ASC_SENTINEL_DIR/export"
+xcrun altool --upload-app > "$ASC_OUTPUT_DIR/export/upload.log" 2>&1
+print -r -- upload > "$ASC_SENTINEL_DIR/upload"
+""",
+    )
+    real_cmp = shutil.which("cmp")
+    assert real_cmp is not None
+    _write_executable(
+        stub_dir / "cmp",
+        """#!/bin/zsh
+print -r -- cmp >> "$ASC_SENTINEL_DIR/cmp"
+if [[ "$ASC_STUB_MODE" == 'cmp-fail' ]]; then
+  exit 31
+fi
+exec "$REAL_CMP" "$@"
+""",
+    )
+    environment = {
+        **os.environ,
+        "ASC_STUB_MODE": mode,
+        "ASC_PROFILE": "stub-profile",
+        "ASC_PROJECT": str(tmp_path / "Stub.xcodeproj"),
+        "ASC_SCHEME": "Stub",
+        "ASC_OUTPUT_DIR": str(output_dir),
+        "ASC_VERIFY_DIR": str(verify_dir),
+        "REAL_XCODEBUILD": str(real_xcodebuild),
+        "REAL_XCRUN": str(real_xcrun),
+        "REAL_CMP": real_cmp,
+        "ASC_SENTINEL_DIR": str(sentinel_dir),
+        "TMPDIR": str(temp_dir),
+        "PATH": f"{stub_dir}{os.pathsep}{os.environ['PATH']}",
+    }
+
+    result = subprocess.run(
+        [zsh],
+        input=block,
+        text=True,
+        capture_output=True,
+        env=environment,
+    )
+
+    assert result.returncode == expected_returncode, result.stderr
+    assert not list(temp_dir.glob("asc-raw-wrapper.*"))
+    if mode == "release-fail":
+        assert not list(sentinel_dir.iterdir())
+        assert not list(verify_dir.glob("*.capture.log"))
+    else:
+        assert {
+            path.name for path in sentinel_dir.iterdir()
+        } >= {"release", "archive", "export", "upload", "cmp"}
+        assert (verify_dir / "archive.capture.log").read_bytes() == b"archive-bytes\n"
+        assert (verify_dir / "export.capture.log").read_bytes() == b"export-bytes\n"
+        assert (verify_dir / "upload.capture.log").read_bytes() == b"upload-bytes\n"
+        cmp_calls = (sentinel_dir / "cmp").read_text(encoding="utf-8").splitlines()
+        assert len(cmp_calls) == (1 if mode == "cmp-fail" else 3)
 
 
 class RecordingSink:
@@ -35,6 +182,24 @@ class RecordingSink:
             "phase_index": phase_index,
             "phase_total": phase_total,
         })
+
+
+class RecordingTaskReporter(TaskReporter):
+    def __init__(self):
+        super().__init__(sinks=[], task_kind="build")
+        self.raw_callbacks = []
+        self.milestone_logs = []
+        self.progress_updates = []
+
+    def make_raw_log_callback(self, source, phase, raw_log_path=None):
+        self.raw_callbacks.append((source, phase, Path(raw_log_path)))
+        return lambda line: None
+
+    def milestone(self, percent, *, message):
+        self.milestone_logs.append((percent, message))
+
+    def progress(self, current, total, msg=None):
+        self.progress_updates.append((current, total, msg))
 
 
 class _FakeSpinner:
@@ -130,8 +295,75 @@ def test_upload_progress_reporter_feeds_task_reporter():
 
     assert sink.progress_events[-1]["pct"] == 50
     assert sink.progress_events[-1]["phase"] == "upload"
-    joined = "\n".join(msg for _, msg in sink.logs)
-    assert "4.0 MB" in joined
+    assert sink.progress_events[-1]["msg"] == "50%"
+    assert sink.logs == []
+
+
+@pytest.mark.parametrize(
+    ("percents", "expected"),
+    [
+        ([37], [0, 25]),
+        ([24, 26], [0, 25]),
+        ([74, 100], [0, 25, 50, 75, 100]),
+        ([50, 25, 50, 75, 75], [0, 25, 50, 75]),
+    ],
+)
+def test_upload_progress_logs_each_crossed_milestone_once(percents, expected):
+    reporter = RecordingTaskReporter()
+    upload = UploadProgressReporter(100, task_reporter=reporter)
+    for percent in percents:
+        upload.handle_output_line(f"Uploaded {percent} of 100 bytes")
+
+    assert reporter.progress_updates == [
+        (percent, 100, f"{percent}%") for percent in percents
+    ]
+    assert [value for value, _ in reporter.milestone_logs] == expected
+    assert all(message for _, message in reporter.milestone_logs)
+
+
+def test_build_callbacks_carry_exact_source_phase_and_raw_path(tmp_path, monkeypatch):
+    reporter = RecordingTaskReporter()
+    monkeypatch.setattr("asc.commands.build.detect_versions", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "asc.commands.build.run_xcodebuild_archive",
+        lambda *a, **k: a[4],
+    )
+
+    def fake_export(*args, **kwargs):
+        ipa = Path(args[2]) / "X.ipa"
+        ipa.write_bytes(b"ipa")
+        return str(ipa)
+
+    monkeypatch.setattr("asc.commands.build.run_xcodebuild_export", fake_export)
+
+    build_core(
+        _resolved(),
+        output=str(tmp_path),
+        reuse_archive=False,
+        reporter=reporter,
+    )
+
+    assert ("xcodebuild", "archive", tmp_path / "build.log") in reporter.raw_callbacks
+    assert ("xcodebuild", "export", tmp_path / "export.log") in reporter.raw_callbacks
+
+
+def test_deploy_callback_uses_altool_upload_path(tmp_path, monkeypatch):
+    reporter = RecordingTaskReporter()
+    ipa = tmp_path / "App.ipa"
+    ipa.write_bytes(b"ipa")
+    monkeypatch.setattr("asc.commands.build.upload_ipa", lambda *a, **k: None)
+
+    deploy_core(
+        ipa_path=str(ipa),
+        issuer_id="issuer",
+        key_id="key",
+        key_file="/tmp/k.p8",
+        destination="testflight",
+        dry_run=False,
+        reporter=reporter,
+    )
+
+    assert ("altool", "upload", tmp_path / "upload.log") in reporter.raw_callbacks
 
 
 def test_build_core_reports_archive_export_phases(tmp_path, monkeypatch):
@@ -316,3 +548,69 @@ def test_spinner_failure_tail_calls_on_log_line(tmp_path):
     assert sum(1 for line in lines if line == "L4") == 1
     assert any("失败" in line for line in lines)
     assert any("完整日志" in line for line in lines)
+
+
+def test_one_hundred_thousand_failed_build_lines_are_bounded_and_deduplicated(
+    tmp_path,
+):
+    store = TaskStore(tmp_path / "tasks.db")
+    task_id = store.create("build")
+    reporter = make_web_reporter(store, task_id, "build")
+    callback = reporter.make_raw_log_callback(
+        "xcodebuild",
+        "archive",
+        tmp_path / "build.log",
+    )
+    input_count = 0
+
+    def emit(line):
+        nonlocal input_count
+        callback(line)
+        input_count += 1
+
+    ordinary_count = 99_984
+    try:
+        for index in range(ordinary_count):
+            emit(f"CompileSwift normal arm64 File{index}.swift")
+        for index in range(1, 6):
+            emit(f"context-before-{index}")
+        emit("error: compiler stopped")
+        for index in range(1, 5):
+            emit(f"context-after-{index}")
+        emit("warning: signing is deprecated")
+        for index in range(6, 11):
+            emit(f"context-after-{index}")
+        callback.finish(failed=True)
+        reporter.flush()
+        store.flush()
+
+        logs = store.get_logs_after(task_id)
+        messages = [item["message"] for item in logs]
+        assert input_count == 100_000
+        assert len(logs) <= 500
+        assert any("CompileSwift 99980" in message for message in messages)
+        assert any(
+            "error 1 行" in message
+            and "warning 1 行" in message
+            and "context 18 行" in message
+            for message in messages
+        )
+        expected_window = {
+            *(f"context-before-{index}" for index in range(1, 6)),
+            "error: compiler stopped",
+            *(f"context-after-{index}" for index in range(1, 5)),
+            "warning: signing is deprecated",
+            *(f"context-after-{index}" for index in range(6, 11)),
+        }
+        for message in expected_window:
+            assert messages.count(message) == 1
+        failure_tail_only = {
+            f"CompileSwift normal arm64 File{index}.swift"
+            for index in range(99_980, 99_984)
+        }
+        for message in failure_tail_only:
+            assert messages.count(message) == 1
+        assert messages.count("context-after-10") == 1
+        assert "CompileSwift normal arm64 File99979.swift" not in messages
+    finally:
+        store.close()

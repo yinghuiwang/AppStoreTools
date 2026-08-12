@@ -1,3 +1,5 @@
+import codecs
+import logging
 import os
 import signal
 import subprocess
@@ -10,6 +12,7 @@ from typing import Callable, Optional
 SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 SPINNER_INTERVAL = 0.08
 TAIL_LINES_ON_FAILURE = 20
+READ_CHUNK_SIZE = 8192
 
 
 class ProcessCanceled(RuntimeError):
@@ -102,6 +105,86 @@ class Spinner:
         if text:
             self.on_log_line(text)
 
+    def _safe_emit_log_line(self, message: str) -> None:
+        try:
+            self._emit_log_line(message)
+        except Exception:
+            logging.getLogger("asc.web").exception(
+                "raw log callback failed after tee path=%s",
+                self.log_path,
+            )
+
+    def _safe_emit_application(self, message: str, *, level: str = "info") -> None:
+        application = getattr(self.on_log_line, "application", None)
+        try:
+            if callable(application):
+                application(message, level=level)
+            else:
+                self._emit_log_line(message)
+        except Exception:
+            logging.getLogger("asc.web").exception(
+                "application log callback failed path=%s",
+                self.log_path,
+            )
+
+    def _safe_output_line(
+        self,
+        output_callback: Optional[Callable[[str], None]],
+        line: str,
+    ) -> None:
+        if output_callback is None:
+            return
+        try:
+            output_callback(line)
+        except Exception:
+            logging.getLogger("asc.web").exception(
+                "subprocess output callback failed after tee path=%s",
+                self.log_path,
+            )
+
+    def _finish_callback(self, *, failed: bool) -> None:
+        finish_callback = getattr(self.on_log_line, "finish", None)
+        flush_callback = getattr(self.on_log_line, "flush", None)
+        try:
+            if callable(finish_callback):
+                finish_callback(failed=failed)
+            elif callable(flush_callback):
+                flush_callback()
+        except Exception:
+            logging.getLogger("asc.web").exception(
+                "raw log callback finalization failed path=%s",
+                self.log_path,
+            )
+
+    @staticmethod
+    def _terminate_process(proc: subprocess.Popen) -> None:
+        if proc.poll() is not None:
+            return
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        except (AttributeError, OSError):
+            proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except (AttributeError, OSError):
+                proc.kill()
+
+    @staticmethod
+    def _write_all(log_file, chunk: bytes) -> None:
+        """Write one raw subprocess chunk completely or fail explicitly."""
+        view = memoryview(chunk)
+        offset = 0
+        while offset < len(view):
+            written = log_file.write(view[offset:])
+            if written is None or written <= 0:
+                raise OSError("raw log write made no progress")
+            if written > len(view) - offset:
+                raise OSError("raw log write returned an invalid byte count")
+            offset += written
+
     def _print_tail(self) -> None:
         """Echo last N log lines to stderr for CLI operators.
 
@@ -124,99 +207,146 @@ class Spinner:
         output_callback: Optional[Callable[[str], None]] = None,
         cancel_event: Optional[threading.Event] = None,
     ) -> subprocess.CompletedProcess:
-        self.log_path.parent.mkdir(parents=True, exist_ok=True)
-        log_file = open(self.log_path, "w", buffering=1)  # line-buffered
-
-        if not self.tty and not self.verbose:
-            sys.stderr.write(f"▶ {self.label}...\n")
-            sys.stderr.flush()
-
         start = time.monotonic()
+        proc = None
+        log_file = None
         spinner_thread = None
-        if self.tty and not self.verbose:
-            spinner_thread = threading.Thread(
-                target=self._spinner_loop, args=(start,), daemon=True
-            )
-            spinner_thread.start()
-
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            bufsize=1,
-            text=True,
-            start_new_session=True,
-        )
         cancel_thread = None
-
-        def _watch_cancel() -> None:
-            if cancel_event is None:
-                return
-            while proc.poll() is None and not cancel_event.wait(timeout=0.1):
-                pass
-            if cancel_event.is_set() and proc.poll() is None:
-                try:
-                    os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-                except (AttributeError, OSError):
-                    proc.terminate()
-                try:
-                    proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    try:
-                        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-                    except (AttributeError, OSError):
-                        proc.kill()
-
+        returncode = None
+        original_error = None
         try:
+            self.log_path.parent.mkdir(parents=True, exist_ok=True)
+            log_file = open(self.log_path, "wb", buffering=0)
+
+            if not self.tty and not self.verbose:
+                sys.stderr.write(f"▶ {self.label}...\n")
+                sys.stderr.flush()
+
+            if self.tty and not self.verbose:
+                spinner_thread = threading.Thread(
+                    target=self._spinner_loop, args=(start,), daemon=True
+                )
+                spinner_thread.start()
+
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                bufsize=0,
+                text=False,
+                start_new_session=True,
+            )
+
+            def _watch_cancel() -> None:
+                if cancel_event is None or proc is None:
+                    return
+                while proc.poll() is None and not cancel_event.wait(timeout=0.1):
+                    pass
+                if cancel_event.is_set():
+                    self._terminate_process(proc)
+
             if cancel_event is not None:
                 cancel_thread = threading.Thread(target=_watch_cancel, daemon=True)
                 cancel_thread.start()
             assert proc.stdout is not None
-            for line in proc.stdout:
-                log_file.write(line)
-                if output_callback is not None:
-                    output_callback(line)
-                self._emit_log_line(line)
-                if self.verbose:
-                    sys.stdout.write(line)
-                    sys.stdout.flush()
-            returncode = proc.wait()
-        finally:
-            self._stop.set()
-            if spinner_thread is not None:
-                spinner_thread.join(timeout=1.0)
-            if cancel_thread is not None:
-                cancel_thread.join(timeout=0.2)
-            self._clear_line()
-            log_file.close()
 
-        flush_callback = getattr(self.on_log_line, "flush", None)
-        elapsed = format_elapsed(time.monotonic() - start)
-        try:
-            if cancel_event is not None and cancel_event.is_set():
+            decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+            pending_text = ""
+
+            def _emit_text(text: str, *, final: bool = False) -> None:
+                nonlocal pending_text
+                pending_text += text
+                while "\n" in pending_text:
+                    line, pending_text = pending_text.split("\n", 1)
+                    rendered = line + "\n"
+                    self._safe_output_line(output_callback, rendered)
+                    self._safe_emit_log_line(rendered)
+                    if self.verbose:
+                        sys.stdout.write(rendered)
+                        sys.stdout.flush()
+                if final and pending_text:
+                    rendered = pending_text
+                    pending_text = ""
+                    self._safe_output_line(output_callback, rendered)
+                    self._safe_emit_log_line(rendered)
+                    if self.verbose:
+                        sys.stdout.write(rendered)
+                        sys.stdout.flush()
+
+            while True:
+                chunk = proc.stdout.read(READ_CHUNK_SIZE)
+                if not chunk:
+                    break
+                self._write_all(log_file, chunk)
+                _emit_text(decoder.decode(chunk))
+            _emit_text(decoder.decode(b"", final=True), final=True)
+            returncode = proc.wait()
+
+            elapsed = format_elapsed(time.monotonic() - start)
+            canceled = cancel_event is not None and cancel_event.is_set()
+            if canceled:
                 canceled_msg = f"⏹ {self.label} 已终止 ({elapsed})"
                 sys.stderr.write(canceled_msg + "\n")
                 sys.stderr.flush()
-                self._emit_log_line(canceled_msg)
+                self._safe_emit_application(canceled_msg)
                 raise ProcessCanceled(f"{self.label} canceled")
             if returncode == 0:
                 ok_msg = f"✅ {self.label} 完成 ({elapsed})"
                 sys.stderr.write(ok_msg + "\n")
-                self._emit_log_line(ok_msg)
+                self._safe_emit_application(ok_msg)
             else:
                 fail_msg = f"❌ {self.label} 失败 ({elapsed})"
                 log_hint = f"   完整日志: {self.log_path}"
                 sys.stderr.write(fail_msg + "\n")
                 sys.stderr.write(log_hint + "\n")
-                self._emit_log_line(fail_msg)
-                self._emit_log_line(log_hint)
+                self._safe_emit_application(fail_msg, level="error")
+                self._safe_emit_application(log_hint)
                 self._print_tail()
             sys.stderr.flush()
 
             return subprocess.CompletedProcess(
                 args=cmd, returncode=returncode, stdout="", stderr=""
             )
+        except BaseException as exc:
+            original_error = exc
+            if proc is not None:
+                try:
+                    self._terminate_process(proc)
+                except Exception:
+                    logging.getLogger("asc.web").exception(
+                        "subprocess cleanup failed path=%s",
+                        self.log_path,
+                    )
+            raise
         finally:
-            # Include any terminal callback emissions in the final summary.
-            if callable(flush_callback):
-                flush_callback()
+            cleanup_error = None
+            self._stop.set()
+            for cleanup in (
+                (
+                    lambda: spinner_thread.join(timeout=1.0)
+                    if spinner_thread is not None
+                    else None
+                ),
+                (
+                    lambda: cancel_thread.join(timeout=0.2)
+                    if cancel_thread is not None
+                    else None
+                ),
+                self._clear_line,
+                lambda: log_file.close() if log_file is not None else None,
+            ):
+                try:
+                    cleanup()
+                except Exception as exc:
+                    if cleanup_error is None:
+                        cleanup_error = exc
+                    logging.getLogger("asc.web").exception(
+                        "Spinner cleanup failed path=%s",
+                        self.log_path,
+                    )
+            canceled = cancel_event is not None and cancel_event.is_set()
+            self._finish_callback(
+                failed=canceled or returncode is None or returncode != 0
+            )
+            if cleanup_error is not None and original_error is None:
+                raise cleanup_error

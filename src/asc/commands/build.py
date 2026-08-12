@@ -82,10 +82,20 @@ def _build_phase_plan(
     ]
 
 
-def _spinner_log_callback(reporter: TaskReporter | None) -> Callable[[str], None] | None:
+def _spinner_log_callback(
+    reporter: TaskReporter | None,
+    *,
+    source: str,
+    phase: str,
+    raw_log_path: str | Path,
+) -> Callable[[str], None] | None:
     if reporter is None:
         return None
-    return reporter.make_raw_log_callback()
+    return reporter.make_raw_log_callback(
+        source,
+        phase,
+        raw_log_path=raw_log_path,
+    )
 
 
 class UploadProgressReporter:
@@ -99,6 +109,7 @@ class UploadProgressReporter:
         self.total_bytes = total_bytes
         self._task_reporter = task_reporter
         self._last_percent: Optional[int] = None
+        self._logged_milestones: set[int] = set()
 
     def print_start(self) -> None:
         size_msg = f"  IPA 总大小: {_format_bytes(self.total_bytes)}"
@@ -116,8 +127,7 @@ class UploadProgressReporter:
             return
 
         uploaded, percent = progress
-        if self._last_percent == percent:
-            return
+        previous_percent = self._last_percent
         self._last_percent = percent
 
         msg = (
@@ -129,9 +139,34 @@ class UploadProgressReporter:
             self._task_reporter.progress(
                 uploaded, self.total_bytes, msg=f"{percent}%"
             )
-            self._task_reporter.log(msg)
+            for milestone in self._crossed_milestones(
+                previous_percent,
+                percent,
+            ):
+                self._task_reporter.milestone(
+                    milestone,
+                    message=(
+                        f"上传进度里程碑：{milestone}%"
+                        f"（当前 {percent}%）"
+                    ),
+                )
         else:
             typer.echo(msg)
+
+    def _crossed_milestones(
+        self,
+        previous_percent: int | None,
+        percent: int,
+    ) -> list[int]:
+        lower_bound = -1 if previous_percent is None else previous_percent
+        crossed = [
+            milestone
+            for milestone in (0, 25, 50, 75, 100)
+            if lower_bound < milestone <= percent
+            and milestone not in self._logged_milestones
+        ]
+        self._logged_milestones.update(crossed)
+        return crossed
 
     def _parse_progress(self, line: str) -> Optional[tuple[int, int]]:
         byte_match = _BYTE_PROGRESS_RE.search(line)
@@ -389,7 +424,6 @@ def build_core(
             output_dir=str(output_dir), bundle_id=resolved.bundle_id,
         )
 
-        on_log = _spinner_log_callback(reporter)
         reporter.phase("archive")
         if reuse_path:
             archive_path = reuse_path
@@ -397,25 +431,37 @@ def build_core(
             reporter.progress(1, 1, msg="复用 archive")
         else:
             reporter.log("  ── 步骤 2/3：构建 Archive ──")
+            archive_log_path = output_dir / "build.log"
             run_xcodebuild_archive(
                 resolved.project_path, resolved.project_kind, resolved.scheme,
                 configuration, archive_path,
                 verbose=verbose,
                 cancel_event=cancel_event,
-                on_log_line=on_log,
+                on_log_line=_spinner_log_callback(
+                    reporter,
+                    source="xcodebuild",
+                    phase="archive",
+                    raw_log_path=archive_log_path,
+                ),
             )
             reporter.log(f"  ✅ Archive: {archive_path}")
             reporter.progress(1, 1, msg="archive 完成")
 
         reporter.phase("export")
         reporter.log("  ── 步骤 3/3：导出 IPA ──")
+        export_log_path = output_dir / "export.log"
         ipa_path = run_xcodebuild_export(
             archive_path,
             export_options,
             export_dir,
             verbose=verbose,
             cancel_event=cancel_event,
-            on_log_line=on_log,
+            on_log_line=_spinner_log_callback(
+                reporter,
+                source="xcodebuild",
+                phase="export",
+                raw_log_path=export_log_path,
+            ),
         )
         reporter.log(f"  ✅ IPA: {ipa_path}")
         reporter.progress(1, 1, msg="export 完成")
@@ -621,7 +667,12 @@ def deploy_core(
             verbose=verbose,
             progress_reporter=progress_reporter,
             cancel_event=cancel_event,
-            on_log_line=_spinner_log_callback(reporter),
+            on_log_line=_spinner_log_callback(
+                reporter,
+                source="altool",
+                phase="upload",
+                raw_log_path=Path(ipa_path).parent / "upload.log",
+            ),
         )
         reporter.log("  ── 步骤 3/3：等待 altool 返回上传结果 ──")
         reporter.log("  ✅ 上传成功")

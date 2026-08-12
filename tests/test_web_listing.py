@@ -1071,3 +1071,6 @@ def test_listing_blocking_routes_offload_event_loop():
     pull_src = inspect.getsource(routes_listing.listing_pull_text)
     assert "to_thread" in pull_src
     assert "_do_listing_pull_text" in pull_src
+    screenshot_pull_src = inspect.getsource(routes_listing.listing_pull_screenshots)
+    assert "to_thread" in screenshot_pull_src
+    assert "_start_listing_pull_screenshots_task" in screenshot_pull_src

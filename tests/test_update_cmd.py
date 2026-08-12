@@ -1,6 +1,9 @@
 """Tests for update_cmd module."""
 
+import subprocess
 from unittest.mock import patch
+
+import pytest
 
 
 class TestSimilarVersions:
@@ -179,6 +182,243 @@ class TestPipInstallStreaming:
         assert any(e["phase"] == "install" for e in sink.progress_events)
         assert sink.progress_events[-1]["pct"] == 100
         assert sink.progress_events[-1]["phase"] == "install"
+
+    def test_pip_stream_uses_semantic_raw_policy_and_quarter_milestones(self):
+        from unittest.mock import MagicMock
+
+        from asc.commands.update_cmd import _install_git_ref, _update_phase_plan
+        from asc.reporting import TaskReporter, web_policy_for
+
+        class RecordingSink:
+            def __init__(self):
+                self.events = []
+                self.progress_events = []
+
+            def on_event(self, event):
+                self.events.append(event)
+
+            def on_progress(self, **event):
+                self.progress_events.append(event)
+
+        lines = [
+            "Collecting package-a\n",
+            "Using cached package_a.whl\n",
+            "Requirement already satisfied: requests\n",
+            "Downloading package-a (1%)\n",
+            "Downloading package-a (25%)\n",
+            "Downloading package-a (25%)\n",
+            "Downloading package-a (10%)\n",
+            "Downloading package-a (50%)\n",
+            "Downloading package-a (75%)\n",
+            "Installing collected packages: package-a\n",
+            "Successfully installed package-a\n",
+        ]
+        proc = MagicMock()
+        proc.stdout = iter(lines)
+        proc.poll.return_value = 0
+        proc.wait.return_value = 0
+        sink = RecordingSink()
+        reporter = TaskReporter(
+            sinks=[sink],
+            task_kind="update",
+            policy_factory=web_policy_for,
+        )
+        reporter.set_phases(_update_phase_plan())
+        reporter.phase("download")
+
+        with patch("asc.commands.update_cmd.subprocess.Popen", return_value=proc):
+            _install_git_ref("main", "a" * 40, reporter=reporter)
+
+        milestones = [
+            event.message
+            for event in sink.events
+            if event.event_type == "milestone"
+        ]
+        assert milestones == [
+            "Downloading 0%",
+            "Downloading 25%",
+            "Downloading 50%",
+            "Downloading 75%",
+            "Installing 100%",
+        ]
+        summaries = [
+            event.message for event in sink.events if event.event_type == "summary"
+        ]
+        assert any("Collecting 1" in message for message in summaries)
+        assert any("Using cached 1" in message for message in summaries)
+        assert any(
+            "Requirement already satisfied 1" in message for message in summaries
+        )
+        assert not any(
+            event.event_type == "operation"
+            and event.message.startswith(("Collecting ", "Using cached "))
+            for event in sink.events
+        )
+        progress_messages = [
+            event["msg"] for event in sink.progress_events if event["msg"]
+        ]
+        assert "Downloading 1%" in progress_messages
+        assert progress_messages.count("Downloading 25%") == 2
+        assert "Downloading 10%" in progress_messages
+
+    def test_pip_failure_keeps_error_traceback_context_and_last_twenty(self):
+        from unittest.mock import MagicMock
+
+        from asc.commands.update_cmd import _install_git_ref, _update_phase_plan
+        from asc.reporting import TaskReporter, web_policy_for
+
+        class RecordingSink:
+            def __init__(self):
+                self.events = []
+
+            def on_event(self, event):
+                self.events.append(event)
+
+            def on_progress(self, **kwargs):
+                pass
+
+        lines = [f"noise-{index}\n" for index in range(30)]
+        lines[10] = "ERROR: Could not build wheels\n"
+        lines[11] = "Traceback (most recent call last):\n"
+        proc = MagicMock()
+        proc.stdout = iter(lines)
+        proc.poll.return_value = 1
+        proc.wait.return_value = 1
+        sink = RecordingSink()
+        reporter = TaskReporter(
+            sinks=[sink],
+            task_kind="update",
+            policy_factory=web_policy_for,
+        )
+        reporter.set_phases(_update_phase_plan())
+        reporter.phase("download")
+
+        with patch("asc.commands.update_cmd.subprocess.Popen", return_value=proc):
+            with pytest.raises(subprocess.CalledProcessError):
+                _install_git_ref("main", reporter=reporter)
+
+        assert any(
+            event.message == "ERROR: Could not build wheels" for event in sink.events
+        )
+        assert any(
+            event.message == "Traceback (most recent call last):"
+            for event in sink.events
+        )
+        assert any(event.message == "noise-29" for event in sink.events)
+        raw_ids = [
+            (event.source, event.raw_line_no)
+            for event in sink.events
+            if event.raw_line_no is not None
+        ]
+        assert len(raw_ids) == len(set(raw_ids))
+
+    def test_pip_progress_parser_failure_does_not_stop_output_consumption(self):
+        from unittest.mock import MagicMock
+
+        from asc.commands.update_cmd import _install_git_ref
+        from asc.reporting import TaskReporter, web_policy_for
+
+        class RecordingSink:
+            def __init__(self):
+                self.events = []
+
+            def on_event(self, event):
+                self.events.append(event)
+
+            def on_progress(self, **kwargs):
+                pass
+
+        proc = MagicMock()
+        proc.stdout = iter(["Downloading package-a (50%)\n", "ERROR: later line\n"])
+        proc.poll.return_value = 0
+        proc.wait.return_value = 0
+        sink = RecordingSink()
+        reporter = TaskReporter(
+            sinks=[sink],
+            task_kind="update",
+            policy_factory=web_policy_for,
+        )
+
+        with patch("asc.commands.update_cmd.subprocess.Popen", return_value=proc), patch(
+            "asc.commands.update_cmd._extract_pip_percent",
+            side_effect=ValueError("bad progress"),
+        ):
+            _install_git_ref("main", reporter=reporter)
+
+        assert any(event.message == "ERROR: later line" for event in sink.events)
+
+    def test_pip_timeout_finishes_raw_callback_as_failed(self):
+        from unittest.mock import MagicMock
+
+        from asc.commands.update_cmd import _install_git_ref
+        from asc.reporting import TaskReporter
+
+        finished = []
+
+        class Callback:
+            def __call__(self, message):
+                pass
+
+            def set_phase(self, phase):
+                pass
+
+            def finish(self, *, failed):
+                finished.append(failed)
+
+        reporter = MagicMock(spec=TaskReporter)
+        reporter.make_raw_log_callback.return_value = Callback()
+        proc = MagicMock()
+        proc.stdout = iter(())
+        proc.wait.return_value = -9
+        with patch("asc.commands.update_cmd.subprocess.Popen", return_value=proc):
+            with pytest.raises(TimeoutError):
+                _install_git_ref("main", reporter=reporter, timeout=0)
+
+        assert finished == [True]
+
+    def test_pip_wait_timeout_kills_process_finishes_callback_and_keeps_tail(self):
+        from unittest.mock import MagicMock
+
+        from asc.commands.update_cmd import _install_git_ref
+        from asc.reporting import TaskReporter, web_policy_for
+
+        class RecordingSink:
+            def __init__(self):
+                self.events = []
+
+            def on_event(self, event):
+                self.events.append(event)
+
+            def on_progress(self, **kwargs):
+                pass
+
+        proc = MagicMock()
+        proc.stdout = iter(f"tail-{index}\n" for index in range(25))
+        proc.poll.return_value = None
+        original = subprocess.TimeoutExpired(["pip"], 30)
+        proc.wait.side_effect = [original, -9]
+        sink = RecordingSink()
+        reporter = TaskReporter(
+            sinks=[sink],
+            task_kind="update",
+            policy_factory=web_policy_for,
+        )
+
+        with patch("asc.commands.update_cmd.subprocess.Popen", return_value=proc):
+            with pytest.raises(subprocess.TimeoutExpired) as caught:
+                _install_git_ref("main", reporter=reporter)
+
+        assert caught.value is original
+        proc.kill.assert_called_once()
+        assert proc.wait.call_count == 2
+        assert any(
+            event.event_type == "context" and event.message == "tail-24"
+            for event in sink.events
+        )
+        assert any(
+            event.event_type == "summary" and "省略其他输出 5 行" in event.message
+            for event in sink.events
+        )
 
     def test_update_core_defer_install_skips_pip(self):
         from unittest.mock import MagicMock, patch

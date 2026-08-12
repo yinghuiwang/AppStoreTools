@@ -14,7 +14,7 @@ from typing import Optional
 import typer
 import requests
 
-from asc.reporting import TaskReporter, make_cli_reporter
+from asc.reporting import RawLogCallback, TaskReporter, make_cli_reporter
 
 GITHUB_API = "https://api.github.com/repos/yinghuiwang/AppStoreTools/releases/latest"
 INSTALL_URL = "https://github.com/yinghuiwang/AppStoreTools.git"
@@ -205,6 +205,15 @@ def _extract_pip_percent(line: str) -> Optional[int]:
     return None
 
 
+def _pip_raw_callback(reporter: TaskReporter, phase: str) -> RawLogCallback:
+    """Create the semantic raw-output callback used only for pip installs."""
+    return reporter.make_raw_log_callback(
+        "pip",
+        phase,
+        raw_log_path=None,
+    )
+
+
 def _install_git_ref(
     ref: str,
     commit: Optional[str] = None,
@@ -229,6 +238,7 @@ def _install_git_ref(
     reporter.log(
         f"Downloading / installing package (pip, timeout={int(timeout)}s, unbuffered)..."
     )
+    raw_callback = _pip_raw_callback(reporter, "download")
 
     proc = subprocess.Popen(
         cmd,
@@ -255,10 +265,14 @@ def _install_git_ref(
     in_install_phase = False
     last_reported_pct = -1
     download_floor = 5  # keep bar moving when pip has no percent yet
+    milestones_emitted: set[int] = set()
     last_output_at = time.monotonic()
     last_heartbeat_at = last_output_at
     deadline = time.monotonic() + float(timeout)
     timed_out = False
+    returncode: int | None = None
+    wait_timeout_error: subprocess.TimeoutExpired | None = None
+    completion_failed = True
 
     try:
         while True:
@@ -291,19 +305,29 @@ def _install_git_ref(
             line = raw.rstrip("\n\r")
             if not line.strip():
                 continue
-            reporter.log(line)
 
             if not in_install_phase and _PIP_INSTALL_RE.search(line):
                 reporter.phase("install")
+                raw_callback.set_phase("install")
                 in_install_phase = True
                 last_reported_pct = -1
 
-            pct = _extract_pip_percent(line)
+            raw_callback(line)
+
+            try:
+                pct = _extract_pip_percent(line)
+            except Exception:  # noqa: BLE001 — parsing must not stop pip output
+                continue
             if pct is not None:
-                if pct == last_reported_pct:
-                    continue
                 last_reported_pct = pct
                 label = "Downloading" if not in_install_phase else "Installing"
+                for milestone in (0, 25, 50, 75, 100):
+                    if pct >= milestone and milestone not in milestones_emitted:
+                        reporter.milestone(
+                            milestone,
+                            message=f"{label} {milestone}%",
+                        )
+                        milestones_emitted.add(milestone)
                 reporter.progress(pct, 100, msg=f"{label} {pct}%")
                 continue
 
@@ -313,31 +337,52 @@ def _install_git_ref(
                     last_reported_pct = download_floor
                     reporter.progress(download_floor, 100, msg="downloading")
     finally:
-        if timed_out:
-            reporter.log(
-                f"❌ pip install timed out after {int(timeout)}s "
-                "(often caused by uninstalling packages still used by a running Web UI).",
-                level="error",
-            )
-            try:
-                proc.kill()
-            except OSError:
-                pass
-            try:
-                proc.wait(timeout=10)
-            except Exception:
-                pass
-            raise TimeoutError(f"pip install timed out after {int(timeout)}s")
-
-        returncode = proc.wait(timeout=30)
+        try:
+            if timed_out:
+                reporter.log(
+                    f"❌ pip install timed out after {int(timeout)}s "
+                    "(often caused by uninstalling packages still used by a running Web UI).",
+                    level="error",
+                )
+                try:
+                    proc.kill()
+                except OSError:
+                    pass
+                try:
+                    proc.wait(timeout=10)
+                except Exception:
+                    pass
+            else:
+                try:
+                    returncode = proc.wait(timeout=30)
+                    completion_failed = returncode != 0
+                except subprocess.TimeoutExpired as exc:
+                    wait_timeout_error = exc
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+                    try:
+                        proc.wait(timeout=10)
+                    except Exception:
+                        pass
+        finally:
+            raw_callback.finish(failed=completion_failed)
 
     reader.join(timeout=5)
 
+    if timed_out:
+        raise TimeoutError(f"pip install timed out after {int(timeout)}s")
+    if wait_timeout_error is not None:
+        raise wait_timeout_error
     if returncode != 0:
         raise subprocess.CalledProcessError(returncode, cmd)
 
     if not in_install_phase:
         reporter.phase("install")
+        raw_callback.set_phase("install")
+    if 100 not in milestones_emitted:
+        reporter.milestone(100, message="Installing 100%")
     reporter.progress(1, 1, msg="installed")
 
 

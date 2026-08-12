@@ -308,12 +308,11 @@ def run_deferred_package_install(
         _install_git_ref,
         _update_phase_plan,
     )
-    from asc.reporting import TaskReporter
+    from asc.reporting import TaskReporter, TaskStoreSink, web_policy_for
 
     class _HelperSink:
         def on_log(self, message: str, *, level: str = "info") -> None:
             print(message, flush=True)
-            _append_update_task_log(task_id, message)
 
         def on_progress(
             self,
@@ -331,10 +330,19 @@ def run_deferred_package_install(
 
     install_target = commit or install_ref
     sink = _HelperSink()
-    reporter = TaskReporter(sinks=[sink])
+    sinks: list[Any] = [sink]
+    if task_id:
+        from asc.web.tasks import task_store
+
+        sinks.append(TaskStoreSink(task_store, str(task_id)))
+    reporter = TaskReporter(
+        sinks=sinks,
+        task_kind="update",
+        policy_factory=web_policy_for,
+    )
     reporter.set_phases(_update_phase_plan())
-    reporter.phase("install")
-    sink.on_log(
+    reporter.phase("download")
+    reporter.log(
         f"Deferred pip install after Web UI stop: ref={install_ref!r} "
         f"target={install_target!r}"
     )
@@ -348,7 +356,7 @@ def run_deferred_package_install(
         )
     except Exception as exc:  # noqa: BLE001
         err = f"{exc.__class__.__name__}: {exc}"
-        sink.on_log(f"❌ Deferred install failed: {err}")
+        reporter.fail(f"❌ Deferred install failed: {err}")
         if task_id:
             try:
                 marker = read_update_restart_marker() or {"task_id": task_id}
@@ -366,6 +374,7 @@ def run_deferred_package_install(
                 path.write_text(json.dumps(marker, indent=2), encoding="utf-8")
             except Exception:
                 pass
+        reporter.flush(failed=True)
         return {"status": "error", "message": err, "install_ref": install_ref}
 
     if task_id:
@@ -387,8 +396,9 @@ def run_deferred_package_install(
             path = _update_restart_path()
             path.write_text(json.dumps(marker, indent=2), encoding="utf-8")
         except Exception as exc:  # noqa: BLE001
-            sink.on_log(f"⚠️  Could not refresh update marker: {exc}")
-    sink.on_log("✅ Deferred package install completed")
+            reporter.log(f"⚠️  Could not refresh update marker: {exc}", level="warning")
+    reporter.done("✅ Deferred package install completed")
+    reporter.flush()
     return {
         "status": "installed",
         "install_ref": install_ref,
