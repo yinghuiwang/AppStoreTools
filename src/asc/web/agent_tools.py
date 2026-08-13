@@ -16,6 +16,7 @@ except ImportError:  # pragma: no cover - Python < 3.11
 
 from asc.config import Config
 from asc.listing.local import PathTraversalError, _assert_under_root
+from asc.listing.models import FIELD_NAMES
 from asc.web.agent_redact import redact_obj, redact_text
 from asc.web.task_runner import FORBIDDEN_REPLAY_KEYS
 
@@ -43,6 +44,37 @@ _ERROR_LINE_RE = re.compile(
     re.I,
 )
 _CREDENTIALS_SECTION_RE = re.compile(r"(?is)^\[credentials\][^\[]*")
+_ALLOWED_MUTATION_OPS = frozenset(
+    {"csv_set_fields", "json_patch", "toml_set", "text_replace", "screenshot_fs"}
+)
+_TOML_ALLOWED_KEYS = frozenset(
+    {
+        "defaults.csv",
+        "defaults.screenshots",
+        "build.project",
+        "build.scheme",
+        "build.output",
+        "build.signing",
+    }
+)
+_TOML_SIGNING_VALUES = frozenset({"auto", "manual"})
+_JSON_PATCH_OPS = frozenset({"replace", "add", "remove"})
+_JSON_POINTER_TERMINALS = frozenset(
+    {
+        "name",
+        "description",
+        "reviewNote",
+        "displayName",
+        "baseAmount",
+        "price",
+        "reviewScreenshot",
+        "reviewScreenshotPath",
+        "screenshot",
+        "screenshotPath",
+    }
+)
+_SCREENSHOT_ACTIONS = frozenset({"rename", "delete", "reorder"})
+_FIELD_NAME_SET = frozenset(FIELD_NAMES)
 
 
 def _tool_schema(
@@ -303,7 +335,44 @@ def _tool_inspect_local(ctx: AgentToolContext, arguments: dict) -> dict:
 
 
 def _tool_propose_fix(ctx: AgentToolContext, arguments: dict) -> dict:
-    return {"ok": False, "error": "not implemented"}
+    if not ctx.session_id:
+        return {"ok": False, "error": "session_id is required"}
+    if ctx.agent_store is None:
+        return {"ok": False, "error": "agent store is required"}
+    summary = arguments.get("summary")
+    if not isinstance(summary, str) or not summary.strip():
+        return {"ok": False, "error": "summary is required"}
+    mutations = arguments.get("mutations") if "mutations" in arguments else []
+    if mutations is None:
+        mutations = []
+    if not isinstance(mutations, list):
+        return {"ok": False, "error": "mutations must be a list"}
+    manual_steps = arguments.get("manual_steps") if "manual_steps" in arguments else []
+    if manual_steps is None:
+        manual_steps = []
+    if not isinstance(manual_steps, list):
+        return {"ok": False, "error": "manual_steps must be a list"}
+    rerun = arguments.get("rerun")
+    if not mutations and not [step for step in manual_steps if str(step).strip()]:
+        return {"ok": False, "error": "mutations or manual_steps required"}
+    if rerun is not None:
+        if not mutations:
+            return {"ok": False, "error": "rerun is illegal when mutations is empty"}
+        if not isinstance(rerun, dict) or not rerun.get("task_id") or not rerun.get("kind"):
+            return {"ok": False, "error": "rerun must include task_id and kind"}
+    for mutation in mutations:
+        error = _validate_mutation(ctx, mutation)
+        if error:
+            return {"ok": False, "error": error}
+    plan_id = ctx.agent_store.insert_plan_draft(
+        ctx.session_id,
+        ctx.turn_seq,
+        summary.strip(),
+        mutations,
+        rerun if isinstance(rerun, dict) else None,
+        [str(step) for step in manual_steps],
+    )
+    return {"ok": True, "plan_id": plan_id, "status": "draft"}
 
 
 _HANDLERS: dict[str, Callable[[AgentToolContext, dict], dict]] = {
@@ -572,3 +641,192 @@ def _binary_meta(path: Path) -> dict:
         "size": size,
         "suffix": path.suffix.lower(),
     }
+
+
+def _validate_mutation(ctx: AgentToolContext, mutation: Any) -> str | None:
+    if not isinstance(mutation, dict):
+        return "invalid mutation"
+    op = mutation.get("op")
+    if op not in _ALLOWED_MUTATION_OPS:
+        return f"unsupported op: {op!r}"
+    resolved, error = _resolve_mutation_path(ctx, mutation.get("path"))
+    if error:
+        return error
+    assert resolved is not None
+    if op == "csv_set_fields":
+        return _validate_csv_set_fields(ctx, mutation, resolved)
+    if op == "json_patch":
+        return _validate_json_patch(ctx, mutation, resolved)
+    if op == "toml_set":
+        return _validate_toml_set(ctx, mutation, resolved)
+    if op == "text_replace":
+        return _validate_text_replace(ctx, mutation, resolved)
+    return _validate_screenshot_fs(ctx, mutation, resolved)
+
+
+def _resolve_mutation_path(ctx: AgentToolContext, raw_path: Any) -> tuple[Path | None, str | None]:
+    if not raw_path:
+        return None, "path is required"
+    try:
+        resolved = _resolve_user_path(ctx.project_root, raw_path)
+    except Exception:
+        return None, "path is not on the allow-list"
+    if _is_forbidden_path(resolved) or not _is_allowed_path(ctx, resolved):
+        return None, "path is not on the allow-list"
+    return resolved, None
+
+
+def _bound_replay_params(ctx: AgentToolContext) -> dict[str, Any]:
+    if not ctx.bound_task_id:
+        return {}
+    replay = ctx.task_store.get_replay(str(ctx.bound_task_id))
+    if not isinstance(replay, dict):
+        return {}
+    params = replay.get("params")
+    return params if isinstance(params, dict) else {}
+
+
+def _bound_profile_paths(ctx: AgentToolContext) -> tuple[Any, Any, Any]:
+    csv_path = None
+    screenshots_path = None
+    iap_path = None
+    profile = None
+    if ctx.bound_task_id:
+        state = ctx.task_store.get_state(str(ctx.bound_task_id))
+        if state:
+            profile = state.get("profile")
+    if profile:
+        try:
+            cfg = Config(app_name=str(profile))
+            csv_path = cfg.csv_path
+            screenshots_path = cfg.screenshots_path
+            iap_path = cfg.iap_path or "data/iap_packages.json"
+        except Exception:
+            pass
+    return csv_path, screenshots_path, iap_path
+
+
+def _candidate_paths(ctx: AgentToolContext, *values: Any) -> list[Path]:
+    roots: list[Path] = []
+    seen: set[str] = set()
+    for value in values:
+        if not value:
+            continue
+        try:
+            resolved = _resolve_user_path(ctx.project_root, value)
+        except Exception:
+            continue
+        key = str(resolved)
+        if key in seen:
+            continue
+        seen.add(key)
+        roots.append(resolved)
+    return roots
+
+
+def _path_matches_any(path: Path, roots: list[Path]) -> bool:
+    for root in roots:
+        try:
+            _assert_under_root(root, path)
+            return True
+        except (PathTraversalError, OSError, ValueError):
+            continue
+    return False
+
+
+def _validate_csv_set_fields(ctx: AgentToolContext, mutation: dict, resolved: Path) -> str | None:
+    locale = mutation.get("locale")
+    if not locale or not str(locale).strip():
+        return "locale is required"
+    fields = mutation.get("fields")
+    if not isinstance(fields, dict) or not fields:
+        return "fields is required"
+    unknown = [name for name in fields if name not in _FIELD_NAME_SET]
+    if unknown:
+        return f"unknown csv field: {unknown[0]}"
+    params = _bound_replay_params(ctx)
+    cfg_csv, _shots, _iap = _bound_profile_paths(ctx)
+    csv_roots = _candidate_paths(ctx, params.get("csv_path"), cfg_csv)
+    if not csv_roots or not _path_matches_any(resolved, csv_roots):
+        return "path must be the profile CSV"
+    return None
+
+
+def _validate_json_patch(ctx: AgentToolContext, mutation: dict, resolved: Path) -> str | None:
+    params = _bound_replay_params(ctx)
+    _csv, _shots, cfg_iap = _bound_profile_paths(ctx)
+    iap_roots = _candidate_paths(ctx, params.get("iap_file"), cfg_iap)
+    if not iap_roots or not _path_matches_any(resolved, iap_roots):
+        return "path must be the profile IAP JSON"
+    patch = mutation.get("patch")
+    if not isinstance(patch, list) or not patch:
+        return "json_patch requires a patch list"
+    for operation in patch:
+        if not isinstance(operation, dict):
+            return "invalid json_patch operation"
+        name = operation.get("op")
+        if name not in _JSON_PATCH_OPS:
+            return f"json_patch op {name!r} is not allowed"
+        pointer = operation.get("path")
+        terminal = _json_pointer_terminal(pointer) if isinstance(pointer, str) else None
+        if terminal not in _JSON_POINTER_TERMINALS:
+            return "json_patch pointer is not allowed"
+    return None
+
+
+def _json_pointer_terminal(pointer: str) -> str | None:
+    if not pointer.startswith("/"):
+        return None
+    parts = pointer.split("/")[1:]
+    if not parts:
+        return None
+    token = parts[-1].replace("~1", "/").replace("~0", "~")
+    if token in {"", "-"} or token.isdigit():
+        return None
+    return token
+
+
+def _validate_toml_set(ctx: AgentToolContext, mutation: dict, resolved: Path) -> str | None:
+    expected = (ctx.project_root / ".asc" / "config.toml").resolve()
+    if resolved != expected:
+        return "path must be project .asc/config.toml"
+    key = mutation.get("key")
+    if not isinstance(key, str) or not key.strip():
+        return "toml key is required"
+    dotted = key.strip()
+    if dotted == "credentials" or dotted.startswith("credentials."):
+        return "credentials keys are forbidden"
+    if dotted not in _TOML_ALLOWED_KEYS:
+        return f"toml key {dotted!r} is not allowed"
+    if dotted == "build.signing" and mutation.get("value") not in _TOML_SIGNING_VALUES:
+        return "build.signing must be auto or manual"
+    return None
+
+
+def _validate_text_replace(ctx: AgentToolContext, mutation: dict, resolved: Path) -> str | None:
+    if "before" not in mutation or "after" not in mutation:
+        return "text_replace requires before, after, count"
+    count = mutation.get("count")
+    if type(count) is not int:
+        return "text_replace requires before, after, count"
+    params = _bound_replay_params(ctx)
+    source_file = params.get("source_file")
+    if not source_file:
+        return "text_replace requires replay source_file"
+    sources = _candidate_paths(ctx, source_file)
+    if not sources or resolved != sources[0]:
+        return "path must equal replay source_file"
+    return None
+
+
+def _validate_screenshot_fs(ctx: AgentToolContext, mutation: dict, resolved: Path) -> str | None:
+    action = mutation.get("action")
+    if action not in _SCREENSHOT_ACTIONS:
+        return "screenshot_fs action must be rename, delete, or reorder"
+    params = _bound_replay_params(ctx)
+    _csv, cfg_shots, _iap = _bound_profile_paths(ctx)
+    shot_roots = _candidate_paths(ctx, params.get("screenshots_dir"), cfg_shots)
+    if not shot_roots or not _path_matches_any(resolved, shot_roots):
+        return "path must be under screenshots_path"
+    return None
+
