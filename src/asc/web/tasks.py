@@ -30,10 +30,12 @@ TASK_KIND_LABELS = {
     "metadata": "元数据上传",
     "build": "构建上传",
     "whats-new": "更新说明上传",
+    "whats-new-translate": "更新说明翻译",
     "iap": "内购上传",
     "iap-review-screenshots": "IAP 审核截图上传",
     "urls": "URL 更新",
     "update": "工具更新",
+    "listing-pull-screenshots": "拉取截图",
 }
 
 
@@ -41,10 +43,12 @@ TASK_KIND_RETRY_PATHS = {
     "metadata": "/metadata",
     "build": "/build",
     "whats-new": "/whats-new",
+    "whats-new-translate": "/whats-new",
     "iap": "/iap",
     "iap-review-screenshots": "/iap",
     "urls": "/urls",
     "update": "/update",
+    "listing-pull-screenshots": "/metadata",
 }
 
 
@@ -182,9 +186,10 @@ class TaskStore:
             )
             self._writer.start()
 
-    def create(self, kind: str, *, profile: str = "") -> str:
+    def create(self, kind: str, *, profile: str = "", replay: dict | None = None) -> str:
         task_id = str(uuid.uuid4())
         now = self._now()
+        stored_replay = replay if isinstance(replay, dict) else None
         task = {
             "id": task_id,
             "kind": kind,
@@ -204,6 +209,7 @@ class TaskStore:
                 "phase_total": 0,
             },
             "cancel_requested": False,
+            "replay": stored_replay,
         }
         if self._db_path is not None:
             self._enqueue(
@@ -213,6 +219,7 @@ class TaskStore:
                     "kind": kind,
                     "profile": profile,
                     "now": now,
+                    "replay_json": self._replay_to_json(stored_replay),
                 },
                 wait=True,
                 critical=True,
@@ -568,6 +575,104 @@ class TaskStore:
                         break
             return ordered
 
+    def get_replay(self, task_id: str) -> dict | None:
+        """Return the sanitized replay snapshot, or None when missing."""
+        if self._db_path is not None:
+            with self._connection() as conn:
+                row = conn.execute(
+                    "SELECT replay_json FROM task_runs WHERE id = ?", (task_id,)
+                ).fetchone()
+            if row is None:
+                return None
+            keys = set(row.keys())
+            raw = row["replay_json"] if "replay_json" in keys else None
+            replay = self._replay_from_value(raw)
+            return dict(replay) if replay is not None else None
+        with self._lock:
+            self._refresh_db()
+            task = self._tasks.get(task_id)
+            if task is None:
+                return None
+            replay = task.get("replay")
+            return dict(replay) if isinstance(replay, dict) else None
+
+    def set_replay(self, task_id: str, replay: dict | None) -> None:
+        stored_replay = replay if isinstance(replay, dict) else None
+        if self._db_path is not None:
+            self._enqueue(
+                "set_replay",
+                task_id,
+                {
+                    "replay_json": self._replay_to_json(stored_replay),
+                    "now": self._now(),
+                },
+                wait=True,
+                critical=True,
+            )
+            return
+        with self._lock:
+            self._refresh_db()
+            task = self._tasks.get(task_id)
+            if task is None:
+                return
+            task["replay"] = stored_replay
+            task["updated_at"] = self._now()
+            self._save()
+
+    def list_failed(
+        self,
+        *,
+        limit: int = 20,
+        kind: str | None = None,
+        profile: str | None = None,
+        prefer_profile: str | None = None,
+    ) -> list[dict]:
+        """Return recent error tasks; cookie profile is sort-only."""
+        capped = max(1, min(int(limit), 50))
+        if self._db_path is not None:
+            sql = "SELECT * FROM task_runs WHERE status = ?"
+            params: list[Any] = [TaskStatus.ERROR.value]
+            if kind:
+                sql += " AND kind = ?"
+                params.append(kind)
+            if profile:
+                sql += " AND profile = ?"
+                params.append(profile)
+            sql += " ORDER BY updated_at DESC LIMIT ?"
+            params.append(capped)
+            with self._connection() as conn:
+                rows = conn.execute(sql, params).fetchall()
+            tasks = [
+                self._public_task(self._task_from_row(row, [])) for row in rows
+            ]
+        else:
+            with self._lock:
+                self._refresh_db()
+                collected: list[dict] = []
+                for task_id in self._order:
+                    task = self._tasks.get(task_id)
+                    if task is None:
+                        continue
+                    if self._normalize_status(task.get("status")) != TaskStatus.ERROR:
+                        continue
+                    if kind and str(task.get("kind") or "") != kind:
+                        continue
+                    if profile and str(task.get("profile") or "") != profile:
+                        continue
+                    state = dict(task)
+                    state["logs"] = []
+                    collected.append(self._public_task(state))
+            collected.sort(
+                key=lambda row: str(row.get("updated_at") or ""),
+                reverse=True,
+            )
+            tasks = collected[:capped]
+        if prefer_profile:
+            preferred = [row for row in tasks if row.get("profile") == prefer_profile]
+            others = [row for row in tasks if row.get("profile") != prefer_profile]
+            tasks = preferred + others
+        return tasks
+
     def get_state(self, task_id: str) -> Optional[dict]:
         """Return task metadata without loading its log history."""
         if self._db_path is None:
@@ -635,6 +740,10 @@ class TaskStore:
     def _task_from_row(self, row: Any, log_rows: list[Any]) -> dict:
         logs = [row["message"] for row in log_rows]
         result_json = row["result_json"]
+        keys = set(row.keys())
+        replay = None
+        if "replay_json" in keys:
+            replay = self._replay_from_value(row["replay_json"])
         return {
             "id": row["id"],
             "kind": row["kind"],
@@ -647,6 +756,7 @@ class TaskStore:
             "completed_at": row["completed_at"],
             "progress": self._progress_from_row(row),
             "cancel_requested": bool(row["cancel_requested"]),
+            "replay": replay,
         }
 
     def _progress_from_row(self, row: Any) -> dict:
@@ -681,6 +791,9 @@ class TaskStore:
         duration_seconds = self._duration_seconds(result)
         result["duration_seconds"] = duration_seconds
         result["duration_label"] = self._format_duration(duration_seconds)
+        replay = result.pop("replay", None)
+        result.pop("params", None)
+        result["has_replay"] = bool(replay)
         return result
 
     def _load(self) -> None:
@@ -741,6 +854,10 @@ class TaskStore:
 
         now = self._now()
 
+        replay = task.get("replay")
+        if not isinstance(replay, dict):
+            replay = None
+
         return {
             "id": task.get("id") or task_id,
             "kind": kind,
@@ -753,6 +870,7 @@ class TaskStore:
             "completed_at": task.get("completed_at"),
             "progress": self._normalize_progress(task.get("progress")),
             "cancel_requested": bool(task.get("cancel_requested")),
+            "replay": replay,
         }
 
     @staticmethod
@@ -878,6 +996,26 @@ class TaskStore:
             "updated_at": now,
             "completed_at": now,
         }
+
+    @staticmethod
+    def _replay_to_json(replay: Any) -> str | None:
+        if not isinstance(replay, dict):
+            return None
+        return json.dumps(replay, ensure_ascii=False)
+
+    @staticmethod
+    def _replay_from_value(value: Any) -> dict | None:
+        if value is None or value == "":
+            return None
+        if isinstance(value, dict):
+            return value
+        if not isinstance(value, str):
+            return None
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return None
+        return parsed if isinstance(parsed, dict) else None
 
     def _normalize_status(self, value: Any) -> TaskStatus:
         try:
@@ -1222,8 +1360,8 @@ class TaskStore:
                 """INSERT INTO task_runs
                 (id, kind, profile, status, created_at, updated_at,
                  progress_pct, progress_msg, progress_phase, progress_phase_label,
-                 phase_index, phase_total)
-                VALUES (?, ?, ?, ?, ?, ?, 0, '', '', '', 0, 0)""",
+                 phase_index, phase_total, replay_json)
+                VALUES (?, ?, ?, ?, ?, ?, 0, '', '', '', 0, 0, ?)""",
                 (
                     task_id,
                     payload["kind"],
@@ -1231,6 +1369,7 @@ class TaskStore:
                     TaskStatus.PENDING.value,
                     payload["now"],
                     payload["now"],
+                    payload.get("replay_json"),
                 ),
             )
             conn.execute("INSERT INTO task_order (task_id) VALUES (?)", (task_id,))
@@ -1348,6 +1487,13 @@ class TaskStore:
                     (payload["now"], task_id),
                 )
             return True
+        if kind == "set_replay":
+            assert task_id is not None
+            conn.execute(
+                "UPDATE task_runs SET replay_json = ?, updated_at = ? WHERE id = ?",
+                (payload["replay_json"], payload["now"], task_id),
+            )
+            return True
         raise ValueError(f"unknown write op: {kind}")
 
     def _db_write(self, writer: Callable[[sqlite3.Connection], None], *, critical: bool) -> bool:
@@ -1428,7 +1574,8 @@ class TaskStore:
                     progress_phase_label TEXT NOT NULL DEFAULT '',
                     phase_index INTEGER NOT NULL DEFAULT 0,
                     phase_total INTEGER NOT NULL DEFAULT 0,
-                    cancel_requested INTEGER NOT NULL DEFAULT 0
+                    cancel_requested INTEGER NOT NULL DEFAULT 0,
+                    replay_json TEXT
                 )
                 """
                 )
@@ -1457,6 +1604,7 @@ class TaskStore:
                     ("progress_phase_label", "TEXT NOT NULL DEFAULT ''"),
                     ("phase_index", "INTEGER NOT NULL DEFAULT 0"),
                     ("phase_total", "INTEGER NOT NULL DEFAULT 0"),
+                    ("replay_json", "TEXT"),
                 ):
                     if column not in existing:
                         conn.execute(f"ALTER TABLE task_runs ADD COLUMN {column} {declaration}")
@@ -1477,6 +1625,10 @@ class TaskStore:
         self._tasks = {}
         self._order = [row["task_id"] for row in order_rows if row["task_id"] in by_id]
         for task_id, row in by_id.items():
+            keys = set(row.keys())
+            replay = None
+            if "replay_json" in keys:
+                replay = self._replay_from_value(row["replay_json"])
             task = {
                 "id": task_id,
                 "kind": row["kind"],
@@ -1489,6 +1641,7 @@ class TaskStore:
                 "completed_at": row["completed_at"],
                 "progress": self._progress_from_row(row),
                 "cancel_requested": bool(row["cancel_requested"]),
+                "replay": replay,
             }
             self._tasks[task_id] = task
         for row in logs:
@@ -1580,8 +1733,8 @@ class TaskStore:
                         """INSERT OR REPLACE INTO task_runs
                         (id, kind, profile, status, result_json, created_at, updated_at, completed_at,
                          progress_pct, progress_msg, progress_phase, progress_phase_label,
-                         phase_index, phase_total, cancel_requested)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                         phase_index, phase_total, cancel_requested, replay_json)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                         (
                             task["id"],
                             task["kind"],
@@ -1598,6 +1751,7 @@ class TaskStore:
                             progress["phase_index"],
                             progress["phase_total"],
                             int(task["cancel_requested"]),
+                            self._replay_to_json(task.get("replay")),
                         ),
                     )
                     conn.execute("DELETE FROM task_logs WHERE task_id = ?", (task["id"],))

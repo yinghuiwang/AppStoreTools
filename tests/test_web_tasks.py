@@ -444,6 +444,9 @@ def test_all_sqlite_entrypoints_balance_open_and_close(tmp_path, monkeypatch):
     store.get_state(task_id)
     store.get_stream_snapshot(task_id, 0)
     store.count_logs(task_id)
+    store.get_replay(task_id)
+    store.list_failed(limit=5)
+    store.set_replay(task_id, {"kind": "build", "profile": "", "verbose": False, "params": {}})
     store.append_logs(task_id, ["writer"])
     store._db_write(lambda conn: conn.execute("SELECT 1"), critical=True)
     store._init_db()
@@ -1887,3 +1890,147 @@ def test_close_aborts_shutdown_when_writer_dies_after_enqueue(
     assert captured and captured[0].kind == "shutdown"
     assert captured[0].settled.is_set()
     assert store._write_q.unfinished_tasks == 0
+
+
+def test_create_stores_replay_but_public_json_only_has_flag(tmp_path):
+    from asc.web.task_runner import sanitize_replay
+    from asc.web.tasks import TaskStore
+
+    store = TaskStore(tmp_path / "tasks.db")
+    try:
+        replay = sanitize_replay(
+            "metadata",
+            "myapp",
+            False,
+            {
+                "csv_path": "data/appstore_info.csv",
+                "issuer_id": "SECRET-ISSUER",
+                "key_file": "/tmp/AuthKey_X.p8",
+                "api_key": "sk-live",
+            },
+        )
+        assert "issuer_id" not in replay["params"]
+        assert "key_file" not in replay["params"]
+        assert "api_key" not in replay["params"]
+        task_id = store.create("metadata", profile="myapp", replay=replay)
+        public = store.get_state(task_id)
+        assert public["has_replay"] is True
+        assert "replay" not in public
+        assert "params" not in public
+        stored = store.get_replay(task_id)
+        assert stored["params"]["csv_path"] == "data/appstore_info.csv"
+        assert "SECRET-ISSUER" not in str(stored)
+    finally:
+        store.close()
+
+
+def test_list_failed_only_errors_and_prefers_cookie_profile(tmp_path):
+    from asc.web.tasks import TaskStatus, TaskStore
+
+    store = TaskStore(tmp_path / "tasks.db")
+    try:
+        a = store.create("metadata", profile="keep")
+        b = store.create("build", profile="other")
+        c = store.create("iap", profile="keep")
+        store.set_status(a, TaskStatus.ERROR)
+        store.set_status(b, TaskStatus.ERROR)
+        store.set_status(c, TaskStatus.DONE)
+        rows = store.list_failed(limit=50, prefer_profile="keep")
+        assert [row["id"] for row in rows][0] == a
+        assert all(row["status"] == TaskStatus.ERROR or row["status"] == "error" for row in rows)
+        assert c not in [row["id"] for row in rows]
+        assert all("params" not in row for row in rows)
+    finally:
+        store.close()
+
+
+def test_legacy_row_without_replay_has_replay_false(tmp_path):
+    from asc.web.tasks import TaskStore
+
+    store = TaskStore(tmp_path / "tasks.db")
+    try:
+        task_id = store.create("update", profile="system")
+        assert store.get_state(task_id)["has_replay"] is False
+        assert store.get_replay(task_id) is None
+    finally:
+        store.close()
+
+
+def test_save_preserves_replay_json(tmp_path):
+    from asc.web.tasks import TaskStore
+
+    store = TaskStore(tmp_path / "tasks.db")
+    try:
+        replay = {
+            "kind": "metadata",
+            "profile": "myapp",
+            "verbose": False,
+            "params": {"csv_path": "data/appstore_info.csv"},
+        }
+        task_id = store.create("metadata", profile="myapp", replay=replay)
+        store._load_db(recover=False)
+        store._save()
+        stored = store.get_replay(task_id)
+        assert stored is not None
+        assert stored["params"]["csv_path"] == "data/appstore_info.csv"
+        public = store.get_state(task_id)
+        assert public["has_replay"] is True
+        assert "replay" not in public
+    finally:
+        store.close()
+
+
+def test_in_memory_store_keeps_replay_off_public_json():
+    from asc.web.tasks import TaskStore
+
+    store = TaskStore()
+    replay = {"kind": "iap", "profile": "p", "verbose": False, "params": {"iap_file": "x.json"}}
+    task_id = store.create("iap", profile="p", replay=replay)
+    public = store.get_state(task_id)
+    assert public["has_replay"] is True
+    assert "replay" not in public
+    assert store.get_replay(task_id)["params"]["iap_file"] == "x.json"
+
+
+def test_sanitize_replay_truncates_text_and_filters_signing():
+    from asc.web.task_runner import FORBIDDEN_REPLAY_KEYS, sanitize_replay
+
+    assert "certificate" in FORBIDDEN_REPLAY_KEYS
+    out = sanitize_replay(
+        "whats-new",
+        "myapp",
+        True,
+        {
+            "text": "x" * 9000,
+            "signing": "invalid",
+            "Authorization": "Bearer secret",
+            "certificate": "iPhone Distribution: Secret",
+            "dry_run": True,
+        },
+    )
+    assert out["kind"] == "whats-new"
+    assert out["profile"] == "myapp"
+    assert out["verbose"] is True
+    assert len(out["params"]["text"]) == 8192
+    assert "signing" not in out["params"]
+    assert "Authorization" not in out["params"]
+    assert "certificate" not in out["params"]
+    assert out["params"]["dry_run"] is True
+    allowed = sanitize_replay("build", "p", False, {"signing": "manual"})
+    assert allowed["params"]["signing"] == "manual"
+
+
+def test_task_kind_labels_include_translate_and_listing_pull():
+    from asc.web.tasks import TASK_KIND_LABELS, TASK_KIND_RETRY_PATHS, TaskStore
+
+    assert TASK_KIND_LABELS["whats-new-translate"] == "更新说明翻译"
+    assert TASK_KIND_LABELS["listing-pull-screenshots"] == "拉取截图"
+    assert TASK_KIND_RETRY_PATHS["whats-new-translate"] == "/whats-new"
+    assert TASK_KIND_RETRY_PATHS["listing-pull-screenshots"] == "/metadata"
+    store = TaskStore()
+    translate_id = store.create("whats-new-translate")
+    pull_id = store.create("listing-pull-screenshots")
+    assert store.get(translate_id)["title"] == "更新说明翻译"
+    assert store.get(translate_id)["retry_path"] == "/whats-new"
+    assert store.get(pull_id)["title"] == "拉取截图"
+    assert store.get(pull_id)["retry_path"] == "/metadata"
