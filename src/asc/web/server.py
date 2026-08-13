@@ -13,6 +13,7 @@ from fastapi.templating import Jinja2Templates
 
 from asc import __version__
 from asc.cli import _installed_commit_short
+from asc.web.agent_store import agent_store
 from asc.web.dashboard import build_dashboard_summary
 from asc.web.tasks import task_store
 
@@ -48,6 +49,10 @@ async def _lifespan(app: FastAPI):
         task_store.close()
     except Exception as exc:  # noqa: BLE001
         print(f"⚠️  TaskStore shutdown failed: {exc}")
+    try:
+        agent_store.close()
+    except Exception as exc:  # noqa: BLE001
+        print(f"⚠️  AgentStore shutdown failed: {exc}")
 
 
 def create_app() -> FastAPI:
