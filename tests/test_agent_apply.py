@@ -306,3 +306,224 @@ def test_apply_fix_is_not_a_model_tool():
     names = {item["function"]["name"] for item in OPENAI_TOOLS}
     assert "apply_fix" not in names
     assert "apply_fix" not in MODEL_TOOL_NAMES
+    assert "rerun_task" not in names
+    assert "rerun_task" not in MODEL_TOOL_NAMES
+
+
+def test_rerun_task_creates_new_id_and_keeps_old_error(tmp_path, monkeypatch):
+    from asc.web.agent_rerun import rerun_task
+    from asc.web.task_runner import sanitize_replay
+    from asc.web.tasks import TaskStatus, TaskStore
+
+    store = TaskStore(tmp_path / "tasks.db")
+    replay = sanitize_replay("update", "system", False, {"version": "0.1.26", "branch": ""})
+    old = store.create("update", profile="system", replay=replay)
+    store.set_status(old, TaskStatus.ERROR)
+    created = []
+
+    def fake_start(store_arg, *, kind, profile, verbose, run, task_id=None, **kwargs):
+        created.append((kind, profile, task_id))
+        return task_id
+
+    monkeypatch.setattr("asc.web.task_runner.start_background_task", fake_start)
+    monkeypatch.setattr("asc.web.routes_api.start_background_task", fake_start)
+    new_id = rerun_task(old, task_store=store)
+    assert new_id != old
+    assert store.get_state(old)["status"] in (TaskStatus.ERROR, "error")
+    assert store.get_state(new_id) is not None
+    store.close()
+
+
+def test_rerun_without_replay_does_not_create(tmp_path):
+    from asc.web.agent_rerun import RerunError, rerun_task
+    from asc.web.tasks import TaskStore
+
+    store = TaskStore(tmp_path / "tasks.db")
+    old = store.create("metadata", profile="myapp")  # no replay
+    try:
+        rerun_task(old, task_store=store)
+        assert False, "expected RerunError"
+    except RerunError as exc:
+        assert "no_replay" in str(exc)
+    assert len(store.list_recent_states(limit=10)) == 1
+    store.close()
+
+
+def test_rerun_unknown_kind_does_not_create(tmp_path):
+    from asc.web.agent_rerun import RerunError, rerun_task
+    from asc.web.tasks import TaskStore
+
+    store = TaskStore(tmp_path / "tasks.db")
+    replay = {"kind": "not-a-web-kind", "profile": "myapp", "verbose": False, "params": {}}
+    old = store.create("metadata", profile="myapp", replay=replay)
+    try:
+        rerun_task(old, task_store=store)
+        assert False, "expected RerunError"
+    except RerunError as exc:
+        assert "no_replay" in str(exc)
+    assert len(store.list_recent_states(limit=10)) == 1
+    store.close()
+
+
+def test_hallucinated_rerun_task_does_not_create(tmp_path):
+    store = TaskStore(tmp_path / "tasks.db")
+    out = execute_model_tool(
+        AgentToolContext(store, None, None, tmp_path, turn_seq=1),
+        "rerun_task",
+        {"task_id": "x"},
+    )
+    assert out["ok"] is False
+    assert "gated" in out["error"]
+    assert store.list_recent_states(limit=10) == []
+    store.close()
+
+
+def test_apply_fix_does_not_create_or_rerun(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    csv_path, tasks, agents, ctx, plan_id = _pending_csv_plan(tmp_path)
+    agents.promote_drafts(ctx.session_id, 1)
+    before_ids = [row["id"] for row in tasks.list_recent_states(limit=20)]
+    result = apply_fix(ctx, plan_id)
+    assert result["ok"] is True
+    after_ids = [row["id"] for row in tasks.list_recent_states(limit=20)]
+    assert after_ids == before_ids
+    tasks.close()
+    agents.close()
+
+
+def test_rerun_metadata_uses_replay_params_not_secrets(tmp_path, monkeypatch):
+    from asc.web.agent_rerun import rerun_task
+    from asc.web.task_runner import sanitize_replay
+    from asc.web.tasks import TaskStatus, TaskStore
+
+    store = TaskStore(tmp_path / "tasks.db")
+    replay = sanitize_replay(
+        "metadata",
+        "myapp",
+        True,
+        {
+            "csv_path": "data/appstore_info.csv",
+            "screenshots_dir": "data/screenshots",
+            "include_metadata": True,
+            "include_screenshots": False,
+            "dry_run": True,
+            "locales": ["zh-Hans"],
+            "issuer_id": "SECRET-ISSUER",
+            "key_file": "/tmp/AuthKey_X.p8",
+        },
+    )
+    old = store.create("metadata", profile="myapp", replay=replay)
+    store.set_status(old, TaskStatus.ERROR)
+
+    def fake_start(store_arg, *, kind, profile, verbose, run, task_id=None, **kwargs):
+        return task_id
+
+    monkeypatch.setattr("asc.web.task_runner.start_background_task", fake_start)
+    monkeypatch.setattr("asc.web.routes_api.start_background_task", fake_start)
+    new_id = rerun_task(old, task_store=store)
+    stored = store.get_replay(new_id)
+    assert stored["kind"] == "metadata"
+    assert stored["profile"] == "myapp"
+    assert stored["verbose"] is True
+    assert stored["params"]["csv_path"] == "data/appstore_info.csv"
+    assert stored["params"]["include_screenshots"] is False
+    assert stored["params"]["locales"] == ["zh-Hans"]
+    assert "issuer_id" not in stored["params"]
+    assert "key_file" not in stored["params"]
+    assert store.get_state(old)["status"] in (TaskStatus.ERROR, "error")
+    store.close()
+
+
+def test_rerun_build_omits_certificate_fields(tmp_path, monkeypatch):
+    from asc.web.agent_rerun import rerun_task
+    from asc.web.task_runner import sanitize_replay
+    from asc.web.tasks import TaskStatus, TaskStore
+
+    store = TaskStore(tmp_path / "tasks.db")
+    replay = sanitize_replay(
+        "build",
+        "myapp",
+        False,
+        {
+            "mode": "build",
+            "project": "App.xcodeproj",
+            "scheme": "App",
+            "destination": "testflight",
+            "ipa_path": "",
+            "signing": "manual",
+            "dry_run": True,
+            "certificate": "iPhone Distribution: Secret",
+            "provisioning_profile": "secret-profile",
+        },
+    )
+    old = store.create("build", profile="myapp", replay=replay)
+    store.set_status(old, TaskStatus.ERROR)
+
+    def fake_start(store_arg, *, kind, profile, verbose, run, task_id=None, **kwargs):
+        return task_id
+
+    monkeypatch.setattr("asc.web.task_runner.start_background_task", fake_start)
+    monkeypatch.setattr("asc.web.routes_api.start_background_task", fake_start)
+    new_id = rerun_task(old, task_store=store)
+    params = store.get_replay(new_id)["params"]
+    assert params["signing"] == "manual"
+    assert params["project"] == "App.xcodeproj"
+    assert "certificate" not in params
+    assert "provisioning_profile" not in params
+    store.close()
+
+
+def test_rerun_remaining_kinds_dispatch(tmp_path, monkeypatch):
+    from asc.web.agent_rerun import rerun_task
+    from asc.web.task_runner import sanitize_replay
+    from asc.web.tasks import TaskStatus, TaskStore
+
+    store = TaskStore(tmp_path / "tasks.db")
+
+    def fake_start(store_arg, *, kind, profile, verbose, run, task_id=None, **kwargs):
+        return task_id
+
+    monkeypatch.setattr("asc.web.task_runner.start_background_task", fake_start)
+    monkeypatch.setattr("asc.web.routes_api.start_background_task", fake_start)
+    monkeypatch.setattr("asc.web.routes_listing.start_background_task", fake_start)
+
+    cases = [
+        ("iap", {"iap_file": "data/iap_packages.json", "dry_run": True, "update_existing": False}),
+        (
+            "urls",
+            {
+                "field": "supportUrl",
+                "url": "https://example.com/s",
+                "locales": ["en-US"],
+                "dry_run": True,
+            },
+        ),
+        ("whats-new", {"dry_run": True, "text": "hello", "locales": ["en-US"]}),
+        ("whats-new-translate", {"text": "hello", "source_locale": "en-US"}),
+        (
+            "listing-pull-screenshots",
+            {
+                "screenshots_dir": "data/screenshots",
+                "scopes": [{"locale": "en-US", "display_type": "APP_IPHONE_67"}],
+            },
+        ),
+        (
+            "iap-review-screenshots",
+            {
+                "dry_run": True,
+                "items": [{"kind": "iap", "id": "x", "productId": "sku", "path": "shot.png"}],
+            },
+        ),
+    ]
+    for kind, params in cases:
+        replay = sanitize_replay(kind, "myapp", False, params)
+        old = store.create(kind, profile="myapp", replay=replay)
+        store.set_status(old, TaskStatus.ERROR)
+        new_id = rerun_task(old, task_store=store)
+        assert new_id != old
+        stored = store.get_replay(new_id)
+        assert stored["kind"] == kind
+        assert store.get_state(old)["status"] in (TaskStatus.ERROR, "error")
+        for key, value in params.items():
+            assert stored["params"][key] == value
+    store.close()
