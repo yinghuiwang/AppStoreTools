@@ -5,15 +5,27 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
+from asc.web import routes_agent, routes_api, routes_listing  # noqa: F401
 from asc.web.server import create_app
 from asc.web.tasks import TaskStatus, TaskStore
 
 
+def _isolate_task_store(monkeypatch, store: TaskStore) -> None:
+    """Patch every module-level TaskStore alias for one test."""
+    monkeypatch.setattr("asc.web.tasks.task_store", store)
+    monkeypatch.setattr("asc.web.server.task_store", store)
+    monkeypatch.setattr("asc.web.routes_api._task_store", store)
+    monkeypatch.setattr("asc.web.routes_listing.task_store", store)
+
+
+def _isolate_agent_store(monkeypatch, agents) -> None:
+    monkeypatch.setattr("asc.web.agent_store.agent_store", agents)
+    monkeypatch.setattr("asc.web.routes_agent.agent_store", agents)
+
+
 def test_agent_stream_is_sse_and_task_stream_still_exists(tmp_path, monkeypatch):
     store = TaskStore(tmp_path / "tasks.db")
-    monkeypatch.setattr("asc.web.tasks.task_store", store)
-    monkeypatch.setattr("asc.web.routes_api._task_store", store)
-    monkeypatch.setattr("asc.web.server.task_store", store)
+    _isolate_task_store(monkeypatch, store)
     task_id = store.create("metadata", profile="myapp")
     store.set_status(task_id, TaskStatus.ERROR)
 
@@ -39,8 +51,7 @@ def test_agent_stream_is_sse_and_task_stream_still_exists(tmp_path, monkeypatch)
 
 def test_failed_tasks_excludes_canceled_and_done(tmp_path, monkeypatch):
     store = TaskStore(tmp_path / "tasks.db")
-    monkeypatch.setattr("asc.web.tasks.task_store", store)
-    monkeypatch.setattr("asc.web.server.task_store", store)
+    _isolate_task_store(monkeypatch, store)
     e = store.create("iap", profile="a")
     store.set_status(e, TaskStatus.ERROR)
     d = store.create("iap", profile="a")
@@ -62,10 +73,8 @@ def test_apply_draft_conflict_and_pending_success(tmp_path, monkeypatch):
 
     store = TaskStore(tmp_path / "tasks.db")
     agents = AgentStore(tmp_path / "agent.db")
-    monkeypatch.setattr("asc.web.tasks.task_store", store)
-    monkeypatch.setattr("asc.web.server.task_store", store)
-    monkeypatch.setattr("asc.web.agent_store.agent_store", agents)
-    monkeypatch.setattr("asc.web.routes_agent.agent_store", agents)
+    _isolate_task_store(monkeypatch, store)
+    _isolate_agent_store(monkeypatch, agents)
     csv_path = tmp_path / "app.csv"
     csv_path.write_text("locale,keywords\nzh-Hans,oldkeywords\n", encoding="utf-8")
     task_id = store.create(
@@ -108,10 +117,8 @@ def test_concurrent_apply_one_409(tmp_path, monkeypatch):
 
     store = TaskStore(tmp_path / "tasks.db")
     agents = AgentStore(tmp_path / "agent.db")
-    monkeypatch.setattr("asc.web.tasks.task_store", store)
-    monkeypatch.setattr("asc.web.server.task_store", store)
-    monkeypatch.setattr("asc.web.agent_store.agent_store", agents)
-    monkeypatch.setattr("asc.web.routes_agent.agent_store", agents)
+    _isolate_task_store(monkeypatch, store)
+    _isolate_agent_store(monkeypatch, agents)
     csv_path = tmp_path / "app.csv"
     csv_path.write_text("locale,keywords\nzh-Hans,oldkeywords\n", encoding="utf-8")
     task_id = store.create(
@@ -162,10 +169,8 @@ def test_reject_non_pending_is_409(tmp_path, monkeypatch):
 
     store = TaskStore(tmp_path / "tasks.db")
     agents = AgentStore(tmp_path / "agent.db")
-    monkeypatch.setattr("asc.web.tasks.task_store", store)
-    monkeypatch.setattr("asc.web.server.task_store", store)
-    monkeypatch.setattr("asc.web.agent_store.agent_store", agents)
-    monkeypatch.setattr("asc.web.routes_agent.agent_store", agents)
+    _isolate_task_store(monkeypatch, store)
+    _isolate_agent_store(monkeypatch, agents)
     task_id = store.create("iap", profile="myapp")
     session = agents.get_or_create_session(task_id, "myapp")
     plan_id = agents.insert_plan_draft(
@@ -186,9 +191,7 @@ def test_reject_non_pending_is_409(tmp_path, monkeypatch):
 
 def test_stream_missing_llm_does_not_instantiate_client(tmp_path, monkeypatch):
     store = TaskStore(tmp_path / "tasks.db")
-    monkeypatch.setattr("asc.web.tasks.task_store", store)
-    monkeypatch.setattr("asc.web.routes_api._task_store", store)
-    monkeypatch.setattr("asc.web.server.task_store", store)
+    _isolate_task_store(monkeypatch, store)
     task_id = store.create("iap", profile="myapp")
     store.set_status(task_id, TaskStatus.ERROR)
 

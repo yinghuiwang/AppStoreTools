@@ -269,3 +269,76 @@ def test_done_promotes_draft_without_writing_csv(tmp_path, monkeypatch):
     tasks.close()
     agents.close()
 
+
+def test_done_promotes_draft_then_apply_writes_csv(tmp_path, monkeypatch):
+    from asc.web.agent import WebAgent
+    from asc.web.agent_tools import AgentToolContext, apply_fix
+
+    monkeypatch.chdir(tmp_path)
+    tasks = TaskStore(tmp_path / "tasks.db")
+    agents = AgentStore(tmp_path / "agent.db")
+    csv_path = tmp_path / "app.csv"
+    csv_path.write_text("locale,keywords\nzh-Hans,oldkeywords\n", encoding="utf-8")
+    before = csv_path.read_bytes()
+    replay = {
+        "kind": "metadata",
+        "profile": "myapp",
+        "verbose": False,
+        "params": {"csv_path": str(csv_path)},
+    }
+    task_id = tasks.create("metadata", profile="myapp", replay=replay)
+    tasks.set_status(task_id, TaskStatus.ERROR)
+    args = {
+        "summary": "truncate keywords",
+        "mutations": [{
+            "op": "csv_set_fields",
+            "path": str(csv_path),
+            "locale": "zh-Hans",
+            "fields": {"keywords": "new"},
+            "before": {"keywords": "oldkeywords"},
+        }],
+        "manual_steps": [],
+    }
+    llm = ScriptedLLM([
+        [
+            {
+                "tool_calls": [{
+                    "index": 0,
+                    "id": "c1",
+                    "function": {
+                        "name": "propose_fix",
+                        "arguments": json.dumps(args),
+                    },
+                }]
+            },
+            {"finish_reason": "tool_calls"},
+        ],
+        [{"content": "please confirm", "finish_reason": "stop"}],
+    ])
+    agent = WebAgent(agent_store=agents, task_store=tasks, project_root=tmp_path)
+    events = list(agent.run_turn(
+        session_id=None, task_id=task_id, message="fix", auto_analyze=False,
+        lang="zh", llm_client=llm,
+    ))
+    assert events[-1][0] == "done"
+    payload = json.loads(events[-1][1])
+    assert payload["plan_ids"]
+    plan_id = payload["plan_ids"][0]
+    plan = agents.get_plan(plan_id)
+    assert plan["status"] == "pending"
+    assert csv_path.read_bytes() == before
+    ctx = AgentToolContext(
+        tasks,
+        agents,
+        task_id,
+        tmp_path,
+        turn_seq=int(plan.get("turn_seq") or 1),
+        session_id=plan["session_id"],
+    )
+    result = apply_fix(ctx, plan_id)
+    assert result["ok"] is True
+    assert agents.get_plan(plan_id)["status"] == "applied"
+    assert "new" in csv_path.read_text(encoding="utf-8")
+    tasks.close()
+    agents.close()
+
