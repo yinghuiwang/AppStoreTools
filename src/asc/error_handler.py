@@ -167,6 +167,14 @@ ACTION_HINTS: dict[str, dict[str, str]] = {
         'en': 'Network error. Check your connection to App Store Connect.',
         'zh': '网络错误，请检查与 App Store Connect 的连接。',
     },
+    '上传写入超时': {
+        'en': 'The Apple upload endpoint timed out while sending the file. Retry the task.',
+        'zh': '向 Apple 上传文件时写入超时，请检查网络后重试任务。',
+    },
+    'upload write timed out': {
+        'en': 'The Apple upload endpoint timed out while sending the file. Retry the task.',
+        'zh': '向 Apple 上传文件时写入超时，请检查网络后重试任务。',
+    },
     # General
     'No such file': {
         'en': 'File not found. Check the path or use --help for correct usage.',

@@ -211,7 +211,7 @@ def validate_review_screenshot_path(path_value) -> PathValidationResult:
     return PathValidationResult(True, path=path, warning=warning)
 
 
-def _upload_iap_review_screenshot_file(api, iap_id: str, path: Path) -> None:
+def _upload_iap_review_screenshot_file(api, iap_id: str, path: Path, log=None) -> None:
     file_bytes = path.read_bytes()
     reservation = api.create_in_app_purchase_review_screenshot_reservation(
         iap_id, path.name, len(file_bytes)
@@ -220,12 +220,17 @@ def _upload_iap_review_screenshot_file(api, iap_id: str, path: Path) -> None:
     upload_operations = reservation["data"].get("attributes", {}).get(
         "uploadOperations", []
     )
-    api.upload_in_app_purchase_review_screenshot(upload_operations, file_bytes)
+    api.upload_in_app_purchase_review_screenshot(
+        upload_operations,
+        file_bytes,
+        log=log,
+        screenshot_id=screenshot_id,
+    )
     md5 = hashlib.md5(file_bytes).hexdigest()
     api.commit_in_app_purchase_review_screenshot(screenshot_id, md5)
 
 
-def _upload_subscription_review_screenshot_file(api, sub_id: str, path: Path) -> None:
+def _upload_subscription_review_screenshot_file(api, sub_id: str, path: Path, log=None) -> None:
     file_bytes = path.read_bytes()
     reservation = api.create_subscription_review_screenshot_reservation(
         sub_id, path.name, len(file_bytes)
@@ -234,7 +239,12 @@ def _upload_subscription_review_screenshot_file(api, sub_id: str, path: Path) ->
     upload_operations = reservation["data"].get("attributes", {}).get(
         "uploadOperations", []
     )
-    api.upload_subscription_review_screenshot(upload_operations, file_bytes)
+    api.upload_subscription_review_screenshot(
+        upload_operations,
+        file_bytes,
+        log=log,
+        screenshot_id=screenshot_id,
+    )
     md5 = hashlib.md5(file_bytes).hexdigest()
     api.commit_subscription_review_screenshot(screenshot_id, md5)
 
@@ -300,9 +310,13 @@ def upload_review_screenshots(
                 continue
 
             if item.kind == "iap":
-                _upload_iap_review_screenshot_file(api, item.id, path)
+                _upload_iap_review_screenshot_file(
+                    api, item.id, path, log=reporter.log
+                )
             elif item.kind == "subscription":
-                _upload_subscription_review_screenshot_file(api, item.id, path)
+                _upload_subscription_review_screenshot_file(
+                    api, item.id, path, log=reporter.log
+                )
             else:
                 raise ValueError(f"unsupported review screenshot kind: {item.kind}")
 

@@ -570,6 +570,211 @@ def test_get_editable_version_returns_none_when_empty(api):
     assert result is None
 
 
+# ── Binary asset PUT retry / timeout ──
+
+def _upload_ops(url="https://upload.example.test/chunk", size=100, headers=None):
+    return [
+        {
+            "url": url,
+            "offset": 0,
+            "length": size,
+            "requestHeaders": headers
+            or [{"name": "Content-Type", "value": "image/jpeg"}],
+        }
+    ]
+
+
+def _write_timeout_error():
+    """Match production: urllib3 SSL write timeout wrapped by requests."""
+    from requests.exceptions import ConnectionError as RequestsConnectionError
+    from urllib3.exceptions import ProtocolError
+
+    return RequestsConnectionError(
+        ProtocolError(
+            "Connection aborted.",
+            TimeoutError("The write operation timed out"),
+        )
+    )
+
+
+def _ok_put_response(status=200):
+    resp = MagicMock()
+    resp.status_code = status
+    resp.text = "ok"
+    return resp
+
+
+def test_upload_timeout_tuple_is_write_friendly():
+    from asc.api import UPLOAD_TIMEOUT
+
+    assert isinstance(UPLOAD_TIMEOUT, tuple)
+    connect, read = UPLOAD_TIMEOUT
+    assert connect >= 30
+    assert read >= 300
+
+
+def test_upload_screenshot_asset_retries_write_timeout_then_succeeds(api, tmp_path):
+    from asc.api import UPLOAD_TIMEOUT
+
+    payload = b"x" * 100
+    shot = tmp_path / "4.jpg"
+    shot.write_bytes(payload)
+    logs: list[str] = []
+
+    with patch(
+        "requests.put",
+        side_effect=[_write_timeout_error(), _ok_put_response()],
+    ) as mock_put:
+        with patch("asc.api._interruptible_sleep"):
+            api.upload_screenshot_asset(
+                _upload_ops(size=len(payload)),
+                shot,
+                log=logs.append,
+            )
+
+    assert mock_put.call_count == 2
+    assert mock_put.call_args.kwargs["timeout"] == UPLOAD_TIMEOUT
+    assert mock_put.call_args.kwargs["data"] == payload
+    joined = "\n".join(logs)
+    assert "1/" in joined
+    assert "重试" in joined or "Retry" in joined
+
+
+def test_upload_screenshot_asset_raises_clear_error_after_retries_exhausted(api, tmp_path):
+    from asc.api import AssetUploadError
+
+    shot = tmp_path / "4.jpg"
+    shot.write_bytes(b"x" * 80)
+    logs: list[str] = []
+
+    with patch("requests.put", side_effect=_write_timeout_error()) as mock_put:
+        with patch("asc.api._interruptible_sleep"):
+            with pytest.raises(AssetUploadError) as ei:
+                api.upload_screenshot_asset(
+                    _upload_ops(size=80),
+                    shot,
+                    log=logs.append,
+                )
+
+    assert mock_put.call_count >= 3
+    assert mock_put.call_count <= 8
+    msg = str(ei.value)
+    assert "Connection aborted" not in msg
+    assert "TimeoutError" not in msg
+    assert "4.jpg" in msg or "截图" in msg or "screenshot" in msg.lower() or "上传" in msg
+    joined = "\n".join(logs)
+    assert "1/" in joined
+
+
+def test_upload_in_app_purchase_review_screenshot_retries_read_timeout(api):
+    from requests.exceptions import ReadTimeout
+
+    payload = b"iap-shot"
+    with patch(
+        "requests.put",
+        side_effect=[ReadTimeout("Read timed out"), _ok_put_response()],
+    ) as mock_put:
+        with patch("asc.api._interruptible_sleep"):
+            api.upload_in_app_purchase_review_screenshot(
+                _upload_ops(size=len(payload)),
+                payload,
+            )
+
+    assert mock_put.call_count == 2
+
+
+def test_upload_subscription_review_screenshot_retries_protocol_error(api):
+    from urllib3.exceptions import ProtocolError
+
+    payload = b"sub-shot"
+    with patch(
+        "requests.put",
+        side_effect=[ProtocolError("Connection aborted."), _ok_put_response()],
+    ) as mock_put:
+        with patch("asc.api._interruptible_sleep"):
+            api.upload_subscription_review_screenshot(
+                _upload_ops(size=len(payload)),
+                payload,
+            )
+
+    assert mock_put.call_count == 2
+
+
+def test_upload_screenshot_asset_refetches_operations_on_403(api, tmp_path):
+    payload = b"y" * 40
+    shot = tmp_path / "1.jpg"
+    shot.write_bytes(payload)
+    stale = _upload_ops("https://upload.example.test/stale", size=len(payload))
+    fresh = _upload_ops("https://upload.example.test/fresh", size=len(payload))
+
+    forbidden = MagicMock()
+    forbidden.status_code = 403
+    forbidden.text = "Expired token"
+
+    with patch("requests.put", side_effect=[forbidden, _ok_put_response()]) as mock_put:
+        with patch("asc.api._interruptible_sleep"):
+            with patch.object(
+                api,
+                "get",
+                return_value={"data": {"attributes": {"uploadOperations": fresh}}},
+            ) as mock_get:
+                api.upload_screenshot_asset(
+                    stale,
+                    shot,
+                    screenshot_id="shot_1",
+                )
+
+    mock_get.assert_called_once()
+    urls = [c.args[0] for c in mock_put.call_args_list]
+    assert urls[0] == "https://upload.example.test/stale"
+    assert urls[-1] == "https://upload.example.test/fresh"
+
+
+def test_upload_screenshot_asset_does_not_retry_http_401(api, tmp_path):
+    from asc.api import AssetUploadError
+
+    shot = tmp_path / "1.jpg"
+    shot.write_bytes(b"z" * 10)
+    unauthorized = MagicMock()
+    unauthorized.status_code = 401
+    unauthorized.text = "nope"
+
+    with patch("requests.put", return_value=unauthorized) as mock_put:
+        with pytest.raises(AssetUploadError, match="401"):
+            api.upload_screenshot_asset(_upload_ops(size=10), shot)
+
+    assert mock_put.call_count == 1
+
+
+def test_upload_screenshot_asset_retries_http_503_then_succeeds(api, tmp_path):
+    shot = tmp_path / "1.jpg"
+    shot.write_bytes(b"x" * 10)
+    unavailable = MagicMock()
+    unavailable.status_code = 503
+    unavailable.text = "busy"
+
+    with patch("requests.put", side_effect=[unavailable, _ok_put_response()]):
+        with patch("asc.api._interruptible_sleep"):
+            api.upload_screenshot_asset(_upload_ops(size=10), shot)
+
+
+def test_upload_screenshot_asset_exhausted_http_502_keeps_status(api, tmp_path):
+    from asc.api import AssetUploadError
+
+    shot = tmp_path / "1.jpg"
+    shot.write_bytes(b"x" * 10)
+    bad_gateway = MagicMock()
+    bad_gateway.status_code = 502
+    bad_gateway.text = "bad gateway"
+
+    with patch("requests.put", return_value=bad_gateway) as mock_put:
+        with patch("asc.api._interruptible_sleep"):
+            with pytest.raises(AssetUploadError, match="502"):
+                api.upload_screenshot_asset(_upload_ops(size=10), shot)
+
+    assert mock_put.call_count >= 3
+
+
 # ── 真实网络模式 ──
 
 LIVE = os.getenv("ASC_TEST_LIVE") == "1"

@@ -13,6 +13,7 @@ from PIL import Image
 
 from asc.config import Config
 from asc.constants import DISPLAY_TYPE_BY_SIZE, SCREENSHOT_FOLDER_TO_LOCALE
+from asc.api import AssetUploadError
 from asc.error_handler import get_action_hint
 from asc.guard import Guard, GuardViolationError
 from asc.progress import ProcessCanceled
@@ -161,6 +162,55 @@ def _wait_for_screenshot_processing(
 
         delay = min(delay * 2, max_delay)
         attempt += 1
+
+
+_SCREENSHOT_RESERVE_ATTEMPTS = 2
+
+
+def _upload_one_screenshot_file(api, set_id, file_path: Path, reporter, cancel_event):
+    """Reserve + PUT + commit one screenshot, re-reserving once after a failed PUT."""
+    filesize = file_path.stat().st_size
+    filename = file_path.name
+    screenshot_id = None
+    last_exc: Exception | None = None
+
+    for attempt in range(1, _SCREENSHOT_RESERVE_ATTEMPTS + 1):
+        if cancel_event is not None and cancel_event.is_set():
+            raise ProcessCanceled("screenshots upload canceled")
+        if screenshot_id:
+            reporter.log(t(ERRORS["screenshot_rereserve"]).format(filename=filename))
+            try:
+                api.delete_screenshot(screenshot_id)
+            except Exception:
+                pass
+            screenshot_id = None
+
+        reserve_resp = api.reserve_screenshot(set_id, filename, filesize)
+        screenshot_data = reserve_resp["data"]
+        screenshot_id = screenshot_data["id"]
+        upload_ops = screenshot_data["attributes"]["uploadOperations"]
+        try:
+            api.upload_screenshot_asset(
+                upload_ops,
+                file_path,
+                screenshot_id=screenshot_id,
+                log=reporter.log,
+            )
+            checksum = md5_of_file(file_path)
+            api.commit_screenshot(screenshot_id, checksum)
+            return screenshot_id
+        except Exception as exc:
+            last_exc = exc
+            if attempt < _SCREENSHOT_RESERVE_ATTEMPTS:
+                continue
+            msg = t(ERRORS["screenshot_upload_failed"]).format(
+                filename=filename,
+                reason=str(exc),
+            )
+            reporter.fail(msg)
+            raise AssetUploadError(msg) from exc
+
+    raise AssetUploadError(str(last_exc)) from last_exc
 
 
 def _collect_locale_screenshot_jobs(
@@ -432,15 +482,9 @@ def _upload_screenshots_core(
                 f"    [{idx}/{len(files)}] 上传: {filename} ({filesize / 1024:.0f} KB)"
             )
 
-            reserve_resp = api.reserve_screenshot(set_id, filename, filesize)
-            screenshot_data = reserve_resp["data"]
-            screenshot_id = screenshot_data["id"]
-            upload_ops = screenshot_data["attributes"]["uploadOperations"]
-
-            api.upload_screenshot_asset(upload_ops, file_path)
-
-            checksum = md5_of_file(file_path)
-            api.commit_screenshot(screenshot_id, checksum)
+            screenshot_id = _upload_one_screenshot_file(
+                api, set_id, file_path, reporter, cancel_event
+            )
 
             outcome, check = _wait_for_screenshot_processing(
                 api,

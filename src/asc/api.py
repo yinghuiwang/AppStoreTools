@@ -1,7 +1,7 @@
 """App Store Connect API client"""
 
 from __future__ import annotations
-from typing import Optional
+from typing import Callable, Optional
 
 import os
 import sys
@@ -13,12 +13,24 @@ from pathlib import Path
 
 import jwt
 import requests
+from requests.exceptions import ChunkedEncodingError
+from requests.exceptions import ConnectionError as RequestsConnectionError
+from requests.exceptions import Timeout as RequestsTimeout
+from urllib3.exceptions import ProtocolError
 
 from asc.constants import BASE_URL
+from asc.i18n import ERRORS, t
 from asc.progress import ProcessCanceled
 
 API_TIMEOUT = (10, 60)
-UPLOAD_TIMEOUT = (10, 300)
+# Connect timeout also governs request-body writes in urllib3/requests, so it
+# must be large enough for 1–10MB screenshot chunks on a slow link.
+UPLOAD_TIMEOUT = (120, 300)
+UPLOAD_MAX_ATTEMPTS = 4
+UPLOAD_RETRY_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
+UPLOAD_STALE_STATUSES = frozenset({400, 403})
+UPLOAD_OK_STATUSES = frozenset({200, 201})
+UPLOAD_RETRY_BACKOFF_CAP_SEC = 8.0
 
 DEFAULT_ASC_MAX_INFLIGHT = 4
 _asc_inflight_lock = threading.Lock()
@@ -48,6 +60,135 @@ def _interruptible_sleep(
             return
         if cancel_event.wait(timeout=min(chunk, remaining)):
             raise ProcessCanceled("ASC request canceled during rate-limit wait")
+
+
+class AssetUploadError(Exception):
+    """Binary asset PUT failed after retries (screenshots / review images)."""
+
+
+class _StaleUploadOperations(Exception):
+    """Signed upload URL expired or rejected; refresh uploadOperations."""
+
+
+def _is_transient_upload_error(exc: BaseException) -> bool:
+    if isinstance(exc, ProcessCanceled):
+        return False
+    if isinstance(
+        exc,
+        (RequestsTimeout, RequestsConnectionError, ChunkedEncodingError, ProtocolError),
+    ):
+        return True
+    if isinstance(exc, TimeoutError):
+        return True
+    text = str(exc).lower()
+    return "timed out" in text or "timeout" in text
+
+
+def _upload_error_reason(exc: BaseException) -> str:
+    text = str(exc).lower()
+    if (
+        isinstance(exc, (RequestsTimeout, TimeoutError))
+        or "timed out" in text
+        or "timeout" in text
+    ):
+        return t(ERRORS["asset_upload_timeout_reason"])
+    return t(ERRORS["asset_upload_connection_reason"])
+
+
+def _log_asset_upload(log, message: str) -> None:
+    if log is not None:
+        log(message)
+        return
+    print(message, file=sys.stderr, flush=True)
+
+
+def _put_asset_chunk(
+    *,
+    url: str,
+    headers: dict,
+    chunk: bytes,
+    error_label: str,
+    log=None,
+    cancel_event: Optional[threading.Event] = None,
+) -> None:
+    last_exc: BaseException | None = None
+    retry_total = UPLOAD_MAX_ATTEMPTS - 1
+    for attempt in range(1, UPLOAD_MAX_ATTEMPTS + 1):
+        if cancel_event is not None and cancel_event.is_set():
+            raise ProcessCanceled("asset upload canceled")
+        try:
+            resp = requests.put(
+                url, headers=headers, data=chunk, timeout=UPLOAD_TIMEOUT
+            )
+        except ProcessCanceled:
+            raise
+        except Exception as exc:
+            if not _is_transient_upload_error(exc):
+                raise
+            last_exc = exc
+            if attempt >= UPLOAD_MAX_ATTEMPTS:
+                break
+            _log_asset_upload(
+                log,
+                t(ERRORS["asset_upload_retry"]).format(
+                    attempt=attempt,
+                    total=retry_total,
+                    reason=_upload_error_reason(exc),
+                ),
+            )
+            _interruptible_sleep(
+                min(2 ** (attempt - 1), UPLOAD_RETRY_BACKOFF_CAP_SEC),
+                cancel_event,
+            )
+            continue
+
+        if resp.status_code in UPLOAD_OK_STATUSES:
+            return
+        if resp.status_code in UPLOAD_STALE_STATUSES:
+            raise _StaleUploadOperations(
+                t(ERRORS["asset_upload_http_error"]).format(
+                    label=error_label,
+                    status=resp.status_code,
+                    detail=(resp.text or "")[:200],
+                )
+            )
+        if resp.status_code in UPLOAD_RETRY_STATUSES and attempt < UPLOAD_MAX_ATTEMPTS:
+            last_exc = AssetUploadError(
+                t(ERRORS["asset_upload_http_error"]).format(
+                    label=error_label,
+                    status=resp.status_code,
+                    detail=(resp.text or "")[:200],
+                )
+            )
+            _log_asset_upload(
+                log,
+                t(ERRORS["asset_upload_retry"]).format(
+                    attempt=attempt,
+                    total=retry_total,
+                    reason=f"HTTP {resp.status_code}",
+                ),
+            )
+            _interruptible_sleep(
+                min(2 ** (attempt - 1), UPLOAD_RETRY_BACKOFF_CAP_SEC),
+                cancel_event,
+            )
+            continue
+        raise AssetUploadError(
+            t(ERRORS["asset_upload_http_error"]).format(
+                label=error_label,
+                status=resp.status_code,
+                detail=(resp.text or "")[:200],
+            )
+        )
+
+    reason = _upload_error_reason(last_exc) if last_exc else ""
+    raise AssetUploadError(
+        t(ERRORS["asset_upload_failed"]).format(
+            label=error_label,
+            attempts=UPLOAD_MAX_ATTEMPTS,
+            reason=reason,
+        )
+    ) from last_exc
 
 
 def _asc_max_inflight() -> int:
@@ -361,19 +502,88 @@ class AppStoreConnectAPI:
             },
         )
 
-    def upload_screenshot_asset(self, upload_operations: list, file_path: Path):
-        file_data = file_path.read_bytes()
-        for op in upload_operations:
-            url = op["url"]
-            offset = op["offset"]
-            length = op["length"]
-            req_headers = {h["name"]: h["value"] for h in op["requestHeaders"]}
-            chunk = file_data[offset : offset + length]
-            resp = requests.put(url, headers=req_headers, data=chunk, timeout=UPLOAD_TIMEOUT)
-            if resp.status_code not in (200, 201):
-                raise Exception(
-                    f"截图上传失败 [{resp.status_code}]: {resp.text[:200]}"
+    def _refresh_upload_operations(self, path: str) -> list:
+        resp = self.get(path)
+        attrs = ((resp.get("data") or {}).get("attributes") or {})
+        ops = attrs.get("uploadOperations") or []
+        return ops if isinstance(ops, list) else []
+
+    def _upload_asset_operations(
+        self,
+        upload_operations: list,
+        file_bytes: bytes,
+        *,
+        error_label: str,
+        log=None,
+        refresh_operations: Optional[Callable[[], list]] = None,
+    ) -> None:
+        ops = list(upload_operations or [])
+        max_rounds = 2 if refresh_operations is not None else 1
+        last_error: BaseException | None = None
+
+        for round_idx in range(max_rounds):
+            try:
+                for op in ops:
+                    url = op["url"]
+                    offset = int(op.get("offset") or 0)
+                    length = int(op.get("length") or 0)
+                    raw_headers = op.get("requestHeaders") or []
+                    req_headers = {h["name"]: h["value"] for h in raw_headers}
+                    chunk = file_bytes[offset : offset + length]
+                    _put_asset_chunk(
+                        url=url,
+                        headers=req_headers,
+                        chunk=chunk,
+                        error_label=error_label,
+                        log=log,
+                        cancel_event=self.cancel_event,
+                    )
+                return
+            except _StaleUploadOperations as exc:
+                last_error = exc
+            except AssetUploadError as exc:
+                last_error = exc
+                if refresh_operations is None or round_idx + 1 >= max_rounds:
+                    raise
+
+            if refresh_operations is None or round_idx + 1 >= max_rounds:
+                raise AssetUploadError(str(last_error)) from last_error
+
+            _log_asset_upload(log, t(ERRORS["asset_upload_refresh"]))
+            new_ops = refresh_operations()
+            if not new_ops:
+                raise AssetUploadError(str(last_error)) from last_error
+            ops = new_ops
+
+        if last_error:
+            raise AssetUploadError(str(last_error)) from last_error
+
+    def upload_screenshot_asset(
+        self,
+        upload_operations: list,
+        file_path: Path,
+        *,
+        log=None,
+        screenshot_id: Optional[str] = None,
+    ):
+        path = Path(file_path)
+        label = f"{t(ERRORS['screenshot_asset_label'])} {path.name}"
+        refresh = None
+        if screenshot_id:
+            asset_id = screenshot_id
+
+            def refresh():
+                return self._refresh_upload_operations(
+                    f"/v1/appScreenshots/{asset_id}"
                 )
+
+        self._upload_asset_operations(
+            upload_operations,
+            path.read_bytes(),
+            error_label=label,
+            log=log,
+            refresh_operations=refresh,
+        )
 
     def commit_screenshot(self, screenshot_id: str, md5_checksum: str) -> dict:
         return self.patch(
@@ -638,19 +848,29 @@ class AppStoreConnectAPI:
         )
 
     def upload_in_app_purchase_review_screenshot(
-        self, upload_operations: list, file_bytes: bytes
+        self,
+        upload_operations: list,
+        file_bytes: bytes,
+        *,
+        log=None,
+        screenshot_id: Optional[str] = None,
     ):
-        for op in upload_operations:
-            url = op["url"]
-            offset = op["offset"]
-            length = op["length"]
-            req_headers = {h["name"]: h["value"] for h in op["requestHeaders"]}
-            chunk = file_bytes[offset : offset + length]
-            resp = requests.put(url, headers=req_headers, data=chunk, timeout=UPLOAD_TIMEOUT)
-            if resp.status_code not in (200, 201):
-                raise Exception(
-                    f"IAP 审核截图上传失败 [{resp.status_code}]: {resp.text[:200]}"
+        refresh = None
+        if screenshot_id:
+            asset_id = screenshot_id
+
+            def refresh():
+                return self._refresh_upload_operations(
+                    f"/v1/inAppPurchaseAppStoreReviewScreenshots/{asset_id}"
                 )
+
+        self._upload_asset_operations(
+            upload_operations,
+            file_bytes,
+            error_label=t(ERRORS["iap_review_asset_label"]),
+            log=log,
+            refresh_operations=refresh,
+        )
 
     def commit_in_app_purchase_review_screenshot(
         self, screenshot_id: str, source_file_checksum: str
@@ -1112,19 +1332,29 @@ class AppStoreConnectAPI:
         )
 
     def upload_subscription_review_screenshot(
-        self, upload_operations: list, file_bytes: bytes
+        self,
+        upload_operations: list,
+        file_bytes: bytes,
+        *,
+        log=None,
+        screenshot_id: Optional[str] = None,
     ):
-        for op in upload_operations:
-            url = op["url"]
-            offset = op["offset"]
-            length = op["length"]
-            req_headers = {h["name"]: h["value"] for h in op["requestHeaders"]}
-            chunk = file_bytes[offset : offset + length]
-            resp = requests.put(url, headers=req_headers, data=chunk, timeout=UPLOAD_TIMEOUT)
-            if resp.status_code not in (200, 201):
-                raise Exception(
-                    f"审核截图上传失败 [{resp.status_code}]: {resp.text[:200]}"
+        refresh = None
+        if screenshot_id:
+            asset_id = screenshot_id
+
+            def refresh():
+                return self._refresh_upload_operations(
+                    f"/v1/subscriptionAppStoreReviewScreenshots/{asset_id}"
                 )
+
+        self._upload_asset_operations(
+            upload_operations,
+            file_bytes,
+            error_label=t(ERRORS["subscription_review_asset_label"]),
+            log=log,
+            refresh_operations=refresh,
+        )
 
     def commit_subscription_review_screenshot(
         self, screenshot_id: str, source_file_checksum: str

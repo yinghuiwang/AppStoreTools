@@ -1017,7 +1017,9 @@ def _sync_review_screenshot(api, sub_id, shot_path, update_existing, dry_run, lo
     )
     shot_id = reservation["data"]["id"]
     upload_ops = reservation["data"].get("attributes", {}).get("uploadOperations", [])
-    api.upload_subscription_review_screenshot(upload_ops, file_bytes)
+    api.upload_subscription_review_screenshot(
+        upload_ops, file_bytes, log=log, screenshot_id=shot_id
+    )
     md5 = hashlib.md5(file_bytes).hexdigest()
     api.commit_subscription_review_screenshot(shot_id, md5)
     log(f"    审核截图: {path.name} 上传 ✅")

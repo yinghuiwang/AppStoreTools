@@ -507,6 +507,51 @@ ERRORS = {
         'en': '--translate requires --text',
         'zh': '--translate 需要配合 --text 使用',
     },
+    # Binary asset upload (screenshots / IAP review images)
+    'screenshot_asset_label': {
+        'en': 'Screenshot',
+        'zh': '截图',
+    },
+    'iap_review_asset_label': {
+        'en': 'IAP review screenshot',
+        'zh': 'IAP 审核截图',
+    },
+    'subscription_review_asset_label': {
+        'en': 'Subscription review screenshot',
+        'zh': '订阅审核截图',
+    },
+    'asset_upload_retry': {
+        'en': 'Retry {attempt}/{total}: {reason}',
+        'zh': '重试 {attempt}/{total}: {reason}',
+    },
+    'asset_upload_timeout_reason': {
+        'en': 'upload write timed out',
+        'zh': '上传写入超时',
+    },
+    'asset_upload_connection_reason': {
+        'en': 'connection interrupted',
+        'zh': '连接中断',
+    },
+    'asset_upload_failed': {
+        'en': '{label} upload failed after {attempts} attempts ({reason})',
+        'zh': '{label}上传失败：{reason}（已重试 {attempts} 次）',
+    },
+    'asset_upload_http_error': {
+        'en': '{label} upload failed [{status}]: {detail}',
+        'zh': '{label}上传失败 [{status}]: {detail}',
+    },
+    'asset_upload_refresh': {
+        'en': 'Refreshing upload reservation after a failed PUT',
+        'zh': '上传中断，正在重新获取上传凭证',
+    },
+    'screenshot_rereserve': {
+        'en': 'Re-reserving {filename} after a failed upload',
+        'zh': '重新预约上传 {filename}',
+    },
+    'screenshot_upload_failed': {
+        'en': 'Screenshot {filename} failed to upload: {reason}',
+        'zh': '截图 {filename} 上传失败：{reason}',
+    },
 }
 
 _COMPLETION_INSTALL = {

@@ -315,7 +315,7 @@ class FakeAPI:
         )
         return {"data": {"id": sid, "attributes": {"uploadOperations": []}}}
 
-    def upload_subscription_review_screenshot(self, upload_operations, file_bytes):
+    def upload_subscription_review_screenshot(self, upload_operations, file_bytes, **kwargs):
         self.calls.append(("upload_subscription_review_screenshot", len(file_bytes)))
 
     def commit_subscription_review_screenshot(self, screenshot_id, source_file_checksum):

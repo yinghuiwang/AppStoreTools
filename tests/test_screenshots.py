@@ -77,7 +77,7 @@ class ScreenshotFakeAPI:
             }
         }
 
-    def upload_screenshot_asset(self, upload_operations, file_path):
+    def upload_screenshot_asset(self, upload_operations, file_path, **kwargs):
         self.calls.append(("upload_screenshot_asset",))
 
     def commit_screenshot(self, screenshot_id, checksum):
@@ -483,3 +483,71 @@ def test_metadata_web_starter_screenshots_branch_uses_reporter():
     assert "manage_phases=not combined" in starter
     assert "finalize=not combined" in starter
     assert "reporter._sinks" not in starter
+
+
+def test_upload_screenshots_rereserves_after_put_failure(tmp_path):
+    from asc.api import AssetUploadError
+
+    class FlakyUploadAPI(ScreenshotFakeAPI):
+        def __init__(self):
+            super().__init__()
+            self._fails_left = 1
+            self._n = 0
+
+        def reserve_screenshot(self, set_id, filename, filesize):
+            self._n += 1
+            sid = f"shot_{self._n}"
+            self.calls.append(("reserve_screenshot", sid, filename))
+            return {
+                "data": {
+                    "id": sid,
+                    "attributes": {"uploadOperations": [{"url": "u"}]},
+                }
+            }
+
+        def upload_screenshot_asset(self, upload_operations, file_path, **kwargs):
+            self.calls.append(("upload_screenshot_asset", kwargs.get("screenshot_id")))
+            if self._fails_left:
+                self._fails_left -= 1
+                raise AssetUploadError("上传写入超时（已重试 4 次）")
+
+    api = FlakyUploadAPI()
+    locale_dir = tmp_path / "en-US"
+    locale_dir.mkdir()
+    _make_png(locale_dir / "1.png", 1290, 2796)
+
+    with patch("time.sleep"):
+        _upload_screenshots_core(api, "app1", str(tmp_path))
+
+    reserves = [c for c in api.calls if c[0] == "reserve_screenshot"]
+    deletes = [c for c in api.calls if c[0] == "delete_screenshot"]
+    commits = [c for c in api.calls if c[0] == "commit_screenshot"]
+    assert len(reserves) == 2
+    assert deletes == [("delete_screenshot", "shot_1")]
+    assert commits == [("commit_screenshot", "shot_2")]
+
+
+def test_upload_screenshots_fails_clearly_after_rereserve_exhausted(tmp_path):
+    from asc.api import AssetUploadError
+
+    class AlwaysFailAPI(ScreenshotFakeAPI):
+        def upload_screenshot_asset(self, upload_operations, file_path, **kwargs):
+            raise AssetUploadError("上传写入超时（已重试 4 次）")
+
+    api = AlwaysFailAPI()
+    locale_dir = tmp_path / "en-US"
+    locale_dir.mkdir()
+    _make_png(locale_dir / "1.png", 1290, 2796)
+
+    with patch("time.sleep"):
+        with pytest.raises(AssetUploadError) as ei:
+            _upload_screenshots_core(api, "app1", str(tmp_path))
+
+    msg = str(ei.value)
+    assert "1.png" in msg
+    assert "Connection aborted" not in msg
+    assert "TimeoutError" not in msg
+    deletes = [c for c in api.calls if c[0] == "delete_screenshot"]
+    reserves = [c for c in api.calls if c[0] == "reserve_screenshot"]
+    assert len(reserves) == 2
+    assert deletes == [("delete_screenshot", "shot_1")]
