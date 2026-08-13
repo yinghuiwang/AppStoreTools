@@ -617,5 +617,11 @@
   "api.branches_unavailable": "无法获取分支列表",
   "api.branches_found": "找到 {count} 个分支",
   "api.versions_unavailable": "无法获取版本列表",
-  "api.versions_found": "找到 {count} 个版本"
+  "api.versions_found": "找到 {count} 个版本",
+  "agent.error.llm_not_configured": "未配置 LLM，请到设置页添加 API Key",
+  "agent.error.llm_rate_limited": "LLM 请求过于频繁，请稍后重试",
+  "agent.error.llm_unavailable": "LLM 服务暂不可用，请稍后重试",
+  "agent.error.timeout": "本轮分析超时，未写入任何文件",
+  "agent.error.tool_limit": "本轮工具次数已用尽，请再问一次",
+  "agent.auto_analyze_label": "请解释这次失败"
 }
