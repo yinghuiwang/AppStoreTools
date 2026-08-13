@@ -1,4 +1,4 @@
-"""Model-visible Agent tools (read + propose_fix). Writes stay gated."""
+"""Model-visible Agent tools plus server-only apply_fix. Writes stay gated."""
 from __future__ import annotations
 
 import json
@@ -15,7 +15,16 @@ except ImportError:  # pragma: no cover - Python < 3.11
     import tomli as tomllib  # type: ignore[no-redef, import-not-found]
 
 from asc.config import Config
-from asc.listing.local import PathTraversalError, _assert_under_root
+from asc.listing.local import (
+    FileChangedError,
+    PathTraversalError,
+    _assert_under_root,
+    apply_screenshot_order,
+    delete_screenshot,
+    load_local_text_snapshot,
+    rename_screenshot,
+    save_local_csv,
+)
 from asc.listing.models import FIELD_NAMES
 from asc.web.agent_redact import redact_obj, redact_text
 from asc.web.task_runner import FORBIDDEN_REPLAY_KEYS
@@ -44,6 +53,8 @@ _ERROR_LINE_RE = re.compile(
     re.I,
 )
 _CREDENTIALS_SECTION_RE = re.compile(r"(?is)^\[credentials\][^\[]*")
+_CREDENTIALS_BLOCK_RE = re.compile(r"(?im)^\[credentials\][^\[]*")
+_CONFLICT = {"ok": False, "code": "conflict"}
 _ALLOWED_MUTATION_OPS = frozenset(
     {"csv_set_fields", "json_patch", "toml_set", "text_replace", "screenshot_fs"}
 )
@@ -182,6 +193,10 @@ class AgentToolContext:
         self.project_root = Path(self.project_root).resolve()
 
 
+class _ApplyStepError(Exception):
+    """A single mutation failed during apply_fix."""
+
+
 def execute_model_tool(ctx: AgentToolContext, name: str, arguments: dict) -> dict:
     """Run one model-visible tool. Unknown or write tools never touch disk."""
     if name not in MODEL_TOOL_NAMES:
@@ -192,6 +207,36 @@ def execute_model_tool(ctx: AgentToolContext, name: str, arguments: dict) -> dic
         return handler(ctx, payload)
     except Exception as exc:
         return {"ok": False, "error": redact_text(str(exc))}
+
+
+def apply_fix(ctx: AgentToolContext, plan_id: str) -> dict:
+    """Apply a pending plan's mutations. Not a model tool; no rerun."""
+    if ctx.agent_store is None:
+        return dict(_CONFLICT)
+    plan = ctx.agent_store.get_plan(plan_id)
+    if plan is None:
+        return dict(_CONFLICT)
+    if ctx.session_id and plan.get("session_id") != ctx.session_id:
+        return dict(_CONFLICT)
+    claimed = ctx.agent_store.claim_pending(plan_id)
+    if claimed is None:
+        return dict(_CONFLICT)
+    mutations = claimed.get("mutations") or []
+    for index, mutation in enumerate(mutations):
+        try:
+            _apply_one_mutation(ctx, mutation)
+        except Exception as exc:
+            message = redact_text(str(exc))
+            ctx.agent_store.set_plan_status(plan_id, "apply_failed", error=message)
+            op = mutation.get("op") if isinstance(mutation, dict) else None
+            return {
+                "ok": False,
+                "status": "apply_failed",
+                "error": message,
+                "failed_step": {"index": index, "op": op},
+            }
+    ctx.agent_store.set_plan_status(plan_id, "applied")
+    return {"ok": True, "status": "applied"}
 
 
 def _tool_get_task(ctx: AgentToolContext, arguments: dict) -> dict:
@@ -829,4 +874,259 @@ def _validate_screenshot_fs(ctx: AgentToolContext, mutation: dict, resolved: Pat
     if not shot_roots or not _path_matches_any(resolved, shot_roots):
         return "path must be under screenshots_path"
     return None
+
+
+def _apply_one_mutation(ctx: AgentToolContext, mutation: Any) -> None:
+    error = _validate_mutation(ctx, mutation)
+    if error:
+        raise _ApplyStepError(error)
+    resolved, path_error = _resolve_mutation_path(ctx, mutation.get("path"))
+    if path_error or resolved is None:
+        raise _ApplyStepError(path_error or "path is required")
+    op = mutation.get("op")
+    if op == "csv_set_fields":
+        _apply_csv_set_fields(mutation, resolved)
+    elif op == "json_patch":
+        _apply_json_patch(mutation, resolved)
+    elif op == "toml_set":
+        _apply_toml_set(mutation, resolved)
+    elif op == "text_replace":
+        _apply_text_replace(mutation, resolved)
+    elif op == "screenshot_fs":
+        _apply_screenshot_fs(ctx, mutation, resolved)
+    else:
+        raise _ApplyStepError(f"unsupported op: {op!r}")
+
+
+def _apply_csv_set_fields(mutation: dict, resolved: Path) -> None:
+    mtime = resolved.stat().st_mtime if resolved.exists() else None
+    snapshot = load_local_text_snapshot(str(resolved))
+    locale = str(mutation.get("locale") or "").strip()
+    listing = next((item for item in snapshot.locales if item.locale == locale), None)
+    if listing is None:
+        raise _ApplyStepError(f"locale {locale!r} not found")
+    before = mutation.get("before")
+    if isinstance(before, dict):
+        for field, expected in before.items():
+            current = listing.fields.get(field, "")
+            if str(current) != str(expected):
+                raise _ApplyStepError("before mismatch")
+    fields = mutation.get("fields") or {}
+    for field, value in fields.items():
+        listing.fields[field] = "" if value is None else str(value)
+    try:
+        save_local_csv(str(resolved), snapshot.locales, expected_mtime=mtime)
+    except FileChangedError as exc:
+        raise _ApplyStepError(str(exc)) from exc
+
+
+def _apply_json_patch(mutation: dict, resolved: Path) -> None:
+    patch = mutation.get("patch")
+    if not isinstance(patch, list):
+        raise _ApplyStepError("json_patch requires a patch list")
+    try:
+        document = json.loads(resolved.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise _ApplyStepError(str(exc)) from exc
+    _apply_rfc6902(document, patch)
+    resolved.write_text(
+        json.dumps(document, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _json_pointer_tokens(pointer: str) -> list[str]:
+    if not isinstance(pointer, str) or not pointer.startswith("/"):
+        raise _ApplyStepError("invalid json pointer")
+    return [part.replace("~1", "/").replace("~0", "~") for part in pointer.split("/")[1:]]
+
+
+def _json_is_index(token: str) -> bool:
+    return token.isdigit() and (token == "0" or not token.startswith("0"))
+
+
+def _json_child(node: Any, token: str) -> Any:
+    if isinstance(node, list):
+        if not _json_is_index(token):
+            raise _ApplyStepError("invalid array index")
+        index = int(token)
+        if index < 0 or index >= len(node):
+            raise _ApplyStepError("json pointer not found")
+        return node[index]
+    if isinstance(node, dict):
+        if token not in node:
+            raise _ApplyStepError("json pointer not found")
+        return node[token]
+    raise _ApplyStepError("json pointer not found")
+
+
+def _json_parent_and_token(document: Any, tokens: list[str]) -> tuple[Any, str]:
+    if not tokens:
+        raise _ApplyStepError("json patch cannot target the document root")
+    current = document
+    for token in tokens[:-1]:
+        current = _json_child(current, token)
+    return current, tokens[-1]
+
+
+def _json_add(parent: Any, token: str, value: Any) -> None:
+    if isinstance(parent, list):
+        if token == "-":
+            parent.append(value)
+            return
+        if not _json_is_index(token):
+            raise _ApplyStepError("invalid array index")
+        index = int(token)
+        if index < 0 or index > len(parent):
+            raise _ApplyStepError("invalid array index")
+        parent.insert(index, value)
+        return
+    if isinstance(parent, dict):
+        parent[token] = value
+        return
+    raise _ApplyStepError("json patch add failed")
+
+
+def _json_remove(parent: Any, token: str) -> None:
+    if isinstance(parent, list):
+        if not _json_is_index(token):
+            raise _ApplyStepError("invalid array index")
+        index = int(token)
+        if index < 0 or index >= len(parent):
+            raise _ApplyStepError("json pointer not found")
+        parent.pop(index)
+        return
+    if isinstance(parent, dict):
+        if token not in parent:
+            raise _ApplyStepError("json pointer not found")
+        del parent[token]
+        return
+    raise _ApplyStepError("json patch remove failed")
+
+
+def _json_replace(parent: Any, token: str, value: Any) -> None:
+    if isinstance(parent, list):
+        if not _json_is_index(token):
+            raise _ApplyStepError("invalid array index")
+        index = int(token)
+        if index < 0 or index >= len(parent):
+            raise _ApplyStepError("json pointer not found")
+        parent[index] = value
+        return
+    if isinstance(parent, dict):
+        if token not in parent:
+            raise _ApplyStepError("json pointer not found")
+        parent[token] = value
+        return
+    raise _ApplyStepError("json patch replace failed")
+
+
+def _apply_rfc6902(document: Any, operations: list) -> None:
+    for operation in operations:
+        if not isinstance(operation, dict):
+            raise _ApplyStepError("invalid json_patch operation")
+        name = operation.get("op")
+        if name not in _JSON_PATCH_OPS:
+            raise _ApplyStepError(f"json_patch op {name!r} is not allowed")
+        pointer = operation.get("path")
+        terminal = _json_pointer_terminal(pointer) if isinstance(pointer, str) else None
+        if terminal not in _JSON_POINTER_TERMINALS:
+            raise _ApplyStepError("json_patch pointer is not allowed")
+        parent, token = _json_parent_and_token(document, _json_pointer_tokens(pointer))
+        if name == "add":
+            _json_add(parent, token, operation.get("value"))
+        elif name == "remove":
+            _json_remove(parent, token)
+        else:
+            _json_replace(parent, token, operation.get("value"))
+
+
+def _extract_credentials_section(text: str) -> str:
+    match = _CREDENTIALS_BLOCK_RE.search(text)
+    return match.group(0) if match else ""
+
+
+def _apply_toml_set(mutation: dict, resolved: Path) -> None:
+    original = resolved.read_text(encoding="utf-8") if resolved.is_file() else ""
+    try:
+        data = tomllib.loads(original) if original else {}
+    except Exception as exc:
+        raise _ApplyStepError(str(exc)) from exc
+    if not isinstance(data, dict):
+        raise _ApplyStepError("invalid toml")
+    credentials = _extract_credentials_section(original)
+    data.pop("credentials", None)
+    dotted = str(mutation.get("key") or "").strip()
+    section, _, name = dotted.partition(".")
+    nested = data.get(section)
+    if not isinstance(nested, dict):
+        nested = {}
+        data[section] = nested
+    nested[name] = mutation.get("value")
+    data.pop("credentials", None)
+    text = toml.dumps(data)
+    if not text.endswith("\n"):
+        text += "\n"
+    if credentials:
+        text = text.rstrip("\n") + "\n\n" + credentials.strip() + "\n"
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+    resolved.write_text(text, encoding="utf-8")
+
+
+def _apply_text_replace(mutation: dict, resolved: Path) -> None:
+    before = mutation.get("before")
+    after = mutation.get("after")
+    count = mutation.get("count")
+    if not isinstance(before, str) or not isinstance(after, str) or type(count) is not int:
+        raise _ApplyStepError("text_replace requires before, after, count")
+    try:
+        text = resolved.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise _ApplyStepError(str(exc)) from exc
+    if text.count(before) != count:
+        raise _ApplyStepError("text_replace count mismatch")
+    resolved.write_text(text.replace(before, after, count), encoding="utf-8")
+
+
+def _screenshots_root(ctx: AgentToolContext) -> Path | None:
+    params = _bound_replay_params(ctx)
+    _csv, cfg_shots, _iap = _bound_profile_paths(ctx)
+    roots = _candidate_paths(ctx, params.get("screenshots_dir"), cfg_shots)
+    return roots[0] if roots else None
+
+
+def _apply_screenshot_fs(ctx: AgentToolContext, mutation: dict, resolved: Path) -> None:
+    root = _screenshots_root(ctx)
+    if root is None:
+        raise _ApplyStepError("screenshots root is required")
+    try:
+        _assert_under_root(root, resolved)
+    except PathTraversalError as exc:
+        raise _ApplyStepError(str(exc)) from exc
+    action = mutation.get("action")
+    try:
+        if action == "rename":
+            new_name = mutation.get("new_name")
+            if not isinstance(new_name, str) or not new_name.strip():
+                raise _ApplyStepError("screenshot rename requires new_name")
+            rename_screenshot(resolved, new_name, root=root)
+            return
+        if action == "delete":
+            _assert_under_root(root, resolved)
+            delete_screenshot(resolved)
+            return
+        if action == "reorder":
+            file_names = mutation.get("file_names") or mutation.get("ordered_file_names")
+            display_type = mutation.get("display_type") or ""
+            if not isinstance(file_names, list) or not all(
+                isinstance(name, str) for name in file_names
+            ):
+                raise _ApplyStepError("screenshot reorder requires file_names")
+            locale_dir = resolved if resolved.is_dir() else resolved.parent
+            _assert_under_root(root, locale_dir)
+            apply_screenshot_order(locale_dir, str(display_type), file_names, root=root)
+            return
+    except PathTraversalError as exc:
+        raise _ApplyStepError(str(exc)) from exc
+    raise _ApplyStepError("screenshot_fs action must be rename, delete, or reorder")
 

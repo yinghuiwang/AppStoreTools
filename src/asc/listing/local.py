@@ -343,6 +343,21 @@ def replace_screenshot(
     return target
 
 
+def rename_screenshot(path: Path, new_name: str, *, root: Path | str) -> Path:
+    """Rename a screenshot, keeping the result under `root`.
+
+    `new_name` must be a bare basename (no absolute path / `..`). Both the
+    source and the resolved target are asserted under `root`.
+    """
+    path = Path(path)
+    root_r = Path(root).resolve()
+    _assert_under_root(root_r, path)
+    _assert_under_root(root_r, path.parent)
+    target = path.parent / _safe_basename(new_name)
+    _assert_under_root(root_r, target)
+    return path.rename(target)
+
+
 def delete_screenshot(path: Path) -> None:
     """Delete the screenshot at `path`; a no-op if the file no longer exists."""
     path = Path(path)
