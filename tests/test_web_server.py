@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 import inspect
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import pytest
@@ -402,6 +403,7 @@ def test_task_log_drawer_stylesheet_defines_drawer_and_dock_modes(client):
     assert ".task-log-drawer.is-overlay" in resp.text
     assert ".task-log-drawer.is-docked" in resp.text
     assert ".task-log-dock" in resp.text
+    assert "height: 100%" in resp.text
     assert "@media (max-width: 1360px)" in resp.text
 
 
@@ -455,11 +457,35 @@ def test_metadata_page_returns_200(client):
     assert ("Chinese headers remain supported" in resp.text) or ("仍兼容中文表头" in resp.text)
 
 
+def _div_depth_before_marker(html: str, marker: str) -> int:
+    """Net unclosed <div> count from <main to the tag that contains *marker*.
+
+    Feature pages must close their content wrappers before #task-log-dock;
+    otherwise the browser nests the shared log drawer inside the scrolling
+    column (below the form) instead of docking it on the right like Build.
+    """
+    idx = html.find(marker)
+    assert idx != -1, f"missing {marker}"
+    tag_start = html.rfind("<", 0, idx)
+    main = html.rfind("<main", 0, tag_start)
+    assert main != -1, "missing <main> before marker"
+    snippet = re.sub(
+        r"<script\b[^>]*>.*?</script>",
+        "",
+        html[main:tag_start],
+        flags=re.I | re.S,
+    )
+    opens = len(re.findall(r"<div\b[^>]*>", snippet, flags=re.I))
+    closes = len(re.findall(r"</div>", snippet, flags=re.I))
+    return opens - closes
+
+
 def test_metadata_page_uses_shared_task_log_drawer(client):
     resp = client.get("/metadata")
     assert resp.status_code == 200
     assert "TaskLogDrawer.open" in resp.text
     assert "data-task-log-open" in resp.text
+    assert 'id="metadata-page-state"' in resp.text
     assert "new EventSource(`/api/task/${taskId}/stream`)" not in resp.text
     assert 'id="log-panel"' not in resp.text
     assert "task-run-panel" in resp.text
@@ -469,6 +495,21 @@ def test_metadata_page_uses_shared_task_log_drawer(client):
     assert ("metadata.fail_banner_title" in resp.text) or ("元数据 / 截图上传失败" in resp.text) or (
         "Metadata / screenshot upload failed" in resp.text
     )
+    assert _div_depth_before_marker(resp.text, 'id="task-log-dock"') == 0
+    assert resp.text.find('id="metadata-page-state"') < resp.text.find('id="task-log-dock"')
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/metadata", "/build", "/urls", "/whats-new", "/iap", "/update"],
+)
+def test_feature_page_docks_task_log_outside_scrolling_content(client, path):
+    resp = client.get(path)
+    assert resp.status_code == 200
+    assert 'id="task-log-dock"' in resp.text
+    assert 'id="task-log-drawer"' in resp.text
+    assert _div_depth_before_marker(resp.text, 'id="task-log-dock"') == 0
+    assert "x-cloak" in resp.text
 
 
 @pytest.mark.parametrize("path", ["/urls", "/whats-new", "/iap", "/update"])
@@ -1027,6 +1068,7 @@ def test_build_run_api_starts_task(client):
         mock_start.return_value = "fake-build-task-id"
         resp = client.post("/api/build/run", cookies={"asc_profile": "myapp"}, data={
             "mode": "full",
+            "project": "/tmp/MyApp.xcworkspace",
             "destination": "testflight",
             "verbose": "",
         })
@@ -1060,6 +1102,21 @@ def test_build_run_api_passes_interactive_release_options(client):
         assert kwargs["dry_run"] is True
 
 
+def test_build_run_rejects_cwd_sentinel_without_project(client):
+    from unittest.mock import MagicMock, patch
+
+    mock_config = MagicMock()
+    mock_config.build_project = None
+    with patch("asc.web.routes_api.Config", return_value=mock_config):
+        resp = client.post(
+            "/api/build/run",
+            cookies={"asc_profile": "myapp"},
+            data={"mode": "full", "project": ".", "destination": "testflight"},
+        )
+    assert resp.status_code == 400
+    assert resp.json()["error"]
+
+
 def test_build_run_parses_false_form_values_as_false(client):
     from unittest.mock import patch
 
@@ -1067,7 +1124,11 @@ def test_build_run_parses_false_form_values_as_false(client):
         resp = client.post(
             "/api/build/run",
             cookies={"asc_profile": "myapp"},
-            data={"verbose": "false", "dry_run": "false"},
+            data={
+                "verbose": "false",
+                "dry_run": "false",
+                "project": "/tmp/MyApp.xcworkspace",
+            },
         )
 
     assert resp.status_code == 200
@@ -1381,7 +1442,7 @@ def test_build_options_api_returns_release_choices(client):
             "/api/build/options",
             cookies={"asc_profile": "myapp"},
             params={
-                "project": ".",
+                "project": "MyApp.xcworkspace",
                 "scheme": "MyApp",
                 "signing": "manual",
                 "certificate": "Apple Distribution: ACME",
@@ -1402,6 +1463,92 @@ def test_build_options_api_returns_release_choices(client):
     assert data["selected_profile"] == ""
     assert data["version_info"] == {"marketing_version": "1.0", "build_number": "42"}
     assert data["archive_match"] is None
+
+
+def _web_decoy_and_real_projects(tmp_path):
+    decoy_root = tmp_path / "asc-web-cwd"
+    real_root = tmp_path / "UserApp"
+    decoy_root.mkdir()
+    real_root.mkdir()
+    (decoy_root / "Decoy.xcodeproj").mkdir()
+    (real_root / "Real.xcodeproj").mkdir()
+    (decoy_root / ".asc").mkdir()
+    (decoy_root / ".asc" / "config.toml").write_text(
+        '[build]\nproject = "."\nbundle_id = "com.decoy.app"\nscheme = "Decoy"\n'
+    )
+    return decoy_root, real_root
+
+
+def _fake_xcodebuild_for_decoy_vs_real(cmd, **_kwargs):
+    class Result:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    argv = list(cmd)
+    project = ""
+    if "-project" in argv:
+        project = argv[argv.index("-project") + 1]
+    elif "-workspace" in argv:
+        project = argv[argv.index("-workspace") + 1]
+
+    if "Real.xcodeproj" in project:
+        bundle_id, scheme = "com.real.app", "RealApp"
+    elif "Decoy.xcodeproj" in project:
+        bundle_id, scheme = "com.decoy.app", "Decoy"
+    else:
+        raise AssertionError(f"xcodebuild used unexpected project path: {project!r}")
+
+    if "-list" in argv:
+        Result.stdout = f"Information about project:\n    Schemes:\n        {scheme}\n"
+    else:
+        Result.stdout = (
+            f"    PRODUCT_BUNDLE_IDENTIFIER = {bundle_id}\n"
+            "    MARKETING_VERSION = 1.0\n"
+            "    CURRENT_PROJECT_VERSION = 1\n"
+        )
+    return Result()
+
+
+def test_build_options_uses_specified_project_not_process_cwd(
+    tmp_path, monkeypatch, client
+):
+    """Bundle ID must come from the UI Xcode path, not the `asc web` cwd."""
+    decoy_root, real_root = _web_decoy_and_real_projects(tmp_path)
+    monkeypatch.chdir(decoy_root)
+    monkeypatch.setattr(
+        "asc.commands.build_inputs.subprocess.run", _fake_xcodebuild_for_decoy_vs_real
+    )
+    monkeypatch.setattr("asc.commands.build_inputs.scan_archives", lambda *a, **kw: [])
+
+    resp = client.get(
+        "/api/build/options",
+        params={"project": str(real_root), "scheme": "RealApp"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert "Real.xcodeproj" in data["project_selected"]
+    assert data["bundle_id"] == "com.real.app"
+    assert data["bundle_id_selected"] == "com.real.app"
+    assert data["bundle_id"] != "com.decoy.app"
+
+
+def test_build_options_does_not_scan_web_process_cwd(tmp_path, monkeypatch, client):
+    """Omitting project (or sending '.') must not pick up a decoy xcodeproj in cwd."""
+    decoy_root, _real_root = _web_decoy_and_real_projects(tmp_path)
+    monkeypatch.chdir(decoy_root)
+    monkeypatch.setattr(
+        "asc.commands.build_inputs.subprocess.run", _fake_xcodebuild_for_decoy_vs_real
+    )
+
+    for params in ({}, {"project": "."}):
+        resp = client.get("/api/build/options", params=params)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("ok") is False
+        assert data.get("bundle_id") != "com.decoy.app"
+        assert "Decoy.xcodeproj" not in str(data.get("project_selected") or "")
 
 
 def test_task_stream_done_task(client):

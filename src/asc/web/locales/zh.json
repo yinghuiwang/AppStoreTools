@@ -386,6 +386,7 @@
   "build.archive_reuse": "Archive 复用",
   "build.hit_prefix": "命中：",
   "build.created_prefix": "创建：",
+  "build.need_project": "请指定 Xcode 项目或 workspace 路径。不会从 Web 服务运行目录检测 Bundle ID。",
   "build.scan_hint": "选择项目后会自动扫描可选项，并展示当前选中的值。",
   "build.step_detect": "检测 Xcode 项目与 Scheme",
   "build.step_signing": "读取签名证书与描述文件",

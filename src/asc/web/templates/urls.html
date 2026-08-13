@@ -248,7 +248,7 @@
 
     <!-- Step 2: 执行面板 -->
     {% from "_task_run_macros.html" import panel_class_attr, title_class_attr, fail_banner, status_icons, progress_block %}
-    <div x-show="step === 2">
+    <div x-show="step === 2" x-cloak>
       <div class="card task-run-panel"
            {{ panel_class_attr() }}>
         <div class="card-body">

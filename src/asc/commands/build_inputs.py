@@ -159,6 +159,63 @@ def detect_certificates() -> List[Certificate]:
 
 
 _BUNDLE_ID_RE = re.compile(r"^\s*PRODUCT_BUNDLE_IDENTIFIER\s*=\s*(\S+)\s*$")
+_CWD_SENTINELS = frozenset({"", ".", "./"})
+
+
+def _is_cwd_sentinel(path: Optional[str]) -> bool:
+    if path is None:
+        return True
+    text = str(path).strip()
+    if text in _CWD_SENTINELS:
+        return True
+    return Path(text) == Path(".")
+
+
+def _paths_equivalent(left: str, right: str) -> bool:
+    try:
+        return Path(left).expanduser().resolve() == Path(right).expanduser().resolve()
+    except OSError:
+        return str(left).rstrip("/\\") == str(right).rstrip("/\\")
+
+
+def resolve_build_project_path(
+    explicit: Optional[str] = None,
+    cached: Optional[str] = None,
+    *,
+    allow_cwd: bool = True,
+) -> str:
+    """Choose which path to pass to ``detect_project``.
+
+    CLI (``allow_cwd=True``) may fall back to the process working directory.
+    Web (``allow_cwd=False``) never uses cwd, and ignores relative cached paths
+    that would be resolved against the ``asc web`` process directory.
+    """
+    for index, raw in enumerate((explicit, cached)):
+        if raw is None:
+            continue
+        text = str(raw).strip()
+        if not text or _is_cwd_sentinel(text):
+            continue
+        is_explicit = index == 0
+        if not allow_cwd and not is_explicit and not Path(text).expanduser().is_absolute():
+            continue
+        return text
+    if allow_cwd:
+        return "."
+    raise ValueError(
+        "Xcode project path is required; cannot detect from the process working directory"
+    )
+
+
+def _xcodebuild_cwd(project: str) -> Optional[str]:
+    """Directory xcodebuild should run in: parent of .xcodeproj / .xcworkspace."""
+    p = Path(project).expanduser()
+    if p.suffix in {".xcodeproj", ".xcworkspace"}:
+        parent = p.parent
+        if str(parent) in ("", "."):
+            return None
+        return str(parent)
+    return str(p) if str(p) not in ("", ".") else None
 
 
 def detect_bundle_id(project: str, kind: str, scheme: str) -> Optional[str]:
@@ -166,6 +223,7 @@ def detect_bundle_id(project: str, kind: str, scheme: str) -> Optional[str]:
     result = subprocess.run(
         ["xcodebuild", "-showBuildSettings", flag, project, "-scheme", scheme],
         capture_output=True, text=True,
+        cwd=_xcodebuild_cwd(project),
     )
     if result.returncode != 0:
         return None
@@ -191,6 +249,7 @@ def detect_versions(project: str, kind: str, scheme: str) -> Optional[tuple]:
     result = subprocess.run(
         ["xcodebuild", "-showBuildSettings", flag, project, "-scheme", scheme],
         capture_output=True, text=True,
+        cwd=_xcodebuild_cwd(project),
     )
     if result.returncode != 0:
         return None
@@ -275,7 +334,7 @@ def detect_project(path: str) -> tuple[str, str]:
     If path points directly to a .xcworkspace or .xcodeproj, return it.
     Otherwise search the directory for one, preferring .xcworkspace.
     """
-    p = Path(path)
+    p = Path(path).expanduser()
 
     if p.suffix == ".xcworkspace":
         return str(p), "workspace"
@@ -300,6 +359,7 @@ def list_schemes(project_path: str, kind: str) -> list[str]:
     result = subprocess.run(
         ["xcodebuild", flag, project_path, "-list"],
         capture_output=True, text=True,
+        cwd=_xcodebuild_cwd(project_path),
     )
     if result.returncode != 0:
         raise RuntimeError(t(ERRORS['xcode_scheme_failed']))
@@ -319,10 +379,42 @@ def list_schemes(project_path: str, kind: str) -> list[str]:
     return schemes
 
 
+def _local_build_cache_applies(
+    *,
+    cli_project: Optional[str],
+    search_root: Optional[str],
+    resolved_project: str,
+    cached_project: Optional[str],
+) -> bool:
+    """True when ``.asc`` / profile [build] settings belong to this Xcode project.
+
+    CLI auto-detect in cwd may reuse the local cache. An explicit ``--project``
+    or ``search_root`` (web) must not inherit a cwd cache that points at a
+    different tree (or at ``.``).
+    """
+    explicit_root = cli_project or search_root
+    if not explicit_root:
+        return True
+    if not cached_project or _is_cwd_sentinel(cached_project):
+        return False
+    return _paths_equivalent(resolved_project, cached_project) or _paths_equivalent(
+        explicit_root, cached_project
+    )
+
+
+def build_cache_matches_project(resolved_project: str, cached_project: Optional[str]) -> bool:
+    """True when local/profile [build] project refers to the resolved Xcode project."""
+    if not cached_project or _is_cwd_sentinel(cached_project):
+        return False
+    return _paths_equivalent(resolved_project, cached_project)
+
+
 def prepare_build_inputs(
     cli: BuildInputsCLI,
     config,  # asc.config.Config
     *, interactive: bool,
+    search_root: Optional[str] = None,
+    persist_cache: bool = True,
 ) -> ResolvedInputs:
     cache: dict = {}
 
@@ -332,17 +424,31 @@ def prepare_build_inputs(
         cache["project"] = project_path
     else:
         cached_project = config.build_project
-        if cached_project and Path(cached_project).exists():
+        if (
+            cached_project
+            and not _is_cwd_sentinel(cached_project)
+            and Path(cached_project).expanduser().exists()
+        ):
             project_path, project_kind = detect_project(cached_project)
+        elif search_root is not None:
+            project_path, project_kind = detect_project(search_root)
+            cache["project"] = project_path
         else:
             project_path, project_kind = detect_project(".")
             cache["project"] = project_path
+
+    cache_ok = _local_build_cache_applies(
+        cli_project=cli.project,
+        search_root=search_root,
+        resolved_project=project_path,
+        cached_project=config.build_project,
+    )
 
     # 2. scheme
     if cli.scheme:
         scheme = cli.scheme
         cache["scheme"] = scheme
-    elif config.build_scheme:
+    elif cache_ok and config.build_scheme:
         scheme = config.build_scheme
     else:
         schemes = list_schemes(project_path, project_kind)
@@ -350,8 +456,9 @@ def prepare_build_inputs(
         cache["scheme"] = scheme
 
     # 3. bundle_id
-    bundle_id = config.build_bundle_id
-    if not bundle_id:
+    if cache_ok and config.build_bundle_id:
+        bundle_id = config.build_bundle_id
+    else:
         bundle_id = detect_bundle_id(project_path, project_kind, scheme)
         if not bundle_id and cli.profile:
             from asc.commands.build import parse_bundle_id_from_profile
@@ -410,7 +517,7 @@ def prepare_build_inputs(
             profile = chosen_p.path
             cache["profile"] = profile
 
-    if cache:
+    if cache and persist_cache:
         try:
             config.update_local_build_section(cache)
         except Exception as e:

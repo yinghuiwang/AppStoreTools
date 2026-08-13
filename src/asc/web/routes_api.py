@@ -591,17 +591,22 @@ def _start_build_task(
 
             if mode in ("full", "build"):
                 from asc.commands.build_inputs import (
-                    BuildInputsCLI, prepare_build_inputs
+                    BuildInputsCLI, prepare_build_inputs, resolve_build_project_path
+                )
+                source_project = resolve_build_project_path(
+                    project, config.build_project, allow_cwd=False
                 )
                 cli = BuildInputsCLI(
-                    project=project or None,
+                    project=source_project,
                     scheme=scheme or None,
                     destination=destination or None,
                     signing=signing or None,
                     certificate=certificate or None,
                     profile=provisioning_profile or None,
                 )
-                resolved = prepare_build_inputs(cli, config, interactive=False)
+                resolved = prepare_build_inputs(
+                    cli, config, interactive=False, persist_cache=False
+                )
                 enforce_bundle_guard(config, resolved.bundle_id)
                 reuse_value = None
                 if reuse_archive == "reuse":
@@ -711,6 +716,17 @@ def build_run(
     profile = _cookie_profile(request)
     if not profile:
         return JSONResponse({"error": t("api.no_profile", lang=lang)}, status_code=400)
+    if mode in ("full", "build"):
+        from asc.commands.build_inputs import resolve_build_project_path
+        try:
+            project = resolve_build_project_path(
+                project, Config(app_name=profile).build_project, allow_cwd=False
+            )
+        except ValueError:
+            return JSONResponse(
+                {"error": t("build.need_project", lang=lang)},
+                status_code=400,
+            )
     task_id = _start_build_task(
         profile=profile,
         mode=mode,
@@ -729,13 +745,22 @@ def build_run(
 
 
 @router.get("/build/schemes")
-def build_schemes(project: str = "."):
+def build_schemes(request: Request, project: str = ""):
     """Return list of schemes for a given project path."""
     try:
-        from asc.commands.build_inputs import detect_project, list_schemes
-        project_path, kind = detect_project(project)
+        from asc.commands.build_inputs import detect_project, list_schemes, resolve_build_project_path
+        profile = _cookie_profile(request)
+        config = Config(app_name=profile or None)
+        source_project = resolve_build_project_path(
+            project, config.build_project, allow_cwd=False
+        )
+        project_path, kind = detect_project(source_project)
         schemes = list_schemes(project_path, kind)
         return {"schemes": schemes}
+    except ValueError as e:
+        lang = _lang(request)
+        msg = t("build.need_project", lang=lang) if "working directory" in str(e) else str(e)
+        return {"schemes": [], "error": msg}
     except Exception as e:
         return {"schemes": [], "error": str(e)}
 
@@ -743,7 +768,7 @@ def build_schemes(project: str = "."):
 @router.get("/build/options")
 def build_options(
     request: Request,
-    project: str = ".",
+    project: str = "",
     scheme: str = "",
     signing: str = "auto",
     certificate: str = "",
@@ -755,6 +780,7 @@ def build_options(
     """
     try:
         from asc.commands.build_inputs import (
+            build_cache_matches_project,
             detect_bundle_id,
             detect_certificates,
             detect_project,
@@ -762,23 +788,42 @@ def build_options(
             detect_versions,
             find_matching_archive,
             list_schemes,
+            resolve_build_project_path,
             scan_archives,
         )
 
         profile = _cookie_profile(request)
         config = Config(app_name=profile or None)
-        source_project = project or config.build_project or "."
+        try:
+            source_project = resolve_build_project_path(
+                project, config.build_project, allow_cwd=False
+            )
+        except ValueError:
+            return {
+                "ok": False,
+                "error": t("build.need_project", lang=_lang(request)),
+                "schemes": [],
+                "certificates": [],
+                "profiles": [],
+            }
         project_path, kind = detect_project(source_project)
         schemes = list_schemes(project_path, kind)
-        selected_scheme = scheme or config.build_scheme or (schemes[0] if len(schemes) == 1 else "")
-        scheme_auto = not scheme and not config.build_scheme and len(schemes) == 1
+        cache_ok = build_cache_matches_project(project_path, config.build_project)
+        selected_scheme = (
+            scheme
+            or (config.build_scheme if cache_ok else None)
+            or (schemes[0] if len(schemes) == 1 else "")
+        )
+        scheme_auto = not scheme and not (cache_ok and config.build_scheme) and len(schemes) == 1
 
         bundle_id = ""
         if selected_scheme:
-            bundle_id = config.build_bundle_id or detect_bundle_id(project_path, kind, selected_scheme) or ""
+            bundle_id = detect_bundle_id(project_path, kind, selected_scheme) or ""
+            if not bundle_id and cache_ok:
+                bundle_id = config.build_bundle_id or ""
 
         certs = detect_certificates() if signing == "manual" else []
-        selected_cert = certificate or config.build_certificate or ""
+        selected_cert = certificate or (config.build_certificate if cache_ok else "") or ""
         cert_sha1 = next((c.sha1 for c in certs if c.name == selected_cert), None)
         profiles = detect_profiles(bundle_id, cert_sha1) if signing == "manual" and bundle_id else []
 
@@ -791,7 +836,7 @@ def build_options(
             archives = scan_archives(config.build_output, selected_scheme)
             archive_match = find_matching_archive(
                 archives,
-                bundle_id=bundle_id or config.build_bundle_id or "",
+                bundle_id=bundle_id or ((config.build_bundle_id or "") if cache_ok else ""),
                 marketing_version=mv,
                 build_number=bn,
             )
@@ -818,7 +863,7 @@ def build_options(
                 }
                 for p in profiles
             ],
-            "selected_profile": config.build_profile or "",
+            "selected_profile": (config.build_profile if cache_ok else "") or "",
             "version_info": {
                 "marketing_version": version_info[0],
                 "build_number": version_info[1],

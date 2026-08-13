@@ -14,7 +14,7 @@
     </h1>
   </div>
 
-  <div x-data="{
+  <div id="metadata-page-state" x-data="{
     step: 1, taskId: null, status: 'idle', progress: 0, progressMsg: '', checkResult: null, submitting: false, canceling: false, showCsvHelp: false, showScreenshotsHelp: false,
 
     wb: {
@@ -1495,7 +1495,7 @@
 
     <!-- Step 2: 执行面板 -->
     {% from "_task_run_macros.html" import panel_class_attr, title_class_attr, fail_banner, status_icons, progress_block %}
-    <div x-show="step === 2" class="">
+    <div x-show="step === 2" x-cloak class="">
       <div class="card task-run-panel"
            {{ panel_class_attr() }}>
         <div class="card-body">
@@ -1616,6 +1616,9 @@
         </template>
       </div>
     </div>
+  </div>
+</div>
+
   </div>
 </div>
 
@@ -1748,14 +1751,14 @@ function cancelTask(taskId, beforeCancel) {
   if (beforeCancel) beforeCancel();
   fetch(`/api/task/${taskId}/cancel`, {method: 'POST'})
     .catch(() => {
-      const root = document.querySelector('[x-data]');
+      const root = document.getElementById('metadata-page-state');
       const d = Alpine.$data(root);
       d.canceling = false;
     });
 }
 
 function metadataLogOptions() {
-  const root = document.querySelector('[x-data]');
+  const root = document.getElementById('metadata-page-state');
   const d = Alpine.$data(root);
   return {
     title: window.t('metadata.log_title'),
@@ -1774,7 +1777,7 @@ function metadataLogOptions() {
 }
 
 function startTaskLogs(taskId) {
-  const root = document.querySelector('[x-data]');
+  const root = document.getElementById('metadata-page-state');
   const d = Alpine.$data(root);
   d.status = 'running';
   d.canceling = false;

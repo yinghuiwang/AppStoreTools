@@ -386,6 +386,7 @@
   "build.archive_reuse": "Archive reuse",
   "build.hit_prefix": "Match: ",
   "build.created_prefix": "Created: ",
+  "build.need_project": "Specify an Xcode project or workspace path. Bundle ID is not detected from the web server working directory.",
   "build.scan_hint": "Selecting a project auto-scans options and shows the current selection.",
   "build.step_detect": "Detect Xcode project and scheme",
   "build.step_signing": "Read signing certificate and profile",

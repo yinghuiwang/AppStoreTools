@@ -178,7 +178,7 @@
     </div>
 
     <!-- Step 2: 执行面板 -->
-    <div x-show="step === 2" class="">
+    <div x-show="step === 2" x-cloak class="">
       <div class="card task-run-panel"
            :class="{
              'task-run-panel--running': status === 'running',
@@ -473,7 +473,21 @@ function _setSelectOptions(select, rows, placeholder, valueFor, labelFor, prefer
 function loadBuildOptions(opts = {}) {
   const f = document.getElementById('build-form');
   if (!f) return;
-  const project = f.querySelector('[name=project]').value || '.';
+  const project = (f.querySelector('[name=project]').value || '').trim();
+  if (!project || project === '.') {
+    const hint = document.getElementById('build-options-hint');
+    if (hint) hint.textContent = window.t('build.need_project');
+    const root = document.getElementById('build-page-state');
+    const d = root ? Alpine.$data(root) : null;
+    if (d) d.loadingScan = false;
+    _emitBuildPanelState({
+      loadingScan: false,
+      scanStatus: 'idle',
+      scanMessage: window.t('build.scan_waiting'),
+      scanResult: null,
+    });
+    return;
+  }
   const schemeSelect = f.querySelector('[name=scheme]');
   if (opts.resetScheme) schemeSelect.value = '';
   const signing = f.querySelector('[name=signing]:checked')?.value || 'auto';

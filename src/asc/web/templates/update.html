@@ -212,7 +212,7 @@
 
     <!-- Progress card -->
     {% from "_task_run_macros.html" import panel_class_attr, title_class_attr, fail_banner, progress_block %}
-    <div x-show="step === 2" class="card task-run-panel mt-6"
+    <div x-show="step === 2" x-cloak class="card task-run-panel mt-6"
          {{ panel_class_attr() }}>
       <div class="card-body">
         {{ fail_banner('update.fail_banner_title', 'update.fail_banner_hint') }}

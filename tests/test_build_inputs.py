@@ -563,7 +563,106 @@ def test_prepare_writes_cache_after_resolution(tmp_path, monkeypatch):
     assert 'signing = "manual"' in text
 
 
-from asc.commands.build_inputs import resolve_interactive
+def _make_decoy_and_real_projects(tmp_path):
+    """cwd decoy xcodeproj vs a different user-specified Xcode project."""
+    decoy_root = tmp_path / "web-cwd"
+    real_root = tmp_path / "UserApp"
+    decoy_root.mkdir()
+    real_root.mkdir()
+    (decoy_root / "Decoy.xcodeproj").mkdir()
+    (real_root / "Real.xcodeproj").mkdir()
+    (decoy_root / ".asc").mkdir()
+    (decoy_root / ".asc" / "config.toml").write_text(
+        '[build]\nproject = "."\nbundle_id = "com.decoy.app"\nscheme = "Decoy"\n'
+    )
+    return decoy_root, real_root
+
+
+def test_prepare_uses_explicit_project_bundle_id_not_cwd_cache(tmp_path, monkeypatch):
+    """Web/CLI --project must detect bundle ID from that project, not cwd's .asc cache."""
+    decoy_root, real_root = _make_decoy_and_real_projects(tmp_path)
+    monkeypatch.chdir(decoy_root)
+    cfg = Config()
+    assert cfg.build_bundle_id == "com.decoy.app"
+
+    def fake_bundle_id(project, kind, scheme):
+        if "Real.xcodeproj" in str(project):
+            return "com.real.app"
+        if "Decoy.xcodeproj" in str(project):
+            return "com.decoy.app"
+        raise AssertionError(f"unexpected project for bundle id: {project!r}")
+
+    monkeypatch.setattr("asc.commands.build_inputs.detect_bundle_id", fake_bundle_id)
+    monkeypatch.setattr(
+        "asc.commands.build_inputs.list_schemes", lambda *a, **kw: ["RealApp"]
+    )
+
+    cli = BuildInputsCLI(
+        project=str(real_root),
+        scheme="RealApp",
+        signing="auto",
+    )
+    resolved = prepare_build_inputs(cli, cfg, interactive=False)
+    assert "Real.xcodeproj" in resolved.project_path
+    assert resolved.bundle_id == "com.real.app"
+
+
+def test_prepare_search_root_skips_process_cwd(tmp_path, monkeypatch):
+    """When no --project is given, an explicit search_root beats process cwd."""
+    decoy_root, real_root = _make_decoy_and_real_projects(tmp_path)
+    monkeypatch.chdir(decoy_root)
+    cfg = Config()
+
+    def fake_bundle_id(project, kind, scheme):
+        if "Real.xcodeproj" in str(project):
+            return "com.real.app"
+        return "com.decoy.app"
+
+    monkeypatch.setattr("asc.commands.build_inputs.detect_bundle_id", fake_bundle_id)
+    monkeypatch.setattr(
+        "asc.commands.build_inputs.list_schemes", lambda *a, **kw: ["RealApp"]
+    )
+
+    cli = BuildInputsCLI(scheme="RealApp", signing="auto")
+    resolved = prepare_build_inputs(
+        cli, cfg, interactive=False, search_root=str(real_root)
+    )
+    assert "Real.xcodeproj" in resolved.project_path
+    assert resolved.bundle_id == "com.real.app"
+
+
+def test_prepare_cli_still_detects_project_from_cwd(tmp_path, monkeypatch):
+    """CLI without --project keeps using the process working directory."""
+    (tmp_path / "App.xcodeproj").mkdir()
+    monkeypatch.chdir(tmp_path)
+    cfg = Config()
+    monkeypatch.setattr(
+        "asc.commands.build_inputs.detect_bundle_id",
+        lambda *a, **kw: "com.cli.app",
+    )
+    monkeypatch.setattr(
+        "asc.commands.build_inputs.list_schemes", lambda *a, **kw: ["App"]
+    )
+    resolved = prepare_build_inputs(
+        BuildInputsCLI(scheme="App", signing="auto"), cfg, interactive=False
+    )
+    assert "App.xcodeproj" in resolved.project_path
+    assert resolved.bundle_id == "com.cli.app"
+
+
+from asc.commands.build_inputs import resolve_interactive, resolve_build_project_path
+
+
+def test_resolve_build_project_path_web_never_falls_back_to_cwd():
+    with pytest.raises(ValueError, match="working directory"):
+        resolve_build_project_path(".", None, allow_cwd=False)
+    with pytest.raises(ValueError, match="working directory"):
+        resolve_build_project_path("", ".", allow_cwd=False)
+    assert (
+        resolve_build_project_path("/abs/App.xcodeproj", ".", allow_cwd=False)
+        == "/abs/App.xcodeproj"
+    )
+    assert resolve_build_project_path(None, None, allow_cwd=True) == "."
 
 
 def test_resolve_interactive_explicit_true_overrides_non_tty(monkeypatch):
