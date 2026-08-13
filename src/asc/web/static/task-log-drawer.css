@@ -110,14 +110,45 @@
 
 .agent-dock-toolbar,
 .agent-dock-composer {
+  position: relative;
   min-height: 42px;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 7px 12px;
   border-bottom: 1px solid var(--border-subtle);
 }
 .agent-dock-search { width: 100%; font-size: 12px; }
+.agent-bound-meta {
+  width: 100%;
+  color: var(--text-muted);
+  font: 10px/1.4 "Fira Code", monospace;
+}
+.agent-search-results {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: calc(100% - 4px);
+  z-index: 3;
+  max-height: 180px;
+  overflow: auto;
+  border: 1px solid var(--border-default);
+  background: #121218;
+}
+.agent-search-results button {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-secondary);
+  text-align: left;
+  cursor: pointer;
+  font: 11px/1.4 "Fira Code", monospace;
+}
+.agent-search-results button:hover { background: var(--bg-overlay); color: var(--text-primary); }
 .agent-dock-messages {
   min-width: 0;
   min-height: 0;
@@ -129,6 +160,52 @@
   margin: 0;
   color: var(--text-muted);
   font: 12px/1.5 "Fira Code", monospace;
+}
+.agent-msg {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font: 12px/1.5 "Fira Code", monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.agent-msg--user { background: rgba(255, 255, 255, .04); color: var(--text-secondary); }
+.agent-msg--assistant { background: rgba(245, 158, 11, .08); }
+.agent-msg--error { border-color: rgba(248, 113, 113, .35); color: #fca5a5; }
+.agent-tool-status {
+  margin: 0 0 8px;
+  color: var(--text-muted);
+  font: 10px/1.4 "Fira Code", monospace;
+}
+.agent-plan-card {
+  margin: 10px 0 0;
+  padding: 10px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-surface);
+  font: 11px/1.45 "Fira Code", monospace;
+}
+.agent-plan-card__summary { margin: 0 0 8px; color: var(--text-primary); }
+.agent-plan-mutation {
+  margin: 0 0 4px;
+  color: var(--text-muted);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+.agent-plan-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-top: 8px;
+}
+.agent-plan-card__actions label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 10px;
 }
 .agent-dock-composer {
   border-bottom: 0;

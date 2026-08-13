@@ -3351,3 +3351,24 @@ def test_task_log_drawer_javascript_switches_tabs_without_agent_stream(client):
     assert stub.status_code == 200
     assert "EventSource" not in stub.text
     assert "AscAgentDock" in stub.text
+
+
+def test_agent_dock_javascript_uses_post_stream_not_event_source(client):
+    js = client.get("/static/agent-dock.js").text
+    assert 'fetch("/api/agent/stream"' in js or "fetch('/api/agent/stream'" in js
+    assert "/api/agent/stop" in js
+    assert "/api/agent/apply" in js
+    assert "/api/agent/reject" in js
+    assert "/api/agent/failed-tasks" in js
+    assert "/api/agent/plans/" in js
+    assert "auto_analyze" in js
+    assert "plan_ids" in js
+    assert "TaskLogDrawer.open" in js
+    assert "ReadableStream" in js or "getReader" in js
+    assert "EventSource" not in js
+
+
+def test_dashboard_javascript_adds_explain_on_error_rows(client):
+    js = client.get("/static/dashboard.js").text
+    assert "data-open-agent-task" in js or "openAgentTask" in js
+    assert 'task.status === "error"' in js or 'task.status==="error"' in js

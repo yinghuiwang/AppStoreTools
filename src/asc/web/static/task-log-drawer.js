@@ -551,6 +551,9 @@
   function close() {
     closeSource();
     cancelPreflight();
+    if (window.AscAgentDock && typeof window.AscAgentDock.onDrawerClose === "function") {
+      window.AscAgentDock.onDrawerClose();
+    }
     setTaskState("");
     beginCloseDrawerPanel();
     updateAgentNavPressed();
