@@ -275,6 +275,7 @@
   "metadata.diff_status_asc_only": "仅线上",
   "metadata.diff_local": "本地",
   "metadata.diff_asc": "线上",
+  "metadata.diff_col_field": "字段",
   "metadata.diff_no_selection": "请至少勾选一个字段再拉取",
   "metadata.diff_locale_summary": "{count} 处差异",
   "metadata.diff_shots_note": "截图按设备类型左右并排对照（不做像素/MD5 自动判定）；勾选后可下载覆盖本地对应类型文件。",

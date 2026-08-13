@@ -714,6 +714,11 @@ def test_metadata_page_has_screenshot_workbench_markup(client):
     # I3 / N1: selection remapped by index; all locale groups refreshed after reorder
     assert "selectedByType" in r.text
     assert "data.groups" in r.text
+    assert "listing-workbench.css" in r.text
+    assert "listing-csv-table" in r.text
+    assert "listing-diff-grid" in r.text
+    assert "listing-diff-row__value--local" in r.text
+    assert "listing-diff-row__value--asc" in r.text
 
 
 def test_listing_screenshots_add_requires_profile(client, tmp_path):

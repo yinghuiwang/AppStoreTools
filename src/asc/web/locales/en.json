@@ -275,6 +275,7 @@
   "metadata.diff_status_asc_only": "ASC only",
   "metadata.diff_local": "Local",
   "metadata.diff_asc": "ASC",
+  "metadata.diff_col_field": "Field",
   "metadata.diff_no_selection": "Select at least one field before pulling",
   "metadata.diff_locale_summary": "{count} diffs",
   "metadata.diff_shots_note": "Screenshots are compared side-by-side per device type (no pixel/MD5 equality). Selected scopes can overwrite local files.",
