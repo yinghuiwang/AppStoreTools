@@ -1,5 +1,6 @@
 {
   "nav.dashboard": "仪表盘",
+  "nav.agent": "Agent",
   "nav.metadata": "元数据上传",
   "nav.urls": "URL 设置",
   "nav.build": "构建上传",
@@ -102,6 +103,9 @@
   "dashboard.task_log_title": "{title} 日志",
   "dashboard.task_fallback": "任务",
   "drawer.title": "任务日志",
+  "drawer.tab_logs": "日志",
+  "drawer.tab_agent": "Agent",
+  "drawer.explain_with_agent": "去 Agent 解释",
   "drawer.close": "关闭日志面板",
   "drawer.tools_aria": "日志工具",
   "drawer.waiting": "等待选择任务",
@@ -623,5 +627,17 @@
   "agent.error.llm_unavailable": "LLM 服务暂不可用，请稍后重试",
   "agent.error.timeout": "本轮分析超时，未写入任何文件",
   "agent.error.tool_limit": "本轮工具次数已用尽，请再问一次",
-  "agent.auto_analyze_label": "请解释这次失败"
+  "agent.auto_analyze_label": "请解释这次失败",
+  "agent.search_placeholder": "搜索失败任务（kind 或 id）",
+  "agent.empty": "选择一个失败任务开始分析",
+  "agent.stop": "停止",
+  "agent.send": "发送",
+  "agent.apply": "应用",
+  "agent.ignore": "忽略",
+  "agent.rerun_after_apply": "应用后重跑",
+  "agent.tool_running": "正在读取任务日志",
+  "agent.applying": "正在应用",
+  "agent.applied": "已应用",
+  "agent.apply_failed": "应用失败",
+  "agent.rejected": "已忽略"
 }

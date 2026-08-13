@@ -29,6 +29,12 @@
   var copyControl = drawer.querySelector("[data-task-log-copy]");
   var clearControl = drawer.querySelector("[data-task-log-clear]");
   var closeControl = drawer.querySelector("[data-task-log-close]");
+  var tabButtons = drawer.querySelectorAll("[data-task-log-tab]");
+  var logsPanel = drawer.querySelector('[data-task-log-panel="logs"]');
+  var agentPanel = drawer.querySelector('[data-task-log-panel="agent"]');
+  var explainControl = drawer.querySelector("[data-open-agent-task]");
+  var agentNav = document.querySelector("[data-open-agent-dock]");
+  var agentForm = drawer.querySelector("[data-agent-stream]");
   var sidebar = document.querySelector("body > aside");
   var overlayMedia = window.matchMedia("(max-width: 1360px)");
 
@@ -55,6 +61,7 @@
   var backgroundInertEntries = null;
   var previouslyFocused = null;
   var suppressNextOutsideClick = false;
+  var activeTab = "logs";
 
   function isDrawerOpen() {
     return drawer.classList.contains("is-open");
@@ -213,6 +220,33 @@
     else drawer.removeAttribute("data-task-state");
   }
 
+  function updateAgentNavPressed() {
+    if (!agentNav) return;
+    var pressed = isDrawerOpen() && activeTab === "agent";
+    agentNav.setAttribute("aria-pressed", pressed ? "true" : "false");
+    agentNav.classList.toggle("active", pressed);
+  }
+
+  function setActiveTab(tab) {
+    var next = tab === "agent" ? "agent" : "logs";
+    if (next === "agent") pauseAtCurrentViewport();
+    activeTab = next;
+    Array.prototype.forEach.call(tabButtons, function (button) {
+      var selected = button.getAttribute("data-task-log-tab") === activeTab;
+      button.setAttribute("aria-selected", selected ? "true" : "false");
+    });
+    if (logsPanel) logsPanel.hidden = activeTab !== "logs";
+    if (agentPanel) agentPanel.hidden = activeTab !== "agent";
+    updateAgentNavPressed();
+  }
+
+  function syncExplainButton(isError) {
+    if (!explainControl) return;
+    explainControl.hidden = !isError;
+    if (isError && activeTaskId) explainControl.setAttribute("data-task-id", activeTaskId);
+    else explainControl.removeAttribute("data-task-id");
+  }
+
   function updatePosition() {
     if (!positionEl || !statusEl) return;
     if (newLogCount > 0) {
@@ -321,6 +355,7 @@
     followPaused = false;
     if (followControl) followControl.checked = true;
     if (output) output.replaceChildren();
+    syncExplainButton(false);
   }
 
   function finishStream(source, message, callbackName, payload) {
@@ -332,6 +367,7 @@
     setTaskState(state);
     setConnectionStatus(message);
     closeSource();
+    syncExplainButton(callbackName === "onError");
     var callback = callbacks[callbackName];
     if (typeof callback === "function") {
       try { callback(payload); } catch (error) { /* consumer callback error is not our concern */ }
@@ -433,6 +469,18 @@
         return;
       }
       if (!response.ok) throw new Error("HTTP " + response.status);
+      if (typeof response.json === "function") {
+        try {
+          var payload = await response.json();
+          if (requestId !== openRequestId || !isDrawerOpen()) return;
+          if (payload && payload.status === "error") {
+            setTaskState("error");
+            syncExplainButton(true);
+          }
+        } catch (parseError) {
+          /* status JSON is optional; still start the log stream */
+        }
+      }
     } catch (error) {
       if (requestId !== openRequestId || (error && error.name === "AbortError")) return;
       setConnectionStatus(tt("drawer.connect_failed"));
@@ -447,12 +495,34 @@
 
   function open(taskId, options) {
     options = options || {};
+    var hasTask = taskId != null && String(taskId) !== "";
+    var tab = options.tab === "agent" || options.tab === "logs"
+      ? options.tab
+      : (hasTask ? "logs" : "agent");
+
+    if (!hasTask) {
+      previouslyFocused = document.activeElement;
+      openDrawerPanel();
+      setActiveTab(tab);
+      suppressNextOutsideClick = true;
+      setTimeout(function () { suppressNextOutsideClick = false; }, 0);
+      return;
+    }
+
+    var nextId = String(taskId);
+    if (isDrawerOpen() && activeTaskId === nextId) {
+      setActiveTab(tab);
+      suppressNextOutsideClick = true;
+      setTimeout(function () { suppressNextOutsideClick = false; }, 0);
+      return;
+    }
+
     closeSource();
     cancelPreflight();
     var requestId = openRequestId;
     var controller = new AbortController();
     statusController = controller;
-    activeTaskId = String(taskId);
+    activeTaskId = nextId;
     callbacks = {
       onProgress: options.onProgress,
       onDone: options.onDone,
@@ -467,6 +537,7 @@
     updatePosition();
     previouslyFocused = document.activeElement;
     openDrawerPanel();
+    setActiveTab(tab);
     if (output) output.focus({ preventScroll: true });
 
     // Swallow the same click that triggered `open()` so the document-level
@@ -474,7 +545,7 @@
     suppressNextOutsideClick = true;
     setTimeout(function () { suppressNextOutsideClick = false; }, 0);
 
-    loadStatusThenStream(taskId, requestId, controller);
+    loadStatusThenStream(nextId, requestId, controller);
   }
 
   function close() {
@@ -482,6 +553,7 @@
     cancelPreflight();
     setTaskState("");
     beginCloseDrawerPanel();
+    updateAgentNavPressed();
     var target = previouslyFocused && previouslyFocused.isConnected ? previouslyFocused : null;
     activeTaskId = null;
     callbacks = {};
@@ -500,6 +572,26 @@
   }
 
   if (closeControl) closeControl.addEventListener("click", close);
+  Array.prototype.forEach.call(tabButtons, function (button) {
+    button.addEventListener("click", function () {
+      setActiveTab(button.getAttribute("data-task-log-tab"));
+    });
+  });
+  if (agentNav) {
+    agentNav.addEventListener("click", function () {
+      open(null, { tab: "agent" });
+    });
+  }
+  if (explainControl) {
+    explainControl.addEventListener("click", function () {
+      setActiveTab("agent");
+    });
+  }
+  if (agentForm) {
+    agentForm.addEventListener("submit", function (event) {
+      event.preventDefault();
+    });
+  }
   if (clearControl) {
     clearControl.addEventListener("click", function () {
       logEntries = [];

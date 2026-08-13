@@ -1,5 +1,6 @@
 {
   "nav.dashboard": "Dashboard",
+  "nav.agent": "Agent",
   "nav.metadata": "Metadata Upload",
   "nav.urls": "URL Settings",
   "nav.build": "Build & Upload",
@@ -102,6 +103,9 @@
   "dashboard.task_log_title": "{title} logs",
   "dashboard.task_fallback": "Task",
   "drawer.title": "Task logs",
+  "drawer.tab_logs": "Logs",
+  "drawer.tab_agent": "Agent",
+  "drawer.explain_with_agent": "Explain with Agent",
   "drawer.close": "Close log panel",
   "drawer.tools_aria": "Log tools",
   "drawer.waiting": "Waiting for a task",
@@ -623,5 +627,17 @@
   "agent.error.llm_unavailable": "LLM is temporarily unavailable. Please try again later",
   "agent.error.timeout": "This analysis timed out. No files were written",
   "agent.error.tool_limit": "This turn used up its tool calls. Please ask again",
-  "agent.auto_analyze_label": "Please explain this failure"
+  "agent.auto_analyze_label": "Please explain this failure",
+  "agent.search_placeholder": "Search failed tasks (kind or id)",
+  "agent.empty": "Select a failed task to start analysis",
+  "agent.stop": "Stop",
+  "agent.send": "Send",
+  "agent.apply": "Apply",
+  "agent.ignore": "Ignore",
+  "agent.rerun_after_apply": "Rerun after apply",
+  "agent.tool_running": "Reading task logs",
+  "agent.applying": "Applying",
+  "agent.applied": "Applied",
+  "agent.apply_failed": "Apply failed",
+  "agent.rejected": "Ignored"
 }

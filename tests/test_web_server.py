@@ -3315,3 +3315,39 @@ def test_profiles_import_local_api_404_when_none(client, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     resp = client.post("/api/profiles/import", json={})
     assert resp.status_code == 404
+
+
+def test_task_log_drawer_exposes_logs_and_agent_tabs(client):
+    resp = client.get("/")
+    assert 'data-task-log-tab="logs"' in resp.text
+    assert 'data-task-log-tab="agent"' in resp.text
+    assert "data-agent-stream" in resp.text
+    assert "data-agent-stop" in resp.text
+    assert "data-agent-messages" in resp.text
+    assert "data-agent-task-search" in resp.text
+    assert "data-open-agent-task" in resp.text
+
+
+def test_sidebar_agent_is_button_not_route(client):
+    resp = client.get("/")
+    assert "data-open-agent-dock" in resp.text
+    assert 'href="/agent"' not in resp.text
+
+
+def test_no_standalone_agent_page(client):
+    assert client.get("/agent").status_code in {404, 405}
+
+
+def test_task_log_drawer_javascript_switches_tabs_without_agent_stream(client):
+    js = client.get("/static/task-log-drawer.js").text
+    page = client.get("/").text
+    assert "options.tab" in js
+    assert 'data-task-log-tab' in js
+    assert "data-open-agent-dock" in js
+    assert "/api/agent/stream" not in js
+    assert "pauseAtCurrentViewport" in js
+    assert "agent-dock.js" in page
+    stub = client.get("/static/agent-dock.js")
+    assert stub.status_code == 200
+    assert "EventSource" not in stub.text
+    assert "AscAgentDock" in stub.text
