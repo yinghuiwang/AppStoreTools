@@ -107,6 +107,7 @@
   "drawer.tab_agent": "Agent",
   "drawer.explain_with_agent": "去 Agent 解释",
   "drawer.close": "关闭日志面板",
+  "drawer.resize": "调整面板宽度",
   "drawer.tools_aria": "日志工具",
   "drawer.waiting": "等待选择任务",
   "drawer.errors_only": "仅错误",

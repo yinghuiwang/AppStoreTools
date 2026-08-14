@@ -19,6 +19,19 @@ from asc.web.tasks import task_store
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 _STATIC_DIR = Path(__file__).parent / "static"
+_ASSET_STAMP_FILES = ("agent-dock.js", "task-log-drawer.css", "task-log-drawer.js")
+
+
+def _web_asset_version() -> str:
+    """Package version plus static mtime so local JS/CSS edits bust browser cache."""
+    stamp = 0
+    for name in _ASSET_STAMP_FILES:
+        path = _STATIC_DIR / name
+        try:
+            stamp = max(stamp, int(path.stat().st_mtime))
+        except OSError:
+            continue
+    return f"{__version__}.{stamp}" if stamp else __version__
 
 
 def runtime_identity() -> tuple[str, str]:
@@ -108,7 +121,7 @@ def create_app() -> FastAPI:
             profile_csv = "data/appstore_info.csv"
             profile_screenshots = "data/screenshots"
             profile_iap_file = "data/iap_packages.json"
-        from asc import __version__ as asset_version
+        asset_version = _web_asset_version()
         lang = getattr(request.state, "lang", None) or resolve_lang(
             cookie=request.cookies.get(COOKIE_NAME),
             accept_language=request.headers.get("accept-language"),

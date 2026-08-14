@@ -107,6 +107,7 @@
   "drawer.tab_agent": "Agent",
   "drawer.explain_with_agent": "Explain with Agent",
   "drawer.close": "Close log panel",
+  "drawer.resize": "Resize panel",
   "drawer.tools_aria": "Log tools",
   "drawer.waiting": "Waiting for a task",
   "drawer.errors_only": "Errors only",

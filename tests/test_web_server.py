@@ -3099,6 +3099,7 @@ function classList() {
 const parent = { children: [] };
 const drawer = {
   classList: classList(), parentElement: parent, nextSibling: null, hidden: true,
+  style: { _props: {}, setProperty(name, value) { this._props[name] = value; }, getPropertyValue(name) { return this._props[name] || ""; } },
   setAttribute() {}, getAttribute() { return null; }, hasAttribute() { return false; },
   removeAttribute() {}, addEventListener() {}, removeEventListener() {},
   querySelector() { return null; }, querySelectorAll() { return []; }, contains() { return false; },
@@ -3194,6 +3195,8 @@ def test_base_layout_has_no_cdn_asset_urls(client):
     assert "/static/tailwind.css?v=" in body
     assert "/static/vendor/htmx-1.9.12.min.js" in body
     assert re.search(r"/static/vendor/alpine-[^\"']+\.min\.js", body)
+    assert "/static/vendor/marked-11.2.0.min.js" in body
+    assert "/static/vendor/purify-3.2.4.min.js" in body
 
 
 def test_vendored_web_assets_are_served(client):
@@ -3203,6 +3206,8 @@ def test_vendored_web_assets_are_served(client):
         "/static/fonts.css",
         "/static/tailwind.css",
         "/static/vendor/htmx-1.9.12.min.js",
+        "/static/vendor/marked-11.2.0.min.js",
+        "/static/vendor/purify-3.2.4.min.js",
     ):
         resp = client.get(path)
         assert resp.status_code == 200, path
@@ -3326,6 +3331,48 @@ def test_task_log_drawer_exposes_logs_and_agent_tabs(client):
     assert "data-agent-messages" in resp.text
     assert "data-agent-task-search" in resp.text
     assert "data-open-agent-task" in resp.text
+    assert "data-task-log-resize" in resp.text
+
+
+def test_task_log_drawer_resize_handle_contract(client):
+    page = client.get("/").text
+    css = client.get("/static/task-log-drawer.css").text
+    js = client.get("/static/task-log-drawer.js").text
+    assert "data-task-log-resize" in page
+    assert "task-log-drawer__resize-grip" in page
+    assert 'role="separator"' in page
+    assert "drawer.resize" in page or "Resize panel" in page or "调整面板宽度" in page
+    assert "--task-log-drawer-width" in css
+    assert "cursor: col-resize" in css
+    assert ".task-log-drawer__resize" in css
+    assert ".task-log-drawer__resize-grip" in css
+    assert "asc.taskLogDrawer.width" in js
+    assert "setPointerCapture" in js
+    assert "function clampDrawerWidth(" in js
+    assert "MIN_DRAWER_WIDTH = 280" in js
+    assert "MAX_DRAWER_WIDTH = 720" in js
+    assert "DEFAULT_DRAWER_WIDTH = 390" in js
+    assert 'localStorage.setItem(DRAWER_WIDTH_STORAGE_KEY' in js
+    assert '"dblclick"' in js
+
+
+def test_agent_dock_renders_assistant_markdown(client):
+    page = client.get("/").text
+    js = client.get("/static/agent-dock.js").text
+    assert "marked-11.2.0.min.js" in page
+    assert "purify-3.2.4.min.js" in page
+    assert "marked.parse" in js
+    assert "DOMPurify.sanitize" in js
+    assert "fallbackSanitize" in js
+    assert "USE_PROFILES" in js
+    assert "setAssistantMarkdown" in js
+    assert "scheduleMdRender" in js
+    assert "agent-msg--md" in js
+    assert "innerHTML" in js
+    assert "renderMarkdown: renderMarkdown" in js
+    css = client.get("/static/task-log-drawer.css").text
+    assert ".agent-msg--md" in css
+    assert "list-style: disc" in css
 
 
 def test_sidebar_agent_is_button_not_route(client):

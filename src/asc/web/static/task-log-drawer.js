@@ -62,6 +62,78 @@
   var previouslyFocused = null;
   var suppressNextOutsideClick = false;
   var activeTab = "logs";
+  var DEFAULT_DRAWER_WIDTH = 390;
+  var MIN_DRAWER_WIDTH = 280;
+  var MAX_DRAWER_WIDTH = 720;
+  var DRAWER_WIDTH_STORAGE_KEY = "asc.taskLogDrawer.width";
+  var resizeHandle = drawer.querySelector("[data-task-log-resize]");
+  var resizing = false;
+  var resizeStartX = 0;
+  var resizeStartWidth = DEFAULT_DRAWER_WIDTH;
+
+  function clampDrawerWidth(px) {
+    var minW = MIN_DRAWER_WIDTH;
+    var viewport = Number(window.innerWidth);
+    if (!Number.isFinite(viewport) || viewport <= 0) viewport = 1440;
+    var maxW = Math.min(MAX_DRAWER_WIDTH, Math.round(viewport * 0.5));
+    if (maxW < minW) maxW = minW;
+    var n = Number(px);
+    if (!Number.isFinite(n)) n = DEFAULT_DRAWER_WIDTH;
+    return Math.round(Math.min(maxW, Math.max(minW, n)));
+  }
+
+  function persistDrawerWidth(px) {
+    try { localStorage.setItem(DRAWER_WIDTH_STORAGE_KEY, String(px)); } catch (error) { /* ignore quota / private mode */ }
+  }
+
+  function readStoredDrawerWidth() {
+    try {
+      var raw = localStorage.getItem(DRAWER_WIDTH_STORAGE_KEY);
+      if (raw == null || raw === "") return DEFAULT_DRAWER_WIDTH;
+      return clampDrawerWidth(raw);
+    } catch (error) {
+      return DEFAULT_DRAWER_WIDTH;
+    }
+  }
+
+  function applyDrawerWidth(px, persist) {
+    var width = clampDrawerWidth(px);
+    if (drawer.style && typeof drawer.style.setProperty === "function") {
+      drawer.style.setProperty("--task-log-drawer-width", width + "px");
+    }
+    if (persist) persistDrawerWidth(width);
+    return width;
+  }
+
+  function readAppliedDrawerWidth() {
+    var raw = drawer.style && typeof drawer.style.getPropertyValue === "function"
+      ? parseFloat(drawer.style.getPropertyValue("--task-log-drawer-width"))
+      : NaN;
+    return Number.isFinite(raw) ? raw : readStoredDrawerWidth();
+  }
+
+  function onResizePointerMove(event) {
+    if (!resizing) return;
+    applyDrawerWidth(resizeStartWidth + (resizeStartX - event.clientX), false);
+  }
+
+  function endDrawerResize(event) {
+    if (!resizing) return;
+    resizing = false;
+    if (event && resizeHandle && resizeHandle.releasePointerCapture && event.pointerId != null) {
+      try { resizeHandle.releasePointerCapture(event.pointerId); } catch (error) { /* already released */ }
+    }
+    if (document.body && document.body.classList) {
+      document.body.classList.remove("task-log-drawer-resizing");
+    }
+    drawer.classList.remove("is-resizing");
+    document.removeEventListener("pointermove", onResizePointerMove);
+    document.removeEventListener("pointerup", endDrawerResize);
+    document.removeEventListener("pointercancel", endDrawerResize);
+    persistDrawerWidth(clampDrawerWidth(readAppliedDrawerWidth()));
+  }
+
+  applyDrawerWidth(readStoredDrawerWidth(), false);
 
   function isDrawerOpen() {
     return drawer.classList.contains("is-open");
@@ -665,6 +737,33 @@
     if (!isOverlayMode()) return;
     close();
   });
+  if (resizeHandle) {
+    resizeHandle.addEventListener("pointerdown", function (event) {
+      if (event.button) return;
+      event.preventDefault();
+      resizing = true;
+      resizeStartX = event.clientX;
+      resizeStartWidth = clampDrawerWidth(readAppliedDrawerWidth());
+      if (resizeHandle.setPointerCapture) {
+        try { resizeHandle.setPointerCapture(event.pointerId); } catch (error) { /* capture is best-effort */ }
+      }
+      if (document.body && document.body.classList) {
+        document.body.classList.add("task-log-drawer-resizing");
+      }
+      drawer.classList.add("is-resizing");
+      document.addEventListener("pointermove", onResizePointerMove);
+      document.addEventListener("pointerup", endDrawerResize);
+      document.addEventListener("pointercancel", endDrawerResize);
+    });
+    resizeHandle.addEventListener("dblclick", function () {
+      applyDrawerWidth(DEFAULT_DRAWER_WIDTH, true);
+    });
+  }
+  if (window.addEventListener) {
+    window.addEventListener("resize", function () {
+      applyDrawerWidth(readAppliedDrawerWidth(), true);
+    });
+  }
   if (overlayMedia.addEventListener) overlayMedia.addEventListener("change", updateMode);
   else overlayMedia.addListener(updateMode);
 

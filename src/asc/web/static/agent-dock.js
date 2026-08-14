@@ -39,6 +39,106 @@
   var resultsBox = null;
   var boundMeta = null;
 
+  function markdownParser() {
+    var marked = window.marked;
+    if (!marked) return null;
+    if (typeof marked.parse === "function") {
+      return function (text, options) { return marked.parse(text, options); };
+    }
+    if (typeof marked.marked === "function") {
+      return function (text, options) { return marked.marked(text, options); };
+    }
+    if (typeof marked === "function") return marked;
+    return null;
+  }
+
+  function fallbackSanitize(html) {
+    if (typeof document === "undefined" || !document.createElement) {
+      return String(html || "");
+    }
+    var template = document.createElement("template");
+    template.innerHTML = String(html || "");
+    var forbidden = template.content.querySelectorAll(
+      "script,iframe,object,embed,link,meta,style,form"
+    );
+    Array.prototype.forEach.call(forbidden, function (node) {
+      if (node.parentNode) node.parentNode.removeChild(node);
+    });
+    var nodes = template.content.querySelectorAll("*");
+    Array.prototype.forEach.call(nodes, function (el) {
+      if (!el.attributes) return;
+      var names = [];
+      var i;
+      for (i = 0; i < el.attributes.length; i++) names.push(el.attributes[i].name);
+      for (i = 0; i < names.length; i++) {
+        var name = names[i];
+        var lower = name.toLowerCase();
+        var value = el.getAttribute(name) || "";
+        if (
+          lower.indexOf("on") === 0 ||
+          lower === "srcdoc" ||
+          /^\s*javascript:/i.test(value)
+        ) {
+          el.removeAttribute(name);
+        }
+      }
+    });
+    var wrap = document.createElement("div");
+    wrap.appendChild(template.content);
+    return wrap.innerHTML;
+  }
+
+  function sanitizeHtml(html) {
+    if (html == null) return "";
+    if (typeof html !== "string") {
+      if (html && typeof html.then === "function") return null;
+      html = String(html);
+    }
+    if (window.DOMPurify && typeof window.DOMPurify.sanitize === "function") {
+      return window.DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
+    }
+    return fallbackSanitize(html);
+  }
+
+  function renderMarkdown(text) {
+    var parse = markdownParser();
+    if (!parse) return null;
+    var html;
+    try { html = parse(String(text || ""), { gfm: true, breaks: true }); }
+    catch (error) { return null; }
+    if (html && typeof html.then === "function") return null;
+    return sanitizeHtml(html);
+  }
+
+  function setAssistantMarkdown(el, text) {
+    var source = String(text || "");
+    el.classList.add("agent-msg--md");
+    el.setAttribute("data-md-source", source);
+    var html = renderMarkdown(source);
+    if (html == null) {
+      el.textContent = source;
+      return;
+    }
+    el.innerHTML = html;
+  }
+
+  function scheduleMdRender(el) {
+    if (el._mdRaf) return;
+    el._mdRaf = window.requestAnimationFrame(function () {
+      el._mdRaf = 0;
+      setAssistantMarkdown(el, el._mdSource || "");
+    });
+  }
+
+  function flushMdRender(el) {
+    if (!el) return;
+    if (el._mdRaf) {
+      window.cancelAnimationFrame(el._mdRaf);
+      el._mdRaf = 0;
+    }
+    setAssistantMarkdown(el, el._mdSource || "");
+  }
+
   function trunc(value, max) {
     var text = typeof value === "string" ? value : JSON.stringify(value);
     if (!text) return "";
@@ -84,6 +184,7 @@
   }
 
   function abortFetch() {
+    flushMdRender(currentAssistantEl);
     if (streamController) {
       streamController.abort();
       streamController = null;
@@ -124,7 +225,8 @@
     currentAssistantEl = null;
     var node = document.createElement("div");
     node.className = "agent-msg agent-msg--" + role;
-    node.textContent = String(text);
+    if (role === "assistant") setAssistantMarkdown(node, text);
+    else node.textContent = String(text);
     messagesEl.appendChild(node);
     scrollMessages();
     return node;
@@ -135,10 +237,12 @@
     hideEmpty();
     if (!currentAssistantEl) {
       currentAssistantEl = document.createElement("div");
-      currentAssistantEl.className = "agent-msg agent-msg--assistant";
+      currentAssistantEl.className = "agent-msg agent-msg--assistant agent-msg--md";
+      currentAssistantEl._mdSource = "";
       messagesEl.appendChild(currentAssistantEl);
     }
-    currentAssistantEl.appendChild(document.createTextNode(String(fragment)));
+    currentAssistantEl._mdSource += String(fragment);
+    scheduleMdRender(currentAssistantEl);
     scrollMessages();
   }
 
@@ -355,10 +459,12 @@
     }
     if (name === "stopped") {
       setGenerating(false);
+      flushMdRender(currentAssistantEl);
       return;
     }
     if (name === "done") {
       setGenerating(false);
+      flushMdRender(currentAssistantEl);
       currentAssistantEl = null;
       try {
         var done = JSON.parse(data);
@@ -383,6 +489,7 @@
     if (buffer.trim()) {
       parseSseChunk(buffer + "\n\n").events.forEach(handleFrame);
     }
+    flushMdRender(currentAssistantEl);
     setGenerating(false);
   }
 
@@ -592,6 +699,8 @@
   window.AscAgentDock = {
     start: function () {},
     bindTask: bindTask,
-    onDrawerClose: abortStream
+    onDrawerClose: abortStream,
+    renderMarkdown: renderMarkdown,
+    setAssistantMarkdown: setAssistantMarkdown
   };
 })();
