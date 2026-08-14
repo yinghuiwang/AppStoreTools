@@ -196,13 +196,15 @@ def test_task_log_drawer_javascript_traps_focus_in_overlay_mode(client):
     resp = client.get("/static/task-log-drawer.js")
 
     assert resp.status_code == 200
-    assert 'window.matchMedia("(max-width: 1360px)")' in resp.text
+    assert 'window.matchMedia("(max-width: 1360px)")' not in resp.text
     assert 'drawer.setAttribute("aria-modal", modal ? "true" : "false")' in resp.text
     assert 'element.setAttribute("inert", "")' in resp.text
     assert 'element.removeAttribute("inert")' in resp.text
-    assert 'document.querySelector("body > aside")' in resp.text
+    assert 'document.querySelector("body > main")' in resp.text
+    assert 'document.querySelector("body > aside")' not in resp.text
     assert 'element.setAttribute("aria-hidden", "true")' in resp.text
     assert 'event.key !== "Tab"' in resp.text
+    assert "!drawer.contains(document.activeElement)" in resp.text
     assert "previouslyFocused" in resp.text
 
 
@@ -395,16 +397,16 @@ def test_dashboard_stylesheet_is_served_with_workspace_and_dock_layout(client):
     assert ".task-log-dock" not in resp.text
 
 
-def test_task_log_drawer_stylesheet_defines_drawer_and_dock_modes(client):
-    resp = client.get("/static/task-log-drawer.css")
-
-    assert resp.status_code == 200
-    assert ".task-log-drawer" in resp.text
-    assert ".task-log-drawer.is-overlay" in resp.text
-    assert ".task-log-drawer.is-docked" in resp.text
-    assert ".task-log-dock" in resp.text
-    assert "height: 100%" in resp.text
-    assert "@media (max-width: 1360px)" in resp.text
+def test_task_log_drawer_stylesheet_is_overlay_only(client):
+    css = client.get("/static/task-log-drawer.css").text
+    assert ".task-log-drawer" in css
+    assert "position: fixed" in css
+    assert "var(--agent-rail-width" in css
+    assert "var(--agent-panel-width" in css
+    assert ".task-log-drawer.is-docked" not in css
+    assert ".task-log-dock" not in css
+    assert "[data-task-log-yield]" not in css
+    assert ".task-log-tabs" not in css
 
 
 def test_mobile_sidebar_navigation_links_have_accessible_tooltips(client):
@@ -574,7 +576,7 @@ def test_build_page_uses_shared_task_log_drawer_and_keeps_scan_panel(client):
     assert resp.status_code == 200
     assert "TaskLogDrawer.open" in resp.text
     assert "data-task-log-open" in resp.text
-    assert "data-task-log-yield" in resp.text
+    assert "data-task-log-yield" not in resp.text
     assert ("Auto-detect results" in resp.text) or ("自动检测结果" in resp.text)
     assert "startBuildSSE" not in resp.text
     assert 'id="build-log-panel"' not in resp.text
@@ -3002,14 +3004,11 @@ def test_iap_check_missing_file(client):
         assert data['level'] == 'error'
         print('test_iap_check_missing_file: PASS')
 
-def test_task_log_drawer_javascript_closes_on_outside_click_in_overlay_mode(client):
-    resp = client.get("/static/task-log-drawer.js")
-
-    assert resp.status_code == 200
-    assert 'document.addEventListener("click", function (event)' in resp.text
-    assert 'if (!isDrawerOpen() || drawer.contains(event.target)) return;' in resp.text
-    assert 'if (!isOverlayMode()) return;' in resp.text
-    assert "close();" in resp.text
+def test_task_log_drawer_outside_click_ignores_agent_chrome(client):
+    js = client.get("/static/task-log-drawer.js").text
+    assert 'closest("[data-agent-rail]")' in js
+    assert 'closest("[data-agent-panel]")' in js
+    assert 'closest("main")' in js
 
 
 def test_task_log_drawer_slide_animation(client):
@@ -3040,27 +3039,25 @@ def test_dashboard_javascript_delegates_logs_to_task_log_drawer(client):
     resp = client.get("/static/dashboard.js")
     assert resp.status_code == 200
     assert "TaskLogDrawer.open" in resp.text
-    assert "TaskLogDrawer.attachDock" in resp.text
+    assert "TaskLogDrawer.attachDock" not in resp.text
+    assert "data-open-agent-task" in resp.text
 
 
 def test_task_log_drawer_javascript_exposes_public_api(client):
-    resp = client.get("/static/task-log-drawer.js")
-    assert resp.status_code == 200
-    body = resp.text
+    body = client.get("/static/task-log-drawer.js").text
     assert "window.TaskLogDrawer" in body
-    assert "function open(" in body or "open: function" in body or "open(" in body
-    assert "attachDock" in body
-    assert "preferOverlay" in body
-    assert 'getElementById("task-log-dock")' in body
-    assert "data-task-log-yield" in body
+    assert "function open(" in body
+    assert "attachDock" not in body
+    assert "preferOverlay" not in body
+    assert 'getElementById("task-log-dock")' not in body
+    assert "data-task-log-yield" not in body
+    assert "AscAgentDock.onDrawerClose" not in body
+    assert "/api/agent/stream" not in body
+    assert "data-agent-rail" in body
+    assert "data-agent-panel" in body
+    assert 'closest("main")' in body
     assert "/api/task/" in body
-    assert '"/status"' in body or "/status" in body
     assert "stream?after=" in body
-    assert "scheduleReconnect" in body
-    assert "EventSource.CLOSED" in body
-    assert "data-task-log-errors" in body
-    assert "data-task-log-follow" in body
-    assert "drawer.missing" in body or "window.t(\"drawer.missing\")" in body or "任务不存在或已被清理" in body
 
 
 def test_task_log_drawer_reconnects_after_timeout(client):
@@ -3409,19 +3406,15 @@ def test_no_standalone_agent_page(client):
     assert client.get("/agent").status_code in {404, 405}
 
 
-def test_task_log_drawer_javascript_switches_tabs_without_agent_stream(client):
+def test_task_log_drawer_javascript_has_no_agent_tabs_or_abort_hook(client):
     js = client.get("/static/task-log-drawer.js").text
     page = client.get("/").text
-    assert "options.tab" in js
-    assert 'data-task-log-tab' in js
-    assert "data-open-agent-dock" in js
+    assert "options.tab" not in js
+    assert "data-task-log-tab" not in js
+    assert "data-open-agent-dock" not in js
     assert "/api/agent/stream" not in js
-    assert "pauseAtCurrentViewport" in js
+    assert "AscAgentDock.onDrawerClose" not in js
     assert "agent-dock.js" in page
-    stub = client.get("/static/agent-dock.js")
-    assert stub.status_code == 200
-    assert "EventSource" not in stub.text
-    assert "AscAgentDock" in stub.text
 
 
 def test_agent_dock_javascript_uses_post_stream_not_event_source(client):

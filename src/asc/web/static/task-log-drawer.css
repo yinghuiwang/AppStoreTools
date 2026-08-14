@@ -9,11 +9,14 @@
 
 .task-log-drawer {
   --task-log-drawer-width: 390px;
-  position: relative;
+  position: fixed;
+  top: 0;
+  right: calc(var(--agent-rail-width, 48px) + var(--agent-panel-width, 0px));
+  bottom: 0;
+  z-index: 40;
   width: var(--task-log-drawer-width);
-  flex: 0 0 var(--task-log-drawer-width);
   min-width: 0;
-  height: 100%;
+  height: auto;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
@@ -31,21 +34,6 @@
 }
 
 .task-log-drawer[hidden] { display: none; }
-
-/* Dock/overlay modes: docked drawers sit inline (flex sibling); overlay drawers
-   float above the page (fixed) regardless of viewport width. */
-.task-log-drawer.is-overlay {
-  position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 40;
-}
-.task-log-drawer.is-docked {
-  position: relative;
-  flex: 0 0 var(--task-log-drawer-width);
-  width: var(--task-log-drawer-width);
-}
 
 .task-log-drawer__header {
   grid-row: 1;
@@ -126,22 +114,6 @@ body.task-log-drawer-resizing * {
   user-select: none !important;
 }
 
-/* Host for docked drawers (flex sibling of page content / right_panel).
-   Empty while overlay or closed — collapses to 0 width. */
-.task-log-dock {
-  display: flex;
-  align-self: stretch;
-  align-items: stretch;
-  min-width: 0;
-  height: 100%;
-  flex-shrink: 0;
-}
-
-/* Companion right panels (e.g. build scan) yield to the docked open drawer. */
-[data-task-log-yield][data-yielded="true"] {
-  display: none !important;
-}
-
 .task-log-drawer__header {
   display: flex;
   align-items: center;
@@ -154,38 +126,11 @@ body.task-log-drawer-resizing * {
   transition: background .2s ease, border-color .2s ease, box-shadow .2s ease;
 }
 .task-log-drawer__header .task-log-kicker { margin-bottom: 4px; }
-.task-log-tabs {
-  display: flex;
-  gap: 4px;
-  margin-top: 8px;
-}
-.task-log-tabs [role="tab"] {
-  height: 26px;
-  padding: 0 10px;
-  border: 1px solid var(--border-default);
-  border-radius: 4px;
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font: 500 11px/1 "Fira Code", monospace;
-}
-.task-log-tabs [role="tab"]:hover { color: var(--text-primary); background: var(--bg-overlay); }
-.task-log-tabs [role="tab"][aria-selected="true"] {
-  border-color: var(--accent-border);
-  background: var(--accent-glow);
-  color: var(--accent);
-}
 
-.task-log-drawer [data-task-log-panel="logs"],
-.task-log-drawer [data-task-log-panel="agent"] {
+.task-log-drawer [data-task-log-panel="logs"] {
   min-width: 0;
   min-height: 0;
   display: grid;
-}
-.task-log-drawer [data-task-log-panel="logs"] {
-  grid-template-rows: auto minmax(0, 1fr) auto;
-}
-.task-log-drawer [data-task-log-panel="agent"] {
   grid-template-rows: auto minmax(0, 1fr) auto;
 }
 .task-log-drawer [data-task-log-panel][hidden] { display: none !important; }
@@ -507,12 +452,9 @@ body.task-log-drawer-resizing * {
 
 @media (max-width: 1360px) {
   .task-log-drawer {
-    position: fixed;
     z-index: 10000;
-    inset: 0 0 0 auto;
     width: min(100vw, var(--task-log-drawer-width));
     max-width: 100vw;
-    flex-basis: auto;
   }
 }
 

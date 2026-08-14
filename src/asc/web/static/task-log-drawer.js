@@ -12,9 +12,7 @@
       open: function () {},
       close: function () {},
       isOpen: function () { return false; },
-      currentTaskId: function () { return null; },
-      attachDock: function () {},
-      preferOverlay: function () {}
+      currentTaskId: function () { return null; }
     };
     return;
   }
@@ -29,19 +27,7 @@
   var copyControl = drawer.querySelector("[data-task-log-copy]");
   var clearControl = drawer.querySelector("[data-task-log-clear]");
   var closeControl = drawer.querySelector("[data-task-log-close]");
-  var tabButtons = drawer.querySelectorAll("[data-task-log-tab]");
-  var logsPanel = drawer.querySelector('[data-task-log-panel="logs"]');
-  var agentPanel = drawer.querySelector('[data-task-log-panel="agent"]');
   var explainControl = drawer.querySelector("[data-open-agent-task]");
-  var agentNav = document.querySelector("[data-open-agent-dock]");
-  var agentForm = drawer.querySelector("[data-agent-stream]");
-  var sidebar = document.querySelector("body > aside");
-  var overlayMedia = window.matchMedia("(max-width: 1360px)");
-
-  var homeParent = drawer.parentElement;
-  var homeNextSibling = drawer.nextSibling;
-  var dockHost = null;
-  var forceOverlay = false;
 
   var eventSource = null;
   var statusController = null;
@@ -61,7 +47,6 @@
   var backgroundInertEntries = null;
   var previouslyFocused = null;
   var suppressNextOutsideClick = false;
-  var activeTab = "logs";
   var DEFAULT_DRAWER_WIDTH = 390;
   var MIN_DRAWER_WIDTH = 280;
   var MAX_DRAWER_WIDTH = 720;
@@ -139,25 +124,9 @@
     return drawer.classList.contains("is-open");
   }
 
-  function isOverlayMode() {
-    return forceOverlay || !dockHost || overlayMedia.matches;
-  }
-
-  function setYieldPanelsHidden(hidden) {
-    document.querySelectorAll("[data-task-log-yield]").forEach(function (element) {
-      if (hidden) element.setAttribute("data-yielded", "true");
-      else element.removeAttribute("data-yielded");
-      element.setAttribute("aria-hidden", hidden ? "true" : "false");
-    });
-  }
-
-  function moveToHome() {
-    if (!homeParent || drawer.parentElement === homeParent) return;
-    if (homeNextSibling && homeNextSibling.parentNode === homeParent) {
-      homeParent.insertBefore(drawer, homeNextSibling);
-    } else {
-      homeParent.appendChild(drawer);
-    }
+  function isAgentChrome(node) {
+    if (!node || !node.closest) return false;
+    return !!(node.closest("[data-agent-rail]") || node.closest("[data-agent-panel]"));
   }
 
   function applyInertState(element) {
@@ -182,17 +151,9 @@
   function setBackgroundInert(enabled) {
     if (enabled) {
       if (backgroundInertEntries) return;
-      var nodes = [];
-      if (sidebar) nodes.push(sidebar);
-      var container = drawer.parentElement;
-      if (container) {
-        Array.prototype.forEach.call(container.children, function (child) {
-          if (child !== drawer) nodes.push(child);
-        });
-      }
-      backgroundInertEntries = nodes.map(function (element) {
-        return { el: element, state: applyInertState(element) };
-      });
+      var main = document.querySelector("body > main");
+      if (!main) return;
+      backgroundInertEntries = [{ el: main, state: applyInertState(main) }];
     } else if (backgroundInertEntries) {
       backgroundInertEntries.forEach(function (entry) {
         releaseInertState(entry.el, entry.state);
@@ -202,20 +163,9 @@
   }
 
   function updateMode() {
-    var overlay = isOverlayMode();
-    drawer.classList.toggle("is-overlay", overlay);
-    drawer.classList.toggle("is-docked", !overlay);
-    if (overlay) {
-      moveToHome();
-    } else if (dockHost && drawer.parentElement !== dockHost) {
-      dockHost.appendChild(drawer);
-    }
-    if (dockHost) {
-      dockHost.setAttribute("aria-hidden", isDrawerOpen() && !overlay ? "false" : "true");
-    }
-    // Build (and similar) right panels yield space while the drawer is docked open.
-    setYieldPanelsHidden(isDrawerOpen() && !overlay);
-    var modal = isDrawerOpen() && overlay;
+    drawer.classList.add("is-overlay");
+    drawer.classList.remove("is-docked");
+    var modal = isDrawerOpen();
     drawer.setAttribute("aria-modal", modal ? "true" : "false");
     setBackgroundInert(modal);
   }
@@ -228,15 +178,13 @@
   }
 
   function trapDrawerFocus(event) {
-    if (event.key !== "Tab" || !isDrawerOpen() || !isOverlayMode()) return;
+    if (event.key !== "Tab" || !isDrawerOpen()) return;
+    if (!drawer.contains(document.activeElement)) return;
     var focusables = drawerFocusables();
     if (!focusables.length) return;
     var first = focusables[0];
     var last = focusables[focusables.length - 1];
-    if (!drawer.contains(document.activeElement)) {
-      event.preventDefault();
-      (event.shiftKey ? last : first).focus();
-    } else if (event.shiftKey && document.activeElement === first) {
+    if (event.shiftKey && document.activeElement === first) {
       event.preventDefault();
       last.focus();
     } else if (!event.shiftKey && document.activeElement === last) {
@@ -290,26 +238,6 @@
     if (!drawer) return;
     if (state) drawer.setAttribute("data-task-state", state);
     else drawer.removeAttribute("data-task-state");
-  }
-
-  function updateAgentNavPressed() {
-    if (!agentNav) return;
-    var pressed = isDrawerOpen() && activeTab === "agent";
-    agentNav.setAttribute("aria-pressed", pressed ? "true" : "false");
-    agentNav.classList.toggle("active", pressed);
-  }
-
-  function setActiveTab(tab) {
-    var next = tab === "agent" ? "agent" : "logs";
-    if (next === "agent") pauseAtCurrentViewport();
-    activeTab = next;
-    Array.prototype.forEach.call(tabButtons, function (button) {
-      var selected = button.getAttribute("data-task-log-tab") === activeTab;
-      button.setAttribute("aria-selected", selected ? "true" : "false");
-    });
-    if (logsPanel) logsPanel.hidden = activeTab !== "logs";
-    if (agentPanel) agentPanel.hidden = activeTab !== "agent";
-    updateAgentNavPressed();
   }
 
   function syncExplainButton(isError) {
@@ -568,22 +496,15 @@
   function open(taskId, options) {
     options = options || {};
     var hasTask = taskId != null && String(taskId) !== "";
-    var tab = options.tab === "agent" || options.tab === "logs"
-      ? options.tab
-      : (hasTask ? "logs" : "agent");
-
     if (!hasTask) {
       previouslyFocused = document.activeElement;
       openDrawerPanel();
-      setActiveTab(tab);
       suppressNextOutsideClick = true;
       setTimeout(function () { suppressNextOutsideClick = false; }, 0);
       return;
     }
-
     var nextId = String(taskId);
     if (isDrawerOpen() && activeTaskId === nextId) {
-      setActiveTab(tab);
       suppressNextOutsideClick = true;
       setTimeout(function () { suppressNextOutsideClick = false; }, 0);
       return;
@@ -609,7 +530,6 @@
     updatePosition();
     previouslyFocused = document.activeElement;
     openDrawerPanel();
-    setActiveTab(tab);
     if (output) output.focus({ preventScroll: true });
 
     // Swallow the same click that triggered `open()` so the document-level
@@ -623,12 +543,8 @@
   function close() {
     closeSource();
     cancelPreflight();
-    if (window.AscAgentDock && typeof window.AscAgentDock.onDrawerClose === "function") {
-      window.AscAgentDock.onDrawerClose();
-    }
     setTaskState("");
     beginCloseDrawerPanel();
-    updateAgentNavPressed();
     var target = previouslyFocused && previouslyFocused.isConnected ? previouslyFocused : null;
     activeTaskId = null;
     callbacks = {};
@@ -636,37 +552,7 @@
     if (target) target.focus({ preventScroll: true });
   }
 
-  function attachDock(host) {
-    dockHost = host || null;
-    updateMode();
-  }
-
-  function preferOverlay(enabled) {
-    forceOverlay = enabled !== false;
-    updateMode();
-  }
-
   if (closeControl) closeControl.addEventListener("click", close);
-  Array.prototype.forEach.call(tabButtons, function (button) {
-    button.addEventListener("click", function () {
-      setActiveTab(button.getAttribute("data-task-log-tab"));
-    });
-  });
-  if (agentNav) {
-    agentNav.addEventListener("click", function () {
-      open(null, { tab: "agent" });
-    });
-  }
-  if (explainControl) {
-    explainControl.addEventListener("click", function () {
-      setActiveTab("agent");
-    });
-  }
-  if (agentForm) {
-    agentForm.addEventListener("submit", function (event) {
-      event.preventDefault();
-    });
-  }
   if (clearControl) {
     clearControl.addEventListener("click", function () {
       logEntries = [];
@@ -733,8 +619,10 @@
       suppressNextOutsideClick = false;
       return;
     }
-    if (!isDrawerOpen() || drawer.contains(event.target)) return;
-    if (!isOverlayMode()) return;
+    if (!isDrawerOpen()) return;
+    if (drawer.contains(event.target)) return;
+    if (isAgentChrome(event.target)) return;
+    if (!event.target.closest || !event.target.closest("main")) return;
     close();
   });
   if (resizeHandle) {
@@ -764,20 +652,12 @@
       applyDrawerWidth(readAppliedDrawerWidth(), true);
     });
   }
-  if (overlayMedia.addEventListener) overlayMedia.addEventListener("change", updateMode);
-  else overlayMedia.addListener(updateMode);
-
-  // Dock into #task-log-dock when present (dashboard right_panel or base layout).
-  var defaultDock = document.getElementById("task-log-dock");
-  if (defaultDock) attachDock(defaultDock);
-  else updateMode();
+  updateMode();
 
   window.TaskLogDrawer = {
     open: open,
     close: close,
     isOpen: isDrawerOpen,
-    currentTaskId: function () { return activeTaskId; },
-    attachDock: attachDock,
-    preferOverlay: preferOverlay
+    currentTaskId: function () { return activeTaskId; }
   };
 })();

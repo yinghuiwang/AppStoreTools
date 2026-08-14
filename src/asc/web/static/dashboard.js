@@ -408,10 +408,5 @@
     if (document.visibilityState === "visible" && hasActiveTasks()) refreshDashboard();
   });
 
-  if (window.TaskLogDrawer) {
-    var dock = document.getElementById("task-log-dock");
-    TaskLogDrawer.attachDock(dock);
-  }
-
   schedulePoll();
 }());
