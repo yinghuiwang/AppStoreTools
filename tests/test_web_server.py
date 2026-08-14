@@ -3495,6 +3495,20 @@ def test_agent_dock_javascript_exposes_chrome_state_and_restore(client):
     assert "auto_analyze: true" in bind
 
 
+def test_agent_dock_bind_and_apply_do_not_use_log_tabs(client):
+    js = client.get("/static/agent-dock.js").text
+    bind = _js_function_source(js, "bindTask")
+    assert "setOpen(true)" in bind
+    assert "auto_analyze: true" in bind
+    apply_src = _js_function_source(js, "applyPlan")
+    assert "TaskLogDrawer.open" in apply_src
+    assert "bindTask" not in apply_src
+    assert "tab:" not in apply_src
+    assert "TaskLogDrawer.open(task.id" not in js
+    assert '{ tab: "agent" }' not in js
+    assert '{ tab: "logs" }' not in js
+
+
 def test_dashboard_javascript_adds_explain_on_error_rows(client):
     js = client.get("/static/dashboard.js").text
     assert "data-open-agent-task" in js or "openAgentTask" in js

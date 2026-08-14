@@ -685,6 +685,8 @@
     abortStream();
     boundTaskId = String(taskId);
     sessionId = null;
+    setOpen(true);
+    persistChrome();
     showEmpty();
     setBoundMeta({ id: boundTaskId }, "");
     var payload;
@@ -702,6 +704,7 @@
     if (seq !== bindSeq) return;
     var session = payload.session || {};
     sessionId = session.id || null;
+    persistChrome();
     setBoundMeta({ id: boundTaskId, profile: session.profile }, session.profile);
     renderHistory(payload);
     if (!hasUserOrAssistant(payload.messages)) {
@@ -753,11 +756,7 @@
         ].filter(Boolean).join(" · ");
         button.addEventListener("click", function () {
           hideResults();
-          if (window.TaskLogDrawer) {
-            TaskLogDrawer.open(task.id, { tab: "agent", title: task.title });
-          }
           bindTask(task.id);
-          setBoundMeta(task, task.profile);
         });
         resultsBox.appendChild(button);
       });
