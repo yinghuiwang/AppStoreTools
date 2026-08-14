@@ -299,7 +299,7 @@ def test_homepage_contains_command_workspace_landmarks(client):
     assert resp.status_code == 200
     assert 'id="dashboard-summary"' in resp.text
     assert 'id="dashboard-task-list"' in resp.text
-    assert 'id="task-log-dock"' in resp.text
+    assert "data-agent-rail" in resp.text
     assert 'id="task-log-drawer"' in resp.text
     assert 'id="task-log-output"' in resp.text
     assert 'data-dashboard-filter="range"' in resp.text
@@ -460,9 +460,9 @@ def test_metadata_page_returns_200(client):
 def _div_depth_before_marker(html: str, marker: str) -> int:
     """Net unclosed <div> count from <main to the tag that contains *marker*.
 
-    Feature pages must close their content wrappers before #task-log-dock;
-    otherwise the browser nests the shared log drawer inside the scrolling
-    column (below the form) instead of docking it on the right like Build.
+    Feature pages must close their content wrappers before chrome that lives
+    after </main>; otherwise the browser nests the shared log drawer inside
+    the scrolling column (below the form) instead of keeping it outside main.
     """
     idx = html.find(marker)
     assert idx != -1, f"missing {marker}"
@@ -495,21 +495,24 @@ def test_metadata_page_uses_shared_task_log_drawer(client):
     assert ("metadata.fail_banner_title" in resp.text) or ("元数据 / 截图上传失败" in resp.text) or (
         "Metadata / screenshot upload failed" in resp.text
     )
-    assert _div_depth_before_marker(resp.text, 'id="task-log-dock"') == 0
-    assert resp.text.find('id="metadata-page-state"') < resp.text.find('id="task-log-dock"')
+    assert resp.text.find('id="metadata-page-state"') < resp.text.find("</main>")
+    assert resp.text.find("</main>") < resp.text.find('id="task-log-drawer"')
 
 
 @pytest.mark.parametrize(
     "path",
-    ["/metadata", "/build", "/urls", "/whats-new", "/iap", "/update"],
+    ["/", "/metadata", "/build", "/urls", "/whats-new", "/iap", "/update"],
 )
-def test_feature_page_docks_task_log_outside_scrolling_content(client, path):
+def test_feature_page_keeps_agent_chrome_outside_main(client, path):
     resp = client.get(path)
+    html = resp.text
     assert resp.status_code == 200
-    assert 'id="task-log-dock"' in resp.text
-    assert 'id="task-log-drawer"' in resp.text
-    assert _div_depth_before_marker(resp.text, 'id="task-log-dock"') == 0
-    assert "x-cloak" in resp.text
+    assert 'id="task-log-dock"' not in html
+    assert "data-agent-rail" in html
+    assert 'id="task-log-drawer"' in html
+    assert html.find("</main>") < html.find("data-agent-rail")
+    assert html.find("data-agent-panel") < html.find("data-agent-rail")
+    assert html.find("data-agent-rail") < html.find('id="task-log-drawer"')
 
 
 @pytest.mark.parametrize("path", ["/urls", "/whats-new", "/iap", "/update"])
@@ -3174,7 +3177,8 @@ def test_base_layout_includes_task_log_drawer_assets(client):
     assert "task-log-drawer.css?v=" in resp.text
     assert "task-log-drawer.js?v=" in resp.text
     assert 'id="task-log-drawer"' in resp.text
-    assert 'id="task-log-dock"' in resp.text
+    assert "agent-rail.css?v=" in resp.text
+    assert "data-agent-rail" in resp.text
     assert "data-task-log-close" in resp.text
 
 
@@ -3322,16 +3326,36 @@ def test_profiles_import_local_api_404_when_none(client, tmp_path, monkeypatch):
     assert resp.status_code == 404
 
 
-def test_task_log_drawer_exposes_logs_and_agent_tabs(client):
+def test_homepage_exposes_agent_right_rail_chrome(client):
     resp = client.get("/")
-    assert 'data-task-log-tab="logs"' in resp.text
-    assert 'data-task-log-tab="agent"' in resp.text
-    assert "data-agent-stream" in resp.text
-    assert "data-agent-stop" in resp.text
-    assert "data-agent-messages" in resp.text
-    assert "data-agent-task-search" in resp.text
-    assert "data-open-agent-task" in resp.text
-    assert "data-task-log-resize" in resp.text
+    html = resp.text
+    assert "data-agent-rail" in html
+    assert "data-agent-toggle" in html
+    assert "data-agent-panel" in html
+    assert 'id="agent-panel"' in html
+    assert "data-agent-stream" in html
+    assert "data-agent-stop" in html
+    assert "data-agent-messages" in html
+    assert "data-agent-task-search" in html
+    assert "data-open-agent-task" in html
+    assert "data-task-log-resize" in html
+    assert "data-agent-resize" in html
+    assert 'data-task-log-tab="agent"' not in html
+    assert 'id="task-log-tab-agent"' not in html
+    assert 'data-task-log-panel="agent"' not in html
+    assert "data-open-agent-dock" not in html
+    assert 'href="/agent"' not in html
+    assert 'id="task-log-dock"' not in html
+    assert "agent-rail.css" in html
+    assert "agent-dock.js" in html
+    assert html.find("</main>") < html.find("data-agent-rail")
+    assert html.find("data-agent-rail") < html.find('id="task-log-drawer"')
+    nav_start = html.find("<nav")
+    nav_end = html.find("</nav>")
+    assert nav_start != -1 and nav_end > nav_start
+    nav = html[nav_start:nav_end]
+    assert "data-agent-toggle" not in nav
+    assert ">Agent<" not in nav and "nav.agent" not in nav
 
 
 def test_task_log_drawer_resize_handle_contract(client):
@@ -3375,9 +3399,9 @@ def test_agent_dock_renders_assistant_markdown(client):
     assert "list-style: disc" in css
 
 
-def test_sidebar_agent_is_button_not_route(client):
+def test_sidebar_has_no_agent_entry_and_no_agent_route(client):
     resp = client.get("/")
-    assert "data-open-agent-dock" in resp.text
+    assert "data-open-agent-dock" not in resp.text
     assert 'href="/agent"' not in resp.text
 
 

@@ -8,18 +8,12 @@
     <div>
       <p class="task-log-kicker">TASK OUTPUT</p>
       <h2 id="task-log-title">{{ t("drawer.title") }}</h2>
-      <div class="task-log-tabs" role="tablist" aria-label="{{ t('drawer.title') }}">
-        <button type="button" role="tab" id="task-log-tab-logs" data-task-log-tab="logs" aria-selected="true" aria-controls="task-log-panel-logs">{{ t("drawer.tab_logs") }}</button>
-        <button type="button" role="tab" id="task-log-tab-agent" data-task-log-tab="agent" aria-selected="false" aria-controls="task-log-panel-agent">{{ t("drawer.tab_agent") }}</button>
-      </div>
     </div>
     <button type="button" class="task-log-icon-button" data-task-log-close aria-label="{{ t('drawer.close') }}" title="{{ t('drawer.close') }}">&#215;</button>
   </header>
   <section id="task-log-panel-logs"
            class="task-log-panel"
-           data-task-log-panel="logs"
-           role="tabpanel"
-           aria-labelledby="task-log-tab-logs">
+           data-task-log-panel="logs">
     <div class="task-log-tools" role="toolbar" aria-label="{{ t('drawer.tools_aria') }}">
       <span class="task-log-status-pill" data-task-log-status-wrap>
         <span class="task-log-status-spinner" aria-hidden="true"></span>
@@ -38,30 +32,6 @@
       <button type="button" class="task-log-button" data-task-log-latest hidden>{{ t("drawer.latest") }}</button>
       <span data-task-log-position>-- / --</span>
     </footer>
-  </section>
-  <section id="task-log-panel-agent"
-           class="task-log-panel"
-           data-task-log-panel="agent"
-           role="tabpanel"
-           aria-labelledby="task-log-tab-agent"
-           hidden>
-    <div class="agent-dock-toolbar">
-      <input type="search"
-             class="field-input agent-dock-search"
-             data-agent-task-search
-             placeholder="{{ t('agent.search_placeholder') }}"
-             autocomplete="off">
-    </div>
-    <div class="agent-dock-messages" data-agent-messages>
-      <p class="agent-dock-empty">{{ t("agent.empty") }}</p>
-    </div>
-    <div class="agent-dock-composer">
-      <button type="button" class="task-log-button" data-agent-stop hidden>{{ t("agent.stop") }}</button>
-      <form data-agent-stream action="#" method="post">
-        <input type="text" name="message" class="field-input agent-dock-input" autocomplete="off">
-        <button type="submit" class="task-log-button">{{ t("agent.send") }}</button>
-      </form>
-    </div>
   </section>
   <div class="task-log-drawer__resize"
        data-task-log-resize

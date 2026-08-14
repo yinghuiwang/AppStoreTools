@@ -1,0 +1,43 @@
+<aside id="agent-panel"
+       class="agent-panel"
+       data-agent-panel
+       aria-hidden="true">
+  <div class="agent-panel__resize"
+       data-agent-resize
+       role="separator"
+       aria-orientation="vertical"
+       aria-label="{{ t('agent.resize') }}"
+       title="{{ t('agent.resize') }}">
+    <span class="agent-panel__resize-grip" aria-hidden="true">
+      <span></span><span></span><span></span>
+    </span>
+  </div>
+  <div class="agent-dock-toolbar">
+    <input type="search"
+           class="field-input agent-dock-search"
+           data-agent-task-search
+           placeholder="{{ t('agent.search_placeholder') }}"
+           autocomplete="off">
+  </div>
+  <div class="agent-dock-messages" data-agent-messages>
+    <p class="agent-dock-empty">{{ t("agent.empty") }}</p>
+  </div>
+  <div class="agent-dock-composer">
+    <button type="button" class="task-log-button" data-agent-stop hidden>{{ t("agent.stop") }}</button>
+    <form data-agent-stream action="#" method="post">
+      <input type="text" name="message" class="field-input agent-dock-input" autocomplete="off">
+      <button type="submit" class="task-log-button">{{ t("agent.send") }}</button>
+    </form>
+  </div>
+</aside>
+<aside class="agent-rail" data-agent-rail>
+  <button type="button"
+          class="agent-rail__button"
+          data-agent-toggle
+          aria-pressed="false"
+          aria-controls="agent-panel"
+          aria-label="{{ t('nav.agent') }}"
+          title="{{ t('nav.agent') }}">
+    <svg class="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M8.625 12a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.41 20.97a5.969 5.969 0 0 1-.474-.065 4.48 4.48 0 0 0 .978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25Z"/></svg>
+  </button>
+</aside>

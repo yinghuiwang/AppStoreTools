@@ -428,6 +428,7 @@
     }
   </style>
   <link rel="stylesheet" href="/static/task-log-drawer.css?v={{ asset_version }}">
+  <link rel="stylesheet" href="/static/agent-rail.css?v={{ asset_version }}">
   {% block extra_head %}{% endblock %}
 </head>
 <body class="flex h-screen overflow-hidden font-sans">
@@ -481,15 +482,6 @@
         <svg class="w-[18px] h-[18px] shrink-0 text-obsidian-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25a2.25 2.25 0 0 1-2.25-2.25v-2.25Z"/></svg>
         {{ t("nav.dashboard") }}
       </a>
-      <button type="button"
-              data-open-agent-dock
-              aria-pressed="false"
-              aria-label="{{ t('nav.agent') }}"
-              title="{{ t('nav.agent') }}"
-              class="nav-item flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] cursor-pointer focus-ring w-full text-left bg-transparent border-0 text-inherit">
-        <svg class="w-[18px] h-[18px] shrink-0 text-obsidian-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M8.625 12a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.41 20.97a5.969 5.969 0 0 1-.474-.065 4.48 4.48 0 0 0 .978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25Z"/></svg>
-        {{ t("nav.agent") }}
-      </button>
       <a href="/metadata" aria-label="{{ t('nav.metadata') }}" title="{{ t('nav.metadata') }}"
          class="nav-item flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] cursor-pointer focus-ring
                 {% if request.url.path == '/metadata' %}active{% endif %}">
@@ -576,11 +568,9 @@
     </div>
     <!-- Optional right panel (override in child templates) -->
     {% block right_panel %}{% endblock %}
-    {% block task_log_dock %}
-    <div id="task-log-dock" class="task-log-dock" aria-hidden="true"></div>
-    {% endblock %}
-    {% include "_task_log_drawer.html" %}
   </main>
+  {% include "_agent_chrome.html" %}
+  {% include "_task_log_drawer.html" %}
 
   <script src="/static/vendor/marked-11.2.0.min.js?v={{ asset_version }}" defer></script>
   <script src="/static/vendor/purify-3.2.4.min.js?v={{ asset_version }}" defer></script>
