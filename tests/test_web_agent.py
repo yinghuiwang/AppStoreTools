@@ -342,3 +342,44 @@ def test_done_promotes_draft_then_apply_writes_csv(tmp_path, monkeypatch):
     tasks.close()
     agents.close()
 
+
+def test_run_turn_without_task_creates_free_chat_session(tmp_path):
+    from asc.web.agent import WebAgent
+
+    tasks = TaskStore(tmp_path / "tasks.db")
+    agents = AgentStore(tmp_path / "agent.db")
+    llm = ScriptedLLM([[
+        {"content": "free chat ok", "finish_reason": "stop"},
+    ]])
+    agent = WebAgent(agent_store=agents, task_store=tasks, project_root=tmp_path)
+    events = list(agent.run_turn(
+        session_id=None, task_id=None, message="hello", auto_analyze=True,
+        lang="zh", llm_client=llm,
+    ))
+    names = [e[0] for e in events]
+    assert names[0] == "session"
+    session_payload = json.loads(events[0][1])
+    assert session_payload["session_id"]
+    assert session_payload.get("task_id") in (None, "")
+    assert "token" in names
+    assert names[-1] == "done"
+    stored = agents.get_session(session_payload["session_id"])
+    assert stored is not None
+    assert stored["task_id"] is None
+    messages = agents.list_messages(session_payload["session_id"])
+    user_text = " ".join(row["content"] for row in messages if row["role"] == "user")
+    assert "hello" in user_text
+    assert "task_id=" not in user_text
+    follow = list(agent.run_turn(
+        session_id=session_payload["session_id"],
+        task_id=None,
+        message="again",
+        auto_analyze=False,
+        lang="zh",
+        llm_client=ScriptedLLM([[{"content": "still free", "finish_reason": "stop"}]]),
+    ))
+    follow_session = json.loads(follow[0][1])
+    assert follow_session["session_id"] == session_payload["session_id"]
+    tasks.close()
+    agents.close()
+

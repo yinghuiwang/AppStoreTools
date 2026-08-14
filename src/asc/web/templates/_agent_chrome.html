@@ -13,21 +13,55 @@
     </span>
   </div>
   <div class="agent-dock-toolbar">
-    <input type="search"
-           class="field-input agent-dock-search"
-           data-agent-task-search
-           placeholder="{{ t('agent.search_placeholder') }}"
-           autocomplete="off">
+    <div class="agent-dock-toolbar__lead">
+      <span class="agent-dock-title" data-agent-title>{{ t("nav.agent") }}</span>
+      <div class="agent-bound-meta" data-agent-bound hidden></div>
+    </div>
+    <button type="button"
+            class="task-log-icon-button agent-dock-close"
+            data-agent-close
+            aria-label="{{ t('agent.close') }}"
+            title="{{ t('agent.close') }}">&#215;</button>
   </div>
   <div class="agent-dock-messages" data-agent-messages>
     <p class="agent-dock-empty">{{ t("agent.empty") }}</p>
   </div>
   <div class="agent-dock-composer">
-    <button type="button" class="task-log-button" data-agent-stop hidden>{{ t("agent.stop") }}</button>
-    <form data-agent-stream action="#" method="post">
-      <input type="text" name="message" class="field-input agent-dock-input" autocomplete="off">
-      <button type="submit" class="task-log-button">{{ t("agent.send") }}</button>
-    </form>
+    <div class="agent-dock-composer__row">
+      <div class="agent-attach" data-agent-attach-wrap>
+        <button type="button"
+                class="agent-attach__button"
+                data-agent-attach
+                aria-expanded="false"
+                aria-haspopup="true"
+                aria-controls="agent-attach-menu"
+                title="{{ t('agent.attach') }}"
+                aria-label="{{ t('agent.attach') }}">+</button>
+        <div id="agent-attach-menu"
+             class="agent-attach-menu"
+             data-agent-attach-menu
+             hidden
+             role="dialog"
+             aria-label="{{ t('agent.attach_task') }}">
+          <p class="agent-attach-menu__label">{{ t("agent.attach_task") }}</p>
+          <input type="search"
+                 class="field-input agent-dock-search"
+                 data-agent-task-search
+                 placeholder="{{ t('agent.search_placeholder') }}"
+                 autocomplete="off">
+          <div class="agent-search-results" data-agent-search-results hidden></div>
+        </div>
+      </div>
+      <form data-agent-stream action="#" method="post">
+        <input type="text"
+               name="message"
+               class="field-input agent-dock-input"
+               placeholder="{{ t('agent.composer_placeholder') }}"
+               autocomplete="off">
+        <button type="button" class="task-log-button" data-agent-stop hidden>{{ t("agent.stop") }}</button>
+        <button type="submit" class="task-log-button">{{ t("agent.send") }}</button>
+      </form>
+    </div>
   </div>
 </aside>
 <aside class="agent-rail" data-agent-rail>
@@ -38,6 +72,6 @@
           aria-controls="agent-panel"
           aria-label="{{ t('nav.agent') }}"
           title="{{ t('nav.agent') }}">
-    <svg class="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M8.625 12a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.41 20.97a5.969 5.969 0 0 1-.474-.065 4.48 4.48 0 0 0 .978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25Z"/></svg>
+    <svg class="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M8.625 12a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.41 20.97a5.969 5.969 0 0 1-.474-.065 4.48 4.48 0 0 0 .978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03 8.25 9-8.25s9 3.694 9 8.25Z"/></svg>
   </button>
 </aside>

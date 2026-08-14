@@ -159,9 +159,63 @@ def test_concurrent_apply_one_409(tmp_path, monkeypatch):
     agents.close()
 
 
-def test_stream_without_ids_is_400():
+def test_stream_without_ids_creates_session(tmp_path, monkeypatch):
+    from asc.web.agent_store import AgentStore
+
+    store = TaskStore(tmp_path / "tasks.db")
+    agents = AgentStore(tmp_path / "agent.db")
+    _isolate_task_store(monkeypatch, store)
+    _isolate_agent_store(monkeypatch, agents)
+    captured = {}
+
+    def fake_turn(self, **kwargs):
+        captured.update(kwargs)
+        yield ("session", '{"session_id":"free-1","task_id":null}')
+        yield ("token", "hello")
+        yield ("done", '{"session_id":"free-1","plan_ids":[]}')
+
+    monkeypatch.setattr("asc.web.agent.WebAgent.run_turn", fake_turn)
+    monkeypatch.setattr(
+        "asc.config.Config.get_active_llm_config",
+        lambda self: {"api_key": "k", "base_url": "http://x", "model": "m"},
+    )
     client = TestClient(create_app())
-    assert client.post("/api/agent/stream", json={}).status_code == 400
+    resp = client.post(
+        "/api/agent/stream",
+        json={"message": "hello", "auto_analyze": False},
+    )
+    assert resp.status_code == 200
+    assert "text/event-stream" in resp.headers["content-type"]
+    assert captured.get("task_id") in (None, "")
+    assert captured.get("session_id") in (None, "")
+    assert captured.get("auto_analyze") is False
+    assert captured.get("message") == "hello"
+    assert "event: session" in resp.text
+    store.close()
+    agents.close()
+
+
+def test_sessions_by_session_id_and_missing_ids(tmp_path, monkeypatch):
+    from asc.web.agent_store import AgentStore
+
+    store = TaskStore(tmp_path / "tasks.db")
+    agents = AgentStore(tmp_path / "agent.db")
+    _isolate_task_store(monkeypatch, store)
+    _isolate_agent_store(monkeypatch, agents)
+    session = agents.get_or_create_session(None, "")
+    agents.append_message(session["id"], "user", "hi")
+    client = TestClient(create_app())
+    assert client.get("/api/agent/sessions").status_code == 400
+    missing = client.get("/api/agent/sessions?session_id=does-not-exist")
+    assert missing.status_code == 404
+    ok = client.get(f"/api/agent/sessions?session_id={session['id']}")
+    assert ok.status_code == 200
+    payload = ok.json()
+    assert payload["session"]["id"] == session["id"]
+    assert payload["session"]["task_id"] is None
+    assert [row["content"] for row in payload["messages"]] == ["hi"]
+    store.close()
+    agents.close()
 
 
 def test_reject_non_pending_is_409(tmp_path, monkeypatch):

@@ -266,3 +266,12 @@ def test_urls_locales_i18n_keys():
     assert t("api.urls_locales_required", lang="en") == "Select at least one target locale"
     assert "selected" in t("urls.locales_selected", lang="en", selected=2, total=5)
     assert "已选" in t("urls.locales_selected", lang="zh", selected=2, total=5)
+
+
+def test_agent_attach_i18n_keys():
+    load_catalog.cache_clear()
+    assert t("agent.attach", lang="zh") == "添加上下文"
+    assert t("agent.attach_task", lang="zh").startswith("绑定失败任务")
+    assert "optional" in t("agent.attach_task", lang="en").lower()
+    assert t("agent.close", lang="en") == "Close Agent panel"
+    assert "optional" in t("agent.empty", lang="en").lower()

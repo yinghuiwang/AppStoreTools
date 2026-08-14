@@ -28,7 +28,10 @@
   var stopBtn = panel ? panel.querySelector("[data-agent-stop]") : null;
   var form = panel ? panel.querySelector("[data-agent-stream]") : null;
   var searchInput = panel ? panel.querySelector("[data-agent-task-search]") : null;
-  var toolbar = panel ? panel.querySelector(".agent-dock-toolbar") : null;
+  var attachBtn = panel ? panel.querySelector("[data-agent-attach]") : null;
+  var attachMenu = panel ? panel.querySelector("[data-agent-attach-menu]") : null;
+  var attachWrap = panel ? panel.querySelector("[data-agent-attach-wrap]") : null;
+  var closeBtn = panel ? panel.querySelector("[data-agent-close]") : null;
   var resizeHandle = panel ? panel.querySelector("[data-agent-resize]") : null;
 
   var boundTaskId = null;
@@ -47,8 +50,8 @@
   var currentAssistantEl = null;
   var bindSeq = 0;
   var searchTimer = null;
-  var resultsBox = null;
-  var boundMeta = null;
+  var resultsBox = panel ? panel.querySelector("[data-agent-search-results]") : null;
+  var boundMeta = panel ? panel.querySelector("[data-agent-bound]") : null;
 
   function clampPanelWidth(px) {
     var minW = MIN_PANEL_WIDTH;
@@ -133,6 +136,7 @@
     if (toggle) {
       toggle.setAttribute("aria-pressed", agentOpen ? "true" : "false");
     }
+    if (!agentOpen && typeof setAttachOpen === "function") setAttachOpen(false);
     applyPanelWidthVar();
     persistChrome();
   }
@@ -142,26 +146,39 @@
     sessionId = chrome.sessionId || "";
     boundTaskId = chrome.boundTaskId || "";
     setOpen(chrome.agentOpen);
-    if (!boundTaskId) {
+    var query = "";
+    if (sessionId) query = "session_id=" + encodeURIComponent(sessionId);
+    else if (boundTaskId) query = "task_id=" + encodeURIComponent(boundTaskId);
+    if (!query) {
       showEmpty();
+      setBoundMeta(null, "");
       return;
     }
     var seq = ++bindSeq;
     try {
-      var response = await fetch("/api/agent/sessions?task_id=" + encodeURIComponent(boundTaskId), {
+      var response = await fetch("/api/agent/sessions?" + query, {
         headers: { Accept: "application/json" }
       });
       if (seq !== bindSeq) return;
       if (!response.ok) {
+        if (response.status === 404) {
+          sessionId = "";
+          persistChrome();
+        }
         showEmpty();
+        setBoundMeta(boundTaskId ? { id: boundTaskId } : null, "");
         return;
       }
       var payload = await response.json();
       if (seq !== bindSeq) return;
       var session = payload.session || {};
       if (session.id) sessionId = String(session.id);
+      if (session.task_id) boundTaskId = String(session.task_id);
       persistChrome();
-      setBoundMeta({ id: boundTaskId, profile: session.profile }, session.profile);
+      setBoundMeta(
+        boundTaskId ? { id: boundTaskId, profile: session.profile } : null,
+        session.profile
+      );
       renderHistory(payload);
     } catch (error) {
       if (seq !== bindSeq) return;
@@ -330,13 +347,7 @@
   }
 
   function setBoundMeta(task, profile) {
-    if (!toolbar) return;
-    if (!boundMeta) {
-      boundMeta = document.createElement("div");
-      boundMeta.className = "agent-bound-meta";
-      boundMeta.setAttribute("data-agent-bound", "");
-      toolbar.insertBefore(boundMeta, toolbar.firstChild);
-    }
+    if (!boundMeta) return;
     var title = task && (task.title || task.kind);
     var bits = [];
     if (title) bits.push(String(title));
@@ -629,7 +640,6 @@
     options = options || {};
     var taskId = options.task_id || boundTaskId;
     var sid = options.session_id || sessionId;
-    if (!taskId && !sid) return;
     abortFetch();
     streamController = new AbortController();
     setGenerating(true);
@@ -718,21 +728,30 @@
     }
   }
 
-  function ensureResultsBox() {
-    if (resultsBox || !toolbar) return;
-    resultsBox = document.createElement("div");
-    resultsBox.className = "agent-search-results";
-    resultsBox.hidden = true;
-    toolbar.appendChild(resultsBox);
-  }
-
   function hideResults() {
     if (resultsBox) resultsBox.hidden = true;
   }
 
+  function isAttachOpen() {
+    return !!(attachMenu && !attachMenu.hidden);
+  }
+
+  function setAttachOpen(open) {
+    if (!attachMenu || !attachBtn) return;
+    attachMenu.hidden = !open;
+    attachBtn.setAttribute("aria-expanded", open ? "true" : "false");
+    if (open) {
+      if (searchInput) {
+        searchInput.focus();
+        runSearch();
+      }
+    } else {
+      hideResults();
+    }
+  }
+
   async function runSearch() {
-    if (!searchInput) return;
-    ensureResultsBox();
+    if (!searchInput || !resultsBox) return;
     var q = String(searchInput.value || "").trim();
     var url = "/api/agent/failed-tasks";
     if (q) url += "?q=" + encodeURIComponent(q);
@@ -755,7 +774,7 @@
           task.profile || ""
         ].filter(Boolean).join(" · ");
         button.addEventListener("click", function () {
-          hideResults();
+          setAttachOpen(false);
           bindTask(task.id);
         });
         resultsBox.appendChild(button);
@@ -778,7 +797,7 @@
       if (generating) return;
       var input = form.querySelector("[name=message]");
       var text = input ? String(input.value || "").trim() : "";
-      if (!text || (!boundTaskId && !sessionId)) return;
+      if (!text) return;
       appendBubble("user", text);
       if (input) input.value = "";
       startStream({
@@ -801,10 +820,30 @@
       if (searchTimer) window.clearTimeout(searchTimer);
       searchTimer = window.setTimeout(runSearch, 200);
     });
-    searchInput.addEventListener("focus", function () {
-      runSearch();
+  }
+
+  if (attachBtn) {
+    attachBtn.addEventListener("click", function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      setAttachOpen(!isAttachOpen());
     });
   }
+
+  if (closeBtn) {
+    closeBtn.addEventListener("click", function () {
+      setAttachOpen(false);
+      setOpen(false);
+    });
+  }
+
+  document.addEventListener("keydown", function (event) {
+    if (event.key !== "Escape" && event.key !== "Esc") return;
+    if (!isAttachOpen()) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    setAttachOpen(false);
+  }, true);
 
   document.addEventListener("click", function (event) {
     var target = event.target;
@@ -816,9 +855,12 @@
         taskId = TaskLogDrawer.currentTaskId();
       }
       if (taskId) openBoundTask(taskId);
+      setAttachOpen(false);
       return;
     }
-    if (resultsBox && toolbar && !toolbar.contains(target)) hideResults();
+    if (isAttachOpen() && attachWrap && !attachWrap.contains(target)) {
+      setAttachOpen(false);
+    }
   });
 
   window.addEventListener("pagehide", function () {

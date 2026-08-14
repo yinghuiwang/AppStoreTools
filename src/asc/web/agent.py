@@ -338,13 +338,9 @@ class WebAgent:
     ) -> Iterator[tuple[str, str]]:
         session_id = session_id or None
         task_id = task_id or None
-        if not session_id and not task_id:
-            return
 
         session = self.agent_store.get_session(session_id) if session_id else None
         if session is None:
-            if not task_id:
-                return
             session = self.agent_store.get_or_create_session(
                 task_id, self._profile_for_task(task_id)
             )

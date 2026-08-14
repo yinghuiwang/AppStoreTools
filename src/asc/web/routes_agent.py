@@ -171,8 +171,6 @@ async def agent_stream(request: Request):
     body = await _json_body(request)
     session_id = _opt_str(body.get("session_id"))
     task_id = _opt_str(body.get("task_id"))
-    if not session_id and not task_id:
-        raise HTTPException(status_code=400, detail="session_id or task_id is required")
     lang = _lang(request)
     llm_client = _llm_client_or_none()
     agent = _web_agent()
@@ -220,13 +218,22 @@ def failed_tasks(
 
 
 @router.get("/sessions")
-def agent_sessions(task_id: str | None = Query(None)):
+def agent_sessions(
+    task_id: str | None = Query(None),
+    session_id: str | None = Query(None),
+):
+    sid = _opt_str(session_id)
     bound = _opt_str(task_id)
-    if not bound:
-        raise HTTPException(status_code=400, detail="task_id is required")
-    state = _current_task_store().get_state(bound)
-    profile = str((state or {}).get("profile") or "")
-    session = agent_store.get_or_create_session(bound, profile)
+    if sid:
+        session = agent_store.get_session(sid)
+        if session is None:
+            raise HTTPException(status_code=404, detail="session not found")
+    elif bound:
+        state = _current_task_store().get_state(bound)
+        profile = str((state or {}).get("profile") or "")
+        session = agent_store.get_or_create_session(bound, profile)
+    else:
+        raise HTTPException(status_code=400, detail="session_id or task_id is required")
     return {
         "session": session,
         "messages": agent_store.list_messages(session["id"]),

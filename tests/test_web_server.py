@@ -421,6 +421,8 @@ def test_agent_rail_stylesheet_defines_chrome_layout(client):
     assert "flex: 0 0 48px" in css or "width: 48px" in css
     assert ".agent-msg--md" in css
     assert "list-style: disc" in css
+    assert ".agent-attach-menu" in css
+    assert ".agent-attach__button" in css
     assert "[data-agent-resize]" in css or ".agent-panel__resize" in css
 
 
@@ -3356,6 +3358,21 @@ def test_homepage_exposes_agent_right_rail_chrome(client):
     assert "data-agent-stop" in html
     assert "data-agent-messages" in html
     assert "data-agent-task-search" in html
+    assert "data-agent-attach" in html
+    assert "data-agent-attach-menu" in html
+    assert "data-agent-close" in html
+    assert "data-agent-title" in html
+    toolbar_start = html.find('class="agent-dock-toolbar"')
+    composer_start = html.find('class="agent-dock-composer"')
+    assert toolbar_start != -1 and composer_start > toolbar_start
+    toolbar_html = html[toolbar_start:composer_start]
+    assert "data-agent-task-search" not in toolbar_html
+    assert "data-agent-attach" not in toolbar_html
+    assert "data-agent-title" in toolbar_html
+    assert "data-agent-close" in toolbar_html
+    composer_html = html[composer_start:]
+    assert "data-agent-task-search" in composer_html
+    assert "data-agent-attach" in composer_html
     assert "data-open-agent-task" in html
     assert "data-task-log-resize" in html
     assert "data-agent-resize" in html
@@ -3491,8 +3508,14 @@ def test_agent_dock_javascript_exposes_chrome_state_and_restore(client):
     restore = _js_function_source(js, "restoreChrome")
     assert "auto_analyze: true" not in restore
     assert "startStream" not in restore
+    assert "session_id=" in restore
     bind = _js_function_source(js, "bindTask")
     assert "auto_analyze: true" in bind
+    start = _js_function_source(js, "startStream")
+    assert "if (!taskId && !sid) return" not in start
+    assert "if (!text || (!boundTaskId && !sessionId)) return" not in js
+    assert "function setAttachOpen(" in js
+    assert "data-agent-attach" in js
 
 
 def test_agent_dock_bind_and_apply_do_not_use_log_tabs(client):

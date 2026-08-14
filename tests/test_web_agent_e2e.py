@@ -381,6 +381,80 @@ def test_agent_rail_toggle_opens_panel_without_streaming(agent_ui: AgentE2E):
     expect(page.locator("[data-agent-rail]")).to_be_visible()
 
 
+def test_composer_plus_menu_and_header_have_no_top_search(agent_ui: AgentE2E):
+    page = agent_ui.page
+    _goto_ready(page)
+    page.locator("[data-agent-toggle]").click()
+    _expect_agent_open(page)
+    expect(page.locator(".agent-dock-toolbar [data-agent-task-search]")).to_have_count(0)
+    expect(page.locator("[data-agent-title]")).to_be_visible()
+    expect(page.locator("[data-agent-attach]")).to_be_visible()
+    expect(page.locator("[data-agent-attach-menu]")).to_be_hidden()
+    page.locator("[data-agent-attach]").click()
+    expect(page.locator("[data-agent-attach-menu]")).to_be_visible()
+    expect(page.locator("[data-agent-attach-menu] [data-agent-task-search]")).to_be_visible()
+    page.keyboard.press("Escape")
+    expect(page.locator("[data-agent-attach-menu]")).to_be_hidden()
+    page.locator("[data-agent-attach]").click()
+    expect(page.locator("[data-agent-attach-menu]")).to_be_visible()
+    page.locator("main").click(position={"x": 24, "y": 24}, force=True)
+    expect(page.locator("[data-agent-attach-menu]")).to_be_hidden()
+    page.locator("[data-agent-close]").click()
+    _expect_agent_closed(page)
+
+
+def test_free_chat_streams_without_binding_a_task(agent_ui: AgentE2E):
+    agent_ui.llm.impl = ScriptedLLM([[
+        {"content": TOKEN_STREAM, "finish_reason": "stop"},
+    ]])
+    page = agent_ui.page
+    _goto_ready(page)
+    page.locator("[data-agent-toggle]").click()
+    _expect_agent_open(page)
+    page.locator("[data-agent-stream] [name=message]").fill("hello free chat")
+    page.locator("[data-agent-stream]").evaluate("form => form.requestSubmit()")
+    expect(page.locator(".agent-msg--user")).to_contain_text("hello free chat")
+    expect(page.locator(".agent-msg--assistant")).to_contain_text(TOKEN_STREAM)
+    assert agent_ui.spies["stream"]
+    body = json.loads(agent_ui.spies["stream"][0])
+    assert not body.get("task_id")
+    assert body.get("auto_analyze") is False
+    assert body["message"] == "hello free chat"
+    state = page.evaluate("() => window.AscAgentDock.getState()")
+    assert state["sessionId"]
+    assert not state["boundTaskId"]
+    agent_ui.llm.impl = ScriptedLLM([[
+        {"content": "follow-up-ok", "finish_reason": "stop"},
+    ]])
+    page.locator("[data-agent-stream] [name=message]").fill("second")
+    page.locator("[data-agent-stream]").evaluate("form => form.requestSubmit()")
+    expect(page.locator(".agent-msg--assistant").nth(1)).to_contain_text("follow-up-ok")
+    body2 = json.loads(agent_ui.spies["stream"][1])
+    assert body2.get("session_id") == state["sessionId"]
+    assert not body2.get("task_id")
+    assert body2.get("auto_analyze") is False
+
+
+def test_plus_menu_can_bind_failed_task(agent_ui: AgentE2E):
+    agent_ui.llm.impl = ScriptedLLM([[
+        {"content": TOKEN_STREAM, "finish_reason": "stop"},
+    ]])
+    page = agent_ui.page
+    _goto_ready(page)
+    page.locator("[data-agent-toggle]").click()
+    _expect_agent_open(page)
+    page.locator("[data-agent-attach]").click()
+    results = page.locator("[data-agent-search-results] button")
+    expect(results.first).to_be_visible()
+    results.first.click()
+    expect(page.locator("[data-agent-attach-menu]")).to_be_hidden()
+    expect(page.locator("[data-agent-bound]")).to_contain_text(agent_ui.task_id[:8])
+    expect(page.locator(".agent-msg--assistant")).to_contain_text(TOKEN_STREAM)
+    body = json.loads(agent_ui.spies["stream"][0])
+    assert body.get("task_id") == agent_ui.task_id
+    assert body.get("auto_analyze") is True
+
+
 def test_agent_panel_drag_resizes_and_persists(agent_ui: AgentE2E):
     page = agent_ui.page
     _goto_ready(page)

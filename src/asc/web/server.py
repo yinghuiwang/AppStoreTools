@@ -19,7 +19,12 @@ from asc.web.tasks import task_store
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 _STATIC_DIR = Path(__file__).parent / "static"
-_ASSET_STAMP_FILES = ("agent-dock.js", "task-log-drawer.css", "task-log-drawer.js")
+_ASSET_STAMP_FILES = (
+    "agent-dock.js",
+    "agent-rail.css",
+    "task-log-drawer.css",
+    "task-log-drawer.js",
+)
 
 
 def _web_asset_version() -> str:
