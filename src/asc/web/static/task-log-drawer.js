@@ -622,7 +622,13 @@
     if (!isDrawerOpen()) return;
     if (drawer.contains(event.target)) return;
     if (isAgentChrome(event.target)) return;
-    if (!event.target.closest || !event.target.closest("main")) return;
+    var target = event.target;
+    if (!target || !target.closest) return;
+    // Main is inert while the overlay is open, so a click on the main
+    // column is retargeted to body/html instead of `closest("main")`.
+    if (!target.closest("main") && target !== document.body && target !== document.documentElement) {
+      return;
+    }
     close();
   });
   if (resizeHandle) {

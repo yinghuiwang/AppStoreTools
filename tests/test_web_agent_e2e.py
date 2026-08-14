@@ -1,4 +1,4 @@
-"""Browser E2E for the Web Failure Agent dock (Chromium + local FastAPI).
+"""Browser E2E for the Web Failure Agent right rail (Chromium + local FastAPI).
 
 Requires the ``playwright`` extra and a local Chromium install. Missing
 browsers skip instead of failing CI:
@@ -191,10 +191,15 @@ def _goto_ready(page: Page, path: str = "/") -> None:
     page.wait_for_function("() => window.TaskLogDrawer && window.AscAgentDock && window.t")
 
 
-def _expect_agent_tab(page: Page) -> None:
-    expect(page.locator("#task-log-drawer.is-open")).to_be_visible()
-    expect(page.locator("#task-log-tab-agent")).to_have_attribute("aria-selected", "true")
-    expect(page.locator("#task-log-panel-agent")).to_be_visible()
+def _expect_agent_open(page: Page) -> None:
+    expect(page.locator("[data-agent-rail]")).to_be_visible()
+    expect(page.locator("[data-agent-panel].is-open")).to_be_visible()
+    assert page.evaluate("() => window.AscAgentDock.getState().open") is True
+
+
+def _expect_agent_closed(page: Page) -> None:
+    assert page.evaluate("() => window.AscAgentDock.getState().open") is False
+    expect(page.locator("[data-agent-rail]")).to_be_visible()
 
 
 def _open_dashboard_explain(page: Page, task_id: str) -> None:
@@ -202,36 +207,27 @@ def _open_dashboard_explain(page: Page, task_id: str) -> None:
     button = page.locator(f'.dashboard-history [data-open-agent-task][data-task-id="{task_id}"]')
     expect(button).to_be_visible()
     button.click()
-    _expect_agent_tab(page)
+    _expect_agent_open(page)
 
 
 def _open_drawer_explain(page: Page, task_id: str) -> None:
     page.locator(f'[data-dashboard-log-task="{task_id}"]').first.click()
-    explain = page.locator("#task-log-panel-logs [data-open-agent-task]")
+    expect(page.locator("#task-log-drawer.is-open")).to_be_visible()
+    explain = page.locator("#task-log-drawer [data-open-agent-task]")
     expect(explain).to_be_visible()
     explain.click()
-    _expect_agent_tab(page)
+    _expect_agent_open(page)
+    expect(page.locator("#task-log-drawer.is-open")).to_be_visible()
 
 
-def _wait_truthy(predicate, *, timeout: float = 5.0, message: str = "condition not met") -> None:
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if predicate():
-            return
-        time.sleep(0.05)
-    raise AssertionError(message)
-
-
-def _close_dock(page: Page, how: str) -> None:
+def _close_log_overlay(page: Page, how: str) -> None:
     expect(page.locator("#task-log-drawer.is-open")).to_be_visible()
     if how == "x":
         page.locator("[data-task-log-close]").click()
     elif how == "escape":
         page.keyboard.press("Escape")
     elif how == "overlay":
-        page.set_viewport_size({"width": 1100, "height": 800})
-        expect(page.locator("#task-log-drawer.is-open.is-overlay")).to_be_visible()
-        page.mouse.click(300, 360)
+        page.locator("main").click(position={"x": 24, "y": 24}, force=True)
     else:
         raise ValueError(how)
     expect(page.locator("#task-log-drawer.is-open")).to_have_count(0)
@@ -370,25 +366,59 @@ def agent_ui(chromium_browser, tmp_path, monkeypatch):
         agents.close()
 
 
-def test_sidebar_agent_opens_dock_without_streaming(agent_ui: AgentE2E):
+def test_agent_rail_toggle_opens_panel_without_streaming(agent_ui: AgentE2E):
     page = agent_ui.page
     _goto_ready(page)
-    page.locator("[data-open-agent-dock]").click()
-    _expect_agent_tab(page)
+    expect(page.locator("[data-agent-rail]")).to_be_visible()
+    page.locator("[data-agent-toggle]").click()
+    _expect_agent_open(page)
     expect(page.locator("[data-agent-messages] .agent-dock-empty")).to_be_visible()
-    expect(page.locator("[data-task-log-resize]")).to_be_visible()
-    page.wait_for_timeout(600)
+    page.wait_for_timeout(400)
     assert agent_ui.spies["stream"] == []
     assert agent_ui.llm.calls == 0
+    page.locator("[data-agent-toggle]").click()
+    _expect_agent_closed(page)
+    expect(page.locator("[data-agent-rail]")).to_be_visible()
 
 
-def test_dock_left_edge_drag_resizes_and_persists(agent_ui: AgentE2E):
+def test_agent_panel_drag_resizes_and_persists(agent_ui: AgentE2E):
     page = agent_ui.page
     _goto_ready(page)
-    page.locator("[data-open-agent-dock]").click()
+    page.locator("[data-agent-toggle]").click()
+    _expect_agent_open(page)
+    panel = page.locator("[data-agent-panel]")
+    handle = page.locator("[data-agent-resize]")
+    expect(handle).to_be_visible()
+    grip = handle.locator(".agent-panel__resize-grip")
+    expect(grip).to_be_visible()
+    before = panel.evaluate("el => el.getBoundingClientRect().width")
+    handle.hover()
+    box = handle.bounding_box()
+    assert box
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + min(40, box["height"] / 2))
+    page.mouse.down()
+    page.mouse.move(box["x"] - 80, box["y"] + min(40, box["height"] / 2), steps=12)
+    page.mouse.up()
+    after = panel.evaluate("el => el.getBoundingClientRect().width")
+    assert after >= before + 50
+    stored = page.evaluate("() => localStorage.getItem('asc.agentPanel.width')")
+    assert stored
+    assert abs(float(stored) - after) < 2
+    log_width = page.evaluate("() => localStorage.getItem('asc.taskLogDrawer.width')")
+    assert log_width in (None, "")
+
+
+def test_log_overlay_drag_resizes_without_changing_agent_width(agent_ui: AgentE2E):
+    page = agent_ui.page
+    _goto_ready(page)
+    page.locator(f'[data-dashboard-log-task="{agent_ui.task_id}"]').first.click()
+    expect(page.locator("#task-log-drawer.is-open")).to_be_visible()
     drawer = page.locator("#task-log-drawer")
     handle = page.locator("[data-task-log-resize]")
     expect(handle).to_be_visible()
+    grip = handle.locator(".task-log-drawer__resize-grip")
+    expect(grip).to_be_visible()
+    agent_before = page.evaluate("() => localStorage.getItem('asc.agentPanel.width')")
     before = drawer.evaluate("el => el.getBoundingClientRect().width")
     handle.hover()
     box = handle.bounding_box()
@@ -402,6 +432,8 @@ def test_dock_left_edge_drag_resizes_and_persists(agent_ui: AgentE2E):
     stored = page.evaluate("() => localStorage.getItem('asc.taskLogDrawer.width')")
     assert stored
     assert abs(float(stored) - after) < 2
+    agent_after = page.evaluate("() => localStorage.getItem('asc.agentPanel.width')")
+    assert agent_after == agent_before
 
 
 def test_assistant_markdown_renders_inline(agent_ui: AgentE2E):
@@ -421,8 +453,8 @@ def test_assistant_markdown_renders_inline(agent_ui: AgentE2E):
 def test_assistant_markdown_renders_without_dompurify(agent_ui: AgentE2E):
     page = agent_ui.page
     _goto_ready(page)
-    page.locator("[data-open-agent-dock]").click()
-    _expect_agent_tab(page)
+    page.locator("[data-agent-toggle]").click()
+    _expect_agent_open(page)
     result = page.evaluate(
         """() => {
           window.DOMPurify = undefined;
@@ -437,19 +469,6 @@ def test_assistant_markdown_renders_without_dompurify(agent_ui: AgentE2E):
     assert "**bold**" not in result["html"]
 
 
-def test_resize_grip_is_visible_in_open_drawer(agent_ui: AgentE2E):
-    page = agent_ui.page
-    _goto_ready(page)
-    page.locator("[data-open-agent-dock]").click()
-    _expect_agent_tab(page)
-    handle = page.locator("[data-task-log-resize]")
-    grip = handle.locator(".task-log-drawer__resize-grip")
-    expect(handle).to_be_visible()
-    expect(grip).to_be_visible()
-    box = handle.bounding_box()
-    assert box and box["width"] >= 8
-
-
 def test_explain_failed_task_streams_mocked_tokens(agent_ui: AgentE2E):
     agent_ui.llm.impl = ScriptedLLM([[
         {"content": TOKEN_STREAM, "finish_reason": "stop"},
@@ -462,6 +481,98 @@ def test_explain_failed_task_streams_mocked_tokens(agent_ui: AgentE2E):
     body = json.loads(agent_ui.spies["stream"][0])
     assert body.get("auto_analyze") is True
     assert body.get("task_id") == agent_ui.task_id
+
+
+def test_opening_and_closing_logs_does_not_change_agent_session(agent_ui: AgentE2E):
+    agent_ui.llm.impl = ScriptedLLM([[
+        {"content": TOKEN_STREAM, "finish_reason": "stop"},
+    ]])
+    page = agent_ui.page
+    _goto_ready(page)
+    _open_dashboard_explain(page, agent_ui.task_id)
+    expect(page.locator(".agent-msg--assistant")).to_contain_text(TOKEN_STREAM)
+    before = page.evaluate("() => window.AscAgentDock.getState()")
+    page.locator(f'[data-dashboard-log-task="{agent_ui.task_id}"]').first.click()
+    expect(page.locator("#task-log-drawer.is-open")).to_be_visible()
+    mid = page.evaluate("() => window.AscAgentDock.getState()")
+    assert mid["sessionId"] == before["sessionId"]
+    assert mid["boundTaskId"] == before["boundTaskId"]
+    _close_log_overlay(page, "x")
+    after = page.evaluate("() => window.AscAgentDock.getState()")
+    assert after["sessionId"] == before["sessionId"]
+    assert after["boundTaskId"] == before["boundTaskId"]
+    assert after["open"] is True
+
+
+def test_collapsing_agent_does_not_close_log_overlay(agent_ui: AgentE2E):
+    page = agent_ui.page
+    _goto_ready(page)
+    page.locator(f'[data-dashboard-log-task="{agent_ui.task_id}"]').first.click()
+    expect(page.locator("#task-log-drawer.is-open")).to_be_visible()
+    page.locator("[data-agent-toggle]").click()
+    _expect_agent_open(page)
+    page.locator("[data-agent-toggle]").click()
+    _expect_agent_closed(page)
+    expect(page.locator("#task-log-drawer.is-open")).to_be_visible()
+
+
+def test_explain_keeps_log_overlay_open(agent_ui: AgentE2E):
+    agent_ui.llm.impl = ScriptedLLM([[
+        {"content": TOKEN_STREAM, "finish_reason": "stop"},
+    ]])
+    page = agent_ui.page
+    _goto_ready(page)
+    _open_drawer_explain(page, agent_ui.task_id)
+    expect(page.locator("#task-log-drawer.is-open")).to_be_visible()
+    expect(page.locator(".agent-msg--assistant")).to_contain_text(TOKEN_STREAM)
+
+
+def test_restore_chrome_renders_history_without_streaming(agent_ui: AgentE2E):
+    session = agent_ui.agents.get_or_create_session(agent_ui.task_id, "myapp")
+    agent_ui.agents.append_message(session["id"], "user", "please explain")
+    agent_ui.agents.append_message(session["id"], "assistant", "history-restore-ok")
+    page = agent_ui.page
+    _goto_ready(page)
+    page.evaluate(
+        """([open, sessionId, boundTaskId]) => {
+          sessionStorage.setItem("asc.agent.chrome", JSON.stringify({
+            agentOpen: open, sessionId, boundTaskId
+          }));
+        }""",
+        [True, session["id"], agent_ui.task_id],
+    )
+    agent_ui.spies["stream"].clear()
+    page.reload(wait_until="domcontentloaded")
+    page.wait_for_function("() => window.TaskLogDrawer && window.AscAgentDock && window.t")
+    _expect_agent_open(page)
+    expect(page.locator("[data-agent-messages]")).to_contain_text("history-restore-ok")
+    page.wait_for_timeout(400)
+    assert agent_ui.spies["stream"] == []
+    assert agent_ui.llm.calls == 0
+
+
+def test_apply_opens_log_overlay_without_rebinding_session(agent_ui: AgentE2E):
+    rounds = _propose_rounds(
+        agent_ui.task_id,
+        "app.csv",
+        mutations=[_csv_mutation("app.csv")],
+        summary=PLAN_MUTATIONS,
+        token=TOKEN_MUTATIONS,
+    )
+    agent_ui.llm.impl = ScriptedLLM(rounds)
+    page = agent_ui.page
+    _goto_ready(page)
+    _open_dashboard_explain(page, agent_ui.task_id)
+    card = page.locator(".agent-plan-card")
+    expect(card.get_by_role("button", name="应用", exact=True)).to_be_visible()
+    before = page.evaluate("() => window.AscAgentDock.getState()")
+    card.get_by_role("button", name="应用", exact=True).click()
+    expect(page.locator("#task-log-drawer.is-open")).to_be_visible()
+    after = page.evaluate("() => window.AscAgentDock.getState()")
+    assert after["sessionId"] == before["sessionId"]
+    assert after["boundTaskId"] == before["boundTaskId"]
+    assert after["open"] is True
+    assert "new" in agent_ui.csv_path.read_text(encoding="utf-8")
 
 
 def test_plan_card_apply_visible_only_after_done_with_mutations(agent_ui: AgentE2E):
@@ -527,8 +638,10 @@ def test_apply_does_not_throw_and_opens_logs_on_rerun(agent_ui: AgentE2E):
     _open_drawer_explain(page, agent_ui.task_id)
     card = page.locator(".agent-plan-card")
     expect(card.get_by_role("button", name="应用", exact=True)).to_be_visible()
-    card.get_by_role("button", name="应用", exact=True).click()
-    expect(page.locator("#task-log-tab-logs")).to_have_attribute("aria-selected", "true")
+    with page.expect_response(lambda response: "/api/agent/apply" in response.url) as apply_resp:
+        card.get_by_role("button", name="应用", exact=True).click()
+    assert apply_resp.value.ok
+    expect(page.locator("#task-log-drawer.is-open")).to_be_visible()
     expect(page.locator("#task-log-panel-logs")).to_be_visible()
     assert agent_ui.spies["apply"], "expected POST /api/agent/apply"
     payload = json.loads(agent_ui.spies["apply"][0])
@@ -539,7 +652,7 @@ def test_apply_does_not_throw_and_opens_logs_on_rerun(agent_ui: AgentE2E):
 
 
 @pytest.mark.parametrize("how", ["x", "escape", "overlay"])
-def test_closing_dock_does_not_apply(agent_ui: AgentE2E, how: str):
+def test_closing_log_overlay_does_not_apply(agent_ui: AgentE2E, how: str):
     rounds = _propose_rounds(
         agent_ui.task_id,
         "app.csv",
@@ -556,14 +669,15 @@ def test_closing_dock_does_not_apply(agent_ui: AgentE2E, how: str):
     messages_before = agent_ui.agents.list_messages(session["id"])
     assert messages_before
     before = agent_ui.csv_path.read_bytes()
-    _close_dock(page, how)
+    _close_log_overlay(page, how)
+    assert page.evaluate("() => window.AscAgentDock.getState().open") is True
     assert agent_ui.spies["apply"] == []
     assert agent_ui.csv_path.read_bytes() == before
     assert agent_ui.agents.get_session(session["id"]) is not None
     assert agent_ui.agents.list_messages(session["id"]) == messages_before
 
 
-def test_closing_dock_aborts_stream_and_posts_stop(agent_ui: AgentE2E):
+def test_closing_log_overlay_does_not_stop_agent_stream(agent_ui: AgentE2E):
     started = threading.Event()
     release = threading.Event()
     agent_ui.llm.impl = BlockingLLM(started, release)
@@ -573,14 +687,32 @@ def test_closing_dock_aborts_stream_and_posts_stop(agent_ui: AgentE2E):
         _open_drawer_explain(page, agent_ui.task_id)
         expect(page.locator(".agent-msg--assistant")).to_contain_text(TOKEN_BLOCKING)
         assert started.wait(timeout=5)
-        session = agent_ui.agents.get_or_create_session(agent_ui.task_id, "myapp")
-        _close_dock(page, "x")
-        _wait_truthy(
-            lambda: bool(agent_ui.spies["stop"]),
-            message="expected POST /api/agent/stop after closing a generating dock",
-        )
-        assert agent_ui.spies["apply"] == []
-        assert agent_ui.agents.get_session(session["id"]) is not None
-        assert agent_ui.agents.list_messages(session["id"])
+        stop_before = list(agent_ui.spies["stop"])
+        _close_log_overlay(page, "x")
+        page.wait_for_timeout(400)
+        assert agent_ui.spies["stop"] == stop_before
+        assert page.evaluate("() => window.AscAgentDock.getState().open") is True
+        expect(page.locator(".agent-msg--assistant")).to_contain_text(TOKEN_BLOCKING)
+    finally:
+        release.set()
+
+
+def test_collapsing_panel_does_not_stop_agent_stream(agent_ui: AgentE2E):
+    started = threading.Event()
+    release = threading.Event()
+    agent_ui.llm.impl = BlockingLLM(started, release)
+    page = agent_ui.page
+    try:
+        _goto_ready(page)
+        _open_dashboard_explain(page, agent_ui.task_id)
+        expect(page.locator(".agent-msg--assistant")).to_contain_text(TOKEN_BLOCKING)
+        assert started.wait(timeout=5)
+        page.locator("[data-agent-toggle]").click()
+        _expect_agent_closed(page)
+        page.wait_for_timeout(300)
+        assert agent_ui.spies["stop"] == []
+        page.locator("[data-agent-toggle]").click()
+        _expect_agent_open(page)
+        expect(page.locator(".agent-msg--assistant")).to_contain_text(TOKEN_BLOCKING)
     finally:
         release.set()
