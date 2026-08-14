@@ -22,15 +22,26 @@
     return { events: events, rest: rest };
   }
 
-  var drawer = document.getElementById("task-log-drawer");
-  var messagesEl = drawer ? drawer.querySelector("[data-agent-messages]") : null;
-  var stopBtn = drawer ? drawer.querySelector("[data-agent-stop]") : null;
-  var form = drawer ? drawer.querySelector("[data-agent-stream]") : null;
-  var searchInput = drawer ? drawer.querySelector("[data-agent-task-search]") : null;
-  var toolbar = drawer ? drawer.querySelector(".agent-dock-toolbar") : null;
+  var panel = document.querySelector("[data-agent-panel]");
+  var toggle = document.querySelector("[data-agent-toggle]");
+  var messagesEl = panel ? panel.querySelector("[data-agent-messages]") : null;
+  var stopBtn = panel ? panel.querySelector("[data-agent-stop]") : null;
+  var form = panel ? panel.querySelector("[data-agent-stream]") : null;
+  var searchInput = panel ? panel.querySelector("[data-agent-task-search]") : null;
+  var toolbar = panel ? panel.querySelector(".agent-dock-toolbar") : null;
+  var resizeHandle = panel ? panel.querySelector("[data-agent-resize]") : null;
 
   var boundTaskId = null;
   var sessionId = null;
+  var agentOpen = false;
+  var CHROME_STORAGE_KEY = "asc.agent.chrome";
+  var PANEL_WIDTH_STORAGE_KEY = "asc.agentPanel.width";
+  var DEFAULT_PANEL_WIDTH = 390;
+  var MIN_PANEL_WIDTH = 280;
+  var MAX_PANEL_WIDTH = 720;
+  var resizing = false;
+  var resizeStartX = 0;
+  var resizeStartWidth = DEFAULT_PANEL_WIDTH;
   var streamController = null;
   var generating = false;
   var currentAssistantEl = null;
@@ -38,6 +49,125 @@
   var searchTimer = null;
   var resultsBox = null;
   var boundMeta = null;
+
+  function clampPanelWidth(px) {
+    var minW = MIN_PANEL_WIDTH;
+    var viewport = Number(window.innerWidth);
+    if (!Number.isFinite(viewport) || viewport <= 0) viewport = 1440;
+    var maxW = Math.min(MAX_PANEL_WIDTH, Math.round(viewport * 0.5));
+    if (maxW < minW) maxW = minW;
+    var n = Number(px);
+    if (!Number.isFinite(n)) n = DEFAULT_PANEL_WIDTH;
+    return Math.round(Math.min(maxW, Math.max(minW, n)));
+  }
+
+  function readStoredPanelWidth() {
+    try {
+      var raw = localStorage.getItem(PANEL_WIDTH_STORAGE_KEY);
+      if (raw == null || raw === "") return DEFAULT_PANEL_WIDTH;
+      return clampPanelWidth(raw);
+    } catch (error) {
+      return DEFAULT_PANEL_WIDTH;
+    }
+  }
+
+  var panelWidth = readStoredPanelWidth();
+
+  function persistPanelWidth(px) {
+    panelWidth = clampPanelWidth(px);
+    try { localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, String(panelWidth)); } catch (error) { /* ignore */ }
+    return panelWidth;
+  }
+
+  function applyPanelWidthVar() {
+    var widthPx = agentOpen ? panelWidth : 0;
+    try {
+      document.documentElement.style.setProperty("--agent-panel-width", widthPx + "px");
+    } catch (error) { /* ignore */ }
+  }
+
+  function emptyChrome() {
+    return { agentOpen: false, sessionId: "", boundTaskId: "" };
+  }
+
+  function readChrome() {
+    try {
+      var raw = sessionStorage.getItem(CHROME_STORAGE_KEY);
+      if (!raw) return emptyChrome();
+      var parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") return emptyChrome();
+      return {
+        agentOpen: parsed.agentOpen === true,
+        sessionId: typeof parsed.sessionId === "string" ? parsed.sessionId : "",
+        boundTaskId: typeof parsed.boundTaskId === "string" ? parsed.boundTaskId : ""
+      };
+    } catch (error) {
+      return emptyChrome();
+    }
+  }
+
+  function persistChrome() {
+    try {
+      sessionStorage.setItem("asc.agent.chrome", JSON.stringify({
+        agentOpen: !!agentOpen,
+        sessionId: sessionId ? String(sessionId) : "",
+        boundTaskId: boundTaskId ? String(boundTaskId) : ""
+      }));
+    } catch (error) { /* in-memory only */ }
+  }
+
+  function getState() {
+    return {
+      open: !!agentOpen,
+      sessionId: sessionId ? String(sessionId) : "",
+      boundTaskId: boundTaskId ? String(boundTaskId) : ""
+    };
+  }
+
+  function setOpen(open) {
+    agentOpen = !!open;
+    if (panel) {
+      panel.classList.toggle("is-open", agentOpen);
+      panel.setAttribute("aria-hidden", agentOpen ? "false" : "true");
+    }
+    if (toggle) {
+      toggle.setAttribute("aria-pressed", agentOpen ? "true" : "false");
+    }
+    applyPanelWidthVar();
+    persistChrome();
+  }
+
+  async function restoreChrome() {
+    var chrome = readChrome();
+    sessionId = chrome.sessionId || "";
+    boundTaskId = chrome.boundTaskId || "";
+    setOpen(chrome.agentOpen);
+    if (!boundTaskId) {
+      showEmpty();
+      return;
+    }
+    var seq = ++bindSeq;
+    try {
+      var response = await fetch("/api/agent/sessions?task_id=" + encodeURIComponent(boundTaskId), {
+        headers: { Accept: "application/json" }
+      });
+      if (seq !== bindSeq) return;
+      if (!response.ok) {
+        showEmpty();
+        return;
+      }
+      var payload = await response.json();
+      if (seq !== bindSeq) return;
+      var session = payload.session || {};
+      if (session.id) sessionId = String(session.id);
+      persistChrome();
+      setBoundMeta({ id: boundTaskId, profile: session.profile }, session.profile);
+      renderHistory(payload);
+    } catch (error) {
+      if (seq !== bindSeq) return;
+      showEmpty();
+    }
+  }
 
   function markdownParser() {
     var marked = window.marked;
@@ -402,7 +532,7 @@
       }
       setCardStatus(card, payload.status || "applied", payload.rerun_error);
       if (payload.new_task_id && window.TaskLogDrawer) {
-        TaskLogDrawer.open(payload.new_task_id, { tab: "logs" });
+        TaskLogDrawer.open(payload.new_task_id);
       }
     } catch (error) {
       setCardStatus(card, "apply_failed", error && error.message);
@@ -433,6 +563,7 @@
         var session = JSON.parse(data);
         if (session.session_id) sessionId = String(session.session_id);
         if (session.task_id) boundTaskId = String(session.task_id);
+        persistChrome();
       } catch (error) { /* ignore malformed session frames */ }
       return;
     }
@@ -469,6 +600,7 @@
       try {
         var done = JSON.parse(data);
         if (done.session_id) sessionId = String(done.session_id);
+        persistChrome();
         var planIds = done.plan_ids || [];
         if (planIds.length) loadPlanCards(planIds);
       } catch (error) { /* done without cards is still a finished turn */ }
@@ -637,9 +769,7 @@
 
   function openBoundTask(taskId) {
     if (!taskId) return;
-    if (window.TaskLogDrawer) {
-      TaskLogDrawer.open(taskId, { tab: "agent" });
-    }
+    setOpen(true);
     bindTask(taskId);
   }
 
@@ -696,10 +826,62 @@
     abortStream();
   });
 
+  if (toggle) {
+    toggle.addEventListener("click", function () {
+      setOpen(!agentOpen);
+    });
+  }
+
+  function onResizePointerMove(event) {
+    if (!resizing || !agentOpen) return;
+    panelWidth = clampPanelWidth(resizeStartWidth + (resizeStartX - event.clientX));
+    applyPanelWidthVar();
+  }
+
+  function endPanelResize(event) {
+    if (!resizing) return;
+    resizing = false;
+    if (event && resizeHandle && resizeHandle.releasePointerCapture && event.pointerId != null) {
+      try { resizeHandle.releasePointerCapture(event.pointerId); } catch (error) { /* already released */ }
+    }
+    if (document.body && document.body.classList) {
+      document.body.classList.remove("agent-panel-resizing");
+    }
+    if (panel) panel.classList.remove("is-resizing");
+    document.removeEventListener("pointermove", onResizePointerMove);
+    document.removeEventListener("pointerup", endPanelResize);
+    document.removeEventListener("pointercancel", endPanelResize);
+    persistPanelWidth(panelWidth);
+    applyPanelWidthVar();
+  }
+
+  if (resizeHandle) {
+    resizeHandle.addEventListener("pointerdown", function (event) {
+      if (!agentOpen) return;
+      if (event.button) return;
+      event.preventDefault();
+      resizing = true;
+      resizeStartX = event.clientX;
+      resizeStartWidth = clampPanelWidth(panelWidth);
+      if (resizeHandle.setPointerCapture) {
+        try { resizeHandle.setPointerCapture(event.pointerId); } catch (error) { /* capture is best-effort */ }
+      }
+      if (document.body && document.body.classList) {
+        document.body.classList.add("agent-panel-resizing");
+      }
+      if (panel) panel.classList.add("is-resizing");
+      document.addEventListener("pointermove", onResizePointerMove);
+      document.addEventListener("pointerup", endPanelResize);
+      document.addEventListener("pointercancel", endPanelResize);
+    });
+  }
+
+  restoreChrome();
+
   window.AscAgentDock = {
-    start: function () {},
     bindTask: bindTask,
-    onDrawerClose: abortStream,
+    setOpen: setOpen,
+    getState: getState,
     renderMarkdown: renderMarkdown,
     setAssistantMarkdown: setAssistantMarkdown
   };

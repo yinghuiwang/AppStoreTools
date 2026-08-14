@@ -3452,6 +3452,47 @@ def test_agent_dock_javascript_uses_post_stream_not_event_source(client):
     assert "TaskLogDrawer.open" in js
     assert "ReadableStream" in js or "getReader" in js
     assert "EventSource" not in js
+    assert '{ tab: "logs" }' not in js
+    assert '{ tab: "agent" }' not in js
+
+
+def _js_function_source(js: str, name: str) -> str:
+    marker = "function " + name + "("
+    start = js.index(marker)
+    i = js.index("{", start)
+    depth = 0
+    for index, char in enumerate(js[i:], start=i):
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return js[start : index + 1]
+    raise AssertionError("unterminated function " + name)
+
+
+def test_agent_dock_javascript_exposes_chrome_state_and_restore(client):
+    js = client.get("/static/agent-dock.js").text
+    assert 'sessionStorage.setItem("asc.agent.chrome"' in js or "sessionStorage.setItem('asc.agent.chrome'" in js
+    assert "function setOpen(" in js
+    assert "function getState(" in js
+    assert "function restoreChrome(" in js
+    assert "function persistChrome(" in js
+    assert "function bindTask(" in js
+    assert "onDrawerClose" not in js
+    assert "getElementById(\"task-log-drawer\")" not in js
+    assert 'querySelector("[data-agent-panel]")' in js
+    assert 'querySelector("[data-agent-toggle]")' in js
+    assert "asc.agentPanel.width" in js
+    assert "AscAgentDock" in js
+    assert "setOpen: setOpen" in js
+    assert "getState: getState" in js
+    assert "bindTask: bindTask" in js
+    restore = _js_function_source(js, "restoreChrome")
+    assert "auto_analyze: true" not in restore
+    assert "startStream" not in restore
+    bind = _js_function_source(js, "bindTask")
+    assert "auto_analyze: true" in bind
 
 
 def test_dashboard_javascript_adds_explain_on_error_rows(client):
