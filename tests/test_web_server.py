@@ -409,6 +409,28 @@ def test_task_log_drawer_stylesheet_is_overlay_only(client):
     assert ".task-log-tabs" not in css
 
 
+def test_agent_rail_stylesheet_defines_chrome_layout(client):
+    resp = client.get("/static/agent-rail.css")
+    assert resp.status_code == 200
+    css = resp.text
+    assert "--agent-rail-width: 48px" in css
+    assert "--agent-panel-width" in css
+    assert "[data-agent-rail]" in css
+    assert "[data-agent-panel]" in css
+    assert "[data-agent-panel].is-open" in css
+    assert "flex: 0 0 48px" in css or "width: 48px" in css
+    assert ".agent-msg--md" in css
+    assert "list-style: disc" in css
+    assert "[data-agent-resize]" in css or ".agent-panel__resize" in css
+
+
+def test_task_log_drawer_css_has_no_agent_conversation_rules(client):
+    css = client.get("/static/task-log-drawer.css").text
+    assert ".agent-msg--md" not in css
+    assert ".agent-plan-card" not in css
+    assert ".agent-dock-messages" not in css
+
+
 def test_mobile_sidebar_navigation_links_have_accessible_tooltips(client):
     resp = client.get("/")
 
@@ -3391,7 +3413,7 @@ def test_agent_dock_renders_assistant_markdown(client):
     assert "agent-msg--md" in js
     assert "innerHTML" in js
     assert "renderMarkdown: renderMarkdown" in js
-    css = client.get("/static/task-log-drawer.css").text
+    css = client.get("/static/agent-rail.css").text
     assert ".agent-msg--md" in css
     assert "list-style: disc" in css
 
