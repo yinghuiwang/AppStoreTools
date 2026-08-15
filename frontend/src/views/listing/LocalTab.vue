@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, inject, onMounted, ref, watch, type Ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { ApiError, apiErrorMessage, httpJson } from "@/api/http";
 import { useBrowse } from "@/composables/useBrowse";
@@ -16,6 +16,7 @@ const { t } = useI18n();
 const browse = useBrowse();
 const viewer = useImageViewer();
 const { snapshot } = useProfile();
+const reloadTick = inject<Ref<number>>("listingReload", ref(0));
 const csvPath = ref(snapshot.value?.paths.csv || "data/appstore_info.csv");
 const shotsDir = ref(snapshot.value?.paths.screenshots || "data/screenshots");
 const locales = ref<LocaleRow[]>([]);
@@ -122,6 +123,7 @@ function openShots(group: Shot[], start: number) {
 }
 
 onMounted(() => { if (!empty.value) void load(); });
+watch(reloadTick, () => { if (!empty.value) void load(); });
 </script>
 
 <template>

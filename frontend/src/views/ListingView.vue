@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { computed, onMounted } from "vue";
+import { computed, onMounted, provide, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import LocalTab from "./listing/LocalTab.vue";
+import DiffTab from "./listing/DiffTab.vue";
+import UploadTab from "./listing/UploadTab.vue";
 
 const TABS = new Set(["local", "diff", "upload"]);
 const route = useRoute();
 const router = useRouter();
+const reloadTick = ref(0);
+provide("listingReload", reloadTick);
 const tab = computed({
   get() {
     const raw = String(route.query.tab || "local");
@@ -30,7 +34,7 @@ onMounted(() => {
 <template>
   <el-tabs v-model="tab">
     <el-tab-pane :label="$t('listing.tab.local')" name="local"><LocalTab /></el-tab-pane>
-    <el-tab-pane :label="$t('listing.tab.diff')" name="diff"><div /></el-tab-pane>
-    <el-tab-pane :label="$t('listing.tab.upload')" name="upload"><div /></el-tab-pane>
+    <el-tab-pane :label="$t('listing.tab.diff')" name="diff"><DiffTab /></el-tab-pane>
+    <el-tab-pane :label="$t('listing.tab.upload')" name="upload"><UploadTab /></el-tab-pane>
   </el-tabs>
 </template>
