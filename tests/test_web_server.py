@@ -996,16 +996,21 @@ def test_guard_page_returns_200(client):
     assert "!loading && !guard" in resp.text
 
 
-def test_filebrowser_returns_html(client, tmp_path):
+def test_filebrowser_returns_json(client, tmp_path):
     resp = client.get(f"/api/browse?path={tmp_path}&mode=dir")
     assert resp.status_code == 200
-    assert "text/html" in resp.headers["content-type"]
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["mode"] == "dir"
+    assert body["current_path"] == str(tmp_path.resolve())
+    assert isinstance(body["entries"], list)
+
 
 def test_filebrowser_lists_files(client, tmp_path):
     (tmp_path / "test.csv").write_text("a,b")
     resp = client.get(f"/api/browse?path={tmp_path}&mode=file&ext=.csv")
-    assert resp.status_code == 200
-    assert "test.csv" in resp.text
+    names = [e["name"] for e in resp.json()["entries"]]
+    assert "test.csv" in names
 
 
 def test_filebrowser_accepts_comma_separated_extensions_case_insensitive(client, tmp_path):
@@ -1013,27 +1018,25 @@ def test_filebrowser_accepts_comma_separated_extensions_case_insensitive(client,
     (tmp_path / "image.jpeg").write_bytes(b"jpeg")
     (tmp_path / "image.PNG").write_bytes(b"png")
     (tmp_path / "notes.txt").write_text("text")
-
     resp = client.get(f"/api/browse?path={tmp_path}&mode=file&ext=.png,.jpg,.jpeg")
+    names = [e["name"] for e in resp.json()["entries"]]
+    assert "image.jpg" in names
+    assert "image.jpeg" in names
+    assert "image.PNG" in names
+    assert "notes.txt" not in names
 
-    assert resp.status_code == 200
-    assert "image.jpg" in resp.text
-    assert "image.jpeg" in resp.text
-    assert "image.PNG" in resp.text
-    assert "notes.txt" not in resp.text
 
-
-def test_filebrowser_directory_click_browses_into_directory(client, tmp_path):
+def test_filebrowser_lists_directories_in_file_mode(client, tmp_path):
     (tmp_path / "nested").mkdir()
-    resp = client.get(f"/api/browse?path={tmp_path}&mode=dir")
-    assert resp.status_code == 200
-    assert 'data-fb-action="browse"' in resp.text
-    assert "nested" in resp.text
+    resp = client.get(f"/api/browse?path={tmp_path}&mode=file&ext=.csv")
+    entries = {e["name"]: e for e in resp.json()["entries"]}
+    assert entries["nested"]["is_dir"] is True
 
 
 def test_filebrowser_rejects_outside_home(client):
     resp = client.get("/api/browse?path=/etc&mode=dir")
     assert resp.status_code == 403
+    assert resp.json() == {"ok": False, "error": "Forbidden"}
 
 
 def test_metadata_check_api(client):
@@ -2805,32 +2808,30 @@ def test_task_store_list_recent_includes_profile():
     assert recent[1]["profile"] == "myapp"
 
 
-def test_tasks_recent_endpoint(client):
-    resp = client.get("/api/tasks/recent")
-    assert resp.status_code == 200
-
-
-def test_tasks_recent_markup_preserves_log_toggle_state(client, monkeypatch):
+def test_tasks_recent_endpoint_returns_json(client, monkeypatch):
     from asc.web import routes_api
-    from asc.web.tasks import TaskStatus, TaskStore
+    from asc.web.tasks import TaskStore
 
     store = TaskStore()
     task_id = store.create("build", profile="staging")
-    store.set_status(task_id, TaskStatus.RUNNING)
-    store.append_log(task_id, "build line")
 
     def fail_full_logs(limit=20):
-        raise AssertionError("recent HTMX fragment must not load full logs")
+        raise AssertionError("recent JSON must not load full logs")
 
     monkeypatch.setattr(routes_api, "_task_store", store)
     monkeypatch.setattr(store, "list_recent", fail_full_logs)
 
     resp = client.get("/api/tasks/recent")
-
     assert resp.status_code == 200
-    assert f'data-task-id="{task_id}"' in resp.text
-    assert f"toggleTaskLogs('{task_id}')" in resp.text
-    assert f'data-task-log-panel="{task_id}"' in resp.text
+    body = resp.json()
+    assert "tasks" in body
+    ids = [t["id"] for t in body["tasks"]]
+    assert task_id in ids
+    row = next(t for t in body["tasks"] if t["id"] == task_id)
+    assert row["kind"] == "build"
+    assert row["profile"] == "staging"
+    assert "status" in row
+    assert "progress" in row
     assert "build line" not in resp.text
 
 

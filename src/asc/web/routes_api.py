@@ -12,8 +12,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
-from fastapi.templating import Jinja2Templates
+from fastapi.responses import FileResponse, JSONResponse, Response
 from asc.commands.iap import _upload_iap_core, _load_iap_config, _iap_phase_plan
 from asc.commands.iap_review_screenshots import (
     ReviewScreenshotUploadItem,
@@ -51,7 +50,6 @@ router = APIRouter()
 # Unique per process — frontend uses this to detect stop/start across update restart.
 WEB_BOOT_ID = uuid.uuid4().hex
 
-_templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 _HOME = Path.home().resolve()
 _TMPDIR = Path(tempfile.gettempdir()).resolve()
 _ALLOWED_ROOTS = (_HOME, _TMPDIR)
@@ -90,22 +88,6 @@ def _lang(request: Request) -> str:
         cookie=request.cookies.get(COOKIE_NAME),
         accept_language=request.headers.get("accept-language"),
     )
-
-
-def _i18n_template_ctx(request: Request) -> dict:
-    from asc.web.i18n import html_lang, load_catalog, t as translate
-
-    lang = _lang(request)
-
-    def _t(key: str, **kwargs: object) -> str:
-        return translate(key, lang=lang, **kwargs)
-
-    return {
-        "lang": lang,
-        "html_lang": html_lang(lang),
-        "t": _t,
-        "i18n_catalog": load_catalog(lang),
-    }
 
 
 def _validate_webhook_config_payload(data: object) -> str | None:
@@ -247,17 +229,14 @@ async def switch_profile(profile: str):
     return resp
 
 
-@router.get("/browse", response_class=HTMLResponse)
+@router.get("/browse")
 def browse(request: Request, path: str = ".", mode: str = "dir", ext: str = ""):
-    """Return an HTML fragment listing files/dirs at `path` for the file browser modal."""
     target = Path(path).expanduser().resolve()
     if not _is_under_allowed_root(target):
-        return Response("Forbidden", status_code=403)
+        return JSONResponse({"ok": False, "error": "Forbidden"}, status_code=403)
 
     if not target.exists():
         target = _HOME
-
-    # If target is a file, use its parent directory for browsing
     if target.is_file():
         target = target.parent
 
@@ -279,13 +258,13 @@ def browse(request: Request, path: str = ".", mode: str = "dir", ext: str = ""):
                 continue
         entries.append({"name": item.name, "path": str(item), "is_dir": item.is_dir()})
 
-    return _templates.TemplateResponse(request, "filebrowser.html", {
+    return {
+        "ok": True,
         "current_path": str(target),
-        "entries": entries,
         "mode": mode,
         "ext": ext,
-        **_i18n_template_ctx(request),
-    })
+        "entries": entries,
+    }
 
 
 import threading as _threading
@@ -1541,15 +1520,10 @@ async def guard_manual_bind(
     return {"ok": True, "binding": result}
 
 
-@router.get("/tasks/recent", response_class=HTMLResponse)
-async def tasks_recent_html(request: Request):
-    """Return HTML fragment of recent tasks for HTMX polling."""
+@router.get("/tasks/recent")
+async def tasks_recent(request: Request):
     tasks = await _asyncio.to_thread(_task_store.list_recent_states, 20)
-    return _templates.TemplateResponse(
-        request,
-        "task_list.html",
-        {"tasks": tasks, **_i18n_template_ctx(request)},
-    )
+    return {"tasks": tasks}
 
 
 @router.get("/dashboard/summary")
