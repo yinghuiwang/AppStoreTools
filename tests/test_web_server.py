@@ -3537,3 +3537,35 @@ def test_dashboard_javascript_adds_explain_on_error_rows(client):
     js = client.get("/static/dashboard.js").text
     assert "data-open-agent-task" in js or "openAgentTask" in js
     assert 'task.status === "error"' in js or 'task.status==="error"' in js
+
+
+def test_spa_fallback_unknown_path_returns_index(tmp_path, monkeypatch):
+    index = tmp_path / "index.html"
+    index.write_text('<html><script src="/static/spa/assets/app.js"></script></html>', encoding="utf-8")
+    monkeypatch.setattr("asc.web.server.SPA_INDEX", index)
+    resp = TestClient(create_app()).get("/listing")
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers["content-type"]
+    assert 'src="/static/spa/' in resp.text
+    assert resp.headers.get("cache-control") == "no-cache"
+
+
+def test_spa_fallback_missing_index_returns_503(monkeypatch):
+    monkeypatch.setattr("asc.web.server.SPA_INDEX", Path("/nonexistent/spa/index.html"))
+    resp = TestClient(create_app()).get("/system/profiles")
+    assert resp.status_code == 503
+    assert resp.json() == {"ok": False, "error": "spa_not_built"}
+
+
+def test_unknown_api_path_still_404(tmp_path, monkeypatch):
+    index = tmp_path / "index.html"
+    index.write_text("<html>spa</html>", encoding="utf-8")
+    monkeypatch.setattr("asc.web.server.SPA_INDEX", index)
+    resp = TestClient(create_app()).get("/api/does-not-exist")
+    assert resp.status_code == 404
+
+
+def test_homepage_still_jinja_during_migration(client):
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert "AppStore Tools" in resp.text

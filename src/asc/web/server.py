@@ -19,6 +19,7 @@ from asc.web.tasks import task_store
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 _STATIC_DIR = Path(__file__).parent / "static"
+SPA_INDEX = _STATIC_DIR / "spa" / "index.html"
 _ASSET_STAMP_FILES = (
     "agent-dock.js",
     "agent-rail.css",
@@ -215,5 +216,21 @@ def create_app() -> FastAPI:
     app.include_router(routes_api.router, prefix="/api")
     app.include_router(routes_listing.router, prefix="/api/listing")
     app.include_router(routes_agent.router, prefix="/api/agent")
+
+    from fastapi import HTTPException
+    from fastapi.responses import FileResponse, JSONResponse
+
+    @app.get("/{full_path:path}")
+    def spa_fallback(full_path: str):
+        if full_path == "api" or full_path.startswith("api/") or full_path == "static" or full_path.startswith("static/"):
+            raise HTTPException(status_code=404, detail="Not Found")
+        index = SPA_INDEX
+        if not index.is_file():
+            return JSONResponse({"ok": False, "error": "spa_not_built"}, status_code=503)
+        return FileResponse(
+            index,
+            media_type="text/html",
+            headers={"Cache-Control": "no-cache"},
+        )
 
     return app
