@@ -7,6 +7,7 @@ import BuildStageProgress from "@/components/BuildStageProgress.vue";
 import { useBrowse } from "@/composables/useBrowse";
 import { useProfile } from "@/composables/useProfile";
 import { useRightRail } from "@/composables/useRightRail";
+import { useTaskPagePhase } from "@/composables/useTaskPagePhase";
 
 type Options = {
   ok?: boolean;
@@ -26,6 +27,7 @@ const route = useRoute();
 const browse = useBrowse();
 const { snapshot } = useProfile();
 const rail = useRightRail();
+const { isForm, isRun, enterRun, backToForm } = useTaskPagePhase();
 const empty = computed(() => (snapshot.value?.current_profile || "") === "");
 const alert = ref("");
 const taskId = ref("");
@@ -88,6 +90,7 @@ async function run() {
     const { task_id } = await httpForm<{ task_id: string }>("/api/build/run", body);
     runMode.value = mode.value;
     taskId.value = task_id;
+    enterRun();
     rail.openLogs(task_id);
   } catch (err) {
     if (err instanceof ApiError && err.status === 400) alert.value = apiErrorMessage(err);
@@ -109,7 +112,7 @@ onMounted(() => {
       <router-link to="/profiles">{{ t("nav.profiles") }}</router-link>
     </el-alert>
     <el-alert v-if="alert" type="error" show-icon :title="alert" />
-    <div class="card">
+    <div v-if="isForm" class="card">
       <label class="field"><span>{{ t("build.mode") }}</span>
         <select v-model="mode" class="field-input">
           <option value="full">{{ t("build.mode_full") }}</option>
@@ -166,13 +169,13 @@ onMounted(() => {
       <label class="check"><input v-model="dryRun" type="checkbox" /> {{ t("build.dry_run") }}</label>
       <label class="check"><input v-model="reuseArchive" type="checkbox" /> {{ t("build.reuse_reuse") }}</label>
       <el-button type="primary" :disabled="empty" @click="run">{{ t("common.submit") }}</el-button>
-      <BuildStageProgress
-        v-if="taskId"
-        :task-id="taskId"
-        :mode="runMode"
-        @retry="taskId = ''"
-      />
     </div>
+    <BuildStageProgress
+      v-if="isRun && taskId"
+      :task-id="taskId"
+      :mode="runMode"
+      @back="backToForm"
+    />
   </div>
 </template>
 

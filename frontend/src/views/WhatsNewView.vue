@@ -6,6 +6,7 @@ import TaskRunBar from "@/components/TaskRunBar.vue";
 import { useProfile } from "@/composables/useProfile";
 import { useRightRail } from "@/composables/useRightRail";
 import { useTaskLog } from "@/composables/useTaskLog";
+import { useTaskPagePhase } from "@/composables/useTaskPagePhase";
 
 type Check = { ok: boolean; level: string; message: string; detail?: { version?: string; locales?: string[] } };
 
@@ -13,6 +14,7 @@ const { t } = useI18n();
 const { snapshot } = useProfile();
 const rail = useRightRail();
 const { status, logTaskId } = useTaskLog();
+const { isForm, isRun, enterRun, backToForm } = useTaskPagePhase();
 const empty = computed(() => (snapshot.value?.current_profile || "") === "");
 const alert = ref("");
 const check = ref<Check | null>(null);
@@ -44,6 +46,7 @@ async function runDirect() {
     });
     const { task_id } = await httpForm<{ task_id: string }>("/api/whats-new/run", body);
     taskId.value = task_id;
+    enterRun();
     rail.openLogs(task_id);
   } catch (err) {
     if (err instanceof ApiError && err.status === 400) alert.value = apiErrorMessage(err);
@@ -60,6 +63,7 @@ async function previewTranslate() {
     });
     translateTaskId.value = task_id;
     taskId.value = task_id;
+    enterRun();
     rail.openLogs(task_id);
   } catch (err) {
     if (err instanceof ApiError && err.status === 400) alert.value = apiErrorMessage(err);
@@ -75,6 +79,7 @@ async function uploadTranslations() {
   });
   const { task_id } = await httpForm<{ task_id: string }>("/api/whats-new/run", body);
   taskId.value = task_id;
+  enterRun();
   rail.openLogs(task_id);
 }
 
@@ -101,7 +106,7 @@ onMounted(() => { void loadCheck(); });
       <router-link to="/profiles">{{ t("nav.profiles") }}</router-link>
     </el-alert>
     <el-alert v-if="alert" type="error" show-icon :title="alert" />
-    <div class="card">
+    <div v-if="isForm" class="card">
       <p v-if="!check">{{ t("whats_new.checking") }}</p>
       <p v-else>{{ check.message }}</p>
       <el-button size="small" @click="loadCheck">{{ t("whats_new.recheck") }}</el-button>
@@ -127,9 +132,8 @@ onMounted(() => { void loadCheck(); });
         <el-button v-if="translateMode" type="primary" :disabled="empty" @click="previewTranslate">{{ t("whats_new.preview_translate") }}</el-button>
         <el-button v-else type="primary" :disabled="empty" @click="runDirect">{{ t("whats_new.upload_direct") }}</el-button>
       </div>
-      <TaskRunBar :task-id="taskId" />
     </div>
-    <div v-if="Object.keys(translations).length" class="card">
+    <div v-if="isForm && Object.keys(translations).length" class="card">
       <h2>{{ t("whats_new.preview_title") }}</h2>
       <label v-for="(value, locale) in translations" :key="locale" class="field">
         <span>{{ locale }}</span>
@@ -137,6 +141,18 @@ onMounted(() => { void loadCheck(); });
       </label>
       <el-button type="primary" :disabled="empty" @click="uploadTranslations">{{ t("whats_new.confirm_upload") }}</el-button>
     </div>
+    <TaskRunBar v-if="isRun && taskId" :task-id="taskId" @back="backToForm">
+      <template #after>
+        <div v-if="Object.keys(translations).length" class="preview">
+          <h2>{{ t("whats_new.preview_title") }}</h2>
+          <label v-for="(value, locale) in translations" :key="locale" class="field">
+            <span>{{ locale }}</span>
+            <textarea v-model="translations[locale]" rows="4" class="field-input" />
+          </label>
+          <el-button type="primary" :disabled="empty" @click="uploadTranslations">{{ t("whats_new.confirm_upload") }}</el-button>
+        </div>
+      </template>
+    </TaskRunBar>
   </div>
 </template>
 
@@ -145,4 +161,5 @@ h1, h2 { margin: 0 0 8px; }
 .card { display: flex; flex-direction: column; gap: 10px; }
 .check { display: flex; gap: 8px; align-items: center; }
 .lbl { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+.preview { display: flex; flex-direction: column; gap: 10px; padding-top: 4px; }
 </style>

@@ -517,9 +517,16 @@ def test_vue_build_page_restores_sse_stage_progress():
     task_log = (root / "frontend/src/composables/useTaskLog.ts").read_text(
         encoding="utf-8"
     )
+    run_bar = (root / "frontend/src/components/TaskRunBar.vue").read_text(
+        encoding="utf-8"
+    )
 
     assert "BuildStageProgress" in view
     assert "TaskRunBar" not in view
+    assert 'v-if="isForm"' in view
+    assert 'v-if="isRun && taskId"' in view
+    assert "enterRun()" in view
+    assert "@back=" in view
     assert "/api/task/" in task_log
     assert "/stream" in task_log
     assert 'phase: String(raw.phase || "")' in task_log
@@ -531,10 +538,12 @@ def test_vue_build_page_restores_sse_stage_progress():
     assert 'build: ["archive", "export"]' in stage
     assert 'deploy: ["upload"]' in stage
     assert "progress.value.phase" in stage
-    assert "progress.value.pct" in stage
     assert "progress.value.phase_index" in stage
+    assert "progress.value.pct" in run_bar
+    assert "TaskRunBar" in stage
     assert "/api/build/progress" not in stage
     assert "EventSource" not in stage
+    assert "EventSource" not in run_bar
 
 
 def test_spinner_streams_lines_to_on_log_line_on_success(tmp_path):

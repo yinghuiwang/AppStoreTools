@@ -264,6 +264,14 @@ def test_build_phase_progress_i18n_keys():
     assert t("build.phase_state_running", lang="en") == "In progress"
 
 
+def test_task_page_phase_i18n_keys():
+    load_catalog.cache_clear()
+    assert t("task.back_to_form", lang="zh") == "返回配置"
+    assert t("task.edit_and_rerun", lang="zh") == "再改再跑"
+    assert t("task.back_to_form", lang="en") == "Back to configuration"
+    assert t("task.edit_and_rerun", lang="en") == "Edit and run again"
+
+
 def test_agent_attach_i18n_keys():
     load_catalog.cache_clear()
     assert t("agent.attach", lang="zh") == "添加上下文"

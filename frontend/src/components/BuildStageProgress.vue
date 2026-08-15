@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed } from "vue";
 import { useI18n } from "vue-i18n";
-import { useRightRail } from "@/composables/useRightRail";
+import TaskRunBar from "@/components/TaskRunBar.vue";
 import { useTaskLog } from "@/composables/useTaskLog";
 
 type BuildMode = "full" | "build" | "deploy";
@@ -33,25 +33,10 @@ const props = defineProps<{
   mode: BuildMode;
 }>();
 
-const emit = defineEmits<{ retry: [] }>();
+const emit = defineEmits<{ back: [] }>();
 
 const { t } = useI18n();
-const rail = useRightRail();
-const { status, progress, cancel, subscribe, logTaskId } = useTaskLog();
-const canceling = ref(false);
-
-watch(
-  () => props.taskId,
-  (id) => {
-    canceling.value = false;
-    if (id && logTaskId.value !== id) subscribe(id);
-  },
-  { immediate: true },
-);
-
-watch(status, (value) => {
-  if (["done", "error", "canceled"].includes(value)) canceling.value = false;
-});
+const { status, progress } = useTaskLog();
 
 const phaseIds = computed(() => PHASES[props.mode] || PHASES.full);
 
@@ -112,56 +97,17 @@ const headline = computed(() => {
   if (runStatus.value === "canceled") return t("build.status_canceled");
   return t("build.status_running");
 });
-
-const pct = computed(() => {
-  if (runStatus.value === "done") return 100;
-  return Math.min(100, Math.max(0, Number(progress.value.pct) || 0));
-});
-
-const canCancel = computed(
-  () => Boolean(props.taskId) && !["done", "error", "canceled"].includes(runStatus.value),
-);
-
-async function onCancel() {
-  if (!canCancel.value || canceling.value) return;
-  canceling.value = true;
-  try {
-    await cancel();
-  } catch {
-    canceling.value = false;
-  }
-}
 </script>
 
 <template>
-  <section
-    class="stage-panel"
-    :class="`is-${runStatus}`"
-    :aria-label="headline"
+  <TaskRunBar
+    :task-id="props.taskId"
+    :headline="headline"
+    :fail-title="t('build.fail_banner_title')"
+    :fail-hint="t('build.fail_banner_hint')"
+    :running-hint="t('build.running_hint')"
+    @back="emit('back')"
   >
-    <div v-if="runStatus === 'error'" class="fail-banner" role="alert">
-      <strong>{{ t("build.fail_banner_title") }}</strong>
-      <p>{{ progress.msg || t("build.fail_banner_hint") }}</p>
-    </div>
-
-    <header class="head">
-      <h2>{{ headline }}</h2>
-      <div class="actions">
-        <el-button size="small" @click="rail.openLogs(props.taskId)">{{ t("common.logs") }}</el-button>
-        <el-button
-          v-if="canCancel"
-          size="small"
-          type="danger"
-          plain
-          :disabled="canceling"
-          @click="onCancel"
-        >
-          {{ canceling ? t("common.canceling") : t("common.cancel_upload") }}
-        </el-button>
-        <el-button size="small" @click="emit('retry')">{{ t("build.retry") }}</el-button>
-      </div>
-    </header>
-
     <div class="stages" role="list">
       <template v-for="(stage, index) in stages" :key="stage.id">
         <div
@@ -197,81 +143,10 @@ async function onCancel() {
         </span>
       </template>
     </div>
-
-    <div class="meter" :class="{ error: runStatus === 'error', live: runStatus === 'running' }">
-      <i :style="{ width: `${pct}%` }" />
-    </div>
-    <div class="meter-meta">
-      <p>{{ progress.msg }}</p>
-      <span v-if="pct > 0" class="mono">{{ pct }}%</span>
-    </div>
-    <p v-if="runStatus === 'running'" class="hint">
-      <span class="dot" aria-hidden="true" />
-      {{ t("build.running_hint") }}
-    </p>
-  </section>
+  </TaskRunBar>
 </template>
 
 <style scoped>
-.stage-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-top: 6px;
-  padding: 14px 16px 16px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--raised);
-}
-
-.stage-panel.is-error {
-  border-color: rgba(248, 113, 113, 0.35);
-}
-
-.stage-panel.is-done {
-  border-color: rgba(52, 211, 153, 0.28);
-}
-
-.fail-banner {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: rgba(248, 113, 113, 0.1);
-  color: var(--err);
-}
-
-.fail-banner p {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-.head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.head h2 {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 650;
-}
-
-.is-done .head h2 { color: var(--ok); }
-.is-error .head h2 { color: var(--err); }
-.is-canceled .head h2 { color: var(--text-muted); }
-.is-running .head h2 { color: var(--accent); }
-
-.actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
 .stages {
   display: flex;
   align-items: stretch;
@@ -377,75 +252,12 @@ async function onCancel() {
   height: 14px;
 }
 
-.meter {
-  height: 6px;
-  border-radius: 99px;
-  overflow: hidden;
-  background: var(--overlay);
-}
-
-.meter i {
-  display: block;
-  height: 100%;
-  background: linear-gradient(90deg, var(--accent-dim), var(--accent));
-  transition: width 200ms ease;
-}
-
-.meter.live i {
-  box-shadow: 0 0 12px var(--accent-glow-strong);
-}
-
-.meter.error i {
-  background: var(--err);
-  box-shadow: none;
-}
-
-.meter-meta {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-.meter-meta p {
-  margin: 0;
-}
-
-.is-error .meter-meta p {
-  color: var(--err);
-}
-
-.hint {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0;
-  color: var(--accent);
-  font-size: 11px;
-}
-
-.dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 0 0 var(--accent-glow-strong);
-  animation: live 1.4s ease-out infinite;
-}
-
 .spin {
   animation: spin 0.8s linear infinite;
 }
 
 @keyframes spin {
   to { transform: rotate(360deg); }
-}
-
-@keyframes live {
-  0% { box-shadow: 0 0 0 0 var(--accent-glow-strong); }
-  70% { box-shadow: 0 0 0 6px transparent; }
-  100% { box-shadow: 0 0 0 0 transparent; }
 }
 
 @media (max-width: 720px) {

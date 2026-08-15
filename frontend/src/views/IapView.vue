@@ -7,6 +7,7 @@ import { useBrowse } from "@/composables/useBrowse";
 import { useImageViewer } from "@/composables/useImageViewer";
 import { useProfile } from "@/composables/useProfile";
 import { useRightRail } from "@/composables/useRightRail";
+import { useTaskPagePhase } from "@/composables/useTaskPagePhase";
 
 type Target = {
   kind: string;
@@ -23,6 +24,7 @@ const browse = useBrowse();
 const viewer = useImageViewer();
 const { snapshot } = useProfile();
 const rail = useRightRail();
+const { isForm, isRun, enterRun, backToForm } = useTaskPagePhase();
 const empty = computed(() => (snapshot.value?.current_profile || "") === "");
 const alert = ref("");
 const checkMsg = ref("");
@@ -58,6 +60,7 @@ async function run() {
     });
     const { task_id } = await httpForm<{ task_id: string }>("/api/iap/run", body);
     taskId.value = task_id;
+    enterRun();
     rail.openLogs(task_id);
   } catch (err) {
     if (err instanceof ApiError && err.status === 400) alert.value = apiErrorMessage(err);
@@ -103,6 +106,7 @@ async function uploadShots() {
     body: JSON.stringify({ items, dryRun: reviewDry.value, verbose: reviewVerbose.value }),
   });
   taskId.value = task_id;
+  enterRun();
   rail.openLogs(task_id);
 }
 
@@ -116,45 +120,47 @@ onMounted(() => { void check(); });
       <router-link to="/profiles">{{ t("nav.profiles") }}</router-link>
     </el-alert>
     <el-alert v-if="alert" type="error" show-icon :title="alert" />
-    <div class="card">
-      <label class="field">
-        <span>{{ t("iap.file") }}</span>
+    <template v-if="isForm">
+      <div class="card">
+        <label class="field">
+          <span>{{ t("iap.file") }}</span>
+          <div class="field-row">
+            <input v-model="iapFile" class="field-input" />
+            <el-button @click="browse.pick({ mode: 'file', ext: '.json', initialPath: iapFile }).then((p) => { if (p) iapFile = p; })">{{ t("filebrowser.browse") }}</el-button>
+          </div>
+        </label>
+        <a href="/api/examples/iap.json">{{ t("iap.download_sample") }}</a>
+        <p v-if="checkMsg">{{ checkMsg }}</p>
+        <label class="check"><input v-model="dryRun" type="checkbox" /> {{ t("iap.dry_run") }}</label>
+        <label class="check"><input v-model="updateExisting" type="checkbox" /> {{ t("iap.update_existing") }}</label>
+        <label class="check"><input v-model="verbose" type="checkbox" /> {{ t("build.verbose") }}</label>
         <div class="field-row">
-          <input v-model="iapFile" class="field-input" />
-          <el-button @click="browse.pick({ mode: 'file', ext: '.json', initialPath: iapFile }).then((p) => { if (p) iapFile = p; })">{{ t("filebrowser.browse") }}</el-button>
-        </div>
-      </label>
-      <a href="/api/examples/iap.json">{{ t("iap.download_sample") }}</a>
-      <p v-if="checkMsg">{{ checkMsg }}</p>
-      <label class="check"><input v-model="dryRun" type="checkbox" /> {{ t("iap.dry_run") }}</label>
-      <label class="check"><input v-model="updateExisting" type="checkbox" /> {{ t("iap.update_existing") }}</label>
-      <label class="check"><input v-model="verbose" type="checkbox" /> {{ t("build.verbose") }}</label>
-      <div class="field-row">
-        <el-button :disabled="empty" @click="check">{{ t("iap.check_config") }}</el-button>
-        <el-button type="primary" :disabled="empty" @click="run">{{ t("common.submit") }}</el-button>
-      </div>
-      <TaskRunBar :task-id="taskId" />
-    </div>
-    <div class="card">
-      <h2>{{ t("iap.review_title") }}</h2>
-      <el-button :disabled="empty" @click="scan">{{ t("iap.scan_missing") }}</el-button>
-      <p v-if="targets.length">{{ t("iap.found_missing", { n: targets.length }) }}</p>
-      <p v-else class="muted">{{ t("iap.no_missing") }}</p>
-      <div v-for="item in targets" :key="item.id" class="shot-row">
-        <div>
-          <strong>{{ item.name || item.productId }}</strong>
-          <div class="muted">{{ item.kind === "subscription" ? t("iap.kind_sub") : "IAP" }} · {{ item.productId }}</div>
-        </div>
-        <div class="field-row">
-          <input v-model="paths[item.id]" class="field-input" />
-          <el-button size="small" @click="pickPath(item.id)">{{ t("filebrowser.browse") }}</el-button>
-          <img v-if="paths[item.id]" class="thumb" :src="`/api/listing/thumb?path=${encodeURIComponent(paths[item.id])}&root=${encodeURIComponent(paths[item.id].replace(/[/\\\\][^/\\\\]+$/, '') || '.')}`" alt="" @click="previewPath(paths[item.id])" />
+          <el-button :disabled="empty" @click="check">{{ t("iap.check_config") }}</el-button>
+          <el-button type="primary" :disabled="empty" @click="run">{{ t("common.submit") }}</el-button>
         </div>
       </div>
-      <label class="check"><input v-model="reviewDry" type="checkbox" /> {{ t("iap.preview") }}</label>
-      <label class="check"><input v-model="reviewVerbose" type="checkbox" /> {{ t("build.verbose") }}</label>
-      <el-button type="primary" :disabled="empty || !targets.length" @click="uploadShots">{{ t("iap.upload_shots") }}</el-button>
-    </div>
+      <div class="card">
+        <h2>{{ t("iap.review_title") }}</h2>
+        <el-button :disabled="empty" @click="scan">{{ t("iap.scan_missing") }}</el-button>
+        <p v-if="targets.length">{{ t("iap.found_missing", { n: targets.length }) }}</p>
+        <p v-else class="muted">{{ t("iap.no_missing") }}</p>
+        <div v-for="item in targets" :key="item.id" class="shot-row">
+          <div>
+            <strong>{{ item.name || item.productId }}</strong>
+            <div class="muted">{{ item.kind === "subscription" ? t("iap.kind_sub") : "IAP" }} · {{ item.productId }}</div>
+          </div>
+          <div class="field-row">
+            <input v-model="paths[item.id]" class="field-input" />
+            <el-button size="small" @click="pickPath(item.id)">{{ t("filebrowser.browse") }}</el-button>
+            <img v-if="paths[item.id]" class="thumb" :src="`/api/listing/thumb?path=${encodeURIComponent(paths[item.id])}&root=${encodeURIComponent(paths[item.id].replace(/[/\\\\][^/\\\\]+$/, '') || '.')}`" alt="" @click="previewPath(paths[item.id])" />
+          </div>
+        </div>
+        <label class="check"><input v-model="reviewDry" type="checkbox" /> {{ t("iap.preview") }}</label>
+        <label class="check"><input v-model="reviewVerbose" type="checkbox" /> {{ t("build.verbose") }}</label>
+        <el-button type="primary" :disabled="empty || !targets.length" @click="uploadShots">{{ t("iap.upload_shots") }}</el-button>
+      </div>
+    </template>
+    <TaskRunBar v-if="isRun && taskId" :task-id="taskId" @back="backToForm" />
   </div>
 </template>
 

@@ -7,6 +7,7 @@ import TaskRunBar from "@/components/TaskRunBar.vue";
 import { useBrowse } from "@/composables/useBrowse";
 import { useProfile } from "@/composables/useProfile";
 import { useRightRail } from "@/composables/useRightRail";
+import { useTaskPagePhase } from "@/composables/useTaskPagePhase";
 
 type LocaleRow = { locale: string; fields: Record<string, string>; screenshots: Record<string, { file_name: string }[]> };
 
@@ -16,6 +17,7 @@ const route = useRoute();
 const browse = useBrowse();
 const { snapshot } = useProfile();
 const rail = useRightRail();
+const { isForm, isRun, enterRun, backToForm } = useTaskPagePhase();
 const empty = computed(() => (snapshot.value?.current_profile || "") === "");
 const csvPath = ref(snapshot.value?.paths.csv || "data/appstore_info.csv");
 const shotsDir = ref(snapshot.value?.paths.screenshots || "data/screenshots");
@@ -90,6 +92,7 @@ async function run() {
     }
     const { task_id } = await httpForm<{ task_id: string }>("/api/metadata/run", body);
     taskId.value = task_id;
+    enterRun();
     rail.openLogs(task_id);
   } catch (err) {
     if (err instanceof ApiError && err.status === 400) alert.value = apiErrorMessage(err);
@@ -122,7 +125,7 @@ onMounted(() => {
       <router-link to="/profiles">{{ t("nav.profiles") }}</router-link>
     </el-alert>
     <el-alert v-if="alert" type="error" show-icon :title="alert" />
-    <div class="card">
+    <div v-if="isForm" class="card">
       <label class="field">
         <span>{{ t("metadata.csv_path") }}</span>
         <div class="field-row">
@@ -165,8 +168,8 @@ onMounted(() => {
         <el-button type="primary" :disabled="empty" @click="run">{{ t("common.submit") }}</el-button>
       </div>
       <p v-if="checkMsg">{{ checkMsg }}</p>
-      <TaskRunBar :task-id="taskId" />
     </div>
+    <TaskRunBar v-if="isRun && taskId" :task-id="taskId" @back="backToForm" />
   </div>
 </template>
 

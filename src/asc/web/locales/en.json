@@ -184,6 +184,8 @@
   "common.fail_banner_title": "Task failed",
   "common.fail_banner_hint": "Open the log drawer for step details and error output.",
   "common.running_hint": "Task is running; logs are streaming live…",
+  "task.back_to_form": "Back to configuration",
+  "task.edit_and_rerun": "Edit and run again",
   "settings.title": "Settings",
   "settings.llm_title": "LLM translation config",
   "settings.add_config": "+ Add config",

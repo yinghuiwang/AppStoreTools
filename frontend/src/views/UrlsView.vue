@@ -5,12 +5,14 @@ import { ApiError, apiErrorMessage, httpForm, httpJson } from "@/api/http";
 import TaskRunBar from "@/components/TaskRunBar.vue";
 import { useProfile } from "@/composables/useProfile";
 import { useRightRail } from "@/composables/useRightRail";
+import { useTaskPagePhase } from "@/composables/useTaskPagePhase";
 
 type Check = { ok: boolean; message: string; detail?: { locales?: string[] } };
 
 const { t } = useI18n();
 const { snapshot } = useProfile();
 const rail = useRightRail();
+const { isForm, isRun, enterRun, backToForm } = useTaskPagePhase();
 const empty = computed(() => (snapshot.value?.current_profile || "") === "");
 const alert = ref("");
 const check = ref<Check | null>(null);
@@ -44,6 +46,7 @@ async function run() {
     });
     const { task_id } = await httpForm<{ task_id: string }>("/api/urls/set", body);
     taskId.value = task_id;
+    enterRun();
     rail.openLogs(task_id);
   } catch (err) {
     if (err instanceof ApiError && err.status === 400) alert.value = apiErrorMessage(err);
@@ -62,7 +65,7 @@ onMounted(() => { void loadCheck(); });
       <router-link to="/profiles">{{ t("nav.profiles") }}</router-link>
     </el-alert>
     <el-alert v-if="alert" type="error" show-icon :title="alert" />
-    <div class="card">
+    <div v-if="isForm" class="card">
       <p v-if="check">{{ check.message }}</p>
       <el-button size="small" @click="loadCheck">{{ t("common.check_env") }}</el-button>
       <label class="field">
@@ -85,8 +88,8 @@ onMounted(() => { void loadCheck(); });
       <label class="check"><input v-model="dryRun" type="checkbox" /> {{ t("common.dry_run") }}</label>
       <label class="check"><input v-model="verbose" type="checkbox" /> {{ t("build.verbose") }}</label>
       <el-button type="primary" :disabled="empty" @click="run">{{ t("urls.submit") }}</el-button>
-      <TaskRunBar :task-id="taskId" />
     </div>
+    <TaskRunBar v-if="isRun && taskId" :task-id="taskId" @back="backToForm" />
   </div>
 </template>
 

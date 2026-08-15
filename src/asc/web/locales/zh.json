@@ -184,6 +184,8 @@
   "common.fail_banner_title": "任务失败",
   "common.fail_banner_hint": "请打开右侧日志查看详细步骤与错误信息。",
   "common.running_hint": "任务运行中，日志实时写入中…",
+  "task.back_to_form": "返回配置",
+  "task.edit_and_rerun": "再改再跑",
   "settings.title": "设置",
   "settings.llm_title": "LLM 翻译配置",
   "settings.add_config": "+ 新增配置",
