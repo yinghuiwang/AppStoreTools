@@ -3,6 +3,7 @@ import { onMounted } from "vue";
 import AppSidebar from "@/components/AppSidebar.vue";
 import AppTopbar from "@/components/AppTopbar.vue";
 import RightRail from "@/components/RightRail.vue";
+import FileBrowser from "@/components/FileBrowser.vue";
 import { useProfile } from "@/composables/useProfile";
 import { useTaskLog } from "@/composables/useTaskLog";
 import { useAgent } from "@/composables/useAgent";
@@ -27,6 +28,7 @@ onMounted(() => {
       </main>
     </div>
     <RightRail />
+    <FileBrowser />
   </div>
 </template>
 
