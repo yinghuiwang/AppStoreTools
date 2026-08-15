@@ -17,6 +17,15 @@ from asc.web.tasks import task_store
 
 _STATIC_DIR = Path(__file__).parent / "static"
 SPA_INDEX = _STATIC_DIR / "spa" / "index.html"
+SPA_BUILD_HINT = "cd frontend && npm ci && npm run build"
+
+
+def spa_not_built_payload() -> dict:
+    return {
+        "ok": False,
+        "error": "spa_not_built",
+        "message": f"Web UI SPA is not built. Run: {SPA_BUILD_HINT}",
+    }
 
 
 def runtime_identity() -> tuple[str, str]:
@@ -78,7 +87,7 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="Not Found")
         index = SPA_INDEX
         if not index.is_file():
-            return JSONResponse({"ok": False, "error": "spa_not_built"}, status_code=503)
+            return JSONResponse(spa_not_built_payload(), status_code=503)
         return FileResponse(
             index,
             media_type="text/html",

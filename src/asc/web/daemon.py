@@ -258,25 +258,32 @@ def stop(timeout: float = 5.0, *, pid: int | None = None) -> dict[str, Any]:
     return {"status": "stopped", "pid": target_pid, "forced": True}
 
 
-def _wait_port_free(host: str, port: int, timeout: float = 10.0) -> bool:
-    """Return True once *host*:*port* accepts no listener (or timeout)."""
+def port_in_use(host: str, port: int) -> bool:
+    """Return True if *host*:*port* currently accepts a TCP connection."""
     import socket
 
+    probe_host = "127.0.0.1" if host in {"0.0.0.0", "", "::"} else host
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(0.3)
+    try:
+        return sock.connect_ex((probe_host, int(port))) == 0
+    except OSError:
+        return False
+    finally:
+        sock.close()
+
+
+def _wait_port_free(host: str, port: int, timeout: float = 10.0) -> bool:
+    """Return True once *host*:*port* accepts no listener (or timeout)."""
     deadline = time.time() + timeout
     while time.time() < deadline:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(0.3)
-        try:
-            # Empty host / 0.0.0.0 → probe loopback where clients connect.
-            probe_host = "127.0.0.1" if host in {"0.0.0.0", "", "::"} else host
-            if sock.connect_ex((probe_host, int(port))) != 0:
-                return True
-        except OSError:
+        if not port_in_use(host, port):
             return True
-        finally:
-            sock.close()
         time.sleep(0.15)
-    return False
+    return not port_in_use(host, port)
+
+
+wait_port_free = _wait_port_free
 
 
 def _append_update_task_log(task_id: str | None, message: str) -> None:

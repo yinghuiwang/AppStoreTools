@@ -199,6 +199,13 @@ def test_wait_port_free_when_connect_fails(isolated_state):
         assert daemon._wait_port_free("127.0.0.1", 65530, timeout=0.5) is True
 
 
+def test_port_in_use_when_connect_succeeds(isolated_state):
+    with patch("socket.socket") as sock_cls:
+        sock = sock_cls.return_value
+        sock.connect_ex.return_value = 0
+        assert daemon.port_in_use("127.0.0.1", 8080) is True
+
+
 def test_update_restart_marker_roundtrip(isolated_state):
     path = daemon.write_update_restart_marker("task-123", installed=True)
     assert path.exists()

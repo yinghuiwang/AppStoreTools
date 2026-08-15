@@ -47,6 +47,8 @@ def test_web_cmd_foreground_runs_uvicorn():
     with patch("asc.web.server.create_app", return_value=mock_app), \
          patch("uvicorn.run") as mock_run, \
          patch("asc.commands.web_cmd.start_background") as mock_start, \
+         patch("asc.commands.web_cmd.get_status", return_value={"running": False}), \
+         patch("asc.commands.web_cmd.port_in_use", return_value=False), \
          patch("threading.Timer"):
         result = runner.invoke(app, ["web", "--foreground", "--no-open", "--port", "9999"])
         assert result.exit_code == 0
@@ -68,6 +70,8 @@ def test_web_cmd_no_open_skips_browser_on_foreground():
     mock_app = MagicMock()
     with patch("asc.web.server.create_app", return_value=mock_app), \
          patch("uvicorn.run"), \
+         patch("asc.commands.web_cmd.get_status", return_value={"running": False}), \
+         patch("asc.commands.web_cmd.port_in_use", return_value=False), \
          patch("webbrowser.open") as mock_browser:
         result = runner.invoke(app, ["web", "--foreground", "--no-open", "--port", "19999"])
         assert result.exit_code == 0
@@ -96,6 +100,62 @@ def test_web_cmd_stop():
         assert result.exit_code == 0
         mock_stop.assert_called_once()
         assert "已停止" in result.output
+
+
+def test_web_cmd_foreground_stops_existing_daemon():
+    """同端口的后台进程应先被停掉，再进入前台 uvicorn。"""
+    mock_app = MagicMock()
+    with patch(
+        "asc.commands.web_cmd.get_status",
+        return_value={
+            "running": True,
+            "pid": 68391,
+            "port": 8080,
+            "host": "127.0.0.1",
+            "url": "http://127.0.0.1:8080",
+        },
+    ), patch(
+        "asc.commands.web_cmd.stop",
+        return_value={"status": "stopped", "pid": 68391},
+    ) as mock_stop, patch(
+        "asc.commands.web_cmd.wait_port_free",
+        return_value=True,
+    ), patch(
+        "asc.commands.web_cmd.port_in_use",
+        return_value=False,
+    ), patch(
+        "asc.web.server.create_app",
+        return_value=mock_app,
+    ), patch("uvicorn.run") as mock_run:
+        result = runner.invoke(app, ["web", "--foreground", "--no-open", "--port", "8080"])
+    assert result.exit_code == 0, result.output
+    mock_stop.assert_called_once()
+    mock_run.assert_called_once()
+    assert "正在停止以便前台启动" in result.output
+
+
+def test_web_cmd_foreground_rejects_busy_foreign_port():
+    with patch("asc.commands.web_cmd.get_status", return_value={"running": False}), \
+         patch("asc.commands.web_cmd.port_in_use", return_value=True), \
+         patch("uvicorn.run") as mock_run:
+        result = runner.invoke(app, ["web", "--foreground", "--no-open", "--port", "8080"])
+    assert result.exit_code == 1
+    mock_run.assert_not_called()
+    assert "已被占用" in result.output
+    assert "asc web stop" in result.output
+
+
+def test_web_cmd_rejects_missing_spa(tmp_path, monkeypatch):
+    monkeypatch.setattr("asc.web.server.SPA_INDEX", tmp_path / "missing.html")
+    with patch("uvicorn.run") as mock_run, patch(
+        "asc.commands.web_cmd.start_background"
+    ) as mock_start:
+        result = runner.invoke(app, ["web", "--foreground", "--no-open"])
+    assert result.exit_code == 1
+    mock_run.assert_not_called()
+    mock_start.assert_not_called()
+    assert "SPA 未构建" in result.output
+    assert "npm run build" in result.output
 
 
 def test_web_cmd_status_running():

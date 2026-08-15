@@ -2377,7 +2377,10 @@ def test_spa_fallback_missing_index_returns_503(monkeypatch):
     monkeypatch.setattr("asc.web.server.SPA_INDEX", Path("/nonexistent/spa/index.html"))
     resp = TestClient(create_app()).get("/system/profiles")
     assert resp.status_code == 503
-    assert resp.json() == {"ok": False, "error": "spa_not_built"}
+    body = resp.json()
+    assert body["ok"] is False
+    assert body["error"] == "spa_not_built"
+    assert "npm run build" in body["message"]
 
 
 def test_unknown_api_path_still_404(tmp_path, monkeypatch):

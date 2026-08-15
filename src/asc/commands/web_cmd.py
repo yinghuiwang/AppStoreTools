@@ -7,13 +7,54 @@ import webbrowser
 
 import typer
 
-from asc.web.daemon import get_status, is_loopback_host, start_background, stop
+from asc.web.daemon import (
+    get_status,
+    is_loopback_host,
+    port_in_use,
+    start_background,
+    stop,
+    wait_port_free,
+)
 
 web_app = typer.Typer(help="本地 Web UI", invoke_without_command=True)
 
 
 def _open_browser(url: str) -> None:
     threading.Timer(1.5, lambda: webbrowser.open(url)).start()
+
+
+def _ensure_spa_built() -> None:
+    from asc.web.server import SPA_BUILD_HINT, SPA_INDEX
+
+    if SPA_INDEX.is_file():
+        return
+    typer.echo(f"❌ Web UI SPA 未构建：找不到 {SPA_INDEX}", err=True)
+    typer.echo(f"   请先执行：{SPA_BUILD_HINT}", err=True)
+    raise typer.Exit(1)
+
+
+def _free_foreground_port(host: str, port: int) -> None:
+    """Stop our background daemon when it owns *port*, then fail if still busy."""
+    current = get_status()
+    if current.get("running") and int(current.get("port", -1)) == int(port):
+        pid = current.get("pid", "")
+        typer.echo(f"⚠️  端口 {port} 已被后台 Web UI 占用（PID {pid}），正在停止以便前台启动…")
+        result = stop()
+        if result.get("status") == "error":
+            typer.echo(f"❌ 无法停止后台进程：{result.get('message', 'unknown error')}", err=True)
+            raise typer.Exit(1)
+        if not wait_port_free(host, port, timeout=10.0):
+            typer.echo(
+                f"❌ 端口 {port} 仍被占用。请换 --port 或手动结束占用进程。",
+                err=True,
+            )
+            raise typer.Exit(1)
+
+    if port_in_use(host, port):
+        typer.echo(f"❌ 端口 {port} 已被占用。", err=True)
+        typer.echo("   请先运行：asc web stop", err=True)
+        typer.echo(f"   或换端口：asc web --foreground --port {int(port) + 1}", err=True)
+        raise typer.Exit(1)
 
 
 def _run_foreground(host: str, port: int, no_open: bool) -> None:
@@ -24,6 +65,9 @@ def _run_foreground(host: str, port: int, no_open: bool) -> None:
         )
     import uvicorn
     from asc.web.server import create_app
+
+    _ensure_spa_built()
+    _free_foreground_port(host, port)
 
     os.environ["ASC_WEB_HOST"] = host
     os.environ["ASC_WEB_PORT"] = str(port)
@@ -36,7 +80,21 @@ def _run_foreground(host: str, port: int, no_open: bool) -> None:
         _open_browser(url)
 
     app = create_app()
-    uvicorn.run(app, host=host, port=port, log_level="info")
+    try:
+        uvicorn.run(app, host=host, port=port, log_level="info")
+    except SystemExit as exc:
+        code = exc.code if isinstance(exc.code, int) else 1
+        if code != 0:
+            typer.echo(
+                f"❌ 无法监听 {host}:{port}。若端口被占用，请先 `asc web stop` 或换 `--port`。",
+                err=True,
+            )
+            raise typer.Exit(code) from None
+        raise
+    except OSError as exc:
+        typer.echo(f"❌ 无法监听 {host}:{port}：{exc}", err=True)
+        typer.echo("   若端口被占用，请先运行：asc web stop  或换 `--port`。", err=True)
+        raise typer.Exit(1) from None
 
 
 @web_app.callback(invoke_without_command=True)
@@ -70,6 +128,8 @@ def cmd_web(
             "Web UI only supports loopback hosts (127.0.0.1, ::1, or localhost)",
             param_hint="--host",
         )
+
+    _ensure_spa_built()
 
     if foreground:
         _run_foreground(host, port, no_open)
