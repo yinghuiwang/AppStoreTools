@@ -1,0 +1,100 @@
+:root,
+html.dark {
+  --bg: #0a0a0c;
+  --surface: #111115;
+  --raised: #16161b;
+  --overlay: #1c1c23;
+  --border: #27272f;
+  --border-strong: #35353f;
+  --text: #dddde3;
+  --text-muted: #91919e;
+  --text-faint: #6b6b78;
+  --accent: #8ff5d2;
+  --accent-dim: #23c9a8;
+  --accent-deep: #147d72;
+  --accent-glow: rgba(35, 201, 168, 0.15);
+  --accent-glow-strong: rgba(35, 201, 168, 0.35);
+  --accent-bright: #e4ffd0;
+  --warn: #f59e0b;
+  --ok: #34d399;
+  --err: #f87171;
+  --info: #60a5fa;
+  --sidebar-width: 224px;
+  --sidebar-collapsed: 48px;
+  --topbar-height: 52px;
+  --rail-strip: 48px;
+  color-scheme: dark;
+}
+
+html,
+html.dark {
+  background: var(--bg);
+  color: var(--text);
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  overflow: hidden;
+}
+
+body::after {
+  content: "";
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  opacity: 0.02;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='80' height='80' filter='url(%23n)' opacity='.55'/%3E%3C/svg%3E");
+}
+
+.mono {
+  font-family: "Fira Code", ui-monospace, monospace;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-property: color, background-color, border-color, opacity, box-shadow !important;
+    transform: none !important;
+    animation: none !important;
+  }
+}

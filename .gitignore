@@ -10,3 +10,4 @@ build/
 .worktrees/
 docs/superpowers/
 .superpowers/
+frontend/node_modules/
