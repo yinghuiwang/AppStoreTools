@@ -704,6 +704,17 @@ def test_listing_screenshots_replace_rejects_new_name_traversal(client, tmp_path
     assert not (shots / "evil.png").exists()
 
 
+def test_listing_view_tabs_start_with_upload():
+    src = Path("frontend/src/views/ListingView.vue").read_text(encoding="utf-8")
+    upload = src.index('name="upload"')
+    local = src.index('name="local"')
+    diff = src.index('name="diff"')
+    assert upload < local < diff
+    assert 'const DEFAULT_TAB = "upload"' in src
+    assert 'route.query.tab || DEFAULT_TAB' in src
+    assert 'route.query.tab || "local"' not in src
+
+
 def test_listing_local_tab_has_screenshot_workbench():
     src = Path("frontend/src/views/listing/LocalTab.vue").read_text(encoding="utf-8")
     assert "/api/listing/screenshots/add" in src

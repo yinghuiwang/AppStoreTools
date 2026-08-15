@@ -112,6 +112,11 @@ def test_nav_catalog_english_and_chinese():
     assert t("nav.profiles", lang="zh") == "App 管理"
     assert t("nav.guard", lang="zh") == "Guard 安全守卫"
     assert t("nav.update", lang="zh") == "检查更新"
+    assert t("nav.listing", lang="en") == "Listing"
+    assert t("nav.listing", lang="zh") == "商品页"
+    assert t("nav.group.listing", lang="zh") == "上架"
+    assert t("listing.tab.upload", lang="zh") == "上传"
+    assert t("listing.tab.local", lang="zh") == "本地工作台"
 
 
 def test_language_switch_updates_locale_without_reload():
