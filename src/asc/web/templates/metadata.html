@@ -34,6 +34,19 @@
       version: null, locales: [], filter: 'all',
     },
 
+    localeCatalog: {
+      open: false,
+      loaded: false,
+      loading: false,
+      error: '',
+      locales: [],
+      presenceAvailable: false,
+      query: '',
+      copiedCode: '',
+      copyFailedCode: '',
+      copyTimer: null,
+    },
+
     lightbox: (window.AscImageViewer && window.AscImageViewer.createState)
       ? window.AscImageViewer.createState()
       : { open: false, items: [], index: 0 },
@@ -994,6 +1007,107 @@
         .catch(e => { this.diff.error = e.message; })
         .finally(() => { this.diff.pullingShots = false; });
     },
+
+    localeCatalogCopy(code) {
+      const value = String(code || '');
+      const markOk = () => {
+        this.localeCatalog.copyFailedCode = '';
+        this.localeCatalog.copiedCode = value;
+        if (this.localeCatalog.copyTimer) clearTimeout(this.localeCatalog.copyTimer);
+        this.localeCatalog.copyTimer = setTimeout(() => {
+          if (this.localeCatalog.copiedCode === value) this.localeCatalog.copiedCode = '';
+        }, 2000);
+      };
+      const markFail = () => {
+        this.localeCatalog.copiedCode = '';
+        this.localeCatalog.copyFailedCode = value;
+      };
+      const fallbackCopy = () => {
+        const ta = document.createElement('textarea');
+        ta.value = value;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        let ok = false;
+        try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+        ta.remove();
+        return ok;
+      };
+      const done = (ok) => { if (ok) markOk(); else markFail(); };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(value).then(() => done(true)).catch(() => {
+          done(fallbackCopy());
+        });
+        return;
+      }
+      done(fallbackCopy());
+    },
+
+    localeCatalogOpen() {
+      this.localeCatalog.open = true;
+      this.localeCatalog.copyFailedCode = '';
+      this.$nextTick(() => {
+        const el = this.$refs.localeSearch;
+        if (el && typeof el.focus === 'function') el.focus();
+      });
+      this.localeCatalogEnsureLoaded(false);
+    },
+
+    localeCatalogClose() {
+      this.localeCatalog.open = false;
+    },
+
+    localeCatalogRefresh() {
+      this.localeCatalogEnsureLoaded(true);
+    },
+
+    localeCatalogEnsureLoaded(force) {
+      if (!force && (this.localeCatalog.loaded || this.localeCatalog.loading)) return;
+      this.localeCatalog.loading = true;
+      this.localeCatalog.error = '';
+      fetch('/api/metadata/locales')
+        .then(async r => {
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok) {
+            throw new Error(data.error || window.t('metadata.locales_catalog_unavailable'));
+          }
+          this.localeCatalog.locales = data.locales || [];
+          this.localeCatalog.presenceAvailable = !!data.presenceAvailable;
+          this.localeCatalog.loaded = true;
+          this.localeCatalog.error = '';
+        })
+        .catch(e => {
+          this.localeCatalog.loaded = false;
+          this.localeCatalog.locales = [];
+          this.localeCatalog.presenceAvailable = false;
+          this.localeCatalog.error = e.message || window.t('metadata.locales_catalog_unavailable');
+        })
+        .finally(() => { this.localeCatalog.loading = false; });
+    },
+
+    localeCatalogFiltered() {
+      const items = this.localeCatalog.locales || [];
+      const q = (this.localeCatalog.query || '').trim().toLowerCase();
+      const matched = !q ? items.slice() : items.filter(row => {
+        const code = String(row.code || '').toLowerCase();
+        const en = String(row.name_en || '').toLowerCase();
+        const zh = String(row.name_zh || '').toLowerCase();
+        return code.indexOf(q) !== -1 || en.indexOf(q) !== -1 || zh.indexOf(q) !== -1;
+      });
+      return matched.slice().sort((a, b) => {
+        const left = String(a.code || '');
+        const right = String(b.code || '');
+        if (left < right) return -1;
+        if (left > right) return 1;
+        return 0;
+      });
+    },
+
+    localeCatalogDisplayName(row) {
+      return window.__ASC_LANG === 'zh' ? row.name_zh : row.name_en;
+    },
   }">
 
     <!-- Step 1: 配置表单 -->
@@ -1115,6 +1229,7 @@
                           @click="wbSwitchTab('diff')">{{ t("metadata.tab_diff") }}</button>
                 </div>
                 <div class="listing-wb-bar__end">
+                  <button type="button" class="btn-ghost" @click="localeCatalogOpen()" x-text="window.t('metadata.locales_btn')">{{ t("metadata.locales_btn") }}</button>
                   <span x-show="wb.dirty" class="listing-wb-msg" style="color: var(--accent);">{{ t("metadata.unsaved") }}</span>
                   <button type="button" class="btn-ghost" x-show="wb.tab === 'local'" :disabled="wb.loading" @click="wbLoadPreview()">
                     <span x-show="!wb.loading">{{ t("metadata.load_preview") }}</span>
@@ -1528,6 +1643,68 @@
     </div>
 
     <div id="run-result"></div>
+
+    <div x-show="localeCatalog.open" x-cloak
+         class="fixed inset-0 flex items-center justify-center z-50"
+         style="background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);"
+         @keydown.escape.window="if (localeCatalog.open) localeCatalogClose()"
+         @click.self="localeCatalogClose()">
+      <div class="card w-[520px] max-w-[calc(100vw-32px)]" @click.stop>
+        <div class="card-header flex items-center justify-between gap-3">
+          <h3 class="text-xs uppercase tracking-widest text-obsidian-400 font-medium" x-text="window.t('metadata.locales_title')"></h3>
+          <div class="flex items-center gap-2">
+            <button type="button" class="btn-ghost" :disabled="localeCatalog.loading" @click="localeCatalogRefresh()" x-text="window.t('metadata.locales_refresh')"></button>
+            <button type="button"
+                    class="text-obsidian-500 hover:text-obsidian-300 cursor-pointer transition-colors duration-150 p-1 rounded focus-ring"
+                    :title="window.t('metadata.locales_close')"
+                    @click="localeCatalogClose()">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="card-body space-y-3">
+          <p class="listing-wb-hint"
+             x-show="localeCatalog.loaded && !localeCatalog.presenceAvailable"
+             x-text="window.t('metadata.locales_presence_unavailable')"></p>
+          <input type="search"
+                 x-ref="localeSearch"
+                 x-model="localeCatalog.query"
+                 class="field-input w-full"
+                 :placeholder="window.t('metadata.locales_search')"
+                 autocomplete="off">
+          <div class="max-h-[min(60vh,420px)] overflow-y-auto">
+            <p class="listing-wb-hint" x-show="localeCatalog.loading" x-text="window.t('common.loading')"></p>
+            <p class="listing-wb-msg" style="color: var(--error);"
+               x-show="!localeCatalog.loading && localeCatalog.error"
+               x-text="localeCatalog.error"></p>
+            <p class="listing-wb-hint"
+               x-show="!localeCatalog.loading && !localeCatalog.error && localeCatalog.loaded && localeCatalogFiltered().length === 0"
+               x-text="window.t('metadata.locales_empty')"></p>
+            <div class="flex flex-col gap-1"
+                 x-show="!localeCatalog.loading && !localeCatalog.error && localeCatalog.loaded">
+              <template x-for="row in localeCatalogFiltered()" :key="row.code">
+                <button type="button"
+                        class="w-full text-left px-2 py-1.5 rounded hover:bg-obsidian-800/80 flex items-center gap-2"
+                        @click="localeCatalogCopy(row.code)">
+                  <span class="font-mono text-sm text-obsidian-100" x-text="row.code"></span>
+                  <span class="text-xs text-obsidian-400 truncate" x-text="localeCatalogDisplayName(row)"></span>
+                  <span class="badge badge-info ml-auto"
+                        x-show="row.present && localeCatalog.copiedCode !== row.code && localeCatalog.copyFailedCode !== row.code"
+                        x-text="window.t('metadata.locales_present')"></span>
+                  <span class="text-xs ml-auto" style="color: var(--success);"
+                        x-show="localeCatalog.copiedCode === row.code"
+                        x-text="window.t('metadata.locales_copied')"></span>
+                  <span class="text-xs ml-auto" style="color: var(--error);"
+                        x-show="localeCatalog.copyFailedCode === row.code"
+                        x-text="window.t('metadata.locales_copy_failed')"></span>
+                </button>
+              </template>
+            </div>
+          </div>
+          <p class="listing-wb-hint" x-text="window.t('metadata.locales_hint')"></p>
+        </div>
+      </div>
+    </div>
 
     <!-- Screenshot lightbox -->
 <div x-show="lightbox.open" x-cloak

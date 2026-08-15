@@ -167,3 +167,55 @@ def test_metadata_locales_does_not_change_csv(client, tmp_path):
     assert response.status_code == 200
     assert csv_path.read_bytes() == before
     assert csv_path.read_text(encoding="utf-8") == original
+
+
+I18N_KEYS = [
+    "metadata.locales_btn",
+    "metadata.locales_title",
+    "metadata.locales_search",
+    "metadata.locales_copied",
+    "metadata.locales_copy_failed",
+    "metadata.locales_empty",
+    "metadata.locales_catalog_unavailable",
+    "metadata.locales_presence_unavailable",
+    "metadata.locales_present",
+    "metadata.locales_refresh",
+    "metadata.locales_hint",
+    "metadata.locales_close",
+]
+
+
+def test_metadata_page_has_locale_search_popup_markup(client):
+    response = client.get("/metadata")
+    html = response.text
+    assert response.status_code == 200
+    assert "/api/metadata/locales" in html
+    assert "localeCatalogOpen" in html
+    assert "localeCatalogCopy" in html
+    assert "localeCatalogRefresh" in html
+    assert "fixed inset-0" in html
+    assert "navigator.clipboard.writeText" in html
+    assert "execCommand('copy')" in html
+    for key in I18N_KEYS:
+        assert key in html
+    copy_at = html.index("localeCatalogCopy")
+    copy_chunk = html[copy_at:copy_at + 1800]
+    assert "locales-json-input" not in copy_chunk
+    assert "fields-by-locale-json-input" not in copy_chunk
+    assert "screenshot-scopes-json-input" not in copy_chunk
+    assert "wbSaveToCsv" not in copy_chunk
+    assert "/api/listing/" not in copy_chunk
+    assert "/api/metadata/run" not in copy_chunk
+    assert "localStorage" not in copy_chunk
+
+
+def test_metadata_page_locale_button_localized(client, monkeypatch):
+    monkeypatch.delenv("ASC_LANG", raising=False)
+    client.cookies.set("asc_lang", "zh")
+    zh = client.get("/metadata")
+    assert "语言码" in zh.text
+    assert t("metadata.locales_btn", lang="zh") in zh.text
+    client.cookies.set("asc_lang", "en")
+    en = client.get("/metadata")
+    assert "Locale codes" in en.text
+    assert t("metadata.locales_btn", lang="en") in en.text
