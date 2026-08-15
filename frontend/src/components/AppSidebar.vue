@@ -28,7 +28,15 @@ const groups: NavGroup[] = [
   },
   { labelKey: "nav.group.build", items: [{ to: "/build", labelKey: "nav.build", match: "exact", icon: "build" }] },
   { labelKey: "nav.group.iap", items: [{ to: "/iap", labelKey: "nav.iap", match: "exact", icon: "iap" }] },
-  { labelKey: "nav.group.system", items: [{ to: "/system/profiles", labelKey: "nav.system", match: "prefix", prefix: "/system", icon: "system" }] },
+  {
+    labelKey: "nav.group.system",
+    items: [
+      { to: "/profiles", labelKey: "nav.profiles", match: "exact", icon: "profiles" },
+      { to: "/guard", labelKey: "nav.guard", match: "exact", icon: "guard" },
+      { to: "/settings", labelKey: "nav.settings", match: "exact", icon: "settings" },
+      { to: "/update", labelKey: "nav.update", match: "exact", icon: "update" },
+    ],
+  },
 ];
 
 const { t } = useI18n();
@@ -296,9 +304,24 @@ onBeforeUnmount(() => {
   -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' stroke='black' stroke-width='1.8' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='8'/%3E%3Cpath d='M12 8v8M9.5 10.5c.5-1 1.5-1.5 2.5-1.5s2 .6 2 1.7c0 2.3-4 1.4-4 3.8 0 1 .9 1.5 2 1.5s2-.5 2.5-1.5'/%3E%3C/svg%3E");
 }
 
-.nav-icon[data-icon="system"] {
+.nav-icon[data-icon="profiles"] {
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' stroke='black' stroke-width='1.8' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='8' r='3'/%3E%3Cpath d='M5 20c1.5-4 4-6 7-6s5.5 2 7 6'/%3E%3C/svg%3E");
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' stroke='black' stroke-width='1.8' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='8' r='3'/%3E%3Cpath d='M5 20c1.5-4 4-6 7-6s5.5 2 7 6'/%3E%3C/svg%3E");
+}
+
+.nav-icon[data-icon="guard"] {
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' stroke='black' stroke-width='1.8' viewBox='0 0 24 24'%3E%3Cpath d='M12 3l8 4v6c0 5-3.4 8.2-8 10-4.6-1.8-8-5-8-10V7l8-4z'/%3E%3C/svg%3E");
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' stroke='black' stroke-width='1.8' viewBox='0 0 24 24'%3E%3Cpath d='M12 3l8 4v6c0 5-3.4 8.2-8 10-4.6-1.8-8-5-8-10V7l8-4z'/%3E%3C/svg%3E");
+}
+
+.nav-icon[data-icon="settings"] {
   mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' stroke='black' stroke-width='1.8' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3Cpath d='M12 3v2M12 19v2M4.9 6.3l1.5 1.5M17.6 16.2l1.5 1.5M3 12h2M19 12h2M4.9 17.7l1.5-1.5M17.6 7.8l1.5-1.5'/%3E%3C/svg%3E");
   -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' stroke='black' stroke-width='1.8' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3Cpath d='M12 3v2M12 19v2M4.9 6.3l1.5 1.5M17.6 16.2l1.5 1.5M3 12h2M19 12h2M4.9 17.7l1.5-1.5M17.6 7.8l1.5-1.5'/%3E%3C/svg%3E");
+}
+
+.nav-icon[data-icon="update"] {
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' stroke='black' stroke-width='1.8' viewBox='0 0 24 24'%3E%3Cpath d='M21 12a9 9 0 1 1-2.64-6.36'/%3E%3Cpath d='M21 4v6h-6'/%3E%3C/svg%3E");
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' stroke='black' stroke-width='1.8' viewBox='0 0 24 24'%3E%3Cpath d='M21 12a9 9 0 1 1-2.64-6.36'/%3E%3Cpath d='M21 4v6h-6'/%3E%3C/svg%3E");
 }
 
 .sidebar.collapsed .brand {

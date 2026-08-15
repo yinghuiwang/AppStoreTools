@@ -59,7 +59,7 @@ onMounted(() => { void loadCheck(); });
     <h1>{{ t("urls.title") }}</h1>
     <p class="muted">{{ t("urls.subtitle") }}</p>
     <el-alert v-if="empty" type="warning" show-icon :title="t('index.no_app')">
-      <router-link to="/system/profiles">{{ t("nav.system") }}</router-link>
+      <router-link to="/profiles">{{ t("nav.profiles") }}</router-link>
     </el-alert>
     <el-alert v-if="alert" type="error" show-icon :title="alert" />
     <div class="card">

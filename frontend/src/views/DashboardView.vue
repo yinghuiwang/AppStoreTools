@@ -34,7 +34,7 @@ type Summary = {
   range_days: number;
 };
 
-const ALLOWED_RETRY = new Set(["/listing", "/build", "/whats-new", "/iap", "/urls", "/system/update"]);
+const ALLOWED_RETRY = new Set(["/listing", "/build", "/whats-new", "/iap", "/urls", "/update"]);
 
 const { t } = useI18n();
 const router = useRouter();

@@ -23,10 +23,10 @@ export function mapRetryPath(path: string | null | undefined): string {
   if (!path) return "/";
   const map: Record<string, string> = {
     "/metadata": "/listing",
-    "/profiles": "/system/profiles",
-    "/guard": "/system/guard",
-    "/settings": "/system/settings",
-    "/update": "/system/update",
+    "/system/profiles": "/profiles",
+    "/system/guard": "/guard",
+    "/system/settings": "/settings",
+    "/system/update": "/update",
   };
   return map[path] ?? path;
 }

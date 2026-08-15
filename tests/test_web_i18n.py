@@ -104,8 +104,14 @@ def test_resolve_via_middleware_sets_bootstrap_lang(client, monkeypatch):
 def test_nav_catalog_english_and_chinese():
     assert t("nav.dashboard", lang="en") == "Dashboard"
     assert t("nav.settings", lang="en") == "Settings"
+    assert t("nav.profiles", lang="en") == "App Profiles"
+    assert t("nav.guard", lang="en") == "Guard"
+    assert t("nav.update", lang="en") == "Check Updates"
     assert t("nav.dashboard", lang="zh") == "仪表盘"
     assert t("nav.settings", lang="zh") == "设置"
+    assert t("nav.profiles", lang="zh") == "App 管理"
+    assert t("nav.guard", lang="zh") == "Guard 安全守卫"
+    assert t("nav.update", lang="zh") == "检查更新"
 
 
 def test_language_switch_updates_locale_without_reload():

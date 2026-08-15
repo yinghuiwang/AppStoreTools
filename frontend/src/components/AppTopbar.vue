@@ -13,12 +13,15 @@ const selectEl = ref<HTMLSelectElement | null>(null);
 
 const TITLE_KEYS: Array<{ test: (path: string) => boolean; key: string }> = [
   { test: (p) => p === "/", key: "nav.dashboard" },
-  { test: (p) => p.startsWith("/system"), key: "nav.system" },
   { test: (p) => p === "/listing", key: "nav.listing" },
   { test: (p) => p === "/whats-new", key: "nav.whats_new" },
   { test: (p) => p === "/urls", key: "nav.urls" },
   { test: (p) => p === "/build", key: "nav.build" },
   { test: (p) => p === "/iap", key: "nav.iap" },
+  { test: (p) => p === "/profiles", key: "nav.profiles" },
+  { test: (p) => p === "/guard", key: "nav.guard" },
+  { test: (p) => p === "/settings", key: "nav.settings" },
+  { test: (p) => p === "/update", key: "nav.update" },
 ];
 
 const titleKey = computed(() => {
@@ -64,7 +67,7 @@ async function setLang(code: "zh" | "en") {
       <span class="profile-name mono">{{ currentName || t("nav.select_app") }}</span>
     </div>
     <div class="topbar-right">
-      <router-link v-if="!hasMachine" class="new-profile" to="/system/profiles">
+      <router-link v-if="!hasMachine" class="new-profile" to="/profiles">
         {{ t("nav.new_profile") }}
       </router-link>
       <select
