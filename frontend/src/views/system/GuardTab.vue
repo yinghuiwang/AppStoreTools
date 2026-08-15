@@ -176,7 +176,7 @@ onMounted(() => {
             <template #default="{ row }">
               <div class="field-row">
                 <input v-model="row.note" class="field-input" />
-                <el-button size="small" :loading="savingNote === row.app_id" @click="saveNote(row)">
+                <el-button size="small" :loading="savingNote === row.app_id" @click="saveNote(row as BindingRow)">
                   {{ t("guard.save_note") }}
                 </el-button>
               </div>

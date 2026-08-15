@@ -12,15 +12,32 @@ export class ApiError extends Error {
 
 type Extra = { skipNotify?: boolean };
 
+export function apiErrorMessage(err: ApiError): string {
+  const d = err.detail;
+  if (typeof d === "string") return d;
+  if (d && typeof d === "object") {
+    const o = d as Record<string, unknown>;
+    if (typeof o.message === "string" && o.message) return o.message;
+    if (typeof o.error === "string" && o.error) return o.error;
+    if (typeof o.detail === "string" && o.detail) return o.detail;
+  }
+  return err.message;
+}
+
 function notifyGuard(err: ApiError, skip?: boolean) {
   if (skip) return;
   if (err.status === 403 || err.status === 409) {
-    const msg =
-      typeof err.detail === "string"
-        ? err.detail
-        : JSON.stringify((err.detail as { detail?: unknown })?.detail ?? err.detail);
-    ElNotification({ type: "error", message: msg, duration: 6000 });
+    ElNotification({ type: "error", message: apiErrorMessage(err), duration: 6000 });
   }
+}
+
+function extractDetail(data: unknown): unknown {
+  if (!data || typeof data !== "object") return data;
+  const o = data as Record<string, unknown>;
+  if (typeof o.message === "string" && o.message) return o;
+  if ("detail" in o && o.detail != null && o.detail !== "") return o.detail;
+  if ("error" in o) return o.error;
+  return data;
 }
 
 async function parse(res: Response, skipNotify?: boolean): Promise<unknown> {
@@ -32,13 +49,7 @@ async function parse(res: Response, skipNotify?: boolean): Promise<unknown> {
     data = text;
   }
   if (!res.ok) {
-    const detail =
-      data && typeof data === "object" && "detail" in data
-        ? (data as { detail: unknown }).detail
-        : data && typeof data === "object" && "error" in data
-          ? (data as { error: unknown }).error
-          : data;
-    const err = new ApiError(res.status, detail);
+    const err = new ApiError(res.status, extractDetail(data));
     notifyGuard(err, skipNotify);
     throw err;
   }
