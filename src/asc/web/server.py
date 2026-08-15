@@ -13,11 +13,30 @@ from fastapi.templating import Jinja2Templates
 
 from asc import __version__
 from asc.cli import _installed_commit_short
+from asc.web.agent_store import agent_store
 from asc.web.dashboard import build_dashboard_summary
 from asc.web.tasks import task_store
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 _STATIC_DIR = Path(__file__).parent / "static"
+_ASSET_STAMP_FILES = (
+    "agent-dock.js",
+    "agent-rail.css",
+    "task-log-drawer.css",
+    "task-log-drawer.js",
+)
+
+
+def _web_asset_version() -> str:
+    """Package version plus static mtime so local JS/CSS edits bust browser cache."""
+    stamp = 0
+    for name in _ASSET_STAMP_FILES:
+        path = _STATIC_DIR / name
+        try:
+            stamp = max(stamp, int(path.stat().st_mtime))
+        except OSError:
+            continue
+    return f"{__version__}.{stamp}" if stamp else __version__
 
 
 def runtime_identity() -> tuple[str, str]:
@@ -48,6 +67,10 @@ async def _lifespan(app: FastAPI):
         task_store.close()
     except Exception as exc:  # noqa: BLE001
         print(f"⚠️  TaskStore shutdown failed: {exc}")
+    try:
+        agent_store.close()
+    except Exception as exc:  # noqa: BLE001
+        print(f"⚠️  AgentStore shutdown failed: {exc}")
 
 
 def create_app() -> FastAPI:
@@ -103,7 +126,7 @@ def create_app() -> FastAPI:
             profile_csv = "data/appstore_info.csv"
             profile_screenshots = "data/screenshots"
             profile_iap_file = "data/iap_packages.json"
-        from asc import __version__ as asset_version
+        asset_version = _web_asset_version()
         lang = getattr(request.state, "lang", None) or resolve_lang(
             cookie=request.cookies.get(COOKIE_NAME),
             accept_language=request.headers.get("accept-language"),
@@ -219,8 +242,9 @@ def create_app() -> FastAPI:
         ctx["is_editable"] = _is_editable()
         return _render(request, "update.html", ctx)
 
-    from asc.web import routes_api, routes_listing
+    from asc.web import routes_api, routes_listing, routes_agent
     app.include_router(routes_api.router, prefix="/api")
     app.include_router(routes_listing.router, prefix="/api/listing")
+    app.include_router(routes_agent.router, prefix="/api/agent")
 
     return app

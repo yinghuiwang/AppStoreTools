@@ -11,21 +11,36 @@
     </div>
     <button type="button" class="task-log-icon-button" data-task-log-close aria-label="{{ t('drawer.close') }}" title="{{ t('drawer.close') }}">&#215;</button>
   </header>
-  <div class="task-log-tools" role="toolbar" aria-label="{{ t('drawer.tools_aria') }}">
-    <span class="task-log-status-pill" data-task-log-status-wrap>
-      <span class="task-log-status-spinner" aria-hidden="true"></span>
-      <span data-task-log-status>{{ t("drawer.waiting") }}</span>
-    </span>
-    <div>
-      <button type="button" class="task-log-filter" data-task-log-errors aria-pressed="false">{{ t("drawer.errors_only") }}</button>
-      <button type="button" class="task-log-icon-button" data-task-log-copy aria-label="{{ t('drawer.copy') }}" title="{{ t('drawer.copy') }}">&#9633;</button>
-      <button type="button" class="task-log-icon-button" data-task-log-clear aria-label="{{ t('drawer.clear') }}" title="{{ t('drawer.clear') }}">&#8856;</button>
+  <section id="task-log-panel-logs"
+           class="task-log-panel"
+           data-task-log-panel="logs">
+    <div class="task-log-tools" role="toolbar" aria-label="{{ t('drawer.tools_aria') }}">
+      <span class="task-log-status-pill" data-task-log-status-wrap>
+        <span class="task-log-status-spinner" aria-hidden="true"></span>
+        <span data-task-log-status>{{ t("drawer.waiting") }}</span>
+      </span>
+      <div>
+        <button type="button" class="task-log-button" data-open-agent-task hidden>{{ t("drawer.explain_with_agent") }}</button>
+        <button type="button" class="task-log-filter" data-task-log-errors aria-pressed="false">{{ t("drawer.errors_only") }}</button>
+        <button type="button" class="task-log-icon-button" data-task-log-copy aria-label="{{ t('drawer.copy') }}" title="{{ t('drawer.copy') }}">&#9633;</button>
+        <button type="button" class="task-log-icon-button" data-task-log-clear aria-label="{{ t('drawer.clear') }}" title="{{ t('drawer.clear') }}">&#8856;</button>
+      </div>
     </div>
+    <pre id="task-log-output" class="task-log-output" tabindex="0" aria-live="polite"><code>{{ t("drawer.placeholder") }}</code></pre>
+    <footer class="task-log-follow">
+      <label><input type="checkbox" data-task-log-follow checked> {{ t("drawer.follow") }}</label>
+      <button type="button" class="task-log-button" data-task-log-latest hidden>{{ t("drawer.latest") }}</button>
+      <span data-task-log-position>-- / --</span>
+    </footer>
+  </section>
+  <div class="task-log-drawer__resize"
+       data-task-log-resize
+       role="separator"
+       aria-orientation="vertical"
+       aria-label="{{ t('drawer.resize') }}"
+       title="{{ t('drawer.resize') }}">
+    <span class="task-log-drawer__resize-grip" aria-hidden="true">
+      <span></span><span></span><span></span>
+    </span>
   </div>
-  <pre id="task-log-output" class="task-log-output" tabindex="0" aria-live="polite"><code>{{ t("drawer.placeholder") }}</code></pre>
-  <footer class="task-log-follow">
-    <label><input type="checkbox" data-task-log-follow checked> {{ t("drawer.follow") }}</label>
-    <button type="button" class="task-log-button" data-task-log-latest hidden>{{ t("drawer.latest") }}</button>
-    <span data-task-log-position>-- / --</span>
-  </footer>
 </aside>

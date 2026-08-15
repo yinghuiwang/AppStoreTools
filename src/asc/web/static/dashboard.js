@@ -63,6 +63,15 @@
     return button;
   }
 
+  function makeExplainButton(task) {
+    var button = textElement("button", "dashboard-log-button", tt("drawer.explain_with_agent"));
+    button.type = "button";
+    button.setAttribute("data-open-agent-task", "");
+    button.setAttribute("data-task-id", String(task.id || ""));
+    button.style.marginLeft = "4px";
+    return button;
+  }
+
   function makeCancelButton(task) {
     var button = textElement("button", "dashboard-cancel-button", tt("index.cancel"));
     button.type = "button";
@@ -202,6 +211,9 @@
       var actions = document.createElement("td");
       actions.className = "dashboard-table__actions";
       actions.append(makeLogButton(task));
+      if (task.status === "error") {
+        actions.append(makeExplainButton(task));
+      }
       var retryPaths = ["/metadata", "/build", "/whats-new", "/iap", "/urls", "/update"];
       if (task.status === "error" && retryPaths.indexOf(task.retry_path) !== -1) {
         var retry = textElement("a", "dashboard-retry-link", tt("index.retry"));
@@ -229,6 +241,7 @@
     var action = null;
     if (active.matches("[data-dashboard-log-task]")) action = "log";
     if (active.matches("[data-dashboard-cancel-task]")) action = "cancel";
+    if (active.matches("[data-open-agent-task]")) action = "explain";
     if (active.matches(".dashboard-retry-link")) action = "retry";
     if (!action) return null;
     return {
@@ -252,6 +265,7 @@
     var actionSelector = "[data-dashboard-log-task]";
     if (snapshot.action === "retry") actionSelector = ".dashboard-retry-link";
     if (snapshot.action === "cancel") actionSelector = "[data-dashboard-cancel-task]";
+    if (snapshot.action === "explain") actionSelector = "[data-open-agent-task]";
     var target = task && task.querySelector(actionSelector);
     if (!target) {
       target = section && section.querySelector("h2");
@@ -393,11 +407,6 @@
   document.addEventListener("visibilitychange", function () {
     if (document.visibilityState === "visible" && hasActiveTasks()) refreshDashboard();
   });
-
-  if (window.TaskLogDrawer) {
-    var dock = document.getElementById("task-log-dock");
-    TaskLogDrawer.attachDock(dock);
-  }
 
   schedulePoll();
 }());

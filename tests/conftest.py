@@ -12,6 +12,10 @@ os.environ.setdefault(
     "ASC_WEB_TASKS_PATH",
     str(Path(tempfile.gettempdir()) / f"asc-web-tasks-pytest-{os.getpid()}.json"),
 )
+os.environ.setdefault(
+    "ASC_WEB_AGENT_PATH",
+    str(Path(tempfile.gettempdir()) / f"asc-web-agent-pytest-{os.getpid()}.db"),
+)
 
 
 class FakeAPI:

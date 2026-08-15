@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 import requests_mock as rm
 
@@ -277,3 +279,75 @@ def test_chat_timeout_defaults_to_60():
             client.chat([{"role": "user", "content": "Hi"}])
 
         assert captured_timeout == 60
+
+
+def test_chat_stream_yields_content_and_tool_call_deltas():
+    from src.asc.llm import LLMClient
+
+    sse = (
+        'data: {"choices":[{"delta":{"role":"assistant"}}]}\n\n'
+        'data: {"choices":[{"delta":{"content":"Hello"}}]}\n\n'
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"get_task","arguments":"{"}}]}}]}\n\n'
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"}"}}]}}]}\n\n'
+        'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\n'
+        "data: [DONE]\n\n"
+    )
+    with rm.Mocker() as m:
+        m.post(
+            "https://api.openai.com/v1/chat/completions",
+            text=sse,
+            headers={"Content-Type": "text/event-stream"},
+        )
+        client = LLMClient(
+            api_key="test-key",
+            base_url="https://api.openai.com/v1",
+            model="gpt-4o",
+        )
+        events = list(
+            client.chat_stream(
+                [{"role": "user", "content": "hi"}],
+                tools=[{"type": "function", "function": {"name": "get_task"}}],
+            )
+        )
+    body = json.loads(m.last_request.text)
+    assert body["stream"] is True
+    assert "response_format" not in body
+    assert body["tools"][0]["function"]["name"] == "get_task"
+    contents = "".join(e.get("content", "") for e in events)
+    assert "Hello" in contents
+    assert any(e.get("finish_reason") == "tool_calls" for e in events)
+    assert any("tool_calls" in e for e in events)
+
+
+def test_chat_stream_raises_llm_http_error_on_429():
+    from src.asc.llm import LLMClient, LLMHTTPError
+
+    with rm.Mocker() as m:
+        m.post(
+            "https://api.openai.com/v1/chat/completions",
+            status_code=429,
+            headers={"Retry-After": "2"},
+            json={"error": "rate limited"},
+        )
+        client = LLMClient(api_key="k", base_url="https://api.openai.com/v1", model="gpt-4o")
+        with pytest.raises(LLMHTTPError) as exc:
+            list(client.chat_stream([], tools=[]))
+        assert exc.value.status_code == 429
+        assert exc.value.retry_after == 2.0
+
+
+def test_chat_still_sends_json_object_without_tools():
+    from src.asc.llm import LLMClient
+
+    with rm.Mocker() as m:
+        m.post(
+            "https://api.openai.com/v1/chat/completions",
+            json={"choices": [{"message": {"content": "{}"}}]},
+        )
+        LLMClient(api_key="k", base_url="https://api.openai.com/v1", model="gpt-4o").chat(
+            [{"role": "user", "content": "x"}]
+        )
+        body = json.loads(m.last_request.text)
+        assert body["stream"] is False
+        assert body["response_format"] == {"type": "json_object"}
+        assert "tools" not in body

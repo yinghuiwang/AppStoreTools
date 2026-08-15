@@ -625,6 +625,44 @@ def shutdown_scheduler(
         scheduler.shutdown(wait=wait, timeout=timeout)
 
 
+FORBIDDEN_REPLAY_KEYS = {
+    "issuer_id",
+    "key_id",
+    "key_file",
+    "api_key",
+    "authorization",
+    "certificate",
+    "provisioning_profile",
+}
+
+_REPLAY_TEXT_MAX_CHARS = 8192
+_ALLOWED_SIGNING = {"auto", "manual"}
+
+
+def sanitize_replay(kind: str, profile: str, verbose: bool, params: dict) -> dict:
+    """Drop secrets and cap replay params for later one-click rerun."""
+    forbidden = {key.lower() for key in FORBIDDEN_REPLAY_KEYS}
+    cleaned: dict[str, Any] = {}
+    source = params if isinstance(params, dict) else {}
+    for key, value in source.items():
+        if str(key).lower() in forbidden:
+            continue
+        if key == "text" and isinstance(value, str):
+            cleaned[key] = value[:_REPLAY_TEXT_MAX_CHARS]
+            continue
+        if key == "signing":
+            if value in _ALLOWED_SIGNING:
+                cleaned[key] = value
+            continue
+        cleaned[key] = value
+    return {
+        "kind": kind,
+        "profile": profile,
+        "verbose": bool(verbose),
+        "params": cleaned,
+    }
+
+
 def start_background_task(
     store: TaskStore,
     *,
@@ -634,6 +672,7 @@ def start_background_task(
     run: RunFn,
     task_id: Optional[str] = None,
     scheduler: Optional[TaskScheduler] = None,
+    replay: dict | None = None,
 ) -> str:
     """Create a task (if needed) and submit it to the bounded worker pool.
 
@@ -642,7 +681,9 @@ def start_background_task(
     worker is free, then becomes RUNNING.
     """
     if task_id is None:
-        task_id = store.create(kind, profile=profile)
+        task_id = store.create(kind, profile=profile, replay=replay)
+    elif replay is not None:
+        store.set_replay(task_id, replay)
 
     pool = scheduler if scheduler is not None else get_scheduler(store)
     pool.submit(task_id, run, kind=kind, profile=profile, verbose=verbose)

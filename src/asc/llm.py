@@ -2,9 +2,17 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Iterator
 from typing import Any
 
 import requests
+
+
+class LLMHTTPError(Exception):
+    def __init__(self, status_code: int, retry_after: float | None = None) -> None:
+        self.status_code = status_code
+        self.retry_after = retry_after
+        super().__init__(f"LLM HTTP {status_code}")
 
 
 class LLMClient:
@@ -61,6 +69,74 @@ class LLMClient:
             return choice["message"]["content"]
 
         raise ValueError("Max retries exceeded")
+
+    def chat_stream(
+        self,
+        messages: list[dict],
+        tools: list[dict],
+        temperature: float = 0.3,
+    ) -> Iterator[dict[str, Any]]:
+        url = self._chat_completions_url()
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+        }
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": temperature,
+            "stream": True,
+        }
+        if tools:
+            payload["tools"] = tools
+        response = requests.post(
+            url, json=payload, headers=headers, timeout=self.timeout, stream=True,
+        )
+        if response.status_code == 429:
+            retry_after = response.headers.get("Retry-After", "1")
+            try:
+                wait = float(retry_after)
+            except ValueError:
+                wait = 1.0
+            response.close()
+            raise LLMHTTPError(429, retry_after=wait)
+        if response.status_code >= 500:
+            response.close()
+            raise LLMHTTPError(response.status_code, retry_after=1.0)
+        if response.status_code >= 400:
+            response.close()
+            raise LLMHTTPError(response.status_code)
+        try:
+            for raw in response.iter_lines(decode_unicode=True):
+                if not raw:
+                    continue
+                line = raw.strip()
+                if not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    obj = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+                for choice in obj.get("choices") or []:
+                    delta = choice.get("delta") or {}
+                    event: dict[str, Any] = {}
+                    if delta.get("role"):
+                        event["role"] = delta["role"]
+                    if delta.get("content"):
+                        event["content"] = delta["content"]
+                    if delta.get("tool_calls"):
+                        event["tool_calls"] = delta["tool_calls"]
+                    finish = choice.get("finish_reason")
+                    if finish:
+                        event["finish_reason"] = finish
+                    if event:
+                        yield event
+        finally:
+            response.close()
 
     def _chat_completions_url(self) -> str:
         """Return a usable chat-completions URL for root or fully-qualified base URLs."""

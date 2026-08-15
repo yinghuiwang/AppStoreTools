@@ -42,6 +42,7 @@ from asc.web.task_runner import (
     TerminalWriteState,
     _notify_task_finished,
     finalize_task_outcome,
+    sanitize_replay,
     start_background_task,
 )
 
@@ -341,7 +342,25 @@ def _start_metadata_task(
     screenshot_scopes: list[dict] | None = None,
 ) -> str:
     guard_enforcer = enforce_config_guard
-    task_id = _task_store.create("metadata", profile=profile)
+    task_id = _task_store.create(
+        "metadata",
+        profile=profile,
+        replay=sanitize_replay(
+            "metadata",
+            profile,
+            verbose,
+            {
+                "csv_path": csv_path,
+                "screenshots_dir": screenshots_dir,
+                "include_metadata": include_metadata,
+                "include_screenshots": include_screenshots,
+                "dry_run": dry_run,
+                "locales": locales,
+                "fields_by_locale": fields_by_locale,
+                "screenshot_scopes": screenshot_scopes,
+            },
+        ),
+    )
 
     def run(reporter, cancel_event):
         from asc.config import Config
@@ -647,7 +666,25 @@ def _start_build_task(
     from asc.commands.build import _build_phase_plan, build_core, deploy_core
     from asc.config import Config
 
-    task_id = _task_store.create("build", profile=profile)
+    task_id = _task_store.create(
+        "build",
+        profile=profile,
+        replay=sanitize_replay(
+            "build",
+            profile,
+            verbose,
+            {
+                "mode": mode,
+                "project": project,
+                "scheme": scheme,
+                "destination": destination,
+                "ipa_path": ipa_path,
+                "signing": signing,
+                "dry_run": dry_run,
+                "reuse_archive": reuse_archive,
+            },
+        ),
+    )
     guard_enforcer = enforce_config_guard
 
     def run(reporter, cancel_event):
@@ -1683,7 +1720,19 @@ def _start_whats_new_translate_task(
     """Preview translate only: translate phase 100%; result.translations (+ errors)."""
     from asc.commands.whats_new import _make_translator, _whats_new_translate_only_core
 
-    task_id = _task_store.create("whats-new-translate", profile=profile)
+    task_id = _task_store.create(
+        "whats-new-translate",
+        profile=profile,
+        replay=sanitize_replay(
+            "whats-new-translate",
+            profile,
+            verbose,
+            {
+                "text": text,
+                "source_locale": source_locale,
+            },
+        ),
+    )
     guard_enforcer = enforce_config_guard
 
     def run(reporter, cancel_event):
@@ -1738,7 +1787,23 @@ def _start_whats_new_task(
 ) -> str:
     from asc.commands.whats_new import _make_translator, _whats_new_core
 
-    task_id = _task_store.create("whats-new", profile=profile)
+    task_id = _task_store.create(
+        "whats-new",
+        profile=profile,
+        replay=sanitize_replay(
+            "whats-new",
+            profile,
+            verbose,
+            {
+                "dry_run": dry_run,
+                "text": text,
+                "locales": locales,
+                "translate": translate,
+                "source_locale": source_locale,
+                "translations": translations,
+            },
+        ),
+    )
     guard_enforcer = enforce_config_guard
 
     def run(reporter, cancel_event):
@@ -1916,7 +1981,27 @@ def _start_iap_review_screenshots_task(
     dry_run: bool,
     verbose: bool = False,
 ) -> str:
-    task_id = _task_store.create("iap-review-screenshots", profile=profile)
+    task_id = _task_store.create(
+        "iap-review-screenshots",
+        profile=profile,
+        replay=sanitize_replay(
+            "iap-review-screenshots",
+            profile,
+            verbose,
+            {
+                "dry_run": dry_run,
+                "items": [
+                    {
+                        "kind": item.kind,
+                        "id": item.id,
+                        "productId": item.product_id,
+                        "path": item.path,
+                    }
+                    for item in items
+                ],
+            },
+        ),
+    )
     guard_enforcer = enforce_config_guard
 
     def run(reporter, cancel_event):
@@ -2008,7 +2093,20 @@ def _start_iap_task(
         update_existing: bool,
         verbose: bool = False,
 ) -> str:
-    task_id = _task_store.create("iap", profile=profile)
+    task_id = _task_store.create(
+        "iap",
+        profile=profile,
+        replay=sanitize_replay(
+            "iap",
+            profile,
+            verbose,
+            {
+                "iap_file": iap_file,
+                "dry_run": dry_run,
+                "update_existing": update_existing,
+            },
+        ),
+    )
     guard_enforcer = enforce_config_guard
 
     def run(reporter, cancel_event):
@@ -2323,7 +2421,21 @@ def _start_urls_task(
     dry_run: bool = False,
     verbose: bool = False,
 ) -> str:
-    task_id = _task_store.create("urls", profile=profile)
+    task_id = _task_store.create(
+        "urls",
+        profile=profile,
+        replay=sanitize_replay(
+            "urls",
+            profile,
+            verbose,
+            {
+                "field": field,
+                "url": url,
+                "locales": locales,
+                "dry_run": dry_run,
+            },
+        ),
+    )
     guard_enforcer = enforce_config_guard
     locale_list = list(locales)
 
@@ -2661,7 +2773,19 @@ def _start_update_task(
     from asc.commands.update_cmd import UpdateError, UpdateResult, _update_core
     from asc.web.daemon import schedule_restart
 
-    task_id = _task_store.create("update", profile="system")
+    task_id = _task_store.create(
+        "update",
+        profile="system",
+        replay=sanitize_replay(
+            "update",
+            "system",
+            verbose,
+            {
+                "version": version,
+                "branch": branch,
+            },
+        ),
+    )
 
     def run(reporter, cancel_event):
         try:

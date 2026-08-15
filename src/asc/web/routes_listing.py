@@ -40,7 +40,7 @@ from asc.listing.remote import (
 from asc.progress import ProcessCanceled
 from asc.utils import make_api_from_config
 from asc.web.i18n import t
-from asc.web.task_runner import start_background_task
+from asc.web.task_runner import sanitize_replay, start_background_task
 from asc.web.tasks import task_store
 
 router = APIRouter()
@@ -442,7 +442,19 @@ def _start_listing_pull_screenshots_task(
     scopes: list[dict],
 ) -> str:
     """Create and enqueue a blocking ASC screenshot download task."""
-    task_id = task_store.create("listing-pull-screenshots", profile=profile)
+    task_id = task_store.create(
+        "listing-pull-screenshots",
+        profile=profile,
+        replay=sanitize_replay(
+            "listing-pull-screenshots",
+            profile,
+            False,
+            {
+                "screenshots_dir": screenshots_dir,
+                "scopes": scopes,
+            },
+        ),
+    )
 
     def run(reporter, cancel_event):
         try:

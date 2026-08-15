@@ -428,6 +428,7 @@
     }
   </style>
   <link rel="stylesheet" href="/static/task-log-drawer.css?v={{ asset_version }}">
+  <link rel="stylesheet" href="/static/agent-rail.css?v={{ asset_version }}">
   {% block extra_head %}{% endblock %}
 </head>
 <body class="flex h-screen overflow-hidden font-sans">
@@ -567,13 +568,14 @@
     </div>
     <!-- Optional right panel (override in child templates) -->
     {% block right_panel %}{% endblock %}
-    {% block task_log_dock %}
-    <div id="task-log-dock" class="task-log-dock" aria-hidden="true"></div>
-    {% endblock %}
-    {% include "_task_log_drawer.html" %}
   </main>
+  {% include "_agent_chrome.html" %}
+  {% include "_task_log_drawer.html" %}
 
+  <script src="/static/vendor/marked-11.2.0.min.js?v={{ asset_version }}" defer></script>
+  <script src="/static/vendor/purify-3.2.4.min.js?v={{ asset_version }}" defer></script>
   <script src="/static/task-log-drawer.js?v={{ asset_version }}" defer></script>
+  <script src="/static/agent-dock.js?v={{ asset_version }}" defer></script>
   <script>
     (function () {
       const openTaskLogs = new Set();
@@ -581,6 +583,7 @@
       function restoreTaskLogPanels(root) {
         const scope = root || document;
         scope.querySelectorAll('[data-task-log-panel]').forEach((panel) => {
+          if (panel.closest('#task-log-drawer')) return;
           const taskId = panel.dataset.taskLogPanel;
           panel.classList.toggle('hidden', !openTaskLogs.has(taskId));
         });

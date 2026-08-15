@@ -196,13 +196,15 @@ def test_task_log_drawer_javascript_traps_focus_in_overlay_mode(client):
     resp = client.get("/static/task-log-drawer.js")
 
     assert resp.status_code == 200
-    assert 'window.matchMedia("(max-width: 1360px)")' in resp.text
+    assert 'window.matchMedia("(max-width: 1360px)")' not in resp.text
     assert 'drawer.setAttribute("aria-modal", modal ? "true" : "false")' in resp.text
     assert 'element.setAttribute("inert", "")' in resp.text
     assert 'element.removeAttribute("inert")' in resp.text
-    assert 'document.querySelector("body > aside")' in resp.text
+    assert 'document.querySelector("body > main")' in resp.text
+    assert 'document.querySelector("body > aside")' not in resp.text
     assert 'element.setAttribute("aria-hidden", "true")' in resp.text
     assert 'event.key !== "Tab"' in resp.text
+    assert "!drawer.contains(document.activeElement)" in resp.text
     assert "previouslyFocused" in resp.text
 
 
@@ -299,7 +301,7 @@ def test_homepage_contains_command_workspace_landmarks(client):
     assert resp.status_code == 200
     assert 'id="dashboard-summary"' in resp.text
     assert 'id="dashboard-task-list"' in resp.text
-    assert 'id="task-log-dock"' in resp.text
+    assert "data-agent-rail" in resp.text
     assert 'id="task-log-drawer"' in resp.text
     assert 'id="task-log-output"' in resp.text
     assert 'data-dashboard-filter="range"' in resp.text
@@ -395,16 +397,40 @@ def test_dashboard_stylesheet_is_served_with_workspace_and_dock_layout(client):
     assert ".task-log-dock" not in resp.text
 
 
-def test_task_log_drawer_stylesheet_defines_drawer_and_dock_modes(client):
-    resp = client.get("/static/task-log-drawer.css")
+def test_task_log_drawer_stylesheet_is_overlay_only(client):
+    css = client.get("/static/task-log-drawer.css").text
+    assert ".task-log-drawer" in css
+    assert "position: fixed" in css
+    assert "var(--agent-rail-width" in css
+    assert "var(--agent-panel-width" in css
+    assert ".task-log-drawer.is-docked" not in css
+    assert ".task-log-dock" not in css
+    assert "[data-task-log-yield]" not in css
+    assert ".task-log-tabs" not in css
 
+
+def test_agent_rail_stylesheet_defines_chrome_layout(client):
+    resp = client.get("/static/agent-rail.css")
     assert resp.status_code == 200
-    assert ".task-log-drawer" in resp.text
-    assert ".task-log-drawer.is-overlay" in resp.text
-    assert ".task-log-drawer.is-docked" in resp.text
-    assert ".task-log-dock" in resp.text
-    assert "height: 100%" in resp.text
-    assert "@media (max-width: 1360px)" in resp.text
+    css = resp.text
+    assert "--agent-rail-width: 48px" in css
+    assert "--agent-panel-width" in css
+    assert "[data-agent-rail]" in css
+    assert "[data-agent-panel]" in css
+    assert "[data-agent-panel].is-open" in css
+    assert "flex: 0 0 48px" in css or "width: 48px" in css
+    assert ".agent-msg--md" in css
+    assert "list-style: disc" in css
+    assert ".agent-attach-menu" in css
+    assert ".agent-attach__button" in css
+    assert "[data-agent-resize]" in css or ".agent-panel__resize" in css
+
+
+def test_task_log_drawer_css_has_no_agent_conversation_rules(client):
+    css = client.get("/static/task-log-drawer.css").text
+    assert ".agent-msg--md" not in css
+    assert ".agent-plan-card" not in css
+    assert ".agent-dock-messages" not in css
 
 
 def test_mobile_sidebar_navigation_links_have_accessible_tooltips(client):
@@ -460,9 +486,9 @@ def test_metadata_page_returns_200(client):
 def _div_depth_before_marker(html: str, marker: str) -> int:
     """Net unclosed <div> count from <main to the tag that contains *marker*.
 
-    Feature pages must close their content wrappers before #task-log-dock;
-    otherwise the browser nests the shared log drawer inside the scrolling
-    column (below the form) instead of docking it on the right like Build.
+    Feature pages must close their content wrappers before chrome that lives
+    after </main>; otherwise the browser nests the shared log drawer inside
+    the scrolling column (below the form) instead of keeping it outside main.
     """
     idx = html.find(marker)
     assert idx != -1, f"missing {marker}"
@@ -495,21 +521,24 @@ def test_metadata_page_uses_shared_task_log_drawer(client):
     assert ("metadata.fail_banner_title" in resp.text) or ("元数据 / 截图上传失败" in resp.text) or (
         "Metadata / screenshot upload failed" in resp.text
     )
-    assert _div_depth_before_marker(resp.text, 'id="task-log-dock"') == 0
-    assert resp.text.find('id="metadata-page-state"') < resp.text.find('id="task-log-dock"')
+    assert resp.text.find('id="metadata-page-state"') < resp.text.find("</main>")
+    assert resp.text.find("</main>") < resp.text.find('id="task-log-drawer"')
 
 
 @pytest.mark.parametrize(
     "path",
-    ["/metadata", "/build", "/urls", "/whats-new", "/iap", "/update"],
+    ["/", "/metadata", "/build", "/urls", "/whats-new", "/iap", "/update"],
 )
-def test_feature_page_docks_task_log_outside_scrolling_content(client, path):
+def test_feature_page_keeps_agent_chrome_outside_main(client, path):
     resp = client.get(path)
+    html = resp.text
     assert resp.status_code == 200
-    assert 'id="task-log-dock"' in resp.text
-    assert 'id="task-log-drawer"' in resp.text
-    assert _div_depth_before_marker(resp.text, 'id="task-log-dock"') == 0
-    assert "x-cloak" in resp.text
+    assert 'id="task-log-dock"' not in html
+    assert "data-agent-rail" in html
+    assert 'id="task-log-drawer"' in html
+    assert html.find("</main>") < html.find("data-agent-rail")
+    assert html.find("data-agent-panel") < html.find("data-agent-rail")
+    assert html.find("data-agent-rail") < html.find('id="task-log-drawer"')
 
 
 @pytest.mark.parametrize("path", ["/urls", "/whats-new", "/iap", "/update"])
@@ -571,7 +600,7 @@ def test_build_page_uses_shared_task_log_drawer_and_keeps_scan_panel(client):
     assert resp.status_code == 200
     assert "TaskLogDrawer.open" in resp.text
     assert "data-task-log-open" in resp.text
-    assert "data-task-log-yield" in resp.text
+    assert "data-task-log-yield" not in resp.text
     assert ("Auto-detect results" in resp.text) or ("自动检测结果" in resp.text)
     assert "startBuildSSE" not in resp.text
     assert 'id="build-log-panel"' not in resp.text
@@ -2999,14 +3028,11 @@ def test_iap_check_missing_file(client):
         assert data['level'] == 'error'
         print('test_iap_check_missing_file: PASS')
 
-def test_task_log_drawer_javascript_closes_on_outside_click_in_overlay_mode(client):
-    resp = client.get("/static/task-log-drawer.js")
-
-    assert resp.status_code == 200
-    assert 'document.addEventListener("click", function (event)' in resp.text
-    assert 'if (!isDrawerOpen() || drawer.contains(event.target)) return;' in resp.text
-    assert 'if (!isOverlayMode()) return;' in resp.text
-    assert "close();" in resp.text
+def test_task_log_drawer_outside_click_ignores_agent_chrome(client):
+    js = client.get("/static/task-log-drawer.js").text
+    assert 'closest("[data-agent-rail]")' in js
+    assert 'closest("[data-agent-panel]")' in js
+    assert 'closest("main")' in js
 
 
 def test_task_log_drawer_slide_animation(client):
@@ -3037,27 +3063,25 @@ def test_dashboard_javascript_delegates_logs_to_task_log_drawer(client):
     resp = client.get("/static/dashboard.js")
     assert resp.status_code == 200
     assert "TaskLogDrawer.open" in resp.text
-    assert "TaskLogDrawer.attachDock" in resp.text
+    assert "TaskLogDrawer.attachDock" not in resp.text
+    assert "data-open-agent-task" in resp.text
 
 
 def test_task_log_drawer_javascript_exposes_public_api(client):
-    resp = client.get("/static/task-log-drawer.js")
-    assert resp.status_code == 200
-    body = resp.text
+    body = client.get("/static/task-log-drawer.js").text
     assert "window.TaskLogDrawer" in body
-    assert "function open(" in body or "open: function" in body or "open(" in body
-    assert "attachDock" in body
-    assert "preferOverlay" in body
-    assert 'getElementById("task-log-dock")' in body
-    assert "data-task-log-yield" in body
+    assert "function open(" in body
+    assert "attachDock" not in body
+    assert "preferOverlay" not in body
+    assert 'getElementById("task-log-dock")' not in body
+    assert "data-task-log-yield" not in body
+    assert "AscAgentDock.onDrawerClose" not in body
+    assert "/api/agent/stream" not in body
+    assert "data-agent-rail" in body
+    assert "data-agent-panel" in body
+    assert 'closest("main")' in body
     assert "/api/task/" in body
-    assert '"/status"' in body or "/status" in body
     assert "stream?after=" in body
-    assert "scheduleReconnect" in body
-    assert "EventSource.CLOSED" in body
-    assert "data-task-log-errors" in body
-    assert "data-task-log-follow" in body
-    assert "drawer.missing" in body or "window.t(\"drawer.missing\")" in body or "任务不存在或已被清理" in body
 
 
 def test_task_log_drawer_reconnects_after_timeout(client):
@@ -3099,6 +3123,7 @@ function classList() {
 const parent = { children: [] };
 const drawer = {
   classList: classList(), parentElement: parent, nextSibling: null, hidden: true,
+  style: { _props: {}, setProperty(name, value) { this._props[name] = value; }, getPropertyValue(name) { return this._props[name] || ""; } },
   setAttribute() {}, getAttribute() { return null; }, hasAttribute() { return false; },
   removeAttribute() {}, addEventListener() {}, removeEventListener() {},
   querySelector() { return null; }, querySelectorAll() { return []; }, contains() { return false; },
@@ -3173,7 +3198,8 @@ def test_base_layout_includes_task_log_drawer_assets(client):
     assert "task-log-drawer.css?v=" in resp.text
     assert "task-log-drawer.js?v=" in resp.text
     assert 'id="task-log-drawer"' in resp.text
-    assert 'id="task-log-dock"' in resp.text
+    assert "agent-rail.css?v=" in resp.text
+    assert "data-agent-rail" in resp.text
     assert "data-task-log-close" in resp.text
 
 
@@ -3194,6 +3220,8 @@ def test_base_layout_has_no_cdn_asset_urls(client):
     assert "/static/tailwind.css?v=" in body
     assert "/static/vendor/htmx-1.9.12.min.js" in body
     assert re.search(r"/static/vendor/alpine-[^\"']+\.min\.js", body)
+    assert "/static/vendor/marked-11.2.0.min.js" in body
+    assert "/static/vendor/purify-3.2.4.min.js" in body
 
 
 def test_vendored_web_assets_are_served(client):
@@ -3203,6 +3231,8 @@ def test_vendored_web_assets_are_served(client):
         "/static/fonts.css",
         "/static/tailwind.css",
         "/static/vendor/htmx-1.9.12.min.js",
+        "/static/vendor/marked-11.2.0.min.js",
+        "/static/vendor/purify-3.2.4.min.js",
     ):
         resp = client.get(path)
         assert resp.status_code == 200, path
@@ -3315,3 +3345,194 @@ def test_profiles_import_local_api_404_when_none(client, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     resp = client.post("/api/profiles/import", json={})
     assert resp.status_code == 404
+
+
+def test_homepage_exposes_agent_right_rail_chrome(client):
+    resp = client.get("/")
+    html = resp.text
+    assert "data-agent-rail" in html
+    assert "data-agent-toggle" in html
+    assert "data-agent-panel" in html
+    assert 'id="agent-panel"' in html
+    assert "data-agent-stream" in html
+    assert "data-agent-stop" in html
+    assert "data-agent-messages" in html
+    assert "data-agent-task-search" in html
+    assert "data-agent-attach" in html
+    assert "data-agent-attach-menu" in html
+    assert "data-agent-close" in html
+    assert "data-agent-title" in html
+    toolbar_start = html.find('class="agent-dock-toolbar"')
+    composer_start = html.find('class="agent-dock-composer"')
+    assert toolbar_start != -1 and composer_start > toolbar_start
+    toolbar_html = html[toolbar_start:composer_start]
+    assert "data-agent-task-search" not in toolbar_html
+    assert "data-agent-attach" not in toolbar_html
+    assert "data-agent-title" in toolbar_html
+    assert "data-agent-close" in toolbar_html
+    composer_html = html[composer_start:]
+    assert "data-agent-task-search" in composer_html
+    assert "data-agent-attach" in composer_html
+    assert "data-open-agent-task" in html
+    assert "data-task-log-resize" in html
+    assert "data-agent-resize" in html
+    assert 'data-task-log-tab="agent"' not in html
+    assert 'id="task-log-tab-agent"' not in html
+    assert 'data-task-log-panel="agent"' not in html
+    assert "data-open-agent-dock" not in html
+    assert 'href="/agent"' not in html
+    assert 'id="task-log-dock"' not in html
+    assert "agent-rail.css" in html
+    assert "agent-dock.js" in html
+    assert html.find("</main>") < html.find("data-agent-rail")
+    assert html.find("data-agent-rail") < html.find('id="task-log-drawer"')
+    nav_start = html.find("<nav")
+    nav_end = html.find("</nav>")
+    assert nav_start != -1 and nav_end > nav_start
+    nav = html[nav_start:nav_end]
+    assert "data-agent-toggle" not in nav
+    assert ">Agent<" not in nav and "nav.agent" not in nav
+
+
+def test_task_log_drawer_resize_handle_contract(client):
+    page = client.get("/").text
+    css = client.get("/static/task-log-drawer.css").text
+    js = client.get("/static/task-log-drawer.js").text
+    assert "data-task-log-resize" in page
+    assert "task-log-drawer__resize-grip" in page
+    assert 'role="separator"' in page
+    assert "drawer.resize" in page or "Resize panel" in page or "调整面板宽度" in page
+    assert "--task-log-drawer-width" in css
+    assert "cursor: col-resize" in css
+    assert ".task-log-drawer__resize" in css
+    assert ".task-log-drawer__resize-grip" in css
+    assert "asc.taskLogDrawer.width" in js
+    assert "setPointerCapture" in js
+    assert "function clampDrawerWidth(" in js
+    assert "MIN_DRAWER_WIDTH = 280" in js
+    assert "MAX_DRAWER_WIDTH = 720" in js
+    assert "DEFAULT_DRAWER_WIDTH = 390" in js
+    assert 'localStorage.setItem(DRAWER_WIDTH_STORAGE_KEY' in js
+    assert '"dblclick"' in js
+
+
+def test_agent_dock_renders_assistant_markdown(client):
+    page = client.get("/").text
+    js = client.get("/static/agent-dock.js").text
+    assert "marked-11.2.0.min.js" in page
+    assert "purify-3.2.4.min.js" in page
+    assert "marked.parse" in js
+    assert "DOMPurify.sanitize" in js
+    assert "fallbackSanitize" in js
+    assert "USE_PROFILES" in js
+    assert "setAssistantMarkdown" in js
+    assert "scheduleMdRender" in js
+    assert "agent-msg--md" in js
+    assert "innerHTML" in js
+    assert "renderMarkdown: renderMarkdown" in js
+    css = client.get("/static/agent-rail.css").text
+    assert ".agent-msg--md" in css
+    assert "list-style: disc" in css
+
+
+def test_sidebar_has_no_agent_entry_and_no_agent_route(client):
+    resp = client.get("/")
+    assert "data-open-agent-dock" not in resp.text
+    assert 'href="/agent"' not in resp.text
+
+
+def test_no_standalone_agent_page(client):
+    assert client.get("/agent").status_code in {404, 405}
+
+
+def test_task_log_drawer_javascript_has_no_agent_tabs_or_abort_hook(client):
+    js = client.get("/static/task-log-drawer.js").text
+    page = client.get("/").text
+    assert "options.tab" not in js
+    assert "data-task-log-tab" not in js
+    assert "data-open-agent-dock" not in js
+    assert "/api/agent/stream" not in js
+    assert "AscAgentDock.onDrawerClose" not in js
+    assert "agent-dock.js" in page
+
+
+def test_agent_dock_javascript_uses_post_stream_not_event_source(client):
+    js = client.get("/static/agent-dock.js").text
+    assert 'fetch("/api/agent/stream"' in js or "fetch('/api/agent/stream'" in js
+    assert "/api/agent/stop" in js
+    assert "/api/agent/apply" in js
+    assert "/api/agent/reject" in js
+    assert "/api/agent/failed-tasks" in js
+    assert "/api/agent/plans/" in js
+    assert "auto_analyze" in js
+    assert "plan_ids" in js
+    assert "TaskLogDrawer.open" in js
+    assert "ReadableStream" in js or "getReader" in js
+    assert "EventSource" not in js
+    assert '{ tab: "logs" }' not in js
+    assert '{ tab: "agent" }' not in js
+
+
+def _js_function_source(js: str, name: str) -> str:
+    marker = "function " + name + "("
+    start = js.index(marker)
+    i = js.index("{", start)
+    depth = 0
+    for index, char in enumerate(js[i:], start=i):
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return js[start : index + 1]
+    raise AssertionError("unterminated function " + name)
+
+
+def test_agent_dock_javascript_exposes_chrome_state_and_restore(client):
+    js = client.get("/static/agent-dock.js").text
+    assert 'sessionStorage.setItem("asc.agent.chrome"' in js or "sessionStorage.setItem('asc.agent.chrome'" in js
+    assert "function setOpen(" in js
+    assert "function getState(" in js
+    assert "function restoreChrome(" in js
+    assert "function persistChrome(" in js
+    assert "function bindTask(" in js
+    assert "onDrawerClose" not in js
+    assert "getElementById(\"task-log-drawer\")" not in js
+    assert 'querySelector("[data-agent-panel]")' in js
+    assert 'querySelector("[data-agent-toggle]")' in js
+    assert "asc.agentPanel.width" in js
+    assert "AscAgentDock" in js
+    assert "setOpen: setOpen" in js
+    assert "getState: getState" in js
+    assert "bindTask: bindTask" in js
+    restore = _js_function_source(js, "restoreChrome")
+    assert "auto_analyze: true" not in restore
+    assert "startStream" not in restore
+    assert "session_id=" in restore
+    bind = _js_function_source(js, "bindTask")
+    assert "auto_analyze: true" in bind
+    start = _js_function_source(js, "startStream")
+    assert "if (!taskId && !sid) return" not in start
+    assert "if (!text || (!boundTaskId && !sessionId)) return" not in js
+    assert "function setAttachOpen(" in js
+    assert "data-agent-attach" in js
+
+
+def test_agent_dock_bind_and_apply_do_not_use_log_tabs(client):
+    js = client.get("/static/agent-dock.js").text
+    bind = _js_function_source(js, "bindTask")
+    assert "setOpen(true)" in bind
+    assert "auto_analyze: true" in bind
+    apply_src = _js_function_source(js, "applyPlan")
+    assert "TaskLogDrawer.open" in apply_src
+    assert "bindTask" not in apply_src
+    assert "tab:" not in apply_src
+    assert "TaskLogDrawer.open(task.id" not in js
+    assert '{ tab: "agent" }' not in js
+    assert '{ tab: "logs" }' not in js
+
+
+def test_dashboard_javascript_adds_explain_on_error_rows(client):
+    js = client.get("/static/dashboard.js").text
+    assert "data-open-agent-task" in js or "openAgentTask" in js
+    assert 'task.status === "error"' in js or 'task.status==="error"' in js

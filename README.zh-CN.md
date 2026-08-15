@@ -175,6 +175,13 @@ pytest
 python -m build
 ```
 
+浏览器 E2E（`tests/test_web_agent_e2e.py`）需要 Playwright Chromium；未安装浏览器时会 skip，不会让 CI 硬失败：
+
+```bash
+python -m playwright install chromium
+pytest tests/test_web_agent_e2e.py
+```
+
 源码位于 `src/asc/`，测试按功能对应放在 `tests/`。推送 `v*.*.*` Tag 后，`.github/workflows/publish.yml` 会负责发布。
 
 若修改了 Web 模板中的 Tailwind 工具类，请运行 `./scripts/build_web_assets.sh` 重建本地 CSS（需要 Node/`npx`）。字体与 vendor JS 已提交在 `src/asc/web/static/`。

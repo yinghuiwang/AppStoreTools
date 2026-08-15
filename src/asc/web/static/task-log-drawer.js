@@ -12,9 +12,7 @@
       open: function () {},
       close: function () {},
       isOpen: function () { return false; },
-      currentTaskId: function () { return null; },
-      attachDock: function () {},
-      preferOverlay: function () {}
+      currentTaskId: function () { return null; }
     };
     return;
   }
@@ -29,13 +27,7 @@
   var copyControl = drawer.querySelector("[data-task-log-copy]");
   var clearControl = drawer.querySelector("[data-task-log-clear]");
   var closeControl = drawer.querySelector("[data-task-log-close]");
-  var sidebar = document.querySelector("body > aside");
-  var overlayMedia = window.matchMedia("(max-width: 1360px)");
-
-  var homeParent = drawer.parentElement;
-  var homeNextSibling = drawer.nextSibling;
-  var dockHost = null;
-  var forceOverlay = false;
+  var explainControl = drawer.querySelector("[data-open-agent-task]");
 
   var eventSource = null;
   var statusController = null;
@@ -55,30 +47,86 @@
   var backgroundInertEntries = null;
   var previouslyFocused = null;
   var suppressNextOutsideClick = false;
+  var DEFAULT_DRAWER_WIDTH = 390;
+  var MIN_DRAWER_WIDTH = 280;
+  var MAX_DRAWER_WIDTH = 720;
+  var DRAWER_WIDTH_STORAGE_KEY = "asc.taskLogDrawer.width";
+  var resizeHandle = drawer.querySelector("[data-task-log-resize]");
+  var resizing = false;
+  var resizeStartX = 0;
+  var resizeStartWidth = DEFAULT_DRAWER_WIDTH;
+
+  function clampDrawerWidth(px) {
+    var minW = MIN_DRAWER_WIDTH;
+    var viewport = Number(window.innerWidth);
+    if (!Number.isFinite(viewport) || viewport <= 0) viewport = 1440;
+    var maxW = Math.min(MAX_DRAWER_WIDTH, Math.round(viewport * 0.5));
+    if (maxW < minW) maxW = minW;
+    var n = Number(px);
+    if (!Number.isFinite(n)) n = DEFAULT_DRAWER_WIDTH;
+    return Math.round(Math.min(maxW, Math.max(minW, n)));
+  }
+
+  function persistDrawerWidth(px) {
+    try { localStorage.setItem(DRAWER_WIDTH_STORAGE_KEY, String(px)); } catch (error) { /* ignore quota / private mode */ }
+  }
+
+  function readStoredDrawerWidth() {
+    try {
+      var raw = localStorage.getItem(DRAWER_WIDTH_STORAGE_KEY);
+      if (raw == null || raw === "") return DEFAULT_DRAWER_WIDTH;
+      return clampDrawerWidth(raw);
+    } catch (error) {
+      return DEFAULT_DRAWER_WIDTH;
+    }
+  }
+
+  function applyDrawerWidth(px, persist) {
+    var width = clampDrawerWidth(px);
+    if (drawer.style && typeof drawer.style.setProperty === "function") {
+      drawer.style.setProperty("--task-log-drawer-width", width + "px");
+    }
+    if (persist) persistDrawerWidth(width);
+    return width;
+  }
+
+  function readAppliedDrawerWidth() {
+    var raw = drawer.style && typeof drawer.style.getPropertyValue === "function"
+      ? parseFloat(drawer.style.getPropertyValue("--task-log-drawer-width"))
+      : NaN;
+    return Number.isFinite(raw) ? raw : readStoredDrawerWidth();
+  }
+
+  function onResizePointerMove(event) {
+    if (!resizing) return;
+    applyDrawerWidth(resizeStartWidth + (resizeStartX - event.clientX), false);
+  }
+
+  function endDrawerResize(event) {
+    if (!resizing) return;
+    resizing = false;
+    if (event && resizeHandle && resizeHandle.releasePointerCapture && event.pointerId != null) {
+      try { resizeHandle.releasePointerCapture(event.pointerId); } catch (error) { /* already released */ }
+    }
+    if (document.body && document.body.classList) {
+      document.body.classList.remove("task-log-drawer-resizing");
+    }
+    drawer.classList.remove("is-resizing");
+    document.removeEventListener("pointermove", onResizePointerMove);
+    document.removeEventListener("pointerup", endDrawerResize);
+    document.removeEventListener("pointercancel", endDrawerResize);
+    persistDrawerWidth(clampDrawerWidth(readAppliedDrawerWidth()));
+  }
+
+  applyDrawerWidth(readStoredDrawerWidth(), false);
 
   function isDrawerOpen() {
     return drawer.classList.contains("is-open");
   }
 
-  function isOverlayMode() {
-    return forceOverlay || !dockHost || overlayMedia.matches;
-  }
-
-  function setYieldPanelsHidden(hidden) {
-    document.querySelectorAll("[data-task-log-yield]").forEach(function (element) {
-      if (hidden) element.setAttribute("data-yielded", "true");
-      else element.removeAttribute("data-yielded");
-      element.setAttribute("aria-hidden", hidden ? "true" : "false");
-    });
-  }
-
-  function moveToHome() {
-    if (!homeParent || drawer.parentElement === homeParent) return;
-    if (homeNextSibling && homeNextSibling.parentNode === homeParent) {
-      homeParent.insertBefore(drawer, homeNextSibling);
-    } else {
-      homeParent.appendChild(drawer);
-    }
+  function isAgentChrome(node) {
+    if (!node || !node.closest) return false;
+    return !!(node.closest("[data-agent-rail]") || node.closest("[data-agent-panel]"));
   }
 
   function applyInertState(element) {
@@ -103,17 +151,9 @@
   function setBackgroundInert(enabled) {
     if (enabled) {
       if (backgroundInertEntries) return;
-      var nodes = [];
-      if (sidebar) nodes.push(sidebar);
-      var container = drawer.parentElement;
-      if (container) {
-        Array.prototype.forEach.call(container.children, function (child) {
-          if (child !== drawer) nodes.push(child);
-        });
-      }
-      backgroundInertEntries = nodes.map(function (element) {
-        return { el: element, state: applyInertState(element) };
-      });
+      var main = document.querySelector("body > main");
+      if (!main) return;
+      backgroundInertEntries = [{ el: main, state: applyInertState(main) }];
     } else if (backgroundInertEntries) {
       backgroundInertEntries.forEach(function (entry) {
         releaseInertState(entry.el, entry.state);
@@ -123,20 +163,9 @@
   }
 
   function updateMode() {
-    var overlay = isOverlayMode();
-    drawer.classList.toggle("is-overlay", overlay);
-    drawer.classList.toggle("is-docked", !overlay);
-    if (overlay) {
-      moveToHome();
-    } else if (dockHost && drawer.parentElement !== dockHost) {
-      dockHost.appendChild(drawer);
-    }
-    if (dockHost) {
-      dockHost.setAttribute("aria-hidden", isDrawerOpen() && !overlay ? "false" : "true");
-    }
-    // Build (and similar) right panels yield space while the drawer is docked open.
-    setYieldPanelsHidden(isDrawerOpen() && !overlay);
-    var modal = isDrawerOpen() && overlay;
+    drawer.classList.add("is-overlay");
+    drawer.classList.remove("is-docked");
+    var modal = isDrawerOpen();
     drawer.setAttribute("aria-modal", modal ? "true" : "false");
     setBackgroundInert(modal);
   }
@@ -149,15 +178,13 @@
   }
 
   function trapDrawerFocus(event) {
-    if (event.key !== "Tab" || !isDrawerOpen() || !isOverlayMode()) return;
+    if (event.key !== "Tab" || !isDrawerOpen()) return;
+    if (!drawer.contains(document.activeElement)) return;
     var focusables = drawerFocusables();
     if (!focusables.length) return;
     var first = focusables[0];
     var last = focusables[focusables.length - 1];
-    if (!drawer.contains(document.activeElement)) {
-      event.preventDefault();
-      (event.shiftKey ? last : first).focus();
-    } else if (event.shiftKey && document.activeElement === first) {
+    if (event.shiftKey && document.activeElement === first) {
       event.preventDefault();
       last.focus();
     } else if (!event.shiftKey && document.activeElement === last) {
@@ -211,6 +238,13 @@
     if (!drawer) return;
     if (state) drawer.setAttribute("data-task-state", state);
     else drawer.removeAttribute("data-task-state");
+  }
+
+  function syncExplainButton(isError) {
+    if (!explainControl) return;
+    explainControl.hidden = !isError;
+    if (isError && activeTaskId) explainControl.setAttribute("data-task-id", activeTaskId);
+    else explainControl.removeAttribute("data-task-id");
   }
 
   function updatePosition() {
@@ -321,6 +355,7 @@
     followPaused = false;
     if (followControl) followControl.checked = true;
     if (output) output.replaceChildren();
+    syncExplainButton(false);
   }
 
   function finishStream(source, message, callbackName, payload) {
@@ -332,6 +367,7 @@
     setTaskState(state);
     setConnectionStatus(message);
     closeSource();
+    syncExplainButton(callbackName === "onError");
     var callback = callbacks[callbackName];
     if (typeof callback === "function") {
       try { callback(payload); } catch (error) { /* consumer callback error is not our concern */ }
@@ -433,6 +469,18 @@
         return;
       }
       if (!response.ok) throw new Error("HTTP " + response.status);
+      if (typeof response.json === "function") {
+        try {
+          var payload = await response.json();
+          if (requestId !== openRequestId || !isDrawerOpen()) return;
+          if (payload && payload.status === "error") {
+            setTaskState("error");
+            syncExplainButton(true);
+          }
+        } catch (parseError) {
+          /* status JSON is optional; still start the log stream */
+        }
+      }
     } catch (error) {
       if (requestId !== openRequestId || (error && error.name === "AbortError")) return;
       setConnectionStatus(tt("drawer.connect_failed"));
@@ -447,12 +495,27 @@
 
   function open(taskId, options) {
     options = options || {};
+    var hasTask = taskId != null && String(taskId) !== "";
+    if (!hasTask) {
+      previouslyFocused = document.activeElement;
+      openDrawerPanel();
+      suppressNextOutsideClick = true;
+      setTimeout(function () { suppressNextOutsideClick = false; }, 0);
+      return;
+    }
+    var nextId = String(taskId);
+    if (isDrawerOpen() && activeTaskId === nextId) {
+      suppressNextOutsideClick = true;
+      setTimeout(function () { suppressNextOutsideClick = false; }, 0);
+      return;
+    }
+
     closeSource();
     cancelPreflight();
     var requestId = openRequestId;
     var controller = new AbortController();
     statusController = controller;
-    activeTaskId = String(taskId);
+    activeTaskId = nextId;
     callbacks = {
       onProgress: options.onProgress,
       onDone: options.onDone,
@@ -474,7 +537,7 @@
     suppressNextOutsideClick = true;
     setTimeout(function () { suppressNextOutsideClick = false; }, 0);
 
-    loadStatusThenStream(taskId, requestId, controller);
+    loadStatusThenStream(nextId, requestId, controller);
   }
 
   function close() {
@@ -487,16 +550,6 @@
     callbacks = {};
     previouslyFocused = null;
     if (target) target.focus({ preventScroll: true });
-  }
-
-  function attachDock(host) {
-    dockHost = host || null;
-    updateMode();
-  }
-
-  function preferOverlay(enabled) {
-    forceOverlay = enabled !== false;
-    updateMode();
   }
 
   if (closeControl) closeControl.addEventListener("click", close);
@@ -566,24 +619,51 @@
       suppressNextOutsideClick = false;
       return;
     }
-    if (!isDrawerOpen() || drawer.contains(event.target)) return;
-    if (!isOverlayMode()) return;
+    if (!isDrawerOpen()) return;
+    if (drawer.contains(event.target)) return;
+    if (isAgentChrome(event.target)) return;
+    var target = event.target;
+    if (!target || !target.closest) return;
+    // Main is inert while the overlay is open, so a click on the main
+    // column is retargeted to body/html instead of `closest("main")`.
+    if (!target.closest("main") && target !== document.body && target !== document.documentElement) {
+      return;
+    }
     close();
   });
-  if (overlayMedia.addEventListener) overlayMedia.addEventListener("change", updateMode);
-  else overlayMedia.addListener(updateMode);
-
-  // Dock into #task-log-dock when present (dashboard right_panel or base layout).
-  var defaultDock = document.getElementById("task-log-dock");
-  if (defaultDock) attachDock(defaultDock);
-  else updateMode();
+  if (resizeHandle) {
+    resizeHandle.addEventListener("pointerdown", function (event) {
+      if (event.button) return;
+      event.preventDefault();
+      resizing = true;
+      resizeStartX = event.clientX;
+      resizeStartWidth = clampDrawerWidth(readAppliedDrawerWidth());
+      if (resizeHandle.setPointerCapture) {
+        try { resizeHandle.setPointerCapture(event.pointerId); } catch (error) { /* capture is best-effort */ }
+      }
+      if (document.body && document.body.classList) {
+        document.body.classList.add("task-log-drawer-resizing");
+      }
+      drawer.classList.add("is-resizing");
+      document.addEventListener("pointermove", onResizePointerMove);
+      document.addEventListener("pointerup", endDrawerResize);
+      document.addEventListener("pointercancel", endDrawerResize);
+    });
+    resizeHandle.addEventListener("dblclick", function () {
+      applyDrawerWidth(DEFAULT_DRAWER_WIDTH, true);
+    });
+  }
+  if (window.addEventListener) {
+    window.addEventListener("resize", function () {
+      applyDrawerWidth(readAppliedDrawerWidth(), true);
+    });
+  }
+  updateMode();
 
   window.TaskLogDrawer = {
     open: open,
     close: close,
     isOpen: isDrawerOpen,
-    currentTaskId: function () { return activeTaskId; },
-    attachDock: attachDock,
-    preferOverlay: preferOverlay
+    currentTaskId: function () { return activeTaskId; }
   };
 })();

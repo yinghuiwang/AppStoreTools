@@ -1,0 +1,365 @@
+/* --- Agent right rail + pinned conversation panel --- */
+
+:root {
+  --agent-rail-width: 48px;
+  --agent-panel-width: 0px;
+}
+
+[data-agent-rail] {
+  flex: 0 0 48px;
+  width: 48px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 0;
+  border-left: 1px solid var(--border-default);
+  background: var(--bg-raised);
+  z-index: 50;
+}
+
+.agent-rail__button {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.agent-rail__button[aria-pressed="true"] {
+  background: var(--accent-glow);
+  color: var(--accent);
+}
+
+[data-agent-panel] {
+  position: relative;
+  flex: 0 0 0;
+  width: 0;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  background: #0c0c10;
+  border-left: 1px solid var(--border-default);
+  z-index: 45;
+}
+
+[data-agent-panel].is-open {
+  flex: 0 0 var(--agent-panel-width, 390px);
+  width: var(--agent-panel-width, 390px);
+  overflow: hidden;
+}
+
+.agent-panel__resize {
+  grid-row: 1 / -1;
+  grid-column: 1;
+  justify-self: start;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 20;
+  width: 12px;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+  pointer-events: auto;
+  background: transparent;
+}
+.agent-panel__resize::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  background: var(--accent-dim);
+  opacity: .55;
+}
+.agent-panel__resize-grip {
+  position: relative;
+  z-index: 1;
+  width: 8px;
+  height: 42px;
+  border-radius: 999px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  pointer-events: none;
+  background: var(--bg-overlay);
+  border: 1px solid var(--accent-border);
+  box-shadow: 0 0 0 1px var(--accent-glow), 0 0 14px var(--accent-glow);
+}
+.agent-panel__resize-grip span {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.agent-panel__resize:hover::before,
+[data-agent-panel].is-resizing .agent-panel__resize::before {
+  opacity: 1;
+  background: var(--accent);
+}
+.agent-panel__resize:hover .agent-panel__resize-grip,
+[data-agent-panel].is-resizing .agent-panel__resize-grip {
+  border-color: var(--accent);
+  background: var(--accent-glow-strong);
+}
+body.agent-panel-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+body.agent-panel-resizing * {
+  user-select: none !important;
+}
+
+.agent-dock-toolbar,
+.agent-dock-composer {
+  position: relative;
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 8px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.agent-dock-toolbar {
+  justify-content: space-between;
+  z-index: 2;
+}
+.agent-dock-toolbar__lead {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.agent-dock-title {
+  color: var(--text-primary);
+  font: 600 12px/1.3 "Fira Code", monospace;
+  letter-spacing: .04em;
+}
+.agent-dock-close {
+  flex: 0 0 auto;
+}
+.agent-bound-meta {
+  min-width: 0;
+  color: var(--text-muted);
+  font: 10px/1.4 "Fira Code", monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-attach {
+  position: relative;
+  flex: 0 0 auto;
+}
+.agent-attach__button {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font: 600 18px/1 "Fira Code", monospace;
+}
+.agent-attach__button:hover {
+  border-color: var(--accent-dim);
+  color: var(--accent);
+  background: var(--accent-glow);
+}
+.agent-attach__button[aria-expanded="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-glow);
+}
+.agent-attach-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  z-index: 6;
+  width: min(300px, calc(var(--agent-panel-width, 390px) - 48px));
+  padding: 10px;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: #121218;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .45), 0 0 0 1px var(--accent-glow);
+}
+.agent-attach-menu__label {
+  margin: 0 0 8px;
+  color: var(--text-muted);
+  font: 10px/1.4 "Fira Code", monospace;
+}
+.agent-dock-search { width: 100%; font-size: 12px; }
+.agent-search-results {
+  margin-top: 8px;
+  max-height: 180px;
+  overflow: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  background: #0c0c10;
+}
+.agent-search-results button {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-secondary);
+  text-align: left;
+  cursor: pointer;
+  font: 11px/1.4 "Fira Code", monospace;
+}
+.agent-search-results button:last-child { border-bottom: 0; }
+.agent-search-results button:hover { background: var(--bg-overlay); color: var(--text-primary); }
+.agent-dock-messages {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px 12px;
+  background: #0a0a0c;
+}
+.agent-dock-empty {
+  margin: 0;
+  color: var(--text-muted);
+  font: 12px/1.5 "Fira Code", monospace;
+}
+.agent-msg {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font: 12px/1.5 "Fira Code", monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.agent-msg--user { background: rgba(255, 255, 255, .04); color: var(--text-secondary); }
+.agent-msg--assistant { background: rgba(245, 158, 11, .08); }
+.agent-msg--error { border-color: rgba(248, 113, 113, .35); color: #fca5a5; }
+.agent-msg--md { white-space: normal; }
+.agent-msg--md > :first-child { margin-top: 0; }
+.agent-msg--md > :last-child { margin-bottom: 0; }
+.agent-msg--md :is(h1, h2, h3, h4) {
+  margin: 0 0 8px;
+  color: var(--text-primary);
+  font-weight: 700;
+  line-height: 1.3;
+}
+.agent-msg--md h1 { font-size: 16px; }
+.agent-msg--md h2 { font-size: 14px; }
+.agent-msg--md :is(h3, h4) { font-size: 13px; }
+.agent-msg--md p { margin: 0 0 8px; }
+.agent-msg--md :is(strong, b) { font-weight: 700; }
+.agent-msg--md :is(ul, ol) {
+  margin: 0 0 8px;
+  padding-left: 1.3em;
+  list-style: disc;
+}
+.agent-msg--md ol { list-style: decimal; }
+.agent-msg--md li { margin: 0 0 4px; }
+.agent-msg--md a { color: var(--accent); }
+.agent-msg--md code {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, .06);
+  font-size: 10px;
+}
+.agent-msg--md pre {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  overflow: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  background: #08080a;
+}
+.agent-msg--md pre code { padding: 0; background: transparent; }
+.agent-msg--md table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 8px;
+  font-size: 11px;
+}
+.agent-msg--md :is(th, td) {
+  border: 1px solid var(--border-subtle);
+  padding: 4px 6px;
+}
+.agent-msg--md blockquote {
+  margin: 0 0 8px;
+  padding-left: 10px;
+  border-left: 2px solid var(--accent-dim);
+  color: var(--text-secondary);
+}
+.agent-tool-status {
+  margin: 0 0 8px;
+  color: var(--text-muted);
+  font: 10px/1.4 "Fira Code", monospace;
+}
+.agent-plan-card {
+  margin: 10px 0 0;
+  padding: 10px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-surface);
+  font: 11px/1.45 "Fira Code", monospace;
+}
+.agent-plan-card__summary { margin: 0 0 8px; color: var(--text-primary); }
+.agent-plan-mutation {
+  margin: 0 0 4px;
+  color: var(--text-muted);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+.agent-plan-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-top: 8px;
+}
+.agent-plan-card__actions label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+.agent-dock-composer {
+  z-index: 4;
+  overflow: visible;
+  border-bottom: 0;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+}
+.agent-dock-composer__row {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+.agent-dock-composer form {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+.agent-dock-input { flex: 1; min-width: 0; font-size: 12px; }

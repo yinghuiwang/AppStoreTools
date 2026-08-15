@@ -175,6 +175,13 @@ pytest
 python -m build
 ```
 
+Browser E2E (`tests/test_web_agent_e2e.py`) needs Playwright Chromium and is skipped if the browser is missing:
+
+```bash
+python -m playwright install chromium
+pytest tests/test_web_agent_e2e.py
+```
+
 Source code lives in `src/asc/`; tests mirror the feature areas under `tests/`. Publishing is handled by `.github/workflows/publish.yml` when a `v*.*.*` tag is pushed.
 
 After changing Tailwind utility classes in Web templates, rebuild local CSS with `./scripts/build_web_assets.sh` (requires Node/`npx`). Fonts and vendor JS are already committed under `src/asc/web/static/`.

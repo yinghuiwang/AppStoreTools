@@ -391,3 +391,22 @@ def test_reorder_renumbers_entire_folder_across_display_types(tmp_path):
     )
     names = [p.name for p in _get_sorted_screenshots(d)]
     assert names == ["01_iphone_b.png", "02_ipad.png", "03_iphone_a.png"]
+
+
+def test_rename_screenshot_stays_under_root(tmp_path):
+    from asc.listing.local import rename_screenshot, PathTraversalError
+
+    root = tmp_path / "shots"
+    root.mkdir()
+    src = root / "01_a.png"
+    src.write_bytes(b"png")
+    out = rename_screenshot(src, "02_b.png", root=root)
+    assert out.name == "02_b.png"
+    assert not src.exists()
+    try:
+        rename_screenshot(out, "../escape.png", root=root)
+        assert False, "should reject"
+    except PathTraversalError:
+        pass
+    assert out.exists()
+    assert not (tmp_path / "escape.png").exists()

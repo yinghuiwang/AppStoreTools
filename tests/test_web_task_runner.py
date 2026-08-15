@@ -494,3 +494,42 @@ def test_worker_retries_terminal_after_transient_final_log_flush(
     assert task["result"]["uploaded"] == 1
     assert "final diagnostic" in task["logs"]
     store.close()
+
+
+def test_start_background_task_stores_and_sets_replay(tmp_path):
+    store = TaskStore(tmp_path / "replay.db")
+    replay = {
+        "kind": "update",
+        "profile": "system",
+        "verbose": False,
+        "params": {"version": "0.1.26"},
+    }
+
+    def run(reporter, cancel_event: Event):
+        return {"success": True}
+
+    created = start_background_task(
+        store,
+        kind="update",
+        profile="system",
+        verbose=False,
+        run=run,
+        replay=replay,
+    )
+    assert store.get_replay(created) == replay
+    assert store.get_state(created)["has_replay"] is True
+    _wait_terminal(store, created)
+
+    existing = store.create("update", profile="system")
+    start_background_task(
+        store,
+        kind="update",
+        profile="system",
+        verbose=False,
+        run=run,
+        task_id=existing,
+        replay=replay,
+    )
+    assert store.get_replay(existing) == replay
+    _wait_terminal(store, existing)
+    store.close()
