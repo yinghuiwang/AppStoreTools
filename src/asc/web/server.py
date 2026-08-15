@@ -96,36 +96,10 @@ def create_app() -> FastAPI:
 
     def _get_profile_context(request: Request) -> dict:
         """Resolve sidebar/current App: cookie if selectable, else machine match only."""
-        from asc.config import Config
-        from asc.guard import Guard
-        from asc.web.profile_select import resolve_web_current_profile
+        from asc.web.profile_context import load_web_profile_state
 
-        profile_from_cookie = request.cookies.get("asc_profile")
-        # list_apps does not need a resolved default_app; avoid implying one is selected.
-        config = Config(app_name=profile_from_cookie or None)
-        profiles = config.list_apps()
-        profile_data = {
-            name: config.get_app_profile(name) or {}
-            for name in profiles
-        }
-        access = Guard().profile_access(profile_data)
-        options = access["options"]
-        current = resolve_web_current_profile(
-            cookie_profile=profile_from_cookie,
-            profiles=profiles,
-            matched_profile=access["matched_profile"],
-            options=options,
-        )
-        if current:
-            current_config = Config(app_name=current)
-            profile_csv = current_config.csv_path
-            profile_screenshots = current_config.screenshots_path
-            profile_iap_file = current_config.iap_path or "data/iap_packages.json"
-        else:
-            # Do not load default_app paths when nothing is selected.
-            profile_csv = "data/appstore_info.csv"
-            profile_screenshots = "data/screenshots"
-            profile_iap_file = "data/iap_packages.json"
+        state = load_web_profile_state(request.cookies.get("asc_profile"))
+        paths = state["paths"]
         asset_version = _web_asset_version()
         lang = getattr(request.state, "lang", None) or resolve_lang(
             cookie=request.cookies.get(COOKIE_NAME),
@@ -136,13 +110,13 @@ def create_app() -> FastAPI:
             return translate(key, lang=lang, **kwargs)
 
         return {
-            "profiles": profiles,
-            "profile_access": options,
-            "has_machine_profile": bool(access["matched_profile"]),
-            "current_profile": current,
-            "profile_csv": profile_csv,
-            "profile_screenshots": profile_screenshots,
-            "profile_iap_file": profile_iap_file,
+            "profiles": state["profiles"],
+            "profile_access": state["profile_access"],
+            "has_machine_profile": state["has_machine_profile"],
+            "current_profile": state["current_profile"],
+            "profile_csv": paths["csv"],
+            "profile_screenshots": paths["screenshots"],
+            "profile_iap_file": paths["iap"],
             "asset_version": asset_version,
             "lang": lang,
             "html_lang": map_html_lang(lang),
@@ -157,19 +131,14 @@ def create_app() -> FastAPI:
         so API routes see the same app. When nothing is selected, clear a stale
         cookie so APIs do not silently fall through to ``default_app``.
         """
+        from asc.web.profile_context import apply_profile_cookie
+
         resp = templates.TemplateResponse(request, template, ctx)
-        cookie = request.cookies.get("asc_profile") or ""
-        current = ctx.get("current_profile") or ""
-        if cookie != current:
-            if current:
-                resp.set_cookie(
-                    "asc_profile",
-                    current,
-                    httponly=True,
-                    samesite="lax",
-                )
-            elif cookie:
-                resp.delete_cookie("asc_profile")
+        apply_profile_cookie(
+            resp,
+            cookie=request.cookies.get("asc_profile") or "",
+            current=ctx.get("current_profile") or "",
+        )
         return resp
 
     @app.get("/", response_class=HTMLResponse)

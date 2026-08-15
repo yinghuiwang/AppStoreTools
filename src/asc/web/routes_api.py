@@ -188,6 +188,43 @@ def _extension_filter(ext: str) -> set[str]:
     }
 
 
+@router.get("/bootstrap")
+def bootstrap(request: Request):
+    from asc import __version__
+    from asc.cli import _installed_commit_short
+    from asc.commands.update_cmd import _is_editable
+    from asc.web.i18n import html_lang
+    from asc.web.profile_context import apply_profile_cookie, load_web_profile_state
+
+    state = load_web_profile_state(_cookie_profile(request) or None)
+    lang = _lang(request)
+    try:
+        commit = _installed_commit_short() or "unknown"
+    except Exception:  # noqa: BLE001
+        commit = "unknown"
+    payload = {
+        "ok": True,
+        "version": __version__,
+        "commit": commit,
+        "boot_id": WEB_BOOT_ID,
+        "lang": lang,
+        "html_lang": html_lang(lang),
+        "current_profile": state["current_profile"],
+        "profiles": state["profiles"],
+        "profile_access": state["profile_access"],
+        "has_machine_profile": state["has_machine_profile"],
+        "paths": state["paths"],
+        "is_editable": _is_editable(),
+    }
+    resp = JSONResponse(payload)
+    apply_profile_cookie(
+        resp,
+        cookie=request.cookies.get("asc_profile") or "",
+        current=state["current_profile"],
+    )
+    return resp
+
+
 @router.get("/switch-profile")
 async def switch_profile(profile: str):
     """Switch active app profile (stores in session cookie)."""
