@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import AppSidebar from "@/components/AppSidebar.vue";
 import AppTopbar from "@/components/AppTopbar.vue";
+import RightRail from "@/components/RightRail.vue";
 import { useProfile } from "@/composables/useProfile";
 
 const { snapshot } = useProfile();
@@ -15,7 +16,7 @@ const { snapshot } = useProfile();
         <router-view :key="snapshot?.current_profile ?? ''" />
       </main>
     </div>
-    <div class="rail-slot" />
+    <RightRail />
   </div>
 </template>
 
@@ -38,12 +39,5 @@ const { snapshot } = useProfile();
   flex: 1;
   overflow: auto;
   padding: 24px 28px 40px;
-}
-
-.rail-slot {
-  width: var(--rail-strip);
-  flex: 0 0 var(--rail-strip);
-  background: var(--surface);
-  border-left: 1px solid var(--border);
 }
 </style>
