@@ -20,6 +20,7 @@ declare module 'vue' {
     ElTabPane: typeof import('element-plus/es')['ElTabPane']
     ElTabs: typeof import('element-plus/es')['ElTabs']
     FileBrowser: typeof import('./components/FileBrowser.vue')['default']
+    ImageViewer: typeof import('./components/ImageViewer.vue')['default']
     RightRail: typeof import('./components/RightRail.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']

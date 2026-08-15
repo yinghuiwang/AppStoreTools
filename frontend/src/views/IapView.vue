@@ -4,6 +4,7 @@ import { useI18n } from "vue-i18n";
 import { ApiError, apiErrorMessage, httpForm, httpJson } from "@/api/http";
 import TaskRunBar from "@/components/TaskRunBar.vue";
 import { useBrowse } from "@/composables/useBrowse";
+import { useImageViewer } from "@/composables/useImageViewer";
 import { useProfile } from "@/composables/useProfile";
 import { useRightRail } from "@/composables/useRightRail";
 
@@ -19,6 +20,7 @@ type Target = {
 
 const { t } = useI18n();
 const browse = useBrowse();
+const viewer = useImageViewer();
 const { snapshot } = useProfile();
 const rail = useRightRail();
 const empty = computed(() => (snapshot.value?.current_profile || "") === "");
@@ -72,6 +74,14 @@ async function scan() {
   const next: Record<string, string> = {};
   for (const item of targets.value) next[item.id] = item.defaultPath || "";
   paths.value = next;
+}
+
+function previewPath(path: string) {
+  const root = path.replace(/[/\\][^/\\]+$/, "") || ".";
+  viewer.show([{
+    src: `/api/listing/thumb?path=${encodeURIComponent(path)}&root=${encodeURIComponent(root)}`,
+    title: path,
+  }]);
 }
 
 async function pickPath(id: string) {
@@ -138,7 +148,7 @@ onMounted(() => { void check(); });
         <div class="field-row">
           <input v-model="paths[item.id]" class="field-input" />
           <el-button size="small" @click="pickPath(item.id)">{{ t("filebrowser.browse") }}</el-button>
-          <img v-if="paths[item.id]" class="thumb" :src="`/api/listing/thumb?path=${encodeURIComponent(paths[item.id])}&root=${encodeURIComponent(paths[item.id])}`" alt="" />
+          <img v-if="paths[item.id]" class="thumb" :src="`/api/listing/thumb?path=${encodeURIComponent(paths[item.id])}&root=${encodeURIComponent(paths[item.id].replace(/[/\\\\][^/\\\\]+$/, '') || '.')}`" alt="" @click="previewPath(paths[item.id])" />
         </div>
       </div>
       <label class="check"><input v-model="reviewDry" type="checkbox" /> {{ t("iap.preview") }}</label>
