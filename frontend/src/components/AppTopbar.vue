@@ -1,0 +1,172 @@
+<script setup lang="ts">
+import { computed, ref } from "vue";
+import { useRoute } from "vue-router";
+import { useI18n } from "vue-i18n";
+import { ElMessage } from "element-plus";
+import { httpForm } from "@/api/http";
+import { useProfile } from "@/composables/useProfile";
+
+const { t, locale } = useI18n();
+const route = useRoute();
+const { snapshot, switchProfile } = useProfile();
+const selectEl = ref<HTMLSelectElement | null>(null);
+
+const TITLE_KEYS: Array<{ test: (path: string) => boolean; key: string }> = [
+  { test: (p) => p === "/", key: "nav.dashboard" },
+  { test: (p) => p.startsWith("/system"), key: "nav.system" },
+  { test: (p) => p === "/listing", key: "nav.listing" },
+  { test: (p) => p === "/whats-new", key: "nav.whats_new" },
+  { test: (p) => p === "/urls", key: "nav.urls" },
+  { test: (p) => p === "/build", key: "nav.build" },
+  { test: (p) => p === "/iap", key: "nav.iap" },
+];
+
+const titleKey = computed(() => {
+  const path = route.path;
+  return TITLE_KEYS.find((row) => row.test(path))?.key ?? "nav.dashboard";
+});
+
+const currentName = computed(() => snapshot.value?.current_profile || "");
+const profiles = computed(() => snapshot.value?.profiles ?? []);
+const access = computed(() => snapshot.value?.profile_access ?? {});
+const hasMachine = computed(() => Boolean(snapshot.value?.has_machine_profile));
+const lang = computed(() => (locale.value === "zh" ? "zh" : "en"));
+
+async function onProfileChange(event: Event) {
+  const el = event.target as HTMLSelectElement;
+  const name = el.value;
+  const previous = snapshot.value?.current_profile ?? "";
+  try {
+    await switchProfile(name);
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : String(err));
+    el.value = previous;
+    if (selectEl.value) selectEl.value.value = previous;
+  }
+}
+
+async function setLang(code: "zh" | "en") {
+  try {
+    await httpForm("/api/settings/lang", new URLSearchParams({ lang: code }));
+    locale.value = code;
+    document.documentElement.lang = code === "zh" ? "zh-CN" : "en";
+    localStorage.setItem("asc_lang", code);
+  } catch {
+    ElMessage.error(t("lang.switch_failed"));
+  }
+}
+</script>
+
+<template>
+  <header class="topbar">
+    <div class="topbar-left">
+      <h1>{{ t(titleKey) }}</h1>
+      <span class="profile-name mono">{{ currentName || t("nav.select_app") }}</span>
+    </div>
+    <div class="topbar-right">
+      <router-link v-if="!hasMachine" class="new-profile" to="/system/profiles">
+        {{ t("nav.new_profile") }}
+      </router-link>
+      <select
+        ref="selectEl"
+        class="profile-select"
+        :value="currentName"
+        @change="onProfileChange"
+      >
+        <option value="" disabled>{{ t("nav.select_app") }}</option>
+        <option
+          v-for="name in profiles"
+          :key="name"
+          :value="name"
+          :disabled="access[name]?.enabled === false"
+        >
+          {{ name }}{{ access[name]?.enabled === false ? t("nav.other_machine") : "" }}
+        </option>
+      </select>
+      <div class="lang" role="group">
+        <button type="button" :class="{ on: lang === 'zh' }" @click="setLang('zh')">zh</button>
+        <button type="button" :class="{ on: lang === 'en' }" @click="setLang('en')">en</button>
+      </div>
+    </div>
+  </header>
+</template>
+
+<style scoped>
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: var(--topbar-height);
+  padding: 0 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.topbar-left {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
+
+.topbar-left h1 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.profile-name {
+  color: var(--text-muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.new-profile {
+  font-size: 12px;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.profile-select {
+  min-width: 160px;
+  max-width: 240px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--raised);
+  color: var(--text);
+}
+
+.lang {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.lang button {
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.lang button.on {
+  color: #0a0a0c;
+  background: linear-gradient(135deg, var(--accent-dim), var(--accent));
+}
+</style>
