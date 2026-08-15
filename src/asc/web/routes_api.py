@@ -24,7 +24,13 @@ from asc.commands.iap_review_screenshots import (
 )
 from asc.commands.subscriptions import _upload_subscriptions_core
 from asc.config import Config
-from asc.guard import enforce_bundle_guard, enforce_config_guard, read_ipa_bundle_id
+from asc.guard import (
+    GuardViolationError,
+    enforce_bundle_guard,
+    enforce_config_guard,
+    read_ipa_bundle_id,
+)
+from asc.locales_catalog import LocaleCatalogError, list_locales
 from asc.utils import make_api_from_config
 from asc.web import notifications
 from asc.web.dashboard import MANUAL_BASELINE_MINUTES, build_dashboard_summary
@@ -421,6 +427,70 @@ def metadata_check(request: Request):
     if not profile:
         return _no_profile_payload(lang)
     return _run_metadata_check(profile, lang=lang)
+
+
+def _absent_locales(catalog: list[dict[str, str]]) -> list[dict]:
+    return [
+        {
+            "code": row["code"],
+            "name_en": row["name_en"],
+            "name_zh": row["name_zh"],
+            "present": False,
+        }
+        for row in catalog
+    ]
+
+
+def _metadata_locale_presence(
+    profile: str,
+    catalog: list[dict[str, str]],
+) -> tuple[list[dict], bool]:
+    """Overlay present flags. Never raises; failures degrade presence only."""
+    if not profile:
+        return _absent_locales(catalog), False
+    try:
+        config = Config(app_name=profile)
+        api, app_id = make_api_from_config(config)
+        enforce_config_guard(config, interactive=False)
+        version = api.get_editable_version(app_id)
+        if not version:
+            return _absent_locales(catalog), False
+        present_codes = {
+            item["locale"] for item in _get_available_locales(api, app_id)
+        }
+        locales = [
+            {
+                "code": row["code"],
+                "name_en": row["name_en"],
+                "name_zh": row["name_zh"],
+                "present": row["code"] in present_codes,
+            }
+            for row in catalog
+        ]
+        return locales, True
+    except (GuardViolationError, Exception):
+        return _absent_locales(catalog), False
+
+
+@router.get("/metadata/locales")
+def metadata_locales(request: Request):
+    """Return the static locale catalog with optional version-presence overlay.
+
+    Sync ``def`` so ASC presence checks stay off the event loop.
+    """
+    lang = _lang(request)
+    try:
+        catalog = list_locales()
+    except LocaleCatalogError:
+        return JSONResponse(
+            {"error": t("metadata.locales_catalog_unavailable", lang=lang)},
+            status_code=500,
+        )
+    locales, presence_available = _metadata_locale_presence(
+        _cookie_profile(request),
+        catalog,
+    )
+    return {"locales": locales, "presenceAvailable": presence_available}
 
 
 @router.post("/metadata/run")
