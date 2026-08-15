@@ -39,7 +39,6 @@ const selectedVersion = ref("");
 const selectedBranch = ref("");
 const advanced = ref<"specific" | "branch">("specific");
 const pending = ref<PostRestart | null>(null);
-const dryRun = ref(false);
 const verbose = ref(false);
 let lastBootId = snapshot.value?.boot_id || "";
 
@@ -72,7 +71,6 @@ async function run(version = "", branch = "") {
   const body = new URLSearchParams({
     version,
     branch,
-    dry_run: dryRun.value ? "true" : "",
     verbose: verbose.value ? "true" : "",
   });
   const { task_id } = await httpForm<{ task_id: string }>("/api/update/run", body);
@@ -133,9 +131,6 @@ onMounted(() => {
       <p v-if="snapshot?.is_editable">{{ t("update.editable_latest_blocked") }}</p>
       <el-button v-else type="primary" @click="run()">{{ t("update.install_now") }}</el-button>
     </div>
-    <div v-else-if="checkResult?.detail?.is_latest" class="card">
-      <p>{{ t("update.up_to_date") }}</p>
-    </div>
     <div class="card">
       <h2>{{ t("update.advanced") }}</h2>
       <div class="seg">
@@ -164,7 +159,6 @@ onMounted(() => {
         <p v-if="branchError" class="muted">{{ branchError }}</p>
         <el-button type="primary" @click="run('', selectedBranch)">{{ t("update.install_branch") }}</el-button>
       </div>
-      <label class="check"><input v-model="dryRun" type="checkbox" /> {{ t("common.dry_run") }}</label>
       <label class="check"><input v-model="verbose" type="checkbox" /> {{ t("build.verbose") }}</label>
       <p class="muted">{{ t("update.note") }}</p>
     </div>

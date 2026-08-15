@@ -93,6 +93,18 @@ def test_system_sidebar_has_independent_links() -> None:
     assert 'labelKey: "nav.system"' not in src
 
 
+def test_update_tab_keeps_status_in_check_card() -> None:
+    src = (FRONTEND / "views" / "system" / "UpdateTab.vue").read_text(encoding="utf-8")
+    assert "checkResult.message" in src
+    assert 't("update.found")' in src
+    assert 't("update.install_now")' in src
+    assert 't("update.up_to_date")' not in src
+    assert "dryRun" not in src
+    assert 't("common.dry_run")' not in src
+    assert "verbose" in src
+    assert 't("build.verbose")' in src
+
+
 def test_retry_paths_map_legacy_system_tabs() -> None:
     types_src = (FRONTEND / "api" / "types.ts").read_text(encoding="utf-8")
     assert '"/system/update": "/update"' in types_src

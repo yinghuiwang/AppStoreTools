@@ -2761,7 +2761,6 @@ def update_branches(request: Request):
 def update_run(
     version: str = _Form(""),
     branch: str = _Form(""),
-    dry_run: str = _Form(""),
     verbose: str = _Form(""),
 ):
     """Run update."""
