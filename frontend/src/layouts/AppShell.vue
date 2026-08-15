@@ -5,12 +5,14 @@ import AppTopbar from "@/components/AppTopbar.vue";
 import RightRail from "@/components/RightRail.vue";
 import { useProfile } from "@/composables/useProfile";
 import { useTaskLog } from "@/composables/useTaskLog";
+import { useAgent } from "@/composables/useAgent";
 
 const { snapshot } = useProfile();
 
 onMounted(() => {
   window.addEventListener("pagehide", () => {
     useTaskLog().disconnect();
+    void useAgent().stop();
   });
 });
 </script>

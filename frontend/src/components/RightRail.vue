@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRightRail } from "@/composables/useRightRail";
+import AgentPanel from "@/components/AgentPanel.vue";
 import TaskLogPanel from "@/components/TaskLogPanel.vue";
 
 const { t } = useI18n();
@@ -69,8 +70,8 @@ onBeforeUnmount(() => {
         :aria-label="t('agent.resize')"
         @pointerdown="onPointerDown"
       />
-      <div v-show="tab === 'agent'" class="pane" data-agent-panel>
-        <slot name="agent" />
+      <div v-show="tab === 'agent'" class="pane">
+        <AgentPanel />
       </div>
       <div v-show="tab === 'logs'" class="pane">
         <TaskLogPanel />
