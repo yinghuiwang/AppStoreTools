@@ -127,7 +127,16 @@ asc web status
 asc web stop
 ```
 
-The Web UI opens at `http://127.0.0.1:8080` by default. It exposes the main upload and release workflows, keeps task history in `~/.config/asc/tasks.db`, and can send completion notifications to Feishu, WeCom, or DingTalk from its settings page.
+Production `asc web` serves the Vue 3 SPA at `http://127.0.0.1:8080` by default. It exposes the main upload and release workflows, keeps task history in `~/.config/asc/tasks.db`, and can send completion notifications to Feishu, WeCom, or DingTalk from its settings page.
+
+Local development uses two processes (do not add `asc web --vite`):
+
+```bash
+asc web --foreground
+cd frontend && npm run dev
+```
+
+Vite on `:5173` proxies `/api` and `/static` to the FastAPI app. A release build requires `npm ci && npm run build` first so `src/asc/web/static/spa/` is included in the package.
 
 Run `asc --help` for all commands and `asc <command> --help` for every option.
 
@@ -184,7 +193,7 @@ pytest tests/test_web_agent_e2e.py
 
 Source code lives in `src/asc/`; tests mirror the feature areas under `tests/`. Publishing is handled by `.github/workflows/publish.yml` when a `v*.*.*` tag is pushed.
 
-After changing Tailwind utility classes in Web templates, rebuild local CSS with `./scripts/build_web_assets.sh` (requires Node/`npx`). Fonts and vendor JS are already committed under `src/asc/web/static/`.
+After changing the Vue UI, rebuild production assets with `cd frontend && npm ci && npm run build` (requires Node). Fonts stay under `src/asc/web/static/`.
 
 ## Security
 

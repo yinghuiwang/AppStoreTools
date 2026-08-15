@@ -324,44 +324,6 @@ def test_whats_new_web_starter_uses_start_background_task():
     assert "start_background_task" in translate_starter
 
 
-def test_whats_new_template_uses_alpine_data_helper():
-    """whats_new template must use Alpine.$data, not Alpine.$Data."""
-    from pathlib import Path
-
-    template = Path("src/asc/web/templates/whats_new.html").read_text(encoding="utf-8")
-    assert "Alpine.$Data" not in template
-    assert "Alpine.$data" in template
-
-
-def test_whats_new_template_hides_direct_upload_in_translate_mode():
-    """When translate mode is enabled, the direct upload button should not be shown."""
-    from pathlib import Path
-
-    template = Path("src/asc/web/templates/whats_new.html").read_text(encoding="utf-8")
-    assert 'x-show="!translateMode"' in template
-    assert "translateError" in template
-
-
-def test_whats_new_template_has_translate_and_upload_action():
-    """Translate mode should offer a one-step translate-and-upload action."""
-    from pathlib import Path
-
-    template = Path("src/asc/web/templates/whats_new.html").read_text(encoding="utf-8")
-    assert ("翻译并上传" in template) or ('whats_new.translate_upload' in template)
-    assert "translate: true" in template
-
-
-def test_whats_new_template_preview_waits_on_task_result():
-    """Preview translate must wait on task SSE/status then read result.translations."""
-    from pathlib import Path
-
-    template = Path("src/asc/web/templates/whats_new.html").read_text(encoding="utf-8")
-    assert "task_id" in template
-    assert "/api/task/" in template
-    assert "result.translations" in template or "result?.translations" in template
-    assert "TaskLogDrawer.open" in template
-
-
 def test_settings_llm_get_redacts_api_key(client):
     """GET /api/settings/llm exposes config metadata, never the secret."""
     mock_config = MagicMock()

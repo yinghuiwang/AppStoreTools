@@ -562,7 +562,11 @@ AppStoreTools/
 │   │   ├── build.py
 │   │   ├── app_config.py
 │   │   └── guard_cmd.py
-│   └── templates/             # 模板文件
+│   ├── web/                   # FastAPI + Vue 3 SPA
+│   │   ├── server.py          # SPA fallback + static mount
+│   │   ├── locales/           # Web i18n catalogs (zh/en)
+│   │   └── static/spa/        # Production Vite build
+│   └── templates/             # CLI 数据模板
 │       ├── iap_packages.json
 │       └── iap_review/
 ├── data/                      # 数据文件（用户创建）
@@ -628,8 +632,8 @@ Web UI strings use a separate stack:
 
 - Catalogs: `src/asc/web/locales/{zh,en}.json` via `src/asc/web/i18n.py`
 - Per-request resolve order: Cookie `asc_lang` → `Accept-Language` → env `ASC_LANG` → default `en`
-- Jinja `t()` + `window.__I18N` for Alpine; user-facing API `message`/`detail` use the same catalogs
-- Language switch (`POST /api/settings/lang`) sets Cookie `asc_lang` and `ASC_LANG` (plus client localStorage); first paint from Accept-Language does **not** auto-write Cookie
+- vue-i18n packs the same JSON catalogs into the SPA; user-facing API `message`/`detail` use the same catalogs
+- Language switch (`POST /api/settings/lang`) sets Cookie `asc_lang` and `ASC_LANG` (plus client localStorage) and updates the Vue locale without a full page reload; first paint from Accept-Language does **not** auto-write Cookie
 - Task/subprocess logs and raw third-party errors stay unlocalized
 
 ## Web task state and event delivery

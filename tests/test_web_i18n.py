@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -87,77 +88,52 @@ def test_set_lang_sets_cookie_and_rejects_invalid(client, monkeypatch):
     assert os.environ.get("ASC_LANG") == "en"
 
 
-def test_resolve_via_middleware_sets_html_lang_attr(client, monkeypatch):
+def test_resolve_via_middleware_sets_bootstrap_lang(client, monkeypatch):
     monkeypatch.delenv("ASC_LANG", raising=False)
-    resp = client.get("/", headers={"Accept-Language": "en-US,en;q=0.9"})
+    resp = client.get("/api/bootstrap", headers={"Accept-Language": "en-US,en;q=0.9"})
     assert resp.status_code == 200
-    assert 'lang="en"' in resp.text
+    assert resp.json()["lang"] == "en"
+    assert resp.json()["html_lang"] == "en"
     client.cookies.set(COOKIE_NAME, "zh")
-    resp2 = client.get("/", headers={"Accept-Language": "en-US"})
+    resp2 = client.get("/api/bootstrap", headers={"Accept-Language": "en-US"})
     assert resp2.status_code == 200
-    assert 'lang="zh-CN"' in resp2.text
+    assert resp2.json()["lang"] == "zh"
+    assert resp2.json()["html_lang"] == "zh-CN"
 
 
-def test_nav_renders_english_with_en_cookie(client, monkeypatch):
-    monkeypatch.delenv("ASC_LANG", raising=False)
-    client.cookies.set(COOKIE_NAME, "en")
-    resp = client.get("/")
-    assert resp.status_code == 200
-    assert "Dashboard" in resp.text
-    assert "Settings" in resp.text
-    assert "window.__I18N" in resp.text
+def test_nav_catalog_english_and_chinese():
+    assert t("nav.dashboard", lang="en") == "Dashboard"
+    assert t("nav.settings", lang="en") == "Settings"
+    assert t("nav.dashboard", lang="zh") == "仪表盘"
+    assert t("nav.settings", lang="zh") == "设置"
 
 
-def test_nav_renders_chinese_with_zh_cookie(client, monkeypatch):
-    monkeypatch.delenv("ASC_LANG", raising=False)
-    client.cookies.set(COOKIE_NAME, "zh")
-    resp = client.get("/")
-    assert "仪表盘" in resp.text
-    assert "设置" in resp.text
+def test_language_switch_updates_locale_without_reload():
+    src = (Path(__file__).resolve().parents[1] / "frontend/src/components/AppTopbar.vue").read_text(encoding="utf-8")
+    assert "/api/settings/lang" in src
+    assert "locale.value = code" in src
+    assert "location.reload" not in src
 
 
-def test_settings_language_select_marks_current(client, monkeypatch):
-    client.cookies.set(COOKIE_NAME, "en")
-    resp = client.get("/settings")
-    assert resp.status_code == 200
-    assert 'value="en"' in resp.text
-    assert "selected" in resp.text
+def test_homepage_feature_chrome_catalog():
+    assert t("index.title", lang="en") == "Release Console"
+    assert t("index.action_check", lang="en") == "Check environment"
+    assert t("index.summary_aria", lang="en") == "Task overview"
+    assert t("index.title", lang="zh") == "发布控制台"
+    dash = (Path(__file__).resolve().parents[1] / "frontend/src/views/DashboardView.vue").read_text(encoding="utf-8")
+    assert 't("index.title")' in dash
+    assert "index.metrics_aria" in dash
 
 
-def test_homepage_feature_chrome_switches_with_lang_cookie(client, monkeypatch):
-    monkeypatch.delenv("ASC_LANG", raising=False)
-    client.cookies.set(COOKIE_NAME, "en")
-    en = client.get("/")
-    assert en.status_code == 200
-    assert "Release Console" in en.text
-    assert "Check environment" in en.text
-    assert "Task overview" in en.text
-
-    client.cookies.set(COOKIE_NAME, "zh")
-    zh = client.get("/")
-    assert zh.status_code == 200
-    assert "发布控制台" in zh.text
-    assert "检查环境" in zh.text
-    assert "任务概览" in zh.text
-
-
-def test_settings_and_metadata_pages_switch_with_lang_cookie(client, monkeypatch):
-    monkeypatch.delenv("ASC_LANG", raising=False)
-    client.cookies.set(COOKIE_NAME, "en")
-    settings_en = client.get("/settings")
-    metadata_en = client.get("/metadata")
-    assert "Language" in settings_en.text
-    assert "LLM translation config" in settings_en.text
-    assert "Metadata upload" in metadata_en.text
-    assert "CSV file path" in metadata_en.text
-
-    client.cookies.set(COOKIE_NAME, "zh")
-    settings_zh = client.get("/settings")
-    metadata_zh = client.get("/metadata")
-    assert "语言" in settings_zh.text
-    assert "LLM 翻译配置" in settings_zh.text
-    assert "元数据上传" in metadata_zh.text
-    assert "CSV 文件路径" in metadata_zh.text
+def test_settings_and_metadata_catalogs():
+    assert t("settings.language", lang="en") == "Language"
+    assert t("settings.llm_title", lang="en") == "LLM translation config"
+    assert t("metadata.title", lang="en") == "Metadata upload"
+    assert t("metadata.csv_path", lang="en") == "CSV file path"
+    assert t("settings.language", lang="zh") == "语言"
+    assert t("settings.llm_title", lang="zh") == "LLM 翻译配置"
+    assert t("metadata.title", lang="zh") == "元数据上传"
+    assert t("metadata.csv_path", lang="zh") == "CSV 文件路径"
 
 
 def test_whats_new_check_no_profile_message_localized(client, monkeypatch):

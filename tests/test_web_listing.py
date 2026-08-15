@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+from pathlib import Path
 
 import pytest
 from unittest.mock import MagicMock, patch
@@ -703,22 +704,14 @@ def test_listing_screenshots_replace_rejects_new_name_traversal(client, tmp_path
     assert not (shots / "evil.png").exists()
 
 
-def test_metadata_page_has_screenshot_workbench_markup(client):
-    r = client.get("/metadata")
-    assert r.status_code == 200
-    assert 'id="screenshot-scopes-json-input"' in r.text
-    assert "wbReorderDrop" in r.text
-    assert "wbTriggerReplace" in r.text
-    assert "wbDeleteScreenshot" in r.text
-    assert "wbTriggerAdd" in r.text
-    # I3 / N1: selection remapped by index; all locale groups refreshed after reorder
-    assert "selectedByType" in r.text
-    assert "data.groups" in r.text
-    assert "listing-workbench.css" in r.text
-    assert "listing-csv-table" in r.text
-    assert "listing-diff-grid" in r.text
-    assert "listing-diff-row__value--local" in r.text
-    assert "listing-diff-row__value--asc" in r.text
+def test_listing_local_tab_has_screenshot_workbench():
+    src = Path("frontend/src/views/listing/LocalTab.vue").read_text(encoding="utf-8")
+    assert "/api/listing/screenshots/add" in src
+    assert "/api/listing/screenshots/replace" in src
+    assert "/api/listing/screenshots/delete" in src
+    assert "/api/listing/screenshots/reorder" in src
+    assert "LocalePicker" in src
+    assert "metadata.save_csv" in src
 
 
 def test_listing_screenshots_add_requires_profile(client, tmp_path):
@@ -925,26 +918,15 @@ def test_listing_pull_text_conflict_returns_409(client, tmp_path):
     assert r.json()["ok"] is False
 
 
-def test_metadata_page_has_diff_tab_ui(client):
-    r = client.get("/metadata")
-    assert r.status_code == 200
-    assert "wbDiffLoad" in r.text
-    assert "wbSelectDiffsOnly" in r.text
-    assert "wbDiffPull" in r.text
-    assert "/api/listing/diff" in r.text
-    assert "/api/listing/pull/text" in r.text
-    assert "/api/listing/pull/screenshots" in r.text
-    assert "wbDiffPullScreenshots" in r.text
-    assert "wbDiffShotThumb" in r.text
-    assert "wbDiffAscThumbError" in r.text
-    assert "/api/listing/asc-thumb" in r.text
-    # Pull defaults: changed + asc_only only (not local_only)
-    assert "f.status === 'changed' || f.status === 'asc_only'" in r.text
-    # Upload「仅勾选有差异项」: changed + local_only (not asc_only)
-    assert "f.status === 'changed' || f.status === 'local_only'" in r.text
-    # Pull / tab / load / screenshot-pull all gate on dirty via the same i18n key
-    assert r.text.count("metadata.diff_dirty_block") >= 4
-    assert "metadata.diff_shots_confirm" in r.text
+def test_listing_diff_tab_ui():
+    src = Path("frontend/src/views/listing/DiffTab.vue").read_text(encoding="utf-8")
+    assert "/api/listing/diff" in src
+    assert "/api/listing/pull/text" in src
+    assert "/api/listing/pull/screenshots" in src
+    assert "/api/listing/asc-thumb" in src
+    assert "metadata.diff_shots_confirm" in src
+    assert "skipNotify" in src
+    assert "openLogs" in src
 
 
 def test_listing_diff_includes_asc_screenshots(client, tmp_path):

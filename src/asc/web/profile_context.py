@@ -1,4 +1,4 @@
-"""Shared Web profile snapshot for Jinja pages and GET /api/bootstrap."""
+"""Shared Web profile snapshot for GET /api/bootstrap."""
 from __future__ import annotations
 
 from typing import Any

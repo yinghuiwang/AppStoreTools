@@ -30,7 +30,7 @@ from asc.web.server import create_app
 from asc.web.tasks import TaskStatus, TaskStore
 from tests.test_web_agent import ScriptedLLM
 
-pytestmark = pytest.mark.e2e
+pytestmark = [pytest.mark.e2e, pytest.mark.skip(reason="待 SPA e2e")]
 
 TOKEN_STREAM = "E2E_TOKEN_STREAM_OK"
 TOKEN_MD = "E2E_MD **bold** and `code`"

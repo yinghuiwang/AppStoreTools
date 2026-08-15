@@ -249,23 +249,12 @@ def test_urls_set_passes_selected_locales(tmp_path, monkeypatch):
 
 
 def test_urls_page_has_locale_checkbox_ui():
-    from fastapi.testclient import TestClient
-
-    from asc.web.server import create_app
-
-    client = TestClient(create_app())
-    resp = client.get("/urls")
-    assert resp.status_code == 200
-    html = resp.text
-    assert "selectedLocales" in html
-    assert "selectAllLocales" in html
-    assert "deselectAllLocales" in html
-    assert "data-locale-checkboxes" in html
-    assert "urls.locales_required" in html
-    assert "x-init=\"checkEnv()\"" in html
-    # No longer a free-text locales input
-    assert 'id="locales-input"' not in html
-    assert "localesText" not in html
+    src = Path("frontend/src/views/UrlsView.vue").read_text(encoding="utf-8")
+    assert "check?.detail?.locales" in src
+    assert 'type="checkbox"' in src
+    assert "urls.locales" in src
+    assert 'id="locales-input"' not in src
+    assert "localesText" not in src
 
 
 def test_start_urls_task_passes_locale_list_to_core(tmp_path, monkeypatch):

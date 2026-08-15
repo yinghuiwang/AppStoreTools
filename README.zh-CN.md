@@ -127,7 +127,16 @@ asc web status
 asc web stop
 ```
 
-Web UI 默认打开 `http://127.0.0.1:8080`。它覆盖主要的上传和发布工作流，将任务历史保存在 `~/.config/asc/tasks.db`，并可在设置页配置飞书、企业微信或钉钉任务完成通知。
+生产环境执行 `asc web` 后，默认在 `http://127.0.0.1:8080` 打开 Vue 3 SPA。它覆盖主要的上传和发布工作流，将任务历史保存在 `~/.config/asc/tasks.db`，并可在设置页配置飞书、企业微信或钉钉任务完成通知。
+
+本地开发使用双进程（不要添加 `asc web --vite`）：
+
+```bash
+asc web --foreground
+cd frontend && npm run dev
+```
+
+Vite 在 `:5173` 将 `/api` 和 `/static` 代理到 FastAPI。发版前需要先执行 `npm ci && npm run build`，把 `src/asc/web/static/spa/` 打进包内。
 
 运行 `asc --help` 查看全部命令，运行 `asc <command> --help` 查看完整选项。
 
@@ -184,7 +193,7 @@ pytest tests/test_web_agent_e2e.py
 
 源码位于 `src/asc/`，测试按功能对应放在 `tests/`。推送 `v*.*.*` Tag 后，`.github/workflows/publish.yml` 会负责发布。
 
-若修改了 Web 模板中的 Tailwind 工具类，请运行 `./scripts/build_web_assets.sh` 重建本地 CSS（需要 Node/`npx`）。字体与 vendor JS 已提交在 `src/asc/web/static/`。
+修改 Vue UI 后，请运行 `cd frontend && npm ci && npm run build` 重建生产资源（需要 Node）。字体文件仍位于 `src/asc/web/static/`。
 
 ## 安全建议
 

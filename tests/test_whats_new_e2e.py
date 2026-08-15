@@ -170,17 +170,17 @@ class TestWebWhatsNewTranslatePreviewFlow:
 class TestWhatsNewPageLoads:
     """Test 3: Simple page load test."""
 
-    def test_whats_new_page_loads(self):
-        """GET /whats-new returns 200 with localized What's New title."""
-        app_instance = create_app()
-        client = TestClient(app_instance)
+    def test_whats_new_page_loads(self, tmp_path, monkeypatch):
+        """GET /whats-new returns the Vue SPA shell."""
+        index = tmp_path / "index.html"
+        index.write_text(
+            '<html><script src="/static/spa/assets/app.js"></script></html>',
+            encoding="utf-8",
+        )
+        monkeypatch.setattr("asc.web.server.SPA_INDEX", index)
+        client = TestClient(create_app())
 
         response = client.get("/whats-new")
 
         assert response.status_code == 200
-        # Jinja may HTML-escape the apostrophe ("What's New" → "What&#39;s New").
-        assert (
-            "更新说明" in response.text
-            or "What's New" in response.text
-            or "What&#39;s New" in response.text
-        )
+        assert 'src="/static/spa/' in response.text

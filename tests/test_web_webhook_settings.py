@@ -29,27 +29,18 @@ def test_settings_webhooks_get_returns_defaults(client: TestClient):
     assert data["providers"]["feishu"]["secret"] == ""
 
 
-def test_settings_page_has_webhook_card(client: TestClient):
-    response = client.get("/settings")
-
-    assert response.status_code == 200
-    html = response.text
-    assert ("Group notifications / Webhook" in html) or ("群通知 / Webhook" in html)
-    assert "/api/settings/webhooks" in html
-    assert ("Feishu/Lark" in html) or ("飞书/Lark" in html) or ("settings.provider_feishu" in html)
-    assert ("WeCom" in html) or ("企业微信" in html) or ("settings.provider_wecom" in html)
-    assert ("DingTalk" in html) or ("钉钉" in html) or ("settings.provider_dingtalk" in html)
-    assert "Webhook URL" in html
-    assert ("Secret / Signing Key" in html) or ("Secret" in html)
-    assert ("settings.secret_kept" in html) or ("已保存 Secret，留空将保留原值" in html) or ("Secret saved" in html)
-    assert ("settings.secret_ph" in html) or ("Secret / 签名密钥（可选）" in html) or ("signing key" in html.lower())
-    assert ("Save &amp; test" in html) or ("Save & test" in html) or ("保存并测试" in html)
-    assert ("settings.task_iap_review" in html) or ("IAP 审核截图上传" in html) or ("IAP review screenshot upload" in html)
-    assert "iap-review-screenshots" in html
-    assert "save() {\n             this.persist(true).catch(() => {});" in html
-    assert "config: null" not in html
-    assert "providers: {" in html
-    assert "feishu: {enabled: false, url: '', secret: ''}" in html
+def test_settings_page_has_webhook_card():
+    src = Path("frontend/src/views/system/SettingsTab.vue").read_text(encoding="utf-8")
+    assert "/api/settings/webhooks" in src
+    assert "settings.webhook_title" in src
+    assert "settings.provider_feishu" in src
+    assert "settings.provider_wecom" in src
+    assert "settings.provider_dingtalk" in src
+    assert "settings.secret_kept" in src
+    assert "settings.secret_ph" in src
+    assert "settings.save_test" in src
+    assert "iap-review-screenshots" in src
+    assert "settings.task_iap_review" in src
 
 
 def test_settings_webhooks_post_saves_config(client: TestClient):

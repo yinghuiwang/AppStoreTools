@@ -9,13 +9,17 @@ except ModuleNotFoundError:  # pragma: no cover - Python < 3.11
     import tomli as tomllib
 
 
-def test_web_ui_template_dependency_is_packaged():
+def test_web_spa_assets_are_packaged():
     pyproject_path = Path(__file__).resolve().parents[1] / "pyproject.toml"
     pyproject = tomllib.loads(pyproject_path.read_text())
 
     dependencies = pyproject["project"]["dependencies"]
+    force_include = pyproject["tool"]["hatch"]["build"]["targets"]["wheel"]["force-include"]
 
-    assert any(dep.lower().startswith("jinja2") for dep in dependencies)
+    assert not any(dep.lower().startswith("jinja2") for dep in dependencies)
+    assert force_include["src/asc/web/static/spa"] == "asc/web/static/spa"
+    assert force_include["src/asc/web/locales/zh.json"] == "asc/web/locales/zh.json"
+    assert force_include["src/asc/web/locales/en.json"] == "asc/web/locales/en.json"
 
 
 def test_cryptography_is_not_a_hard_install_dependency():
