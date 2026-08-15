@@ -1,10 +1,18 @@
 <script setup lang="ts">
+import { onMounted } from "vue";
 import AppSidebar from "@/components/AppSidebar.vue";
 import AppTopbar from "@/components/AppTopbar.vue";
 import RightRail from "@/components/RightRail.vue";
 import { useProfile } from "@/composables/useProfile";
+import { useTaskLog } from "@/composables/useTaskLog";
 
 const { snapshot } = useProfile();
+
+onMounted(() => {
+  window.addEventListener("pagehide", () => {
+    useTaskLog().disconnect();
+  });
+});
 </script>
 
 <template>

@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRightRail } from "@/composables/useRightRail";
+import TaskLogPanel from "@/components/TaskLogPanel.vue";
 
 const { t } = useI18n();
 const { open, tab, width, collapse, openAgent, persistChrome, setWidth } = useRightRail();
@@ -72,7 +73,7 @@ onBeforeUnmount(() => {
         <slot name="agent" />
       </div>
       <div v-show="tab === 'logs'" class="pane">
-        <slot name="logs" />
+        <TaskLogPanel />
       </div>
     </section>
     <aside class="strip" data-agent-rail>
