@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block extra_head %}
-  <link rel="stylesheet" href="/static/listing-workbench.css?v={{ asset_version }}">
+  <link rel="stylesheet" href="/static/listing-workbench.css?v={{ asset_version }}-locales-grid">
 {% endblock %}
 {% block content %}
 <div class="">
@@ -41,6 +41,8 @@
       error: '',
       locales: [],
       presenceAvailable: false,
+      presenceLoaded: false,
+      loadSeq: 0,
       query: '',
       copiedCode: '',
       copyFailedCode: '',
@@ -1065,26 +1067,62 @@
 
     localeCatalogEnsureLoaded(force) {
       if (!force && (this.localeCatalog.loaded || this.localeCatalog.loading)) return;
+      const seq = (this.localeCatalog.loadSeq = (this.localeCatalog.loadSeq || 0) + 1);
       this.localeCatalog.loading = true;
       this.localeCatalog.error = '';
+      this.localeCatalog.presenceLoaded = false;
+      this.localeCatalog.presenceAvailable = false;
       fetch('/api/metadata/locales')
         .then(async r => {
           const data = await r.json().catch(() => ({}));
           if (!r.ok) {
             throw new Error(data.error || window.t('metadata.locales_catalog_unavailable'));
           }
+          if (seq !== this.localeCatalog.loadSeq) return;
           this.localeCatalog.locales = data.locales || [];
-          this.localeCatalog.presenceAvailable = !!data.presenceAvailable;
+          this.localeCatalog.presenceAvailable = false;
           this.localeCatalog.loaded = true;
           this.localeCatalog.error = '';
+          this.localeCatalogLoadPresence(seq);
         })
         .catch(e => {
+          if (seq !== this.localeCatalog.loadSeq) return;
           this.localeCatalog.loaded = false;
           this.localeCatalog.locales = [];
           this.localeCatalog.presenceAvailable = false;
+          this.localeCatalog.presenceLoaded = false;
           this.localeCatalog.error = e.message || window.t('metadata.locales_catalog_unavailable');
         })
-        .finally(() => { this.localeCatalog.loading = false; });
+        .finally(() => {
+          if (seq === this.localeCatalog.loadSeq) this.localeCatalog.loading = false;
+        });
+    },
+
+    localeCatalogLoadPresence(seq) {
+      fetch('/api/metadata/locales/presence')
+        .then(async r => {
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error('presence');
+          return data;
+        })
+        .then(data => {
+          if (seq !== this.localeCatalog.loadSeq) return;
+          const available = !!data.presenceAvailable;
+          const codes = available ? new Set(data.codes || []) : new Set();
+          this.localeCatalog.locales = (this.localeCatalog.locales || []).map(row => ({
+            code: row.code,
+            name_en: row.name_en,
+            name_zh: row.name_zh,
+            present: codes.has(row.code),
+          }));
+          this.localeCatalog.presenceAvailable = available;
+          this.localeCatalog.presenceLoaded = true;
+        })
+        .catch(() => {
+          if (seq !== this.localeCatalog.loadSeq) return;
+          this.localeCatalog.presenceAvailable = false;
+          this.localeCatalog.presenceLoaded = true;
+        });
     },
 
     localeCatalogFiltered() {
@@ -1644,13 +1682,16 @@
 
     <div id="run-result"></div>
 
+    <template x-teleport="body">
     <div x-show="localeCatalog.open" x-cloak
-         class="fixed inset-0 flex items-center justify-center z-50"
+         class="locale-catalog-overlay"
          style="background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);"
          @keydown.escape.window="if (localeCatalog.open) localeCatalogClose()"
          @click.self="localeCatalogClose()">
-      <div class="card w-[520px] max-w-[calc(100vw-32px)]" @click.stop>
-        <div class="card-header flex items-center justify-between gap-3">
+      <div class="card locale-catalog-dialog"
+           style="flex:0 0 min(920px, calc(100vw - 32px));width:min(920px, calc(100vw - 32px));max-width:min(920px, calc(100vw - 32px));min-width:min(720px, calc(100vw - 32px));max-height:85vh;"
+           @click.stop>
+        <div class="card-header flex items-center justify-between gap-3 shrink-0">
           <h3 class="text-xs uppercase tracking-widest text-obsidian-400 font-medium" x-text="window.t('metadata.locales_title')"></h3>
           <div class="flex items-center gap-2">
             <button type="button" class="btn-ghost" :disabled="localeCatalog.loading" @click="localeCatalogRefresh()" x-text="window.t('metadata.locales_refresh')"></button>
@@ -1662,17 +1703,17 @@
             </button>
           </div>
         </div>
-        <div class="card-body space-y-3">
-          <p class="listing-wb-hint"
-             x-show="localeCatalog.loaded && !localeCatalog.presenceAvailable"
+        <div class="card-body locale-catalog-body">
+          <p class="listing-wb-hint shrink-0"
+             x-show="localeCatalog.loaded && localeCatalog.presenceLoaded && !localeCatalog.presenceAvailable"
              x-text="window.t('metadata.locales_presence_unavailable')"></p>
           <input type="search"
                  x-ref="localeSearch"
                  x-model="localeCatalog.query"
-                 class="field-input w-full"
+                 class="field-input w-full shrink-0"
                  :placeholder="window.t('metadata.locales_search')"
                  autocomplete="off">
-          <div class="max-h-[min(60vh,420px)] overflow-y-auto">
+          <div class="locale-catalog-results">
             <p class="listing-wb-hint" x-show="localeCatalog.loading" x-text="window.t('common.loading')"></p>
             <p class="listing-wb-msg" style="color: var(--error);"
                x-show="!localeCatalog.loading && localeCatalog.error"
@@ -1680,31 +1721,32 @@
             <p class="listing-wb-hint"
                x-show="!localeCatalog.loading && !localeCatalog.error && localeCatalog.loaded && localeCatalogFiltered().length === 0"
                x-text="window.t('metadata.locales_empty')"></p>
-            <div class="flex flex-col gap-1"
+            <div class="locale-catalog-grid grid grid-cols-2 sm:grid-cols-3"
                  x-show="!localeCatalog.loading && !localeCatalog.error && localeCatalog.loaded">
               <template x-for="row in localeCatalogFiltered()" :key="row.code">
                 <button type="button"
-                        class="w-full text-left px-2 py-1.5 rounded hover:bg-obsidian-800/80 flex items-center gap-2"
+                        class="w-full min-w-0 text-left px-2 py-1.5 rounded flex items-center gap-1.5 overflow-hidden"
                         @click="localeCatalogCopy(row.code)">
-                  <span class="font-mono text-sm text-obsidian-100" x-text="row.code"></span>
-                  <span class="text-xs text-obsidian-400 truncate" x-text="localeCatalogDisplayName(row)"></span>
-                  <span class="badge badge-info ml-auto"
+                  <span class="font-mono text-sm text-obsidian-100 shrink-0" x-text="row.code"></span>
+                  <span class="text-xs text-obsidian-400 truncate min-w-0" x-text="localeCatalogDisplayName(row)"></span>
+                  <span class="badge badge-info ml-auto shrink-0"
                         x-show="row.present && localeCatalog.copiedCode !== row.code && localeCatalog.copyFailedCode !== row.code"
                         x-text="window.t('metadata.locales_present')"></span>
-                  <span class="text-xs ml-auto" style="color: var(--success);"
+                  <span class="text-xs ml-auto shrink-0" style="color: var(--success);"
                         x-show="localeCatalog.copiedCode === row.code"
                         x-text="window.t('metadata.locales_copied')"></span>
-                  <span class="text-xs ml-auto" style="color: var(--error);"
+                  <span class="text-xs ml-auto shrink-0" style="color: var(--error);"
                         x-show="localeCatalog.copyFailedCode === row.code"
                         x-text="window.t('metadata.locales_copy_failed')"></span>
                 </button>
               </template>
             </div>
           </div>
-          <p class="listing-wb-hint" x-text="window.t('metadata.locales_hint')"></p>
+          <p class="listing-wb-hint shrink-0" x-text="window.t('metadata.locales_hint')"></p>
         </div>
       </div>
     </div>
+    </template>
 
     <!-- Screenshot lightbox -->
 <div x-show="lightbox.open" x-cloak

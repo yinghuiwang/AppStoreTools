@@ -619,3 +619,75 @@
     grid-template-columns: 148px minmax(0, 1fr) minmax(0, 1fr) 44px;
   }
 }
+
+/* Locale catalog popup: wide dialog + explicit multi-column grid.
+   Do not use flex shrink-to-fit or auto-fill: both collapse to one column. */
+.locale-catalog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  box-sizing: border-box;
+}
+
+.locale-catalog-dialog {
+  box-sizing: border-box;
+  flex: 0 0 min(920px, calc(100vw - 32px));
+  width: min(920px, calc(100vw - 32px));
+  max-width: min(920px, calc(100vw - 32px));
+  min-width: min(720px, calc(100vw - 32px));
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.locale-catalog-dialog .card-header {
+  flex-shrink: 0;
+}
+
+.locale-catalog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.locale-catalog-results {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.locale-catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 8px;
+  width: 100%;
+  align-content: start;
+}
+
+.locale-catalog-grid > button:hover {
+  background: rgba(28, 28, 35, 0.8);
+}
+
+@media (min-width: 640px) {
+  .locale-catalog-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 900px) {
+  .locale-catalog-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
