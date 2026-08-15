@@ -250,6 +250,20 @@ def test_urls_locales_i18n_keys():
     assert "已选" in t("urls.locales_selected", lang="zh", selected=2, total=5)
 
 
+def test_build_phase_progress_i18n_keys():
+    load_catalog.cache_clear()
+    assert t("build.phase_archive", lang="zh") == "归档"
+    assert t("build.phase_export", lang="zh") == "导出"
+    assert t("build.phase_upload", lang="zh") == "上传"
+    assert t("build.phase_state_wait", lang="zh") == "等待"
+    assert t("build.phase_state_running", lang="zh") == "进行中"
+    assert t("build.phase_state_done", lang="zh") == "完成"
+    assert t("build.phase_state_error", lang="zh") == "失败"
+    assert t("build.phase_state_canceled", lang="zh") == "已终止"
+    assert t("build.phase_archive", lang="en") == "Archive"
+    assert t("build.phase_state_running", lang="en") == "In progress"
+
+
 def test_agent_attach_i18n_keys():
     load_catalog.cache_clear()
     assert t("agent.attach", lang="zh") == "添加上下文"

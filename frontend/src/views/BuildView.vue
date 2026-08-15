@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute } from "vue-router";
 import { ApiError, apiErrorMessage, httpForm, httpJson } from "@/api/http";
-import TaskRunBar from "@/components/TaskRunBar.vue";
+import BuildStageProgress from "@/components/BuildStageProgress.vue";
 import { useBrowse } from "@/composables/useBrowse";
 import { useProfile } from "@/composables/useProfile";
 import { useRightRail } from "@/composables/useRightRail";
@@ -29,7 +29,8 @@ const rail = useRightRail();
 const empty = computed(() => (snapshot.value?.current_profile || "") === "");
 const alert = ref("");
 const taskId = ref("");
-const mode = ref(route.query.action === "build-upload" ? "full" : "full");
+const mode = ref<"full" | "build" | "deploy">("full");
+const runMode = ref<"full" | "build" | "deploy">("full");
 const signing = ref("auto");
 const project = ref("");
 const scheme = ref("");
@@ -85,6 +86,7 @@ async function run() {
     body.set("dry_run", dryRun.value ? "true" : "");
     body.set("reuse_archive", reuseArchive.value ? "true" : "");
     const { task_id } = await httpForm<{ task_id: string }>("/api/build/run", body);
+    runMode.value = mode.value;
     taskId.value = task_id;
     rail.openLogs(task_id);
   } catch (err) {
@@ -164,7 +166,12 @@ onMounted(() => {
       <label class="check"><input v-model="dryRun" type="checkbox" /> {{ t("build.dry_run") }}</label>
       <label class="check"><input v-model="reuseArchive" type="checkbox" /> {{ t("build.reuse_reuse") }}</label>
       <el-button type="primary" :disabled="empty" @click="run">{{ t("common.submit") }}</el-button>
-      <TaskRunBar :task-id="taskId" />
+      <BuildStageProgress
+        v-if="taskId"
+        :task-id="taskId"
+        :mode="runMode"
+        @retry="taskId = ''"
+      />
     </div>
   </div>
 </template>

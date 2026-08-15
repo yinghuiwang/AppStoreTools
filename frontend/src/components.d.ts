@@ -11,6 +11,7 @@ declare module 'vue' {
     AgentPanel: typeof import('./components/AgentPanel.vue')['default']
     AppSidebar: typeof import('./components/AppSidebar.vue')['default']
     AppTopbar: typeof import('./components/AppTopbar.vue')['default']
+    BuildStageProgress: typeof import('./components/BuildStageProgress.vue')['default']
     ElAlert: typeof import('element-plus/es')['ElAlert']
     ElButton: typeof import('element-plus/es')['ElButton']
     ElDialog: typeof import('element-plus/es')['ElDialog']

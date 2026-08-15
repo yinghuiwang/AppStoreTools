@@ -507,6 +507,36 @@ def test_build_web_starter_uses_start_background_task():
     assert "phase" in starter or "_build_phase_plan" in starter
 
 
+def test_vue_build_page_restores_sse_stage_progress():
+    """Build page shows archive/export/upload stages from existing task SSE progress."""
+    root = Path(__file__).resolve().parents[1]
+    view = (root / "frontend/src/views/BuildView.vue").read_text(encoding="utf-8")
+    stage = (root / "frontend/src/components/BuildStageProgress.vue").read_text(
+        encoding="utf-8"
+    )
+    task_log = (root / "frontend/src/composables/useTaskLog.ts").read_text(
+        encoding="utf-8"
+    )
+
+    assert "BuildStageProgress" in view
+    assert "TaskRunBar" not in view
+    assert "/api/task/" in task_log
+    assert "/stream" in task_log
+    assert 'phase: String(raw.phase || "")' in task_log
+    assert "addEventListener(\"progress\"" in task_log
+    assert "build.phase_archive" in stage
+    assert "build.phase_export" in stage
+    assert "build.phase_upload" in stage
+    assert 'full: ["archive", "export", "upload"]' in stage
+    assert 'build: ["archive", "export"]' in stage
+    assert 'deploy: ["upload"]' in stage
+    assert "progress.value.phase" in stage
+    assert "progress.value.pct" in stage
+    assert "progress.value.phase_index" in stage
+    assert "/api/build/progress" not in stage
+    assert "EventSource" not in stage
+
+
 def test_spinner_streams_lines_to_on_log_line_on_success(tmp_path):
     """Live tee should forward every non-empty line to on_log_line (Web TaskReporter)."""
     from asc.progress import Spinner
