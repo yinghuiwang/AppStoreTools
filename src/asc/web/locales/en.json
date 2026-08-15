@@ -497,6 +497,8 @@
   "guard.no_bound_app": "None",
   "guard.ip_unavailable": "Unavailable; IP binding check skipped",
   "guard.bound_at": "Bound at",
+  "guard.app_id": "App ID",
+  "guard.credential": "Credential key ID",
   "guard.note": "Note",
   "guard.empty": "No bindings yet",
   "guard.help1": "Guard binds credentials to this machine and IP to prevent credential abuse.",

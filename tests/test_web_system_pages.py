@@ -105,6 +105,36 @@ def test_update_tab_keeps_status_in_check_card() -> None:
     assert 't("build.verbose")' in src
 
 
+def test_guard_tab_restores_old_information_architecture() -> None:
+    src = (FRONTEND / "views" / "system" / "GuardTab.vue").read_text(encoding="utf-8")
+    assert "el-table" not in src
+    assert "el-table-column" not in src
+    assert "rebuildAppRows" in src
+    assert "app_notes" in src
+    assert "current_profile" in src
+    assert 't("guard.current_env")' in src
+    assert 't("guard.bindings")' in src
+    assert 't("guard.ip_address")' in src
+    assert 't("guard.machine")' in src
+    assert 't("guard.ip")' in src
+    assert 't("guard.credential")' in src
+    assert 't("guard.app_id")' in src
+    assert 't("guard.manual_add")' in src
+    assert 't("guard.save_note")' in src
+    assert 't("guard.help1")' in src
+    assert 't("guard.help2")' in src
+    assert "asc guard enable/disable/unbind" in src
+    assert src.find('t("guard.current_env")') < src.find('t("guard.bindings")')
+    assert src.find('t("guard.bindings")') < src.find('t("guard.help1")')
+    assert src.find('t("guard.enabled")') < src.find('t("guard.current_env")')
+    assert ":label=\"t('guard.machine')\"" not in src
+    from asc.web.i18n import load_catalog, t
+    load_catalog.cache_clear()
+    assert t("guard.credential", lang="zh") == "凭证 Key ID"
+    assert t("guard.credential", lang="en") == "Credential key ID"
+    assert t("guard.app_id", lang="en") == "App ID"
+
+
 def test_retry_paths_map_legacy_system_tabs() -> None:
     types_src = (FRONTEND / "api" / "types.ts").read_text(encoding="utf-8")
     assert '"/system/update": "/update"' in types_src
