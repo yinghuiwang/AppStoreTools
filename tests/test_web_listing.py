@@ -262,6 +262,45 @@ def test_metadata_run_explicit_empty_screenshot_scopes_list_returns_400(client):
     assert response.json()["error"] == "no screenshots selected"
 
 
+def test_metadata_run_locales_json_is_passed_to_screenshot_core(client, tmp_path):
+    """Upload-tab locale list (no screenshot_scopes) still limits screenshot jobs."""
+    from asc.web import routes_api
+
+    shots = tmp_path / "screenshots"
+    shots.mkdir()
+    captured = {}
+
+    def fake_upload_screenshots_core(*args, **kwargs):
+        captured["kwargs"] = kwargs
+        return None
+
+    with patch("asc.web.routes_api.Config", return_value=MagicMock()), \
+         patch("asc.web.routes_api.make_api_from_config", return_value=(MagicMock(), "app123")), \
+         patch(
+             "asc.commands.screenshots._upload_screenshots_core",
+             side_effect=fake_upload_screenshots_core,
+         ):
+        response = client.post(
+            "/api/metadata/run",
+            cookies={"asc_profile": "test"},
+            data={
+                "screenshots_dir": str(shots),
+                "include_metadata": "",
+                "include_screenshots": "1",
+                "dry_run": "1",
+                "locales_json": json.dumps(["zh-Hans"]),
+            },
+        )
+        assert response.status_code == 200
+        task_id = response.json()["task_id"]
+        task = _wait_for_task(routes_api, task_id)
+
+    assert task is not None
+    assert task["status"] == TaskStatus.DONE
+    assert captured["kwargs"]["locales"] == ["zh-Hans"]
+    assert captured["kwargs"]["screenshot_scopes"] is None
+
+
 def test_metadata_run_omitted_filter_fields_legacy_unfiltered_200(client, tmp_path):
     """Omitted filter fields (not present in form) keep legacy unfiltered upload."""
     from asc.web import routes_api
@@ -702,6 +741,30 @@ def test_listing_screenshots_replace_rejects_new_name_traversal(client, tmp_path
     assert r.status_code == 400
     assert img_path.read_bytes() != b"new-image-bytes"
     assert not (shots / "evil.png").exists()
+
+
+def test_upload_tab_uses_flat_locale_picker():
+    """Upload tab keeps metadata/screenshot scope + locale list; no field/device checkboxes."""
+    from asc.web.i18n import t
+
+    src = Path("frontend/src/views/listing/UploadTab.vue").read_text(encoding="utf-8")
+    assert "fields_by_locale_json" not in src
+    assert "screenshot_scopes_json" not in src
+    assert "toggleField" not in src
+    assert "toggleScope" not in src
+    assert "APP_IPHONE" not in src
+    assert "metadata.field_name" not in src
+    assert "locales_json" in src
+    assert "metadata.upload_locales" in src
+    assert "metadata.upload_locales_all" in src
+    assert "includeMetadata" in src
+    assert "includeScreenshots" in src
+    assert t("metadata.upload_locales", lang="zh") == "语言"
+    assert t("metadata.upload_locales_all", lang="zh") == "全部语言"
+    assert t("metadata.upload_no_locales", lang="zh") == "请至少勾选一种语言"
+    assert t("metadata.upload_locales", lang="en") == "Locales"
+    assert t("metadata.upload_locales_all", lang="en") == "All locales"
+    assert t("metadata.upload_no_locales", lang="en") == "Select at least one locale"
 
 
 def test_listing_view_tabs_start_with_upload():

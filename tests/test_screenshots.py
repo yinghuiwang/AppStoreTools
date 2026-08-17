@@ -182,6 +182,64 @@ def test_upload_screenshots_happy_path(tmp_path):
     assert "commit_screenshot" in call_names
 
 
+def test_upload_screenshots_filters_by_locales(tmp_path):
+    """Locale list (no display-type scopes) keeps only matching screenshot jobs."""
+    (tmp_path / "en-US").mkdir()
+    (tmp_path / "zh-Hans").mkdir()
+    _make_png(tmp_path / "en-US" / "1.png", 1290, 2796)
+    _make_png(tmp_path / "zh-Hans" / "1.png", 1290, 2796)
+
+    class MultiLocaleAPI(ScreenshotFakeAPI):
+        def get_version_localizations(self, version_id):
+            return [
+                {"id": "loc_en", "attributes": {"locale": "en-US"}},
+                {"id": "loc_zh", "attributes": {"locale": "zh-Hans"}},
+            ]
+
+        def create_screenshot_set(self, localization_id, display_type):
+            self.calls.append(("create_screenshot_set", localization_id, display_type))
+            return {"data": {"id": f"set_{localization_id}"}}
+
+    api = MultiLocaleAPI()
+    with patch("time.sleep"):
+        _upload_screenshots_core(api, "app1", str(tmp_path), locales=["zh-Hans"])
+
+    sets = [c for c in api.calls if c[0] == "create_screenshot_set"]
+    assert sets == [("create_screenshot_set", "loc_zh", "APP_IPHONE_67")]
+
+
+def test_upload_screenshots_scopes_take_precedence_over_locales(tmp_path):
+    """Explicit screenshot_scopes win over a locales list."""
+    (tmp_path / "en-US").mkdir()
+    (tmp_path / "zh-Hans").mkdir()
+    _make_png(tmp_path / "en-US" / "1.png", 1290, 2796)
+    _make_png(tmp_path / "zh-Hans" / "1.png", 1290, 2796)
+
+    class MultiLocaleAPI(ScreenshotFakeAPI):
+        def get_version_localizations(self, version_id):
+            return [
+                {"id": "loc_en", "attributes": {"locale": "en-US"}},
+                {"id": "loc_zh", "attributes": {"locale": "zh-Hans"}},
+            ]
+
+        def create_screenshot_set(self, localization_id, display_type):
+            self.calls.append(("create_screenshot_set", localization_id, display_type))
+            return {"data": {"id": f"set_{localization_id}"}}
+
+    api = MultiLocaleAPI()
+    with patch("time.sleep"):
+        _upload_screenshots_core(
+            api,
+            "app1",
+            str(tmp_path),
+            locales=["zh-Hans"],
+            screenshot_scopes=[{"locale": "en-US", "display_type": "APP_IPHONE_67"}],
+        )
+
+    sets = [c for c in api.calls if c[0] == "create_screenshot_set"]
+    assert sets == [("create_screenshot_set", "loc_en", "APP_IPHONE_67")]
+
+
 def test_upload_screenshots_skips_locales_without_local_folder(tmp_path):
     """Default: only locales with a local screenshots folder are uploaded."""
     en_dir = tmp_path / "en-US"

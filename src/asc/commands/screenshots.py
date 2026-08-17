@@ -313,6 +313,7 @@ def _upload_screenshots_core(
     manage_phases: bool = True,
     finalize: bool = True,
     screenshot_scopes: list[dict] | None = None,
+    locales: Optional[list[str]] = None,
     fallback_en_us: bool = False,
 ):
     """Core screenshots upload logic"""
@@ -392,6 +393,9 @@ def _upload_screenshots_core(
             for locale, loc_data, folder, files, display_type, used_fallback in jobs
             if (locale, display_type) in keep
         ]
+    elif locales:
+        wanted = set(locales)
+        jobs = [job for job in jobs if job[0] in wanted]
 
     total_files = sum(len(files) for _, _, _, files, _, _ in jobs)
     locales_count = len({locale for locale, _, _, _, _, _ in jobs})

@@ -434,6 +434,7 @@ def _start_metadata_task(
                     manage_phases=not combined,
                     finalize=True,
                     screenshot_scopes=screenshot_scopes,
+                    locales=locales,
                 )
 
             if cancel_event.is_set():
