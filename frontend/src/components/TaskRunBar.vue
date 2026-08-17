@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, onActivated, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRightRail } from "@/composables/useRightRail";
 import { useTaskLog } from "@/composables/useTaskLog";
@@ -16,17 +16,36 @@ const emit = defineEmits<{ back: [] }>();
 
 const { t } = useI18n();
 const rail = useRightRail();
-const { status, progress, cancel, subscribeIfNeeded } = useTaskLog();
+const { cancel, subscribeIfNeeded, setActiveTask, channelOf } = useTaskLog();
+const { status, progress } = channelOf(() => props.taskId);
 const canceling = ref(false);
+const rootEl = ref<HTMLElement | null>(null);
+
+function focusIfVisible() {
+  if (!props.taskId) return;
+  const el = rootEl.value;
+  if (el && el.getClientRects().length === 0) return;
+  setActiveTask(props.taskId);
+}
 
 watch(
   () => props.taskId,
   (id) => {
     canceling.value = false;
-    if (id) subscribeIfNeeded(id);
+    if (!id) return;
+    subscribeIfNeeded(id);
+    if (rootEl.value) focusIfVisible();
   },
   { immediate: true },
 );
+
+onMounted(() => {
+  void nextTick(focusIfVisible);
+});
+
+onActivated(() => {
+  void nextTick(focusIfVisible);
+});
 
 watch(status, (value) => {
   if (["done", "error", "canceled"].includes(value)) canceling.value = false;
@@ -67,7 +86,7 @@ async function onCancel() {
   if (!canCancel.value || canceling.value) return;
   canceling.value = true;
   try {
-    await cancel();
+    await cancel(props.taskId);
   } catch {
     canceling.value = false;
   }
@@ -77,6 +96,7 @@ async function onCancel() {
 <template>
   <section
     v-if="props.taskId"
+    ref="rootEl"
     class="run-panel"
     :class="`is-${runStatus}`"
     :aria-label="resolvedHeadline"

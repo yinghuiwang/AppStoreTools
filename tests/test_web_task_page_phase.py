@@ -75,8 +75,11 @@ def test_task_run_bar_offers_back_to_form():
 def test_task_run_bar_reuses_existing_sse():
     src = (FRONTEND / "components/TaskRunBar.vue").read_text(encoding="utf-8")
     assert "subscribeIfNeeded" in src
+    assert "setActiveTask" in src
     log = (FRONTEND / "composables/useTaskLog.ts").read_text(encoding="utf-8")
     assert "function subscribeIfNeeded" in log
-    assert "if (logTaskId.value === taskId) return" in log
+    assert "function setActiveTask" in log
+    assert "const activeTaskId = ref" in log
+    assert "const channels = reactive" in log
     rail = (FRONTEND / "composables/useRightRail.ts").read_text(encoding="utf-8")
-    assert "subscribeIfNeeded" in rail
+    assert "setActiveTask" in rail

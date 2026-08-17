@@ -81,7 +81,7 @@ export function useRightRail() {
     open.value = true;
     persistChrome();
     void import("@/composables/useTaskLog").then(({ useTaskLog }) => {
-      useTaskLog().subscribeIfNeeded(taskId);
+      useTaskLog().setActiveTask(taskId);
     });
   }
 

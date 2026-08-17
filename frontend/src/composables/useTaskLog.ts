@@ -1,4 +1,4 @@
-import { ref } from "vue";
+import { computed, reactive, ref, toValue, type MaybeRefOrGetter } from "vue";
 import { httpJson } from "@/api/http";
 
 type TaskProgress = {
@@ -11,68 +11,126 @@ type TaskProgress = {
 };
 
 type LogLine = { seq: number; message: string };
+type Connection = "idle" | "connecting" | "live" | "reconnecting" | "closed";
 
-const logTaskId = ref("");
-const lines = ref<LogLine[]>([]);
-const status = ref("");
-const progress = ref<TaskProgress>({
+type Channel = {
+  lines: LogLine[];
+  status: string;
+  progress: TaskProgress;
+  connection: Connection;
+  lastSeq: number;
+  retries: number;
+};
+
+type Runtime = {
+  source: EventSource | null;
+  reconnectTimer: number | null;
+  intentionalClose: boolean;
+};
+
+const EMPTY_LINES: LogLine[] = [];
+const EMPTY_PROGRESS: TaskProgress = {
   pct: 0, msg: "", phase: "", phase_label: "", phase_index: 0, phase_total: 0,
-});
-const connection = ref<"idle" | "connecting" | "live" | "reconnecting" | "closed">("idle");
+};
+
+const channels = reactive<Record<string, Channel>>({});
+const runtime = new Map<string, Runtime>();
+const activeTaskId = ref("");
+const logTaskId = activeTaskId;
 const follow = ref(true);
 
-let source: EventSource | null = null;
-let retries = 0;
-let lastSeq = 0;
-let reconnectTimer: number | null = null;
-let intentionalClose = false;
+const lines = computed(() => channels[activeTaskId.value]?.lines ?? EMPTY_LINES);
+const status = computed(() => channels[activeTaskId.value]?.status ?? "");
+const progress = computed(() => channels[activeTaskId.value]?.progress ?? EMPTY_PROGRESS);
+const connection = computed(() => channels[activeTaskId.value]?.connection ?? "idle");
 
-function closeSource() {
-  intentionalClose = true;
-  if (reconnectTimer != null) {
-    window.clearTimeout(reconnectTimer);
-    reconnectTimer = null;
+function emptyProgress(): TaskProgress {
+  return { pct: 0, msg: "", phase: "", phase_label: "", phase_index: 0, phase_total: 0 };
+}
+
+function ensureChannel(taskId: string): Channel {
+  if (!channels[taskId]) {
+    channels[taskId] = {
+      lines: [],
+      status: "",
+      progress: emptyProgress(),
+      connection: "idle",
+      lastSeq: 0,
+      retries: 0,
+    };
   }
-  source?.close();
-  source = null;
+  if (!runtime.has(taskId)) {
+    runtime.set(taskId, { source: null, reconnectTimer: null, intentionalClose: false });
+  }
+  return channels[taskId];
+}
+
+function closeSource(taskId: string) {
+  const rt = runtime.get(taskId);
+  if (!rt) return;
+  rt.intentionalClose = true;
+  if (rt.reconnectTimer != null) {
+    window.clearTimeout(rt.reconnectTimer);
+    rt.reconnectTimer = null;
+  }
+  rt.source?.close();
+  rt.source = null;
 }
 
 function subscribeIfNeeded(taskId: string) {
   if (!taskId) return;
-  if (logTaskId.value === taskId) return;
-  subscribe(taskId);
+  const ch = ensureChannel(taskId);
+  const rt = runtime.get(taskId);
+  if (rt?.source) return;
+  if (rt?.reconnectTimer != null) return;
+  if (ch.connection === "connecting" || ch.connection === "live" || ch.connection === "reconnecting") return;
+  if (["done", "error", "canceled"].includes(ch.status) && (ch.lines.length > 0 || ch.lastSeq > 0)) {
+    return;
+  }
+  openEventSource(taskId, ch.lastSeq);
+}
+
+function setActiveTask(taskId: string) {
+  if (!taskId) return;
+  if (activeTaskId.value !== taskId) {
+    activeTaskId.value = taskId;
+    void import("@/composables/useRightRail").then(({ useRightRail }) => {
+      const rail = useRightRail();
+      if (rail.logTaskId.value === taskId) return;
+      rail.logTaskId.value = taskId;
+      rail.persistChrome();
+    });
+  }
+  subscribeIfNeeded(taskId);
 }
 
 function subscribe(taskId: string) {
-  closeSource();
-  logTaskId.value = taskId;
-  lines.value = [];
-  lastSeq = 0;
-  retries = 0;
-  status.value = "";
-  progress.value = {
-    pct: 0, msg: "", phase: "", phase_label: "", phase_index: 0, phase_total: 0,
-  };
-  connection.value = "connecting";
-  openEventSource(taskId, 0);
+  setActiveTask(taskId);
 }
 
 function openEventSource(taskId: string, after: number) {
-  closeSource();
-  intentionalClose = false;
+  const ch = ensureChannel(taskId);
+  const rt = runtime.get(taskId);
+  if (!rt) return;
+  closeSource(taskId);
+  rt.intentionalClose = false;
+  ch.connection = "connecting";
   const url = `/api/task/${encodeURIComponent(taskId)}/stream?after=${encodeURIComponent(String(after))}`;
-  source = new EventSource(url);
+  const source = new EventSource(url);
+  rt.source = source;
   source.addEventListener("log", (event) => {
-    retries = 0;
-    connection.value = "live";
-    const seq = Number((event as MessageEvent).lastEventId || lastSeq);
-    lastSeq = Number.isFinite(seq) ? seq : lastSeq;
-    lines.value = [...lines.value, { seq: lastSeq, message: (event as MessageEvent).data }];
+    if (runtime.get(taskId)?.source !== source) return;
+    ch.retries = 0;
+    ch.connection = "live";
+    const seq = Number((event as MessageEvent).lastEventId || ch.lastSeq);
+    ch.lastSeq = Number.isFinite(seq) ? seq : ch.lastSeq;
+    ch.lines = [...ch.lines, { seq: ch.lastSeq, message: (event as MessageEvent).data }];
   });
   source.addEventListener("progress", (event) => {
+    if (runtime.get(taskId)?.source !== source) return;
     try {
       const raw = JSON.parse((event as MessageEvent).data || "{}") as Partial<TaskProgress>;
-      progress.value = {
+      ch.progress = {
         pct: Number(raw.pct || 0),
         msg: String(raw.msg || ""),
         phase: String(raw.phase || ""),
@@ -85,68 +143,116 @@ function openEventSource(taskId: string, after: number) {
     }
   });
   const finish = (value: string) => {
-    status.value = value;
-    connection.value = "closed";
-    closeSource();
+    if (runtime.get(taskId)?.source !== source) return;
+    ch.status = value;
+    ch.connection = "closed";
+    closeSource(taskId);
   };
   source.addEventListener("done", () => finish("done"));
   source.addEventListener("canceled", () => finish("canceled"));
   source.addEventListener("error_event", (event) => {
-    status.value = "error";
-    lines.value = [...lines.value, { seq: lastSeq, message: (event as MessageEvent).data }];
-    connection.value = "closed";
-    closeSource();
+    if (runtime.get(taskId)?.source !== source) return;
+    ch.status = "error";
+    ch.lines = [...ch.lines, { seq: ch.lastSeq, message: (event as MessageEvent).data }];
+    ch.connection = "closed";
+    closeSource(taskId);
   });
   source.onerror = () => {
-    if (intentionalClose) return;
+    if (runtime.get(taskId)?.source !== source) return;
+    if (runtime.get(taskId)?.intentionalClose) return;
     void recover(taskId);
   };
 }
 
 async function recover(taskId: string) {
-  closeSource();
-  connection.value = "reconnecting";
+  const ch = channels[taskId];
+  const rt = runtime.get(taskId);
+  if (!ch || !rt) return;
+  closeSource(taskId);
+  ch.connection = "reconnecting";
   try {
     const state = await httpJson<{ status: string }>(
       `/api/task/${encodeURIComponent(taskId)}/status`,
     );
     const st = String(state.status || "");
     if (["done", "error", "canceled"].includes(st)) {
-      status.value = st;
-      connection.value = "closed";
+      ch.status = st;
+      ch.connection = "closed";
       return;
     }
   } catch {
     /* fall through to reconnect */
   }
-  if (retries >= 5) {
-    connection.value = "closed";
+  if (ch.retries >= 5) {
+    ch.connection = "closed";
     return;
   }
-  retries += 1;
-  reconnectTimer = window.setTimeout(() => {
-    connection.value = "connecting";
-    openEventSource(taskId, lastSeq);
+  ch.retries += 1;
+  rt.intentionalClose = false;
+  rt.reconnectTimer = window.setTimeout(() => {
+    rt.reconnectTimer = null;
+    ch.connection = "connecting";
+    openEventSource(taskId, ch.lastSeq);
   }, 1000);
 }
 
-function disconnect() {
-  closeSource();
-  connection.value = "closed";
+function disconnect(taskId?: string) {
+  const ids = taskId ? [taskId] : Object.keys(channels);
+  for (const id of ids) {
+    closeSource(id);
+    const ch = channels[id];
+    if (ch) ch.connection = "closed";
+  }
 }
 
-async function cancel() {
-  if (!logTaskId.value) return;
-  await httpJson(`/api/task/${encodeURIComponent(logTaskId.value)}/cancel`, { method: "POST" });
+async function cancel(taskId?: string) {
+  const id = taskId || activeTaskId.value;
+  if (!id) return;
+  await httpJson(`/api/task/${encodeURIComponent(id)}/cancel`, { method: "POST" });
 }
 
 function clearLocal() {
-  lines.value = [];
+  const ch = channels[activeTaskId.value];
+  if (ch) ch.lines = [];
+}
+
+function channelOf(taskId: MaybeRefOrGetter<string>) {
+  return {
+    status: computed(() => {
+      const id = toValue(taskId);
+      return id && channels[id] ? channels[id].status : "";
+    }),
+    progress: computed(() => {
+      const id = toValue(taskId);
+      return id && channels[id] ? channels[id].progress : EMPTY_PROGRESS;
+    }),
+    lines: computed(() => {
+      const id = toValue(taskId);
+      return id && channels[id] ? channels[id].lines : EMPTY_LINES;
+    }),
+    connection: computed(() => {
+      const id = toValue(taskId);
+      return id && channels[id] ? channels[id].connection : "idle";
+    }),
+  };
 }
 
 export function useTaskLog() {
   return {
-    logTaskId, lines, status, progress, connection, follow,
-    subscribe, subscribeIfNeeded, disconnect, cancel, clearLocal,
+    activeTaskId,
+    logTaskId,
+    channels,
+    lines,
+    status,
+    progress,
+    connection,
+    follow,
+    channelOf,
+    setActiveTask,
+    subscribe,
+    subscribeIfNeeded,
+    disconnect,
+    cancel,
+    clearLocal,
   };
 }

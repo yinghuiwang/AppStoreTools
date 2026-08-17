@@ -76,7 +76,7 @@ const { t } = useI18n();
 const router = useRouter();
 const { snapshot } = useProfile();
 const rail = useRightRail();
-const logs = useTaskLog();
+const { channels } = useTaskLog();
 defineOptions({ name: "DashboardView" });
 const loading = ref(true);
 const refreshError = ref("");
@@ -198,18 +198,24 @@ watch([range, profileFilter, kind, statusFilter], () => {
 });
 
 watch(
-  () => [logs.logTaskId.value, logs.progress.value.pct, logs.progress.value.msg] as const,
-  ([taskId, pct, msg]) => {
-    const task = summary.value?.tasks.find((item) => item.id === taskId);
-    if (!task) return;
-    task.progress = { pct, msg };
+  channels,
+  () => {
+    const tasks = summary.value?.tasks;
+    if (!tasks) return;
+    for (const task of tasks) {
+      const ch = channels[task.id];
+      if (!ch) continue;
+      task.progress = { pct: ch.progress.pct, msg: ch.progress.msg };
+    }
   },
+  { deep: true },
 );
 
 watch(
-  () => logs.status.value,
-  (status) => {
-    if (status === "done" || status === "error" || status === "canceled") void load();
+  () => Object.entries(channels).map(([id, ch]) => `${id}:${ch.status}`).sort().join(","),
+  (next, prev) => {
+    if (!prev || next === prev) return;
+    if (/(?:^|,)[^:]+:(?:done|error|canceled)(?:,|$)/.test(next)) void load();
   },
 );
 

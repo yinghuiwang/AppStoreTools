@@ -15,7 +15,7 @@ const {
   progress,
   connection,
   follow,
-  subscribe,
+  setActiveTask,
   cancel,
   clearLocal,
 } = useTaskLog();
@@ -44,7 +44,7 @@ function explain() {
 }
 
 watch(
-  () => [lines.value.length, follow.value] as const,
+  () => [logTaskId.value, lines.value.length, follow.value] as const,
   async () => {
     if (!follow.value) return;
     await nextTick();
@@ -54,14 +54,12 @@ watch(
 );
 
 onMounted(() => {
-  if (rail.logTaskId.value && !logTaskId.value) {
-    subscribe(rail.logTaskId.value);
-  }
+  if (rail.logTaskId.value) setActiveTask(rail.logTaskId.value);
 });
 </script>
 
 <template>
-  <div class="logs">
+  <div class="logs" :data-log-task-id="logTaskId || undefined">
     <header class="head">
       <div class="head-row">
         <span class="title">{{ t("rail.tab.logs") }}</span>

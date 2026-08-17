@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute } from "vue-router";
 import { ApiError, apiErrorMessage, httpForm, httpJson } from "@/api/http";
@@ -8,13 +8,16 @@ import TaskRunBar from "@/components/TaskRunBar.vue";
 import { useBrowse } from "@/composables/useBrowse";
 import { useProfile } from "@/composables/useProfile";
 import { useRightRail } from "@/composables/useRightRail";
-import { useTaskPagePhase } from "@/composables/useTaskPagePhase";
+import { useTaskLog } from "@/composables/useTaskLog";
+import { useListingTab, useTaskPagePhase } from "@/composables/useTaskPagePhase";
 
 const { t } = useI18n();
 const route = useRoute();
 const browse = useBrowse();
 const { snapshot } = useProfile();
 const rail = useRightRail();
+const { setActiveTask } = useTaskLog();
+const { listingTab } = useListingTab();
 const { isForm, isRun, taskId, enterRun, backToForm } = useTaskPagePhase("listing-upload");
 const empty = computed(() => (snapshot.value?.current_profile || "") === "");
 const csvPath = ref(snapshot.value?.paths.csv || "data/appstore_info.csv");
@@ -70,6 +73,10 @@ async function run() {
     else throw err;
   }
 }
+
+watch(listingTab, (tab) => {
+  if (tab === "upload" && isRun.value && taskId.value) setActiveTask(taskId.value);
+});
 
 onMounted(() => {
   const action = String(route.query.action || "");

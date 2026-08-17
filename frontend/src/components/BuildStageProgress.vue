@@ -36,7 +36,8 @@ const props = defineProps<{
 const emit = defineEmits<{ back: [] }>();
 
 const { t } = useI18n();
-const { status, progress } = useTaskLog();
+const { channelOf } = useTaskLog();
+const { status, progress } = channelOf(() => props.taskId);
 
 const phaseIds = computed(() => PHASES[props.mode] || PHASES.full);
 

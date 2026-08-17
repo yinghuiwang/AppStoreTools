@@ -14,7 +14,7 @@ type Check = { ok: boolean; level: string; message: string; detail?: { version?:
 const { t } = useI18n();
 const { snapshot } = useProfile();
 const rail = useRightRail();
-const { status, logTaskId } = useTaskLog();
+const { channelOf } = useTaskLog();
 defineOptions({ name: "WhatsNewView" });
 
 const { isForm, isRun, taskId, meta, enterRun, backToForm } = useTaskPagePhase("whats-new");
@@ -30,6 +30,7 @@ const translateMode = ref(false);
 const sourceLocale = ref("auto");
 const translations = ref<Record<string, string>>({});
 const translateTaskId = computed(() => meta.value.translateTaskId || "");
+const translateLog = channelOf(translateTaskId);
 
 async function loadCheck() {
   checking.value = true;
@@ -126,11 +127,12 @@ async function pullTranslateResult() {
   }
 }
 
-watch([status, logTaskId], async () => {
-  if (translateTaskId.value && logTaskId.value === translateTaskId.value && status.value === "done") {
-    await pullTranslateResult();
-  }
-});
+watch(
+  () => translateLog.status.value,
+  async (st) => {
+    if (translateTaskId.value && st === "done") await pullTranslateResult();
+  },
+);
 
 onMounted(() => {
   if (!check.value) void loadCheck();

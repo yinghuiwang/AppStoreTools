@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, onMounted, ref, watch, type Ref } from "vue";
+import { computed, inject, onActivated, onMounted, ref, watch, type Ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { ApiError, apiErrorMessage, httpJson } from "@/api/http";
 import PageLoading from "@/components/PageLoading.vue";
@@ -7,6 +7,7 @@ import { useImageViewer } from "@/composables/useImageViewer";
 import { useProfile } from "@/composables/useProfile";
 import { useRightRail } from "@/composables/useRightRail";
 import { useTaskLog } from "@/composables/useTaskLog";
+import { useListingTab } from "@/composables/useTaskPagePhase";
 
 type Shot = { file_name: string; order: number; thumb_url: string; local_path: string; remote_id: string };
 type FieldDiff = { field: string; status: string; local: string; asc: string };
@@ -18,7 +19,8 @@ const { t } = useI18n();
 const { snapshot } = useProfile();
 const viewer = useImageViewer();
 const rail = useRightRail();
-const { status, logTaskId } = useTaskLog();
+const { listingTab } = useListingTab();
+const { setActiveTask, channelOf } = useTaskLog();
 const reloadTick = inject<Ref<number>>("listingReload", ref(0));
 const csvPath = ref(snapshot.value?.paths.csv || "data/appstore_info.csv");
 const shotsDir = ref(snapshot.value?.paths.screenshots || "data/screenshots");
@@ -31,6 +33,7 @@ const selectedScopes = ref<Record<string, boolean>>({});
 const alert = ref<{ level: string; message: string } | null>(null);
 const conflict = ref(false);
 const pullTaskId = ref("");
+const pullLog = channelOf(pullTaskId);
 const loading = ref(false);
 const loaded = ref(false);
 
@@ -157,11 +160,22 @@ async function pullShots() {
   rail.openLogs(task_id);
 }
 
-watch([status, logTaskId], () => {
-  if (pullTaskId.value && logTaskId.value === pullTaskId.value && status.value === "done") {
-    reloadTick.value += 1;
-    void load();
-  }
+watch(
+  () => pullLog.status.value,
+  (st) => {
+    if (pullTaskId.value && st === "done") {
+      reloadTick.value += 1;
+      void load();
+    }
+  },
+);
+
+watch(listingTab, (tab) => {
+  if (tab === "diff" && pullTaskId.value) setActiveTask(pullTaskId.value);
+});
+
+onActivated(() => {
+  if (listingTab.value === "diff" && pullTaskId.value) setActiveTask(pullTaskId.value);
 });
 
 onMounted(() => { void load(); });
