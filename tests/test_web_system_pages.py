@@ -135,18 +135,23 @@ def test_guard_tab_restores_old_information_architecture() -> None:
     assert t("guard.app_id", lang="en") == "App ID"
 
 
-def test_profiles_tab_uses_full_width_native_table() -> None:
+def test_profiles_tab_uses_full_width_wrapping_cards() -> None:
     src = (FRONTEND / "views" / "system" / "ProfilesTab.vue").read_text(encoding="utf-8")
     assert "el-table" not in src
     assert "el-table-column" not in src
-    assert 'class="profiles-table"' in src
-    assert "table-layout: fixed" in src
-    assert "text-overflow: ellipsis" in src
-    assert "white-space: nowrap" in src
+    assert 'class="profiles-table"' not in src
+    assert "table-layout: fixed" not in src
+    assert "text-overflow: ellipsis" not in src
+    assert "white-space: nowrap" not in src
+    assert 'class="profile-list"' in src
+    assert 'class="profile-card"' in src
+    assert 'class="profile-meta"' in src
+    assert "overflow-wrap: anywhere" in src
     assert 'class="badge"' in src
     assert 't("common.default")' in src
     assert 'v-if="!row.isDefault"' in src
     assert "profiles-page" in src
+    assert "max-width: none" in src
     assert "<el-dialog" in src
     assert src.find("profiles-page") < src.find("<el-dialog")
 

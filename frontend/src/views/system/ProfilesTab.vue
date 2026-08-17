@@ -162,36 +162,28 @@ onMounted(() => { void load(); });
         {{ t("profiles.empty") }}
         <span class="empty-hint">{{ t("profiles.empty_hint") }}</span>
       </p>
-      <div v-else class="table-wrap">
-        <table class="profiles-table">
-          <thead>
-            <tr>
-              <th class="col-name">{{ t("profiles.name") }}</th>
-              <th class="col-app">App ID</th>
-              <th class="col-issuer">Issuer</th>
-              <th class="col-actions">{{ t("index.col_actions") }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="row in rows" :key="row.name">
-              <td class="col-name">
-                <div class="name-cell">
-                  <span class="name mono" :title="row.name">{{ row.name }}</span>
-                  <span v-if="row.isDefault" class="badge">{{ t("common.default") }}</span>
-                </div>
-              </td>
-              <td class="col-app mono" :title="row.app_id">{{ row.app_id }}</td>
-              <td class="col-issuer mono" :title="row.issuer_id">{{ row.issuer_id }}</td>
-              <td class="col-actions">
-                <div class="actions">
-                  <el-button size="small" @click="openEdit(row.name)">{{ t("common.edit") }}</el-button>
-                  <el-button v-if="!row.isDefault" size="small" @click="setDefault(row.name)">{{ t("common.set_default") }}</el-button>
-                  <el-button size="small" @click="remove(row.name)">{{ t("common.delete") }}</el-button>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+      <div v-else class="profile-list">
+        <article v-for="row in rows" :key="row.name" class="profile-card">
+          <header class="profile-head">
+            <span class="name mono">{{ row.name }}</span>
+            <span v-if="row.isDefault" class="badge">{{ t("common.default") }}</span>
+          </header>
+          <div class="actions">
+            <el-button size="small" @click="openEdit(row.name)">{{ t("common.edit") }}</el-button>
+            <el-button v-if="!row.isDefault" size="small" @click="setDefault(row.name)">{{ t("common.set_default") }}</el-button>
+            <el-button size="small" @click="remove(row.name)">{{ t("common.delete") }}</el-button>
+          </div>
+          <dl class="profile-meta">
+            <div class="meta-item">
+              <dt>App ID</dt>
+              <dd class="mono">{{ row.app_id }}</dd>
+            </div>
+            <div class="meta-item">
+              <dt>Issuer</dt>
+              <dd class="mono">{{ row.issuer_id }}</dd>
+            </div>
+          </dl>
+        </article>
       </div>
     </div>
   </div>
@@ -259,57 +251,42 @@ onMounted(() => { void load(); });
   color: var(--text-faint);
   font-size: 12px;
 }
-.table-wrap {
+.profile-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   width: 100%;
   min-width: 0;
   flex: 1 1 auto;
-  overflow-x: auto;
 }
-.profiles-table {
+.profile-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "head actions"
+    "meta actions";
+  column-gap: 20px;
+  row-gap: 10px;
   width: 100%;
-  table-layout: fixed;
-  border-collapse: collapse;
-  font-size: 13px;
+  min-width: 0;
+  box-sizing: border-box;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
 }
-th,
-td {
-  padding: 10px 12px;
-  text-align: left;
-  vertical-align: middle;
-  border-bottom: 1px solid var(--border);
-}
-th {
-  color: var(--text-faint);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  white-space: nowrap;
-  background: var(--raised);
-}
-.col-name { width: 22%; }
-.col-app { width: 18%; }
-.col-issuer { width: auto; }
-.col-actions {
-  width: 1%;
-  white-space: nowrap;
-}
-.col-app,
-.col-issuer {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.name-cell {
+.profile-head {
+  grid-area: head;
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
   min-width: 0;
 }
 .name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
 }
 .badge {
   flex-shrink: 0;
@@ -323,13 +300,49 @@ th {
   padding: 1px 7px;
 }
 .actions {
+  grid-area: actions;
   display: inline-flex;
-  flex-wrap: nowrap;
+  flex-direction: row;
+  flex-wrap: wrap;
   align-items: center;
+  align-self: start;
   gap: 8px;
-  white-space: nowrap;
 }
 .actions :deep(.el-button + .el-button) {
   margin-left: 0;
+}
+.profile-meta {
+  grid-area: meta;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: 10px 28px;
+  margin: 0;
+  min-width: 0;
+}
+.meta-item dt {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 4px;
+}
+.meta-item dd {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+@media (max-width: 720px) {
+  .profile-card {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "head"
+      "meta"
+      "actions";
+  }
+  .profile-meta {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 </style>
