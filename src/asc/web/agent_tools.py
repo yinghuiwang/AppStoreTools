@@ -26,6 +26,7 @@ from asc.listing.local import (
     save_local_csv,
 )
 from asc.listing.models import FIELD_NAMES
+from asc.web.agent_knowledge import get_topic, search_notes
 from asc.web.agent_redact import redact_obj, redact_text
 from asc.web.agent_workspace import (
     FILE_MUTATION_OPS,
@@ -48,6 +49,8 @@ MODEL_TOOL_NAMES = (
     "get_task_log",
     "get_profile_context",
     "inspect_local",
+    "search_knowledge",
+    "get_knowledge",
     "grep",
     "search_files",
     "read_file",
@@ -190,6 +193,37 @@ OPENAI_TOOLS: list[dict] = [
         ["path"],
     ),
     _tool_schema(
+        "search_knowledge",
+        "Search packaged App Store Connect expert notes (locales, listing limits, "
+        "screenshots, IAP, version/What's New, tool pitfalls). Read-only package data; "
+        "does not use the user project sandbox. Call this before answering ASC listing, "
+        "language, IAP, or version-update questions.",
+        {
+            "query": {
+                "type": "string",
+                "description": "Search text, e.g. locale, keywords 字数, IAP types, what's new",
+            },
+            "topic": {
+                "type": "string",
+                "description": "Optional topic: locales, listing, screenshots, iap, version, pitfalls",
+            },
+        },
+        ["query"],
+    ),
+    _tool_schema(
+        "get_knowledge",
+        "Read one packaged ASC knowledge topic in full (truncated). "
+        "Topics: locales, listing, screenshots, iap, version, pitfalls. "
+        "Read-only; not part of the user project.",
+        {
+            "topic": {
+                "type": "string",
+                "description": "locales | listing | screenshots | iap | version | pitfalls",
+            },
+        },
+        ["topic"],
+    ),
+    _tool_schema(
         "propose_fix",
         "Validate and store a draft local-fix plan. Does not write business files.",
         {
@@ -255,6 +289,7 @@ OPENAI_TOOLS: list[dict] = [
         "write_file",
         "Draft a plan to write/replace a text file. Does not write until the user applies. "
         "Path is project-relative and must stay inside the workspace. "
+        "Cannot edit the packaged ASC knowledge base. "
         "Secret files (.env, *.p8, keys/, credentials, .git) are forbidden.",
         {
             "path": {"type": "string", "description": "Project-relative path to write"},
@@ -265,7 +300,8 @@ OPENAI_TOOLS: list[dict] = [
     _tool_schema(
         "create_file",
         "Draft a plan to create a new text file. Does not write until the user applies. "
-        "Fails if the file already exists. Path is project-relative; secrets are forbidden.",
+        "Fails if the file already exists. Path is project-relative; secrets are forbidden. "
+        "Cannot create files in the packaged ASC knowledge base.",
         {
             "path": {"type": "string", "description": "Project-relative path to create"},
             "content": {"type": "string", "description": "File content to write after apply"},
@@ -275,7 +311,8 @@ OPENAI_TOOLS: list[dict] = [
     _tool_schema(
         "delete_file",
         "Draft a plan to delete one file. Does not delete until the user applies. "
-        "Cannot delete directories, the project root, or secret files. Path is project-relative.",
+        "Cannot delete directories, the project root, secret files, or packaged knowledge. "
+        "Path is project-relative.",
         {
             "path": {"type": "string", "description": "Project-relative file to delete"},
         },
@@ -449,6 +486,20 @@ def _tool_get_profile_context(ctx: AgentToolContext, arguments: dict) -> dict:
         "build": build,
     }
     return redact_obj(_drop_secret_keys(payload))
+
+
+def _tool_search_knowledge(_ctx: AgentToolContext, arguments: dict) -> dict:
+    return search_notes(
+        str(arguments.get("query") or ""),
+        topic=arguments.get("topic"),
+    )
+
+
+def _tool_get_knowledge(_ctx: AgentToolContext, arguments: dict) -> dict:
+    topic = arguments.get("topic")
+    if not topic:
+        return {"ok": False, "error": "topic is required"}
+    return get_topic(str(topic))
 
 
 def _tool_inspect_local(ctx: AgentToolContext, arguments: dict) -> dict:
@@ -627,6 +678,8 @@ _HANDLERS: dict[str, Callable[[AgentToolContext, dict], dict]] = {
     "get_task_log": _tool_get_task_log,
     "get_profile_context": _tool_get_profile_context,
     "inspect_local": _tool_inspect_local,
+    "search_knowledge": _tool_search_knowledge,
+    "get_knowledge": _tool_get_knowledge,
     "grep": _tool_grep,
     "search_files": _tool_grep,
     "read_file": _tool_read_file,

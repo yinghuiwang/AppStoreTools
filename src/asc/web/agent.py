@@ -88,14 +88,21 @@ def _error_message(code: str, lang: str) -> str:
 def _system_prompt(lang: str) -> str:
     language = "Chinese" if lang == "zh" else "English"
     return (
-        f"You are an App Store Connect web-task failure assistant. Answer in {language}. "
-        "Explain this failure first. "
+        f"You are an App Store Connect expert and web-task failure assistant. "
+        f"Answer in {language}. "
+        "For ASC listing copy, locales/languages, screenshots, IAP/subscriptions, "
+        "version updates, What's New, or review rules: call search_knowledge or "
+        "get_knowledge first, then combine with the current task/form. "
+        "Those notes are packaged with this app; they are not in the user project. "
+        "Do not use read_file, write_file, create_file, or delete_file on the knowledge base. "
+        "Explain a failure first when one is in context. "
         "If it is locally fixable, call propose_fix. Otherwise give manual steps only. "
         "Never claim files were already changed or that a task was rerun. "
         "Never ask for or repeat secrets, API keys, issuer_id, key_id, .p8 paths, or PEM keys. "
         "Available tools: get_task, list_failed_tasks, get_task_log, get_profile_context, "
-        "inspect_local, grep, search_files, read_file, write_file, create_file, delete_file, "
-        "propose_fix. Paths are relative to the project root and must stay inside the workspace. "
+        "inspect_local, search_knowledge, get_knowledge, grep, search_files, read_file, "
+        "write_file, create_file, delete_file, propose_fix. "
+        "Project paths stay inside the user workspace. Knowledge tools ignore project_root. "
         "Never read or write secrets (.env, *.p8, keys/, credentials, .git). "
         "write_file, create_file, and delete_file only draft a plan; the user must apply it. "
         "Do not call apply_fix or rerun_task."
@@ -178,6 +185,12 @@ def _tool_summary(name: str, result: dict[str, Any]) -> str:
     if name == "list_failed_tasks":
         tasks = result.get("tasks") or []
         return f"{len(tasks)} failed tasks"
+    if name == "search_knowledge":
+        hits = result.get("hits") or []
+        topics = ", ".join(str(hit.get("topic") or "") for hit in hits[:3] if hit)
+        return redact_text(topics or "ok")[:_SUMMARY_MAX]
+    if name == "get_knowledge":
+        return redact_text(str(result.get("topic") or "ok"))[:_SUMMARY_MAX]
     if result.get("summary"):
         return redact_text(str(result.get("summary")))[:_SUMMARY_MAX]
     return "ok"

@@ -432,7 +432,16 @@ def test_tool_display_names_are_i18n_friendly():
     assert "agent.tool.name." in src
     zh = json.loads((ROOT / "src" / "asc" / "web" / "locales" / "zh.json").read_text(encoding="utf-8"))
     en = json.loads((ROOT / "src" / "asc" / "web" / "locales" / "en.json").read_text(encoding="utf-8"))
-    for name in ("grep", "search_files", "read_file", "write_file", "create_file", "delete_file"):
+    for name in (
+        "grep",
+        "search_files",
+        "read_file",
+        "write_file",
+        "create_file",
+        "delete_file",
+        "search_knowledge",
+        "get_knowledge",
+    ):
         key = f"agent.tool.name.{name}"
         assert zh[key]
         assert en[key]

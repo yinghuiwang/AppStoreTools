@@ -695,6 +695,8 @@
   "agent.tool.name.get_task_log": "读取任务日志",
   "agent.tool.name.get_profile_context": "查看应用配置",
   "agent.tool.name.inspect_local": "检查本地文件",
+  "agent.tool.name.search_knowledge": "检索上架知识",
+  "agent.tool.name.get_knowledge": "阅读上架笔记",
   "agent.tool.name.grep": "搜索代码",
   "agent.tool.name.search_files": "搜索文件",
   "agent.tool.name.read_file": "读取文件",

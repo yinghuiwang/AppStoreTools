@@ -61,3 +61,4 @@ packages = ["src/asc"]
 "src/asc/web/static/logo.svg" = "asc/web/static/logo.svg"
 "src/asc/web/locales/zh.json" = "asc/web/locales/zh.json"
 "src/asc/web/locales/en.json" = "asc/web/locales/en.json"
+"src/asc/web/knowledge" = "asc/web/knowledge"

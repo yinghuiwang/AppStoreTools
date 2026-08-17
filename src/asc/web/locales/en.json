@@ -695,6 +695,8 @@
   "agent.tool.name.get_task_log": "Read task log",
   "agent.tool.name.get_profile_context": "Get profile context",
   "agent.tool.name.inspect_local": "Inspect local file",
+  "agent.tool.name.search_knowledge": "Search listing knowledge",
+  "agent.tool.name.get_knowledge": "Read listing notes",
   "agent.tool.name.grep": "Search code",
   "agent.tool.name.search_files": "Search files",
   "agent.tool.name.read_file": "Read file",

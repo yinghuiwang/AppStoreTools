@@ -20,7 +20,16 @@ def test_openai_tools_match_model_names_and_keep_writes_gated():
     assert names == set(MODEL_TOOL_NAMES)
     assert "apply_fix" not in names
     assert "rerun_task" not in names
-    assert {"grep", "read_file", "write_file", "create_file", "delete_file"} <= names
+    assert {
+        "grep",
+        "read_file",
+        "write_file",
+        "create_file",
+        "delete_file",
+        "search_knowledge",
+        "get_knowledge",
+    } <= names
+    assert "apply_fix" not in MODEL_TOOL_NAMES
 
 
 def test_hallucinated_apply_fix_does_not_write(tmp_path):

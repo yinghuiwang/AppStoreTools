@@ -44,6 +44,8 @@ def test_workspace_tools_are_registered_and_apply_stays_gated():
         "write_file",
         "create_file",
         "delete_file",
+        "search_knowledge",
+        "get_knowledge",
     ):
         assert name in names
     assert "apply_fix" not in names
