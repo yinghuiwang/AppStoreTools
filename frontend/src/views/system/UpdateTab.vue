@@ -186,6 +186,7 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.card { display: flex; flex-direction: column; flex: 1 1 auto; }
 .toolbar { display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; }
 .muted { color: var(--text-muted); font-size: 13px; }
 h2 { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }

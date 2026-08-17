@@ -259,6 +259,7 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.card { display: flex; flex-direction: column; flex: 1 1 auto; }
 .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 h2, h3 { margin: 0 0 8px; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
 .form-box, .provider, .llm-row { border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin: 10px 0; display: flex; flex-direction: column; gap: 8px; }

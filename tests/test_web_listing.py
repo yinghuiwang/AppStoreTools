@@ -770,6 +770,8 @@ def test_listing_view_tabs_start_with_upload():
     local = src.index('name="local"')
     diff = src.index('name="diff"')
     assert upload < local < diff
+    assert "listing-tabs" in src
+    assert "overflow: visible" in src
     assert "DEFAULT_LISTING_TAB" in src
     assert "useListingTab" in src
     assert 'route.query.tab || "local"' not in src

@@ -132,6 +132,7 @@ async function onCancel() {
 .run-panel {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
   gap: 12px;
   padding: 14px 16px 16px;
   border: 1px solid var(--border);

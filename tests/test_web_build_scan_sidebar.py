@@ -26,6 +26,9 @@ def test_build_view_restores_env_scan_sidebar():
     assert 'v-if="isForm"' in src
     assert "build-layout" in src or "build-scan" in src
     assert 'mode !== "deploy"' in src or "mode !== 'deploy'" in src
+    assert "align-items: stretch" in src
+    assert "overflow: auto" not in src
+    assert "max-height" not in src
 
     # Local scan spinner — not a whole-page gate on first paint.
     assert "optionsLoading && !optionsReady" not in src

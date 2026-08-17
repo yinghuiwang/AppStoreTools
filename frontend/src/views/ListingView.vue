@@ -55,9 +55,31 @@ onActivated(() => {
 </script>
 
 <template>
-  <el-tabs v-model="tab">
+  <el-tabs class="listing-tabs" v-model="tab">
     <el-tab-pane :label="$t('listing.tab.upload')" name="upload"><UploadTab /></el-tab-pane>
     <el-tab-pane :label="$t('listing.tab.local')" name="local"><LocalTab /></el-tab-pane>
     <el-tab-pane :label="$t('listing.tab.diff')" name="diff"><DiffTab /></el-tab-pane>
   </el-tabs>
 </template>
+
+<style scoped>
+.listing-tabs {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+}
+.listing-tabs :deep(.el-tabs__header) {
+  flex: 0 0 auto;
+}
+.listing-tabs :deep(.el-tabs__content) {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  overflow: visible;
+}
+.listing-tabs :deep(.el-tab-pane) {
+  flex: 1 1 auto;
+}
+</style>

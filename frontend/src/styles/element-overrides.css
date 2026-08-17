@@ -73,6 +73,10 @@ html.dark .el-tabs__active-bar {
   background-color: var(--accent-dim);
 }
 
+html.dark .el-tabs__content {
+  overflow: visible;
+}
+
 html.dark .el-dialog,
 html.dark .el-message-box {
   background: var(--overlay);

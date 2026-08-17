@@ -372,14 +372,15 @@ onMounted(() => {
 h1 { margin: 0; }
 .muted { color: var(--text-muted); font-size: 12px; }
 .check { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
-.card { display: flex; flex-direction: column; gap: 12px; }
+.card { display: flex; flex-direction: column; gap: 12px; flex: 1 1 auto; }
 
 .build-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 16px;
-  align-items: start;
+  align-items: stretch;
   width: 100%;
+  flex: 1 1 auto;
 }
 .build-layout.has-scan {
   grid-template-columns: minmax(0, 1fr) minmax(280px, 390px);
@@ -441,7 +442,7 @@ h1 { margin: 0; }
   color: var(--err);
 }
 
-.scan-body { display: flex; flex-direction: column; gap: 14px; }
+.scan-body { display: flex; flex-direction: column; flex: 1 1 auto; gap: 14px; }
 .scan-row { display: flex; flex-direction: column; gap: 4px; }
 .scan-label {
   font-size: 11px;

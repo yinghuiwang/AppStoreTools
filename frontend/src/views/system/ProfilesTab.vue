@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { ElMessage } from "element-plus";
 import { httpJson } from "@/api/http";
@@ -37,6 +37,18 @@ const form = reactive({
   csv: "data/appstore_info.csv",
   screenshots: "data/screenshots",
 });
+
+const rows = computed(() =>
+  profiles.value.map((name) => {
+    const d = details.value[name];
+    return {
+      name,
+      app_id: d?.app_id || "—",
+      issuer_id: d?.issuer_id || "—",
+      isDefault: name === defaultName.value,
+    };
+  }),
+);
 
 async function load() {
   loading.value = true;
@@ -137,60 +149,181 @@ onMounted(() => { void load(); });
 </script>
 
 <template>
-  <div class="page-stack">
+  <div class="page-stack profiles-page">
     <div class="card">
       <div class="toolbar">
         <el-button type="primary" :disabled="!canCreate" :title="canCreate ? t('profiles.add_title') : t('profiles.cannot_create')" @click="openCreate">{{ t("profiles.add") }}</el-button>
         <el-button @click="importLocal">{{ t("profiles.import_confirm") }}</el-button>
       </div>
       <PageLoading v-if="loading" size="block" />
-      <el-table v-else :data="profiles.map((name) => ({ name, ...(details[name] || {}) }))">
-        <el-table-column prop="name" :label="t('profiles.name')" />
-        <el-table-column prop="app_id" label="App ID" />
-        <el-table-column prop="issuer_id" label="Issuer" />
-        <el-table-column>
-          <template #default="{ row }">
-            <el-button size="small" @click="openEdit(row.name)">{{ t("common.edit") }}</el-button>
-            <el-button size="small" @click="setDefault(row.name)">{{ t("common.set_default") }}</el-button>
-            <el-button size="small" @click="remove(row.name)">{{ t("common.delete") }}</el-button>
-            <span v-if="row.name === defaultName" class="mono">{{ t("common.default") }}</span>
-          </template>
-        </el-table-column>
-      </el-table>
-    </div>
-    <el-dialog v-model="dialog" :title="editing ? t('common.edit') : t('profiles.create')" width="520px">
-      <div class="page-stack">
-        <label class="field"><span>{{ t("profiles.name") }}</span><input v-model="form.name" class="field-input" /></label>
-        <label class="field"><span>Issuer ID</span><input v-model="form.issuer_id" class="field-input" /></label>
-        <label class="field"><span>Key ID</span><input v-model="form.key_id" class="field-input" /></label>
-        <label class="field"><span>App ID</span><input v-model="form.app_id" class="field-input" /></label>
-        <div class="field">
-          <ExampleHelp kind="csv" :label="t('profiles.csv_optional')" />
-          <div class="field-row">
-            <input v-model="form.csv" class="field-input" />
-            <el-button @click="pickCsv">{{ t("filebrowser.browse") }}</el-button>
-          </div>
-        </div>
-        <div class="field">
-          <ExampleHelp kind="shots" :label="t('profiles.shots_optional')" />
-          <div class="field-row">
-            <input v-model="form.screenshots" class="field-input" />
-            <el-button @click="pickShots">{{ t("filebrowser.browse") }}</el-button>
-          </div>
-        </div>
-        <label class="field">
-          <span>.p8</span>
-          <input type="file" accept=".p8" @change="keyFile = ($event.target as HTMLInputElement).files?.[0] || null" />
-        </label>
+      <p v-else-if="!rows.length" class="empty-state">
+        {{ t("profiles.empty") }}
+        <span class="empty-hint">{{ t("profiles.empty_hint") }}</span>
+      </p>
+      <div v-else class="table-wrap">
+        <table class="profiles-table">
+          <thead>
+            <tr>
+              <th class="col-name">{{ t("profiles.name") }}</th>
+              <th class="col-app">App ID</th>
+              <th class="col-issuer">Issuer</th>
+              <th class="col-actions">{{ t("index.col_actions") }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in rows" :key="row.name">
+              <td class="col-name">
+                <div class="name-cell">
+                  <span class="name mono" :title="row.name">{{ row.name }}</span>
+                  <span v-if="row.isDefault" class="badge">{{ t("common.default") }}</span>
+                </div>
+              </td>
+              <td class="col-app mono" :title="row.app_id">{{ row.app_id }}</td>
+              <td class="col-issuer mono" :title="row.issuer_id">{{ row.issuer_id }}</td>
+              <td class="col-actions">
+                <div class="actions">
+                  <el-button size="small" @click="openEdit(row.name)">{{ t("common.edit") }}</el-button>
+                  <el-button v-if="!row.isDefault" size="small" @click="setDefault(row.name)">{{ t("common.set_default") }}</el-button>
+                  <el-button size="small" @click="remove(row.name)">{{ t("common.delete") }}</el-button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
-      <template #footer>
-        <el-button @click="dialog = false">{{ t("common.cancel") }}</el-button>
-        <el-button type="primary" @click="save">{{ t("common.save") }}</el-button>
-      </template>
-    </el-dialog>
+    </div>
   </div>
+  <el-dialog v-model="dialog" :title="editing ? t('common.edit') : t('profiles.create')" width="520px">
+    <div class="page-stack">
+      <label class="field"><span>{{ t("profiles.name") }}</span><input v-model="form.name" class="field-input" /></label>
+      <label class="field"><span>Issuer ID</span><input v-model="form.issuer_id" class="field-input" /></label>
+      <label class="field"><span>Key ID</span><input v-model="form.key_id" class="field-input" /></label>
+      <label class="field"><span>App ID</span><input v-model="form.app_id" class="field-input" /></label>
+      <div class="field">
+        <ExampleHelp kind="csv" :label="t('profiles.csv_optional')" />
+        <div class="field-row">
+          <input v-model="form.csv" class="field-input" />
+          <el-button @click="pickCsv">{{ t("filebrowser.browse") }}</el-button>
+        </div>
+      </div>
+      <div class="field">
+        <ExampleHelp kind="shots" :label="t('profiles.shots_optional')" />
+        <div class="field-row">
+          <input v-model="form.screenshots" class="field-input" />
+          <el-button @click="pickShots">{{ t("filebrowser.browse") }}</el-button>
+        </div>
+      </div>
+      <label class="field">
+        <span>.p8</span>
+        <input type="file" accept=".p8" @change="keyFile = ($event.target as HTMLInputElement).files?.[0] || null" />
+      </label>
+    </div>
+    <template #footer>
+      <el-button @click="dialog = false">{{ t("common.cancel") }}</el-button>
+      <el-button type="primary" @click="save">{{ t("common.save") }}</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <style scoped>
-.toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; }
+.profiles-page {
+  align-self: stretch;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  box-sizing: border-box;
+}
+.profiles-page > .card {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  align-self: stretch;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  box-sizing: border-box;
+}
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+.empty-hint {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+.table-wrap {
+  width: 100%;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-x: auto;
+}
+.profiles-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+th,
+td {
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--border);
+}
+th {
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  background: var(--raised);
+}
+.col-name { width: 22%; }
+.col-app { width: 18%; }
+.col-issuer { width: auto; }
+.col-actions { width: 1%; }
+.col-app,
+.col-issuer {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.name-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--info);
+  border: 1px solid color-mix(in srgb, var(--info) 45%, transparent);
+  background: color-mix(in srgb, var(--info) 12%, transparent);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+.actions {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.actions :deep(.el-button + .el-button) {
+  margin-left: 0;
+}
 </style>

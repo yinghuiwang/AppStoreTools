@@ -135,6 +135,22 @@ def test_guard_tab_restores_old_information_architecture() -> None:
     assert t("guard.app_id", lang="en") == "App ID"
 
 
+def test_profiles_tab_uses_full_width_native_table() -> None:
+    src = (FRONTEND / "views" / "system" / "ProfilesTab.vue").read_text(encoding="utf-8")
+    assert "el-table" not in src
+    assert "el-table-column" not in src
+    assert 'class="profiles-table"' in src
+    assert "table-layout: fixed" in src
+    assert "text-overflow: ellipsis" in src
+    assert "white-space: nowrap" in src
+    assert 'class="badge"' in src
+    assert 't("common.default")' in src
+    assert 'v-if="!row.isDefault"' in src
+    assert "profiles-page" in src
+    assert "<el-dialog" in src
+    assert src.find("profiles-page") < src.find("<el-dialog")
+
+
 def test_retry_paths_map_legacy_system_tabs() -> None:
     types_src = (FRONTEND / "api" / "types.ts").read_text(encoding="utf-8")
     assert '"/system/update": "/update"' in types_src
@@ -177,5 +193,31 @@ def test_dashboard_restores_workspace_capabilities() -> None:
     assert "dash-toolbar" in dash
     assert "dash-split" in dash
     assert "minmax(0, 1.15fr) minmax(0, 1fr)" in dash
-    assert "flex: 1.35 1 0" in dash
-    assert "overflow: auto" in dash
+    assert "overflow: auto" not in dash
+    assert "flex: 1.35 1 0" not in dash
+    assert "min-height: 0" not in dash
+
+
+def test_page_modules_grow_and_main_column_scrolls() -> None:
+    shell = (FRONTEND / "layouts" / "AppShell.vue").read_text(encoding="utf-8")
+    tokens = (FRONTEND / "styles" / "tokens.css").read_text(encoding="utf-8")
+    listing = (FRONTEND / "views" / "ListingView.vue").read_text(encoding="utf-8")
+    local = (FRONTEND / "views" / "listing" / "LocalTab.vue").read_text(encoding="utf-8")
+    diff = (FRONTEND / "views" / "listing" / "DiffTab.vue").read_text(encoding="utf-8")
+    build = (FRONTEND / "views" / "BuildView.vue").read_text(encoding="utf-8")
+    run = (FRONTEND / "components" / "TaskRunBar.vue").read_text(encoding="utf-8")
+    logs = (FRONTEND / "components" / "TaskLogPanel.vue").read_text(encoding="utf-8")
+    agent = (FRONTEND / "components" / "AgentPanel.vue").read_text(encoding="utf-8")
+
+    assert ".shell-main" in shell
+    assert "overflow: auto" in shell
+    assert ".page-stack > :last-child" in tokens
+    assert "listing-tabs" in listing
+    assert "overflow: visible" in listing
+    assert "overflow: auto" not in local
+    assert "overflow: auto" not in diff
+    assert "overflow: auto" not in build
+    assert "align-items: stretch" in build
+    assert "flex: 1 1 auto" in run
+    assert "overflow: auto" in logs
+    assert "overflow: auto" in agent

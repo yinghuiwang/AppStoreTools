@@ -98,6 +98,13 @@ a:hover {
   gap: 16px;
   width: 100%;
   max-width: none;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Leftover main-column height goes into the last module, not a void below it. */
+.page-stack > :last-child {
+  flex: 1 1 auto;
 }
 
 .card {

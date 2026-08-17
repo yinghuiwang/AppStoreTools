@@ -458,10 +458,7 @@ onUnmounted(() => {
 .dash {
   width: 100%;
   flex: 1 1 auto;
-  min-height: 0;
-  height: 100%;
   gap: 8px;
-  overflow: hidden;
 }
 .dash-toolbar {
   display: flex;
@@ -569,26 +566,19 @@ onUnmounted(() => {
   grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
   gap: 8px;
   align-items: stretch;
-  flex: 1 1 0;
-  min-height: 160px;
+  flex: 0 0 auto;
 }
 .running,
 .quick,
 .history {
   min-width: 0;
-  min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
   border-radius: 8px;
 }
 .running,
-.quick {
-  height: 100%;
-}
-.running,
 .history {
-  padding: 10px 12px 0;
+  padding: 10px 12px 12px;
 }
 .section-head {
   display: flex;
@@ -615,8 +605,6 @@ onUnmounted(() => {
 .quick-list,
 .table-wrap {
   flex: 1 1 auto;
-  min-height: 0;
-  overflow: auto;
 }
 .run-row {
   display: grid;
@@ -661,7 +649,7 @@ onUnmounted(() => {
   margin: 0;
   padding: 12px 4px;
 }
-.quick { padding: 10px 0 0; }
+.quick { padding: 10px 0 8px; }
 .quick .section-head { padding: 0 12px; }
 .quick-link {
   display: grid;
@@ -698,8 +686,7 @@ onUnmounted(() => {
 .quick-link small { margin-top: 2px; color: var(--text-muted); font-size: 12px; }
 .quick-arrow { color: var(--text-faint); font-size: 18px; }
 .history {
-  flex: 1.35 1 0;
-  min-height: 180px;
+  flex: 1 1 auto;
 }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th {
@@ -749,23 +736,8 @@ tr.is-running td { background: color-mix(in srgb, var(--info) 7%, transparent); 
 .actions { white-space: nowrap; }
 @keyframes dash-pulse { 50% { opacity: 0.35; } }
 @media (max-width: 1100px) {
-  .dash {
-    height: auto;
-    overflow: visible;
-    flex: none;
-  }
   .dash-split {
     grid-template-columns: 1fr;
-    flex: none;
-    min-height: 0;
   }
-  .running,
-  .quick,
-  .history {
-    height: auto;
-  }
-  .history { flex: none; min-height: 240px; }
-  .run-list,
-  .quick-list { flex: none; overflow: visible; }
 }
 </style>

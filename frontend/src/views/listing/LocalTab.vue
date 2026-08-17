@@ -263,7 +263,13 @@ watch(reloadTick, () => { if (!empty.value) void load(); });
 </template>
 
 <style scoped>
-.workbench { display: grid; grid-template-columns: 180px 1fr; gap: 16px; }
+.workbench {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 16px;
+  flex: 1 1 auto;
+  align-items: stretch;
+}
 aside { display: flex; flex-direction: column; gap: 4px; }
 aside button { text-align: left; background: var(--surface); color: var(--text-muted); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
 aside button.on { color: var(--accent); border-color: var(--accent-dim); }
