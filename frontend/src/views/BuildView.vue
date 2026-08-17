@@ -4,6 +4,7 @@ import { useI18n } from "vue-i18n";
 import { useRoute } from "vue-router";
 import { ApiError, apiErrorMessage, httpForm, httpJson } from "@/api/http";
 import BuildStageProgress from "@/components/BuildStageProgress.vue";
+import PageLoading from "@/components/PageLoading.vue";
 import { useBrowse } from "@/composables/useBrowse";
 import { useProfile } from "@/composables/useProfile";
 import { useRightRail } from "@/composables/useRightRail";
@@ -44,19 +45,27 @@ const verbose = ref(false);
 const dryRun = ref(false);
 const reuseArchive = ref(false);
 const options = ref<Options>({ schemes: [], certificates: [], profiles: [] });
+const optionsLoading = ref(false);
+const optionsReady = ref(false);
 
 async function loadOptions() {
-  const qs = new URLSearchParams({
-    project: project.value,
-    scheme: scheme.value,
-    signing: signing.value,
-    certificate: certificate.value,
-  });
-  options.value = await httpJson<Options>(`/api/build/options?${qs}`);
-  if (!project.value && options.value.project) project.value = options.value.project;
-  if (!scheme.value && options.value.selected_scheme) scheme.value = options.value.selected_scheme;
-  if (!certificate.value && options.value.selected_certificate) certificate.value = options.value.selected_certificate;
-  if (!profileName.value && options.value.selected_profile) profileName.value = options.value.selected_profile;
+  optionsLoading.value = true;
+  try {
+    const qs = new URLSearchParams({
+      project: project.value,
+      scheme: scheme.value,
+      signing: signing.value,
+      certificate: certificate.value,
+    });
+    options.value = await httpJson<Options>(`/api/build/options?${qs}`);
+    if (!project.value && options.value.project) project.value = options.value.project;
+    if (!scheme.value && options.value.selected_scheme) scheme.value = options.value.selected_scheme;
+    if (!certificate.value && options.value.selected_certificate) certificate.value = options.value.selected_certificate;
+    if (!profileName.value && options.value.selected_profile) profileName.value = options.value.selected_profile;
+    optionsReady.value = true;
+  } finally {
+    optionsLoading.value = false;
+  }
 }
 
 async function pickProject() {
@@ -113,6 +122,11 @@ onMounted(() => {
     </el-alert>
     <el-alert v-if="alert" type="error" show-icon :title="alert" />
     <div v-if="isForm" class="card">
+      <PageLoading v-if="optionsLoading && !optionsReady" />
+      <template v-else>
+      <div v-if="optionsLoading" class="field-row">
+        <PageLoading size="inline" />
+      </div>
       <label class="field"><span>{{ t("build.mode") }}</span>
         <select v-model="mode" class="field-input">
           <option value="full">{{ t("build.mode_full") }}</option>
@@ -168,7 +182,8 @@ onMounted(() => {
       <label class="check"><input v-model="verbose" type="checkbox" /> {{ t("build.verbose") }}</label>
       <label class="check"><input v-model="dryRun" type="checkbox" /> {{ t("build.dry_run") }}</label>
       <label class="check"><input v-model="reuseArchive" type="checkbox" /> {{ t("build.reuse_reuse") }}</label>
-      <el-button type="primary" :disabled="empty" @click="run">{{ t("common.submit") }}</el-button>
+      <el-button type="primary" :disabled="empty || optionsLoading" @click="run">{{ t("common.submit") }}</el-button>
+      </template>
     </div>
     <BuildStageProgress
       v-if="isRun && taskId"

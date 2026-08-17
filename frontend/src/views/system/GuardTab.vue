@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { httpForm, httpJson } from "@/api/http";
+import PageLoading from "@/components/PageLoading.vue";
 
 type EnvEntry = {
   fingerprint?: string;
@@ -206,7 +207,7 @@ onMounted(() => {
         <h2>{{ t("guard.title") }}</h2>
         <el-button @click="openAdd">{{ t("guard.manual_add") }}</el-button>
       </div>
-      <p v-if="loading" class="empty-state">{{ t("common.loading") }}</p>
+      <PageLoading v-if="loading" />
       <p v-else-if="!guard" class="err">{{ t("guard.load_failed") }}</p>
       <template v-else>
         <div class="status-row">

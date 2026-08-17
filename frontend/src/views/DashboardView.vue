@@ -4,6 +4,7 @@ import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import { httpJson } from "@/api/http";
 import { mapRetryPath } from "@/api/types";
+import PageLoading from "@/components/PageLoading.vue";
 import { useProfile } from "@/composables/useProfile";
 import { useRightRail } from "@/composables/useRightRail";
 
@@ -41,6 +42,7 @@ const router = useRouter();
 const { snapshot } = useProfile();
 const rail = useRightRail();
 const loading = ref(true);
+const refreshing = ref(false);
 const summary = ref<Summary | null>(null);
 const range = ref<"7d" | "30d" | "90d">("30d");
 const profileFilter = ref(snapshot.value?.current_profile || "");
@@ -70,13 +72,19 @@ function retryTo(path?: string) {
 }
 
 async function load() {
-  loading.value = !summary.value;
-  const qs = new URLSearchParams({ range: range.value });
-  qs.set("profile", profileFilter.value);
-  if (kind.value) qs.set("kind", kind.value);
-  if (statusFilter.value) qs.set("status", statusFilter.value);
-  summary.value = await httpJson<Summary>(`/api/dashboard/summary?${qs}`);
-  loading.value = false;
+  const first = !summary.value;
+  loading.value = first;
+  refreshing.value = !first;
+  try {
+    const qs = new URLSearchParams({ range: range.value });
+    qs.set("profile", profileFilter.value);
+    if (kind.value) qs.set("kind", kind.value);
+    if (statusFilter.value) qs.set("status", statusFilter.value);
+    summary.value = await httpJson<Summary>(`/api/dashboard/summary?${qs}`);
+  } finally {
+    loading.value = false;
+    refreshing.value = false;
+  }
 }
 
 async function cancel(id: string) {
@@ -141,11 +149,12 @@ onMounted(() => {
           <option value="update">{{ t("index.kind_update") }}</option>
         </select>
       </label>
+      <PageLoading v-if="refreshing" size="inline" />
     </section>
 
     <p v-if="showNoApp" class="empty-state">{{ t("index.no_app") }}</p>
 
-    <el-skeleton v-if="loading" :rows="6" animated />
+    <PageLoading v-else-if="loading" size="page" />
     <template v-else-if="summary">
       <section class="metrics" :aria-label="t('index.metrics_aria')">
         <article class="metric">

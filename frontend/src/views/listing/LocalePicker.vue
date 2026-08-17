@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { httpJson } from "@/api/http";
+import PageLoading from "@/components/PageLoading.vue";
 
 type Row = { code: string; name_en: string; name_zh: string; present?: boolean };
 
@@ -67,9 +68,9 @@ onMounted(() => { void load(); });
     <p v-if="!presenceAvailable" class="hint">{{ t("metadata.locales_presence_unavailable") }}</p>
     <div class="field-row">
       <input v-model="query" class="field-input" :placeholder="t('metadata.locales_search')" />
-      <el-button @click="load">{{ t("metadata.locales_refresh") }}</el-button>
+      <el-button :loading="loading" @click="load">{{ t("metadata.locales_refresh") }}</el-button>
     </div>
-    <p v-if="loading">{{ t("common.loading") }}</p>
+    <PageLoading v-if="loading" />
     <p v-else-if="error" class="err">{{ error }}</p>
     <ul v-else class="list">
       <li v-for="row in filtered" :key="row.code" @click="copy(row.code)">

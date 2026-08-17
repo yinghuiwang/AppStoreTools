@@ -3,6 +3,7 @@ import { onMounted, reactive, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { ElMessage } from "element-plus";
 import { httpJson } from "@/api/http";
+import PageLoading from "@/components/PageLoading.vue";
 import { useBrowse } from "@/composables/useBrowse";
 import { useProfile } from "@/composables/useProfile";
 
@@ -24,6 +25,7 @@ const details = ref<Record<string, Detail>>({});
 const defaultName = ref("");
 const canCreate = ref(true);
 const dialog = ref(false);
+const loading = ref(true);
 const editing = ref("");
 const keyFile = ref<File | null>(null);
 const form = reactive({
@@ -36,16 +38,21 @@ const form = reactive({
 });
 
 async function load() {
-  const data = await httpJson<{
-    profiles: string[];
-    default: string;
-    profile_details: Record<string, Detail>;
-    can_create: boolean;
-  }>("/api/profiles");
-  profiles.value = data.profiles || [];
-  details.value = data.profile_details || {};
-  defaultName.value = data.default || "";
-  canCreate.value = data.can_create !== false;
+  loading.value = true;
+  try {
+    const data = await httpJson<{
+      profiles: string[];
+      default: string;
+      profile_details: Record<string, Detail>;
+      can_create: boolean;
+    }>("/api/profiles");
+    profiles.value = data.profiles || [];
+    details.value = data.profile_details || {};
+    defaultName.value = data.default || "";
+    canCreate.value = data.can_create !== false;
+  } finally {
+    loading.value = false;
+  }
 }
 
 function openCreate() {
@@ -137,7 +144,8 @@ onMounted(() => { void load(); });
         <a href="/api/examples/csv">{{ t("common.download_sample_csv") }}</a>
         <a href="/api/examples/screenshots">{{ t("common.download_sample_shots") }}</a>
       </div>
-      <el-table :data="profiles.map((name) => ({ name, ...(details[name] || {}) }))">
+      <PageLoading v-if="loading" />
+      <el-table v-else :data="profiles.map((name) => ({ name, ...(details[name] || {}) }))">
         <el-table-column prop="name" :label="t('profiles.name')" />
         <el-table-column prop="app_id" label="App ID" />
         <el-table-column prop="issuer_id" label="Issuer" />

@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute } from "vue-router";
 import { ApiError, apiErrorMessage, httpForm, httpJson } from "@/api/http";
+import PageLoading from "@/components/PageLoading.vue";
 import TaskRunBar from "@/components/TaskRunBar.vue";
 import { useBrowse } from "@/composables/useBrowse";
 import { useProfile } from "@/composables/useProfile";
@@ -33,19 +34,25 @@ const selectedLocales = ref<string[]>([]);
 const fieldsByLocale = ref<Record<string, string[]>>({});
 const scopes = ref<{ locale: string; display_type: string }[]>([]);
 const omitFilters = ref(false);
+const loadingLocal = ref(false);
+const checkingEnv = ref(false);
 
 async function loadLocal() {
+  loadingLocal.value = true;
   try {
     const qs = new URLSearchParams({ csv_path: csvPath.value, screenshots_dir: shotsDir.value });
     const data = await httpJson<{ snapshot: { locales: LocaleRow[] } }>(`/api/listing/local?${qs}`);
     locales.value = data.snapshot?.locales || [];
   } catch {
     locales.value = [];
+  } finally {
+    loadingLocal.value = false;
   }
 }
 
 async function checkEnv() {
   alert.value = "";
+  checkingEnv.value = true;
   try {
     const data = await httpJson<{ ok?: boolean; message?: string }>("/api/metadata/check", { method: "POST" });
     checkMsg.value = data.message || "";
@@ -53,6 +60,8 @@ async function checkEnv() {
   } catch (err) {
     if (err instanceof ApiError && err.status === 400) alert.value = apiErrorMessage(err);
     else throw err;
+  } finally {
+    checkingEnv.value = false;
   }
 }
 
@@ -145,6 +154,7 @@ onMounted(() => {
         <label class="check"><input v-model="includeMetadata" type="checkbox" /> {{ t("metadata.scope_metadata") }}</label>
         <label class="check"><input v-model="includeScreenshots" type="checkbox" /> {{ t("metadata.scope_screenshots") }}</label>
       </div>
+      <PageLoading v-if="loadingLocal" size="inline" />
       <div v-for="row in locales" :key="row.locale" class="locale">
         <label class="check">
           <input type="checkbox" :checked="selectedLocales.includes(row.locale)" @change="toggleLocale(row.locale, ($event.target as HTMLInputElement).checked)" />
@@ -164,7 +174,7 @@ onMounted(() => {
       <label class="check"><input v-model="dryRun" type="checkbox" /> {{ t("common.dry_run") }}</label>
       <label class="check"><input v-model="verbose" type="checkbox" /> {{ t("build.verbose") }}</label>
       <div class="field-row">
-        <el-button :disabled="empty" @click="checkEnv">{{ t("common.check_env") }}</el-button>
+        <el-button :disabled="empty" :loading="checkingEnv" @click="checkEnv">{{ t("common.check_env") }}</el-button>
         <el-button type="primary" :disabled="empty" @click="run">{{ t("common.submit") }}</el-button>
       </div>
       <p v-if="checkMsg">{{ checkMsg }}</p>

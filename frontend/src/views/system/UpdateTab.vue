@@ -2,6 +2,7 @@
 import { onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { httpForm, httpJson } from "@/api/http";
+import PageLoading from "@/components/PageLoading.vue";
 import { useProfile } from "@/composables/useProfile";
 import { useRightRail } from "@/composables/useRightRail";
 
@@ -35,6 +36,8 @@ const versions = ref<string[]>([]);
 const branches = ref<string[]>([]);
 const versionError = ref("");
 const branchError = ref("");
+const versionsLoading = ref(false);
+const branchesLoading = ref(false);
 const selectedVersion = ref("");
 const selectedBranch = ref("");
 const advanced = ref<"specific" | "branch">("specific");
@@ -53,18 +56,28 @@ async function check() {
 
 async function loadVersions() {
   versionError.value = "";
-  const data = await httpJson<{ ok: boolean; versions: string[]; message?: string }>("/api/update/versions");
-  versions.value = data.versions || [];
-  if (!data.ok) versionError.value = data.message || t("update.version_list_failed");
-  if (versions.value.length && !selectedVersion.value) selectedVersion.value = versions.value[0];
+  versionsLoading.value = true;
+  try {
+    const data = await httpJson<{ ok: boolean; versions: string[]; message?: string }>("/api/update/versions");
+    versions.value = data.versions || [];
+    if (!data.ok) versionError.value = data.message || t("update.version_list_failed");
+    if (versions.value.length && !selectedVersion.value) selectedVersion.value = versions.value[0];
+  } finally {
+    versionsLoading.value = false;
+  }
 }
 
 async function loadBranches() {
   branchError.value = "";
-  const data = await httpJson<{ ok: boolean; branches: string[]; message?: string }>("/api/update/branches");
-  branches.value = data.branches || [];
-  if (!data.ok) branchError.value = data.message || t("update.branch_list_failed");
-  if (branches.value.length && !selectedBranch.value) selectedBranch.value = branches.value[0];
+  branchesLoading.value = true;
+  try {
+    const data = await httpJson<{ ok: boolean; branches: string[]; message?: string }>("/api/update/branches");
+    branches.value = data.branches || [];
+    if (!data.ok) branchError.value = data.message || t("update.branch_list_failed");
+    if (branches.value.length && !selectedBranch.value) selectedBranch.value = branches.value[0];
+  } finally {
+    branchesLoading.value = false;
+  }
 }
 
 async function run(version = "", branch = "") {
@@ -124,7 +137,8 @@ onMounted(() => {
           </template>
         </span>
       </div>
-      <p v-if="checkResult">{{ checkResult.message }}</p>
+      <PageLoading v-if="checking && !checkResult" :text="t('update.checking')" />
+      <p v-else-if="checkResult">{{ checkResult.message }}</p>
     </div>
     <div v-if="checkResult?.detail && !checkResult.detail.is_latest" class="card">
       <p>{{ t("update.found") }} <span class="mono">{{ checkResult.detail.latest }}</span></p>
@@ -138,6 +152,7 @@ onMounted(() => {
         <button type="button" :class="{ on: advanced === 'branch' }" @click="advanced = 'branch'; loadBranches()">{{ t("update.pin_branch") }}</button>
       </div>
       <div v-show="advanced === 'specific'" class="page-stack">
+        <PageLoading v-if="versionsLoading" size="inline" />
         <label class="field">
           <span>{{ t("update.version_label") }}</span>
           <select v-if="versions.length" v-model="selectedVersion" class="field-input">
@@ -146,9 +161,10 @@ onMounted(() => {
           <input v-else v-model="selectedVersion" class="field-input" :placeholder="t('update.version_ph')" />
         </label>
         <p v-if="versionError" class="muted">{{ versionError }}</p>
-        <el-button type="primary" @click="run(selectedVersion, '')">{{ t("update.install_version") }}</el-button>
+        <el-button type="primary" :disabled="versionsLoading" @click="run(selectedVersion, '')">{{ t("update.install_version") }}</el-button>
       </div>
       <div v-show="advanced === 'branch'" class="page-stack">
+        <PageLoading v-if="branchesLoading" size="inline" />
         <label class="field">
           <span>{{ t("update.branch_label") }}</span>
           <select v-if="branches.length" v-model="selectedBranch" class="field-input">
@@ -157,7 +173,7 @@ onMounted(() => {
           <input v-else v-model="selectedBranch" class="field-input" :placeholder="t('update.branch_ph')" />
         </label>
         <p v-if="branchError" class="muted">{{ branchError }}</p>
-        <el-button type="primary" @click="run('', selectedBranch)">{{ t("update.install_branch") }}</el-button>
+        <el-button type="primary" :disabled="branchesLoading" @click="run('', selectedBranch)">{{ t("update.install_branch") }}</el-button>
       </div>
       <label class="check"><input v-model="verbose" type="checkbox" /> {{ t("build.verbose") }}</label>
       <p class="muted">{{ t("update.note") }}</p>

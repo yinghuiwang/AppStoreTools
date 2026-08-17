@@ -2,6 +2,7 @@
 import { nextTick, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { ElMessage } from "element-plus";
+import PageLoading from "@/components/PageLoading.vue";
 import { useRightRail } from "@/composables/useRightRail";
 import { useTaskLog } from "@/composables/useTaskLog";
 
@@ -87,6 +88,10 @@ onMounted(() => {
       </div>
     </header>
     <div v-if="!logTaskId" class="empty">{{ t("rail.logs.empty") }}</div>
+    <PageLoading
+      v-else-if="!lines.length && (connection === 'connecting' || connection === 'reconnecting')"
+      :text="t('common.loading')"
+    />
     <pre v-else ref="scroller" class="stream mono">
       <div
         v-for="line in lines"

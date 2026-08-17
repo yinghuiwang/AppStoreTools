@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { useI18n } from "vue-i18n";
+import PageLoading from "@/components/PageLoading.vue";
 import { useBrowse } from "@/composables/useBrowse";
 
 const { t } = useI18n();
-const { open, mode, currentPath, entries, error, choose, cancel, enter } = useBrowse();
+const { open, mode, currentPath, entries, error, loading, choose, cancel, enter } = useBrowse();
 
 function onClosed(visible: boolean) {
   if (!visible && open.value) cancel();
@@ -20,7 +21,8 @@ function onClosed(visible: boolean) {
   >
     <p class="path mono">{{ currentPath }}</p>
     <p v-if="error" class="err">{{ error }}</p>
-    <ul class="list">
+    <PageLoading v-if="loading" />
+    <ul v-else class="list">
       <li v-for="entry in entries" :key="entry.path">
         <button type="button" @click="enter(entry)">
           <span class="kind">{{ entry.is_dir ? "dir" : "file" }}</span>
@@ -28,12 +30,13 @@ function onClosed(visible: boolean) {
         </button>
       </li>
     </ul>
-    <p v-if="!entries.length && !error" class="empty">{{ t("filebrowser.empty") }}</p>
+    <p v-if="!loading && !entries.length && !error" class="empty">{{ t("filebrowser.empty") }}</p>
     <template #footer>
       <el-button @click="cancel()">{{ t("filebrowser.cancel") }}</el-button>
       <el-button
         v-if="mode === 'dir'"
         type="primary"
+        :disabled="loading"
         @click="choose(currentPath)"
       >
         {{ t("filebrowser.select_dir") }}

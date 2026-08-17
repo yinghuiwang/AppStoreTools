@@ -16,10 +16,12 @@ const ext = ref("");
 const currentPath = ref(".");
 const entries = ref<Entry[]>([]);
 const error = ref("");
+const loading = ref(false);
 let resolvePick: ((path: string | null) => void) | null = null;
 
 async function load(path: string) {
   error.value = "";
+  loading.value = true;
   try {
     const qs = new URLSearchParams({ path, mode: mode.value, ext: ext.value });
     const data = await httpJson<BrowseOk>(`/api/browse?${qs}`, { skipNotify: true });
@@ -31,6 +33,8 @@ async function load(path: string) {
       return;
     }
     throw err;
+  } finally {
+    loading.value = false;
   }
 }
 
@@ -58,5 +62,5 @@ export function useBrowse() {
     if (entry.is_dir) void load(entry.path);
     else if (mode.value === "file") choose(entry.path);
   }
-  return { open, mode, ext, currentPath, entries, error, pick, choose, cancel, enter, load };
+  return { open, mode, ext, currentPath, entries, error, loading, pick, choose, cancel, enter, load };
 }

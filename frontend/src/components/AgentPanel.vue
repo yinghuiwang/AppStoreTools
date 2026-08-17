@@ -5,6 +5,7 @@ import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { useAgent, type AgentPlan } from "@/composables/useAgent";
 import { useRightRail } from "@/composables/useRightRail";
+import PageLoading from "@/components/PageLoading.vue";
 
 const { t } = useI18n();
 const {
@@ -180,6 +181,7 @@ onMounted(() => {
           </div>
         </article>
       </template>
+      <PageLoading v-if="generating" size="inline" :text="t('agent.generating')" />
     </div>
     <div class="composer">
       <div class="row">

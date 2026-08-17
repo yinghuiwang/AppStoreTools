@@ -33,21 +33,46 @@ function applyFavicon() {
   link.href = "data:image/svg+xml," + encodeURIComponent(svg);
 }
 
+function renderBootLoading(root: HTMLElement) {
+  root.textContent = "";
+  root.className = "spa-boot";
+  const wrap = document.createElement("div");
+  wrap.className = "spa-boot__row";
+  wrap.setAttribute("role", "status");
+  wrap.setAttribute("aria-busy", "true");
+  const icon = document.createElement("span");
+  icon.className = "spa-boot__spinner";
+  icon.setAttribute("aria-hidden", "true");
+  const label = document.createElement("span");
+  label.textContent = String(i18n.global.t("spa.booting"));
+  wrap.append(icon, label);
+  root.append(wrap);
+}
+
+function renderBootFailed(root: HTMLElement, retry: () => void) {
+  root.textContent = "";
+  root.className = "spa-boot";
+  const p = document.createElement("p");
+  p.className = "spa-boot__msg";
+  p.textContent = String(i18n.global.t("spa.boot_failed"));
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "spa-boot__retry";
+  btn.textContent = String(i18n.global.t("spa.retry"));
+  btn.onclick = () => void retry();
+  root.append(p, btn);
+}
+
 async function boot() {
   document.documentElement.classList.add("dark");
   const root = document.getElementById("app");
   if (!root) return;
+  renderBootLoading(root);
   const { refresh, snapshot } = useProfile();
   try {
     await refresh();
   } catch {
-    root.textContent = "";
-    const p = document.createElement("p");
-    p.textContent = String(i18n.global.t("spa.boot_failed"));
-    const btn = document.createElement("button");
-    btn.textContent = String(i18n.global.t("spa.retry"));
-    btn.onclick = () => void boot();
-    root.append(p, btn);
+    renderBootFailed(root, boot);
     return;
   }
   const lang = snapshot.value?.lang === "zh" ? "zh" : "en";

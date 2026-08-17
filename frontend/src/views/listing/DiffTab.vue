@@ -2,6 +2,7 @@
 import { computed, inject, onMounted, ref, watch, type Ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { ApiError, apiErrorMessage, httpJson } from "@/api/http";
+import PageLoading from "@/components/PageLoading.vue";
 import { useImageViewer } from "@/composables/useImageViewer";
 import { useProfile } from "@/composables/useProfile";
 import { useRightRail } from "@/composables/useRightRail";
@@ -30,6 +31,8 @@ const selectedScopes = ref<Record<string, boolean>>({});
 const alert = ref<{ level: string; message: string } | null>(null);
 const conflict = ref(false);
 const pullTaskId = ref("");
+const loading = ref(false);
+const loaded = ref(false);
 
 const visible = computed(() => {
   if (filter.value === "all") return locales.value;
@@ -69,6 +72,7 @@ function openLocal(group: Shot[], start: number) {
 async function load() {
   alert.value = null;
   conflict.value = false;
+  loading.value = true;
   try {
     const qs = new URLSearchParams({ csv_path: csvPath.value, screenshots_dir: shotsDir.value });
     const data = await httpJson<{
@@ -98,6 +102,9 @@ async function load() {
       return;
     }
     throw err;
+  } finally {
+    loaded.value = true;
+    loading.value = false;
   }
 }
 
@@ -170,14 +177,15 @@ onMounted(() => { void load(); });
       <p>{{ t("metadata.diff_hint") }}</p>
       <p v-if="version">{{ t("metadata.diff_version", { version: version.versionString || "", state: version.appStoreState || "" }) }}</p>
       <div class="field-row">
-        <el-button @click="load">{{ t("metadata.diff_load") }}</el-button>
+        <el-button :loading="loading" @click="load">{{ t("metadata.diff_load") }}</el-button>
         <el-button @click="filter = 'all'">{{ t("metadata.diff_filter_all") }}</el-button>
         <el-button @click="filter = 'diff'">{{ t("metadata.diff_filter_diff") }}</el-button>
         <el-button type="primary" @click="pullText">{{ t("metadata.diff_pull") }}</el-button>
         <el-button @click="pullShots">{{ t("metadata.diff_shots_pull") }}</el-button>
       </div>
     </div>
-    <p v-if="!locales.length" class="empty-state">{{ t("metadata.diff_empty") }}</p>
+    <PageLoading v-if="loading && !loaded" size="page" />
+    <p v-else-if="!locales.length" class="empty-state">{{ t("metadata.diff_empty") }}</p>
     <section v-for="loc in visible" :key="loc.locale" class="card">
       <h3>{{ loc.locale }}</h3>
       <table>

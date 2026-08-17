@@ -2,6 +2,7 @@
 import { onMounted, reactive, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { httpJson } from "@/api/http";
+import PageLoading from "@/components/PageLoading.vue";
 
 type LlmItem = { base_url: string; model: string; has_api_key: boolean };
 type Provider = { enabled: boolean; url: string; secret: string; has_secret?: boolean };
@@ -31,6 +32,7 @@ const webhook = reactive<WebhookConfig>({
 });
 const webhookError = ref("");
 const testResults = ref<{ provider: string; ok: boolean; error?: string }[]>([]);
+const loading = ref(true);
 const kinds = [
   ["metadata", "settings.task_metadata"],
   ["build", "settings.task_build"],
@@ -153,14 +155,20 @@ async function testProvider(provider: string) {
   testResults.value = data.results || [];
 }
 
-onMounted(() => {
-  void loadLlm();
-  void loadWebhook();
+onMounted(async () => {
+  loading.value = true;
+  try {
+    await Promise.all([loadLlm(), loadWebhook()]);
+  } finally {
+    loading.value = false;
+  }
 });
 </script>
 
 <template>
   <div class="page-stack">
+    <PageLoading v-if="loading" size="page" />
+    <template v-else>
     <div class="card">
       <div class="toolbar">
         <h2>{{ t("settings.llm_title") }}</h2>
@@ -243,6 +251,7 @@ onMounted(() => {
         <li v-for="row in testResults" :key="row.provider">{{ row.provider }}: {{ row.ok ? t("settings.test_ok") : (row.error || t("settings.test_failed")) }}</li>
       </ul>
     </div>
+    </template>
   </div>
 </template>
 

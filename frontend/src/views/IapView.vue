@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { ApiError, apiErrorMessage, httpForm, httpJson } from "@/api/http";
+import PageLoading from "@/components/PageLoading.vue";
 import TaskRunBar from "@/components/TaskRunBar.vue";
 import { useBrowse } from "@/composables/useBrowse";
 import { useImageViewer } from "@/composables/useImageViewer";
@@ -37,15 +38,20 @@ const targets = ref<Target[]>([]);
 const paths = ref<Record<string, string>>({});
 const reviewDry = ref(false);
 const reviewVerbose = ref(false);
+const checking = ref(false);
+const scanning = ref(false);
 
 async function check() {
   alert.value = "";
+  checking.value = true;
   try {
     const data = await httpForm<{ ok: boolean; message: string }>("/api/iap/check", new URLSearchParams());
     checkMsg.value = data.message;
   } catch (err) {
     if (err instanceof ApiError && err.status === 400) alert.value = apiErrorMessage(err);
     else throw err;
+  } finally {
+    checking.value = false;
   }
 }
 
@@ -69,14 +75,19 @@ async function run() {
 }
 
 async function scan() {
-  const data = await httpJson<{ targets: Target[]; count: number }>("/api/iap/review-screenshots/scan", {
-    method: "POST",
-    body: JSON.stringify({ iapFile: iapFile.value }),
-  });
-  targets.value = data.targets || [];
-  const next: Record<string, string> = {};
-  for (const item of targets.value) next[item.id] = item.defaultPath || "";
-  paths.value = next;
+  scanning.value = true;
+  try {
+    const data = await httpJson<{ targets: Target[]; count: number }>("/api/iap/review-screenshots/scan", {
+      method: "POST",
+      body: JSON.stringify({ iapFile: iapFile.value }),
+    });
+    targets.value = data.targets || [];
+    const next: Record<string, string> = {};
+    for (const item of targets.value) next[item.id] = item.defaultPath || "";
+    paths.value = next;
+  } finally {
+    scanning.value = false;
+  }
 }
 
 function previewPath(path: string) {
@@ -130,18 +141,22 @@ onMounted(() => { void check(); });
           </div>
         </label>
         <a href="/api/examples/iap.json">{{ t("iap.download_sample") }}</a>
-        <p v-if="checkMsg">{{ checkMsg }}</p>
+        <PageLoading v-if="checking && !checkMsg" />
+        <p v-else-if="checkMsg">{{ checkMsg }}</p>
         <label class="check"><input v-model="dryRun" type="checkbox" /> {{ t("iap.dry_run") }}</label>
         <label class="check"><input v-model="updateExisting" type="checkbox" /> {{ t("iap.update_existing") }}</label>
         <label class="check"><input v-model="verbose" type="checkbox" /> {{ t("build.verbose") }}</label>
         <div class="field-row">
-          <el-button :disabled="empty" @click="check">{{ t("iap.check_config") }}</el-button>
+          <el-button :disabled="empty" :loading="checking" @click="check">{{ t("iap.check_config") }}</el-button>
           <el-button type="primary" :disabled="empty" @click="run">{{ t("common.submit") }}</el-button>
         </div>
       </div>
       <div class="card">
         <h2>{{ t("iap.review_title") }}</h2>
-        <el-button :disabled="empty" @click="scan">{{ t("iap.scan_missing") }}</el-button>
+        <div class="field-row">
+          <el-button :disabled="empty" :loading="scanning" @click="scan">{{ t("iap.scan_missing") }}</el-button>
+          <PageLoading v-if="scanning" size="inline" />
+        </div>
         <p v-if="targets.length">{{ t("iap.found_missing", { n: targets.length }) }}</p>
         <p v-else class="muted">{{ t("iap.no_missing") }}</p>
         <div v-for="item in targets" :key="item.id" class="shot-row">

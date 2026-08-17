@@ -2,6 +2,7 @@
 import { computed, inject, onMounted, ref, watch, type Ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { ApiError, apiErrorMessage, httpJson } from "@/api/http";
+import PageLoading from "@/components/PageLoading.vue";
 import { useBrowse } from "@/composables/useBrowse";
 import { useImageViewer } from "@/composables/useImageViewer";
 import { useProfile } from "@/composables/useProfile";
@@ -25,12 +26,15 @@ const conflict = ref(false);
 const pickerOpen = ref(false);
 const active = ref("");
 const alert = ref("");
+const loading = ref(false);
+const loaded = ref(false);
 const empty = computed(() => (snapshot.value?.current_profile || "") === "");
 const current = computed(() => locales.value.find((row) => row.locale === active.value) || locales.value[0]);
 
 async function load() {
   alert.value = "";
   conflict.value = false;
+  loading.value = true;
   const qs = new URLSearchParams({ csv_path: csvPath.value, screenshots_dir: shotsDir.value });
   try {
     const data = await httpJson<{ ok: boolean; mtime: number | null; snapshot: { locales: LocaleRow[] } }>(
@@ -41,9 +45,12 @@ async function load() {
     if (!active.value || !locales.value.some((row) => row.locale === active.value)) {
       active.value = locales.value[0]?.locale || "";
     }
+    loaded.value = true;
   } catch (err) {
     if (err instanceof ApiError && err.status === 400) alert.value = apiErrorMessage(err);
     else throw err;
+  } finally {
+    loading.value = false;
   }
 }
 
@@ -152,14 +159,15 @@ watch(reloadTick, () => { if (!empty.value) void load(); });
         </div>
       </label>
       <div class="field-row">
-        <el-button :disabled="empty" @click="load">{{ t("metadata.load_preview") }}</el-button>
+        <el-button :disabled="empty" :loading="loading" @click="load">{{ t("metadata.load_preview") }}</el-button>
         <el-button type="primary" :disabled="empty" @click="save">{{ t("metadata.save_csv") }}</el-button>
         <el-button @click="pickerOpen = true">{{ t("metadata.locales_btn") }}</el-button>
         <a href="/api/examples/csv">{{ t("common.download_sample_csv") }}</a>
         <a href="/api/examples/screenshots">{{ t("common.download_sample_shots") }}</a>
       </div>
     </div>
-    <p v-if="!locales.length" class="empty-state">{{ t("metadata.wb_empty") }}</p>
+    <PageLoading v-if="loading && !loaded" size="page" />
+    <p v-else-if="!locales.length" class="empty-state">{{ t("metadata.wb_empty") }}</p>
     <div v-else class="workbench">
       <aside>
         <button
