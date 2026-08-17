@@ -525,7 +525,7 @@ def test_vue_build_page_restores_sse_stage_progress():
     assert "TaskRunBar" not in view
     assert 'v-if="isForm"' in view
     assert 'v-if="isRun && taskId"' in view
-    assert "enterRun()" in view
+    assert "enterRun(task_id" in view
     assert "@back=" in view
     assert "/api/task/" in task_log
     assert "/stream" in task_log

@@ -1,6 +1,7 @@
 import { ref, type Ref } from "vue";
 import { httpJson } from "@/api/http";
 import type { Bootstrap } from "@/api/types";
+import { bindTaskPageProfile } from "@/composables/useTaskPagePhase";
 
 const snapshot: Ref<Bootstrap | null> = ref(null);
 
@@ -14,6 +15,7 @@ export function useProfile() {
   async function switchProfile(name: string): Promise<void> {
     await httpJson(`/api/switch-profile?profile=${encodeURIComponent(name)}`);
     await refresh();
+    bindTaskPageProfile(snapshot.value?.current_profile || name);
   }
 
   return { snapshot, refresh, switchProfile };

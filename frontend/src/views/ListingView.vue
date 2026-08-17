@@ -1,34 +1,56 @@
 <script setup lang="ts">
-import { computed, onMounted, provide, ref } from "vue";
+import { computed, onActivated, onMounted, provide, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import {
+  DEFAULT_LISTING_TAB,
+  LISTING_TABS,
+  useListingTab,
+} from "@/composables/useTaskPagePhase";
 import LocalTab from "./listing/LocalTab.vue";
 import DiffTab from "./listing/DiffTab.vue";
 import UploadTab from "./listing/UploadTab.vue";
 
-const TABS = new Set(["upload", "local", "diff"]);
-const DEFAULT_TAB = "upload";
+defineOptions({ name: "ListingView" });
+
 const route = useRoute();
 const router = useRouter();
 const reloadTick = ref(0);
 provide("listingReload", reloadTick);
+const { listingTab, setListingTab } = useListingTab();
+
 const tab = computed({
   get() {
-    const raw = String(route.query.tab || DEFAULT_TAB);
-    return TABS.has(raw) ? raw : DEFAULT_TAB;
+    const raw = String(route.query.tab || "");
+    if (LISTING_TABS.has(raw)) return raw;
+    return LISTING_TABS.has(listingTab.value) ? listingTab.value : DEFAULT_LISTING_TAB;
   },
   set(value: string) {
-    void router.replace({ query: { ...route.query, tab: value } });
+    const next = LISTING_TABS.has(value) ? value : DEFAULT_LISTING_TAB;
+    setListingTab(next);
+    void router.replace({ query: { ...route.query, tab: next } });
   },
 });
 
-onMounted(() => {
+function syncTabFromRoute() {
   const action = String(route.query.action || "");
   if (["check", "all", "metadata", "screenshots"].includes(action)) {
-    void router.replace({ query: { ...route.query, tab: "upload" } });
+    tab.value = "upload";
+    return;
   }
-  if (!TABS.has(String(route.query.tab || DEFAULT_TAB))) {
-    void router.replace({ query: { ...route.query, tab: DEFAULT_TAB } });
+  const raw = String(route.query.tab || "");
+  if (LISTING_TABS.has(raw)) {
+    if (raw !== listingTab.value) setListingTab(raw);
+    return;
   }
+  void router.replace({ query: { ...route.query, tab: listingTab.value } });
+}
+
+onMounted(() => {
+  syncTabFromRoute();
+});
+
+onActivated(() => {
+  syncTabFromRoute();
 });
 </script>
 

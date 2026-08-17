@@ -16,14 +16,14 @@ const emit = defineEmits<{ back: [] }>();
 
 const { t } = useI18n();
 const rail = useRightRail();
-const { status, progress, cancel, subscribe, logTaskId } = useTaskLog();
+const { status, progress, cancel, subscribeIfNeeded } = useTaskLog();
 const canceling = ref(false);
 
 watch(
   () => props.taskId,
   (id) => {
     canceling.value = false;
-    if (id && logTaskId.value !== id) subscribe(id);
+    if (id) subscribeIfNeeded(id);
   },
   { immediate: true },
 );

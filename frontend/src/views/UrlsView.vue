@@ -13,7 +13,9 @@ type Check = { ok: boolean; message: string; detail?: { locales?: string[] } };
 const { t } = useI18n();
 const { snapshot } = useProfile();
 const rail = useRightRail();
-const { isForm, isRun, enterRun, backToForm } = useTaskPagePhase();
+defineOptions({ name: "UrlsView" });
+
+const { isForm, isRun, taskId, enterRun, backToForm } = useTaskPagePhase("urls");
 const empty = computed(() => (snapshot.value?.current_profile || "") === "");
 const alert = ref("");
 const check = ref<Check | null>(null);
@@ -23,7 +25,6 @@ const url = ref("");
 const locales = ref<string[]>([]);
 const dryRun = ref(false);
 const verbose = ref(false);
-const taskId = ref("");
 
 async function loadCheck() {
   checking.value = true;
@@ -52,8 +53,7 @@ async function run() {
       verbose: verbose.value ? "true" : "",
     });
     const { task_id } = await httpForm<{ task_id: string }>("/api/urls/set", body);
-    taskId.value = task_id;
-    enterRun();
+    enterRun(task_id);
     rail.openLogs(task_id);
   } catch (err) {
     if (err instanceof ApiError && err.status === 400) alert.value = apiErrorMessage(err);

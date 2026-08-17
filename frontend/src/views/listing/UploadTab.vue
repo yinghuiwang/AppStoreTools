@@ -18,7 +18,7 @@ const route = useRoute();
 const browse = useBrowse();
 const { snapshot } = useProfile();
 const rail = useRightRail();
-const { isForm, isRun, enterRun, backToForm } = useTaskPagePhase();
+const { isForm, isRun, taskId, enterRun, backToForm } = useTaskPagePhase("listing-upload");
 const empty = computed(() => (snapshot.value?.current_profile || "") === "");
 const csvPath = ref(snapshot.value?.paths.csv || "data/appstore_info.csv");
 const shotsDir = ref(snapshot.value?.paths.screenshots || "data/screenshots");
@@ -26,7 +26,6 @@ const includeMetadata = ref(true);
 const includeScreenshots = ref(true);
 const dryRun = ref(false);
 const verbose = ref(false);
-const taskId = ref("");
 const checkMsg = ref("");
 const alert = ref("");
 const locales = ref<LocaleRow[]>([]);
@@ -112,8 +111,7 @@ async function run() {
       body.set("locales_json", JSON.stringify(selectedLocales.value));
     }
     const { task_id } = await httpForm<{ task_id: string }>("/api/metadata/run", body);
-    taskId.value = task_id;
-    enterRun();
+    enterRun(task_id);
     rail.openLogs(task_id);
   } catch (err) {
     if (err instanceof ApiError && err.status === 400) alert.value = apiErrorMessage(err);

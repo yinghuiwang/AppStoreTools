@@ -50,12 +50,17 @@ const route = useRoute();
 const browse = useBrowse();
 const { snapshot } = useProfile();
 const rail = useRightRail();
-const { isForm, isRun, enterRun, backToForm } = useTaskPagePhase();
+defineOptions({ name: "BuildView" });
+
+const { isForm, isRun, taskId, meta, enterRun, backToForm } = useTaskPagePhase("build");
 const empty = computed(() => (snapshot.value?.current_profile || "") === "");
 const alert = ref("");
-const taskId = ref("");
 const mode = ref<"full" | "build" | "deploy">("full");
-const runMode = ref<"full" | "build" | "deploy">("full");
+const runMode = computed<"full" | "build" | "deploy">(() => {
+  const stored = meta.value.runMode;
+  if (stored === "full" || stored === "build" || stored === "deploy") return stored;
+  return mode.value;
+});
 const signing = ref("auto");
 const project = ref("");
 const scheme = ref("");
@@ -150,9 +155,7 @@ async function run() {
     body.set("dry_run", dryRun.value ? "true" : "");
     body.set("reuse_archive", reuseArchive.value ? "true" : "");
     const { task_id } = await httpForm<{ task_id: string }>("/api/build/run", body);
-    runMode.value = mode.value;
-    taskId.value = task_id;
-    enterRun();
+    enterRun(task_id, { runMode: mode.value });
     rail.openLogs(task_id);
   } catch (err) {
     if (err instanceof ApiError && err.status === 400) alert.value = apiErrorMessage(err);

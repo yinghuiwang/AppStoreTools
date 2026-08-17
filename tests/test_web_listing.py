@@ -773,9 +773,11 @@ def test_listing_view_tabs_start_with_upload():
     local = src.index('name="local"')
     diff = src.index('name="diff"')
     assert upload < local < diff
-    assert 'const DEFAULT_TAB = "upload"' in src
-    assert 'route.query.tab || DEFAULT_TAB' in src
+    assert "DEFAULT_LISTING_TAB" in src
+    assert "useListingTab" in src
     assert 'route.query.tab || "local"' not in src
+    phase = Path("frontend/src/composables/useTaskPagePhase.ts").read_text(encoding="utf-8")
+    assert 'DEFAULT_LISTING_TAB = "upload"' in phase
 
 
 def test_listing_local_tab_has_screenshot_workbench():

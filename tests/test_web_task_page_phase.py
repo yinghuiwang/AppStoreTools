@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,12 +27,14 @@ def _on_mounted_source(src: str) -> str:
     return script[idx:] if idx >= 0 else ""
 
 
-def test_use_task_page_phase_is_page_local():
+def test_use_task_page_phase_is_module_scoped_not_pinia():
     src = (FRONTEND / "composables/useTaskPagePhase.ts").read_text(encoding="utf-8")
-    assert "ref<TaskPagePhase>" in src
-    assert '"form" | "run"' in src
+    assert "Record<TaskPageId, PageBucket>" in src
+    assert "sessionStorage" in src
     assert "function enterRun" in src
     assert "function backToForm" in src
+    assert "export function resetTaskPageState" in src
+    assert "export function bindTaskPageProfile" in src
     assert "pinia" not in src.lower()
     assert "defineStore" not in src
 
@@ -41,7 +44,7 @@ def test_task_pages_form_and_run_are_exclusive():
         src = path.read_text(encoding="utf-8")
         rel = path.relative_to(ROOT)
         assert "useTaskPagePhase" in src, rel
-        assert "enterRun()" in src, rel
+        assert re.search(r"enterRun\(\s*task_id", src), rel
         assert "backToForm" in src, rel
         assert 'v-if="isForm"' in src, rel
         assert 'v-if="isRun && taskId"' in src, rel
@@ -67,3 +70,13 @@ def test_task_run_bar_offers_back_to_form():
     assert "task.edit_and_rerun" in src
     assert 'emit("back")' in src or "emit('back')" in src
     assert "common.cancel_upload" in src
+
+
+def test_task_run_bar_reuses_existing_sse():
+    src = (FRONTEND / "components/TaskRunBar.vue").read_text(encoding="utf-8")
+    assert "subscribeIfNeeded" in src
+    log = (FRONTEND / "composables/useTaskLog.ts").read_text(encoding="utf-8")
+    assert "function subscribeIfNeeded" in log
+    assert "if (logTaskId.value === taskId) return" in log
+    rail = (FRONTEND / "composables/useRightRail.ts").read_text(encoding="utf-8")
+    assert "subscribeIfNeeded" in rail

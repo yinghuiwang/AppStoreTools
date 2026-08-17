@@ -37,6 +37,12 @@ function closeSource() {
   source = null;
 }
 
+function subscribeIfNeeded(taskId: string) {
+  if (!taskId) return;
+  if (logTaskId.value === taskId) return;
+  subscribe(taskId);
+}
+
 function subscribe(taskId: string) {
   closeSource();
   logTaskId.value = taskId;
@@ -141,6 +147,6 @@ function clearLocal() {
 export function useTaskLog() {
   return {
     logTaskId, lines, status, progress, connection, follow,
-    subscribe, disconnect, cancel, clearLocal,
+    subscribe, subscribeIfNeeded, disconnect, cancel, clearLocal,
   };
 }

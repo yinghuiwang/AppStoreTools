@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted } from "vue";
+import { onMounted, watch } from "vue";
 import AppSidebar from "@/components/AppSidebar.vue";
 import AppTopbar from "@/components/AppTopbar.vue";
 import RightRail from "@/components/RightRail.vue";
@@ -8,8 +8,15 @@ import ImageViewer from "@/components/ImageViewer.vue";
 import { useProfile } from "@/composables/useProfile";
 import { useTaskLog } from "@/composables/useTaskLog";
 import { useAgent } from "@/composables/useAgent";
+import { bindTaskPageProfile, TASK_KEEP_ALIVE_NAMES } from "@/composables/useTaskPagePhase";
 
 const { snapshot } = useProfile();
+
+watch(
+  () => snapshot.value?.current_profile ?? "",
+  (profile) => bindTaskPageProfile(profile),
+  { immediate: true },
+);
 
 onMounted(() => {
   window.addEventListener("pagehide", () => {
@@ -25,7 +32,11 @@ onMounted(() => {
     <div class="shell-col">
       <AppTopbar />
       <main class="shell-main">
-        <router-view :key="snapshot?.current_profile ?? ''" />
+        <router-view v-slot="{ Component }">
+          <keep-alive :include="TASK_KEEP_ALIVE_NAMES" :key="snapshot?.current_profile ?? ''">
+            <component :is="Component" />
+          </keep-alive>
+        </router-view>
       </main>
     </div>
     <RightRail />

@@ -26,11 +26,12 @@ const browse = useBrowse();
 const viewer = useImageViewer();
 const { snapshot } = useProfile();
 const rail = useRightRail();
-const { isForm, isRun, enterRun, backToForm } = useTaskPagePhase();
+defineOptions({ name: "IapView" });
+
+const { isForm, isRun, taskId, enterRun, backToForm } = useTaskPagePhase("iap");
 const empty = computed(() => (snapshot.value?.current_profile || "") === "");
 const alert = ref("");
 const checkMsg = ref("");
-const taskId = ref("");
 const iapFile = ref(snapshot.value?.paths.iap || "data/iap_packages.json");
 const dryRun = ref(false);
 const updateExisting = ref(false);
@@ -66,8 +67,7 @@ async function run() {
       verbose: verbose.value ? "true" : "",
     });
     const { task_id } = await httpForm<{ task_id: string }>("/api/iap/run", body);
-    taskId.value = task_id;
-    enterRun();
+    enterRun(task_id);
     rail.openLogs(task_id);
   } catch (err) {
     if (err instanceof ApiError && err.status === 400) alert.value = apiErrorMessage(err);
@@ -117,8 +117,7 @@ async function uploadShots() {
     method: "POST",
     body: JSON.stringify({ items, dryRun: reviewDry.value, verbose: reviewVerbose.value }),
   });
-  taskId.value = task_id;
-  enterRun();
+  enterRun(task_id);
   rail.openLogs(task_id);
 }
 

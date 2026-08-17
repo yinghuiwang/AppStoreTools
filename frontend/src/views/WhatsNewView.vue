@@ -15,7 +15,9 @@ const { t } = useI18n();
 const { snapshot } = useProfile();
 const rail = useRightRail();
 const { status, logTaskId } = useTaskLog();
-const { isForm, isRun, enterRun, backToForm } = useTaskPagePhase();
+defineOptions({ name: "WhatsNewView" });
+
+const { isForm, isRun, taskId, meta, enterRun, backToForm } = useTaskPagePhase("whats-new");
 const empty = computed(() => (snapshot.value?.current_profile || "") === "");
 const alert = ref("");
 const check = ref<Check | null>(null);
@@ -26,9 +28,8 @@ const dryRun = ref(false);
 const verbose = ref(false);
 const translateMode = ref(false);
 const sourceLocale = ref("auto");
-const taskId = ref("");
-const translateTaskId = ref("");
 const translations = ref<Record<string, string>>({});
+const translateTaskId = computed(() => meta.value.translateTaskId || "");
 
 async function loadCheck() {
   checking.value = true;
@@ -52,8 +53,7 @@ async function runDirect() {
       verbose: verbose.value ? "true" : "",
     });
     const { task_id } = await httpForm<{ task_id: string }>("/api/whats-new/run", body);
-    taskId.value = task_id;
-    enterRun();
+    enterRun(task_id, { translateTaskId: "" });
     rail.openLogs(task_id);
   } catch (err) {
     if (err instanceof ApiError && err.status === 400) alert.value = apiErrorMessage(err);
@@ -68,9 +68,7 @@ async function previewTranslate() {
       method: "POST",
       body: JSON.stringify({ text: text.value, source_locale: sourceLocale.value, verbose: verbose.value }),
     });
-    translateTaskId.value = task_id;
-    taskId.value = task_id;
-    enterRun();
+    enterRun(task_id, { translateTaskId: task_id });
     rail.openLogs(task_id);
   } catch (err) {
     if (err instanceof ApiError && err.status === 400) alert.value = apiErrorMessage(err);
@@ -85,8 +83,7 @@ async function uploadTranslations() {
     verbose: verbose.value ? "true" : "",
   });
   const { task_id } = await httpForm<{ task_id: string }>("/api/whats-new/run", body);
-  taskId.value = task_id;
-  enterRun();
+  enterRun(task_id, { translateTaskId: "" });
   rail.openLogs(task_id);
 }
 
@@ -94,16 +91,29 @@ function toggleLocale(code: string, on: boolean) {
   locales.value = on ? Array.from(new Set([...locales.value, code])) : locales.value.filter((item) => item !== code);
 }
 
-watch([status, logTaskId], async () => {
-  if (translateTaskId.value && logTaskId.value === translateTaskId.value && status.value === "done") {
+async function pullTranslateResult() {
+  const id = translateTaskId.value;
+  if (!id || Object.keys(translations.value).length) return;
+  try {
     const state = await httpJson<{ result?: { translations?: Record<string, string> } }>(
-      `/api/task/${encodeURIComponent(translateTaskId.value)}/status`,
+      `/api/task/${encodeURIComponent(id)}/status`,
     );
     translations.value = state.result?.translations || {};
+  } catch {
+    /* ignore */
+  }
+}
+
+watch([status, logTaskId], async () => {
+  if (translateTaskId.value && logTaskId.value === translateTaskId.value && status.value === "done") {
+    await pullTranslateResult();
   }
 });
 
-onMounted(() => { void loadCheck(); });
+onMounted(() => {
+  void loadCheck();
+  void pullTranslateResult();
+});
 </script>
 
 <template>
