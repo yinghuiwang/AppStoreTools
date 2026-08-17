@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
-import { useAgent, type AgentPlan } from "@/composables/useAgent";
+import { CircleCheck, CircleClose, Loading, Plus, Promotion, VideoPause } from "@element-plus/icons-vue";
+import { useAgent, type AgentMessage, type AgentPlan } from "@/composables/useAgent";
 import { useRightRail } from "@/composables/useRightRail";
 import PageLoading from "@/components/PageLoading.vue";
 
@@ -28,6 +29,16 @@ const search = ref("");
 const results = ref<Array<Record<string, unknown>>>([]);
 const rerunByPlan = ref<Record<string, boolean>>({});
 const scroller = ref<HTMLElement | null>(null);
+const draftEl = ref<HTMLTextAreaElement | null>(null);
+const attachWrap = ref<HTMLElement | null>(null);
+const openTools = ref<string[]>([]);
+const openThinks = ref<string[]>([]);
+const COMPOSER_LINE = 20;
+const COMPOSER_PAD_Y = 8;
+const COMPOSER_MIN_ROWS = 2;
+const COMPOSER_MAX_ROWS = 6;
+const COMPOSER_MIN = COMPOSER_PAD_Y * 2 + COMPOSER_LINE * COMPOSER_MIN_ROWS;
+const COMPOSER_MAX = COMPOSER_PAD_Y * 2 + COMPOSER_LINE * COMPOSER_MAX_ROWS;
 
 function renderMd(text: string): string {
   const html = marked.parse(text || "", { async: false, gfm: true, breaks: true }) as string;
@@ -69,6 +80,73 @@ function canAct(plan: AgentPlan): boolean {
   return plan.status === "pending" || plan.status === "conflict";
 }
 
+function toolStatusLabel(status: string): string {
+  if (status === "running") return t("agent.tool.running");
+  if (status === "success") return t("agent.tool.success");
+  return t("agent.tool.failed");
+}
+
+function isTool(msg: AgentMessage): msg is Extract<AgentMessage, { kind: "tool" }> {
+  return msg.kind === "tool";
+}
+
+function toolOpenNames(id: string): string[] {
+  return openTools.value.includes(id) ? [id] : [];
+}
+
+function onToolToggle(id: string, names: string[] | string) {
+  const list = Array.isArray(names) ? names : [names];
+  const open = list.map(String).includes(id);
+  const next = openTools.value.filter((item) => item !== id);
+  if (open) next.push(id);
+  openTools.value = next;
+}
+
+function thinkName(idx: number): string {
+  return `think-${idx}`;
+}
+
+function thinkOpenNames(idx: number): string[] {
+  const name = thinkName(idx);
+  return openThinks.value.includes(name) ? [name] : [];
+}
+
+function onThinkToggle(idx: number, names: string[] | string) {
+  const name = thinkName(idx);
+  const list = Array.isArray(names) ? names : [names];
+  const open = list.map(String).includes(name);
+  const next = openThinks.value.filter((item) => item !== name);
+  if (open) next.push(name);
+  openThinks.value = next;
+}
+
+function autosizeDraft() {
+  const el = draftEl.value;
+  if (!el) return;
+  el.style.height = "auto";
+  el.style.height = `${Math.min(Math.max(el.scrollHeight, COMPOSER_MIN), COMPOSER_MAX)}px`;
+}
+
+function closeAttach() {
+  attachOpen.value = false;
+}
+
+function toggleAttach() {
+  attachOpen.value = !attachOpen.value;
+  if (attachOpen.value) void runSearch();
+}
+
+function onDocPointerDown(event: PointerEvent) {
+  if (!attachOpen.value) return;
+  const root = attachWrap.value;
+  if (root && event.target instanceof Node && root.contains(event.target)) return;
+  closeAttach();
+}
+
+function onDocKeydown(event: KeyboardEvent) {
+  if (event.key === "Escape" && attachOpen.value) closeAttach();
+}
+
 const boundSummary = computed(() => {
   const bits: string[] = [];
   if (boundTaskId.value) bits.push(shortId(boundTaskId.value));
@@ -76,12 +154,22 @@ const boundSummary = computed(() => {
   return bits.join(" · ");
 });
 
+const panelOpen = computed(() => rail.open.value && rail.tab.value === "agent");
+
 async function onSubmit() {
   const text = draft.value.trim();
   if (!text || generating.value) return;
   draft.value = "";
+  await nextTick();
+  autosizeDraft();
   messages.value = [...messages.value, { kind: "user", text }];
   await send({ message: text });
+}
+
+function onComposerKeydown(event: KeyboardEvent) {
+  if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+  event.preventDefault();
+  void onSubmit();
 }
 
 async function runSearch() {
@@ -97,7 +185,7 @@ function onSearchInput() {
 }
 
 function pickTask(id: unknown) {
-  attachOpen.value = false;
+  closeAttach();
   if (id) void bindTask(String(id), { autoAnalyze: true });
 }
 
@@ -105,6 +193,17 @@ function applyPlan(plan: AgentPlan) {
   const rerun = rerunByPlan.value[plan.id] !== false;
   void apply(plan.id, Boolean(plan.rerun) && rerun);
 }
+
+watch(
+  () => messages.value.map((msg) => (isTool(msg) ? `${msg.id}:${msg.status}` : "")).join("|"),
+  () => {
+    const running = messages.value.filter(isTool).filter((msg) => msg.status === "running").map((msg) => msg.id);
+    const seen = new Set(openTools.value);
+    for (const id of running) {
+      if (!seen.has(id)) openTools.value = [...openTools.value, id];
+    }
+  },
+);
 
 watch(
   () => messages.value.length,
@@ -118,30 +217,100 @@ watch(
 onMounted(() => {
   if (rail.sessionId.value) sessionId.value = rail.sessionId.value;
   if (rail.boundTaskId.value) boundTaskId.value = rail.boundTaskId.value;
+  document.addEventListener("pointerdown", onDocPointerDown);
+  document.addEventListener("keydown", onDocKeydown);
   void restoreMessages();
+  void nextTick(autosizeDraft);
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener("pointerdown", onDocPointerDown);
+  document.removeEventListener("keydown", onDocKeydown);
 });
 </script>
 
 <template>
-  <div class="agent" data-agent-panel>
+  <div class="agent" data-agent-panel :class="{ 'is-open': panelOpen }">
     <header class="toolbar">
       <div class="lead">
-        <span class="title mono">{{ t("nav.agent") }}</span>
-        <div v-if="boundSummary" class="bound mono">{{ boundSummary }}</div>
+        <span class="title mono" data-agent-title>{{ t("nav.agent") }}</span>
+        <div v-if="boundSummary" class="bound mono" data-agent-bound>{{ boundSummary }}</div>
       </div>
-      <button type="button" class="icon" :aria-label="t('agent.close')" @click="rail.collapse()">×</button>
+      <button
+        type="button"
+        class="icon"
+        data-agent-close
+        :aria-label="t('agent.close')"
+        @click="rail.collapse()"
+      >
+        ×
+      </button>
     </header>
     <div ref="scroller" class="messages" data-agent-messages>
-      <p v-if="!messages.length" class="empty">{{ t("agent.empty") }}</p>
+      <p v-if="!messages.length" class="empty agent-dock-empty">{{ t("agent.empty") }}</p>
       <template v-for="(msg, idx) in messages" :key="idx">
         <div v-if="msg.kind === 'user'" class="bubble user">{{ msg.text }}</div>
+        <article
+          v-else-if="msg.kind === 'thinking' && msg.text.trim()"
+          class="thinking"
+          data-agent-thinking
+          :data-agent-thinking-open="thinkOpenNames(idx).length ? 'true' : 'false'"
+        >
+          <el-collapse
+            :model-value="thinkOpenNames(idx)"
+            @update:model-value="onThinkToggle(idx, $event)"
+          >
+            <el-collapse-item :name="thinkName(idx)">
+              <template #title>
+                <span class="thinking-title" data-agent-thinking-title>
+                  {{ msg.streaming ? t("agent.thinking") : t("agent.thinking_done") }}
+                </span>
+              </template>
+              <pre
+                v-if="openThinks.includes(thinkName(idx))"
+                class="thinking-body"
+                data-agent-thinking-body
+              >{{ msg.text }}</pre>
+            </el-collapse-item>
+          </el-collapse>
+        </article>
+        <article
+          v-else-if="msg.kind === 'tool'"
+          class="tool-card"
+          :data-agent-tool="msg.id"
+        >
+          <el-collapse
+            :model-value="toolOpenNames(msg.id)"
+            @update:model-value="onToolToggle(msg.id, $event)"
+          >
+            <el-collapse-item :name="msg.id">
+              <template #title>
+                <span class="tool-head">
+                  <el-icon v-if="msg.status === 'running'" class="is-loading" :size="14">
+                    <Loading />
+                  </el-icon>
+                  <el-icon v-else-if="msg.status === 'success'" class="ok" :size="14">
+                    <CircleCheck />
+                  </el-icon>
+                  <el-icon v-else class="err" :size="14">
+                    <CircleClose />
+                  </el-icon>
+                  <span class="tool-name mono" data-agent-tool-name>{{ msg.name }}</span>
+                  <span class="tool-status" :data-agent-tool-status="msg.status">
+                    {{ toolStatusLabel(msg.status) }}
+                  </span>
+                </span>
+              </template>
+              <pre v-if="msg.summary" class="tool-summary" data-agent-tool-summary>{{ msg.summary }}</pre>
+            </el-collapse-item>
+          </el-collapse>
+        </article>
         <div
           v-else-if="msg.kind === 'assistant'"
           class="bubble assistant"
           v-html="renderMd(msg.text)"
         />
         <div v-else-if="msg.kind === 'error'" class="bubble error">{{ msg.text }}</div>
-        <div v-else-if="msg.kind === 'tool'" class="tool">{{ msg.text }}</div>
         <article v-else-if="msg.kind === 'plan'" class="plan" :data-agent-plan="msg.plan.id">
           <p class="plan-summary">{{ msg.plan.summary }}</p>
           <div
@@ -185,16 +354,17 @@ onMounted(() => {
     </div>
     <div class="composer">
       <div class="row">
-        <div class="attach" data-agent-attach-wrap>
+        <div ref="attachWrap" class="attach" data-agent-attach-wrap>
           <button
             type="button"
             class="plus"
             data-agent-attach
             :aria-expanded="attachOpen ? 'true' : 'false'"
             :aria-label="t('agent.attach')"
-            @click="attachOpen = !attachOpen; if (attachOpen) runSearch()"
+            :title="t('agent.attach')"
+            @click="toggleAttach"
           >
-            +
+            <el-icon :size="16"><Plus /></el-icon>
           </button>
           <div v-show="attachOpen" class="menu" data-agent-attach-menu>
             <p>{{ t("agent.attach_task") }}</p>
@@ -220,17 +390,39 @@ onMounted(() => {
           </div>
         </div>
         <form data-agent-stream @submit.prevent="onSubmit">
-          <input
+          <textarea
+            ref="draftEl"
             v-model="draft"
-            type="text"
             name="message"
+            rows="2"
+            class="draft"
+            data-agent-input
             :placeholder="t('agent.composer_placeholder')"
             autocomplete="off"
+            @keydown="onComposerKeydown"
+            @input="autosizeDraft"
           />
-          <button v-show="generating" type="button" data-agent-stop @click="stop()">
-            {{ t("agent.stop") }}
+          <button
+            v-if="generating"
+            type="button"
+            class="send"
+            data-agent-stop
+            :title="t('agent.stop')"
+            :aria-label="t('agent.stop')"
+            @click="stop()"
+          >
+            <el-icon :size="16"><VideoPause /></el-icon>
           </button>
-          <button type="submit">{{ t("agent.send") }}</button>
+          <button
+            v-else
+            type="submit"
+            class="send"
+            data-agent-send
+            :title="t('agent.send')"
+            :aria-label="t('agent.send')"
+          >
+            <el-icon :size="16"><Promotion /></el-icon>
+          </button>
         </form>
       </div>
     </div>
@@ -327,10 +519,81 @@ onMounted(() => {
   margin-bottom: 0;
 }
 
-.tool {
-  font-size: 11px;
+.thinking,
+.tool-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--overlay);
+  overflow: hidden;
+}
+
+.thinking :deep(.el-collapse),
+.tool-card :deep(.el-collapse) {
+  border: 0;
+  background: transparent;
+}
+
+.thinking :deep(.el-collapse-item__header),
+.tool-card :deep(.el-collapse-item__header) {
+  height: auto;
+  min-height: 36px;
+  line-height: 1.4;
+  padding: 6px 10px;
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.thinking :deep(.el-collapse-item__wrap),
+.tool-card :deep(.el-collapse-item__wrap) {
+  background: transparent;
+  border: 0;
+}
+
+.thinking :deep(.el-collapse-item__content),
+.tool-card :deep(.el-collapse-item__content) {
+  padding: 0 10px 10px;
+  color: var(--text-muted);
+}
+
+.tool-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.tool-name {
+  font-size: 12px;
+}
+
+.tool-status {
   color: var(--text-faint);
+  font-size: 11px;
+}
+
+.tool-head .ok {
+  color: var(--ok);
+}
+
+.tool-head .err {
+  color: var(--err);
+}
+
+.tool-summary,
+.thinking-body {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 11px;
   font-family: "Fira Code", ui-monospace, monospace;
+  color: var(--text-muted);
+}
+
+.thinking-title {
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 .plan {
@@ -359,9 +622,7 @@ onMounted(() => {
   align-items: center;
 }
 
-.plan-actions button,
-.composer button,
-.plus {
+.plan-actions button {
   background: var(--raised);
   border: 1px solid var(--border);
   color: var(--text);
@@ -372,33 +633,69 @@ onMounted(() => {
 }
 
 .composer {
+  --composer-btn: 36px;
+  --composer-min: 56px;
+  --composer-max: 136px;
+  --composer-gap: 8px;
+  position: relative;
+  flex: 0 0 auto;
+  min-width: 0;
+  box-sizing: border-box;
   border-top: 1px solid var(--border);
-  padding: 10px 12px;
+  padding: 10px;
 }
 
 .row {
   display: flex;
-  gap: 8px;
   align-items: flex-end;
+  gap: var(--composer-gap);
+  min-width: 0;
+  width: 100%;
 }
 
 .attach {
-  position: relative;
+  flex: 0 0 var(--composer-btn);
+  width: var(--composer-btn);
 }
 
-.plus {
-  width: 32px;
-  height: 32px;
+.plus,
+.send {
+  box-sizing: border-box;
+  flex: 0 0 var(--composer-btn);
+  width: var(--composer-btn);
+  min-width: var(--composer-btn);
+  max-width: var(--composer-btn);
+  height: var(--composer-btn);
+  min-height: var(--composer-btn);
+  max-height: var(--composer-btn);
   padding: 0;
-  font-size: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  cursor: pointer;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  font-size: 0;
+}
+
+.plus :deep(.el-icon),
+.send :deep(.el-icon) {
+  font-size: 16px;
 }
 
 .menu {
   position: absolute;
-  left: 0;
+  left: 10px;
+  right: 10px;
   bottom: calc(100% + 8px);
   z-index: 6;
-  width: 260px;
+  width: auto;
+  box-sizing: border-box;
   padding: 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -412,13 +709,33 @@ onMounted(() => {
 }
 
 .search,
-.composer input {
-  width: 100%;
+.draft {
   background: var(--raised);
   border: 1px solid var(--border);
   color: var(--text);
-  border-radius: 6px;
-  padding: 7px 8px;
+  border-radius: 8px;
+  padding: 8px 10px;
+  box-sizing: border-box;
+}
+
+.search {
+  width: 100%;
+}
+
+.draft {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+  display: block;
+  margin: 0;
+  min-height: var(--composer-min);
+  height: var(--composer-min);
+  max-height: var(--composer-max);
+  line-height: 20px;
+  resize: none;
+  overflow-y: auto;
+  font: inherit;
+  field-sizing: fixed;
 }
 
 .results {
@@ -443,7 +760,9 @@ onMounted(() => {
 
 form[data-agent-stream] {
   flex: 1;
+  min-width: 0;
   display: flex;
-  gap: 6px;
+  align-items: flex-end;
+  gap: var(--composer-gap);
 }
 </style>

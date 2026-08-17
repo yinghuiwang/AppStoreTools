@@ -67,6 +67,7 @@ onBeforeUnmount(() => {
       <button
         type="button"
         class="resize"
+        data-agent-resize
         :aria-label="t('agent.resize')"
         @pointerdown="onPointerDown"
       />

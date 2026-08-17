@@ -687,8 +687,14 @@
   "agent.rerun_after_apply": "Rerun after apply",
   "agent.generating": "Generating a reply…",
   "agent.tool_running": "Reading task logs",
+  "agent.tool.running": "Running",
+  "agent.tool.success": "Succeeded",
+  "agent.tool.failed": "Failed",
+  "agent.thinking": "Thinking",
+  "agent.thinking_done": "Thought",
   "agent.applying": "Applying",
   "agent.applied": "Applied",
   "agent.apply_failed": "Apply failed",
-  "agent.rejected": "Ignored"
+  "agent.rejected": "Ignored",
+  "agent.conflict": "Conflict — refresh and try again"
 }

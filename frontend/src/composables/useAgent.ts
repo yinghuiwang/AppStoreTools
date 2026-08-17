@@ -2,23 +2,16 @@ import { ref, type Ref } from "vue";
 import { ApiError, httpJson } from "@/api/http";
 import { i18n } from "@/i18n";
 import { useRightRail } from "@/composables/useRightRail";
+import {
+  applyAgentEvent,
+  finishThinkStream,
+  historyToMessages,
+  type AgentMessage,
+  type AgentPlan,
+  type StoreRow,
+} from "@/composables/agentStream";
 
-export type AgentPlan = {
-  id: string;
-  status: string;
-  summary: string;
-  mutations: Array<Record<string, unknown>>;
-  manual_steps?: string[];
-  rerun?: { task_id?: string; kind?: string };
-  error?: string;
-};
-
-export type AgentMessage =
-  | { kind: "user"; text: string }
-  | { kind: "assistant"; text: string }
-  | { kind: "error"; text: string }
-  | { kind: "tool"; text: string }
-  | { kind: "plan"; plan: AgentPlan };
+export type { AgentMessage, AgentPlan, AgentToolStatus } from "@/composables/agentStream";
 
 const sessionId = ref("");
 const boundTaskId = ref("");
@@ -65,19 +58,9 @@ async function readAgentSse(
   }
 }
 
-function appendAssistantToken(fragment: string) {
-  const list = messages.value;
-  const last = list[list.length - 1];
-  if (last && last.kind === "assistant") {
-    last.text += fragment;
-    messages.value = [...list];
-    return;
-  }
-  messages.value = [...list, { kind: "assistant", text: fragment }];
-}
-
 async function loadPlanCards(planIds: string[]) {
   for (const id of planIds) {
+    if (messages.value.some((msg) => msg.kind === "plan" && msg.plan.id === id)) continue;
     try {
       const plan = await httpJson<AgentPlan>(`/api/agent/plans/${encodeURIComponent(id)}`);
       messages.value = [...messages.value, { kind: "plan", plan }];
@@ -99,15 +82,10 @@ function handleEvent(event: string, data: string) {
     }
     return;
   }
-  if (event === "token") {
-    appendAssistantToken(data);
+  if (event === "token" || event === "tool_start" || event === "tool_result" || event === "thinking") {
+    messages.value = applyAgentEvent(messages.value, event, data);
     return;
   }
-  if (event === "tool_start") {
-    messages.value = [...messages.value, { kind: "tool", text: t("agent.tool_running") }];
-    return;
-  }
-  if (event === "tool_result") return;
   if (event === "error") {
     generating.value = false;
     let text = data;
@@ -119,11 +97,12 @@ function handleEvent(event: string, data: string) {
     } catch {
       text = data;
     }
-    messages.value = [...messages.value, { kind: "error", text }];
+    messages.value = [...finishThinkStream(messages.value), { kind: "error", text }];
     return;
   }
   if (event === "stopped" || event === "done") {
     generating.value = false;
+    messages.value = finishThinkStream(messages.value);
     if (event === "done") {
       try {
         const done = JSON.parse(data) as { session_id?: string; plan_ids?: string[] };
@@ -191,21 +170,14 @@ async function stop(): Promise<void> {
 
 function ingestSessionPayload(payload: {
   session?: { id?: string; task_id?: string };
-  messages?: Array<{ role?: string; content?: string }>;
+  messages?: StoreRow[];
   plans?: AgentPlan[];
 }) {
   const session = payload.session || {};
   if (session.id) sessionId.value = String(session.id);
   if (session.task_id) boundTaskId.value = String(session.task_id);
   syncRail();
-  const next: AgentMessage[] = [];
-  for (const msg of payload.messages || []) {
-    if (msg.role === "user" || msg.role === "assistant") {
-      next.push({ kind: msg.role, text: String(msg.content || "") });
-    }
-  }
-  for (const plan of payload.plans || []) next.push({ kind: "plan", plan });
-  messages.value = next;
+  messages.value = historyToMessages(payload.messages || [], payload.plans || []);
 }
 
 async function restoreMessages(): Promise<void> {
@@ -219,7 +191,7 @@ async function restoreMessages(): Promise<void> {
   try {
     const payload = await httpJson<{
       session?: { id?: string; task_id?: string };
-      messages?: Array<{ role?: string; content?: string }>;
+      messages?: StoreRow[];
       plans?: AgentPlan[];
     }>(`/api/agent/sessions?${qs}`, { skipNotify: true });
     ingestSessionPayload(payload);
@@ -237,7 +209,7 @@ async function bindTask(taskId: string, opts?: { autoAnalyze?: boolean }): Promi
   try {
     const payload = await httpJson<{
       session?: { id?: string; task_id?: string };
-      messages?: Array<{ role?: string; content?: string }>;
+      messages?: StoreRow[];
       plans?: AgentPlan[];
     }>(`/api/agent/sessions?task_id=${encodeURIComponent(taskId)}`, { skipNotify: true });
     if (seq !== bindSeq) return;

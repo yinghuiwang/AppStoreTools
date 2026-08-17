@@ -687,8 +687,14 @@
   "agent.rerun_after_apply": "应用后重跑",
   "agent.generating": "正在生成回复…",
   "agent.tool_running": "正在读取任务日志",
+  "agent.tool.running": "运行中",
+  "agent.tool.success": "成功",
+  "agent.tool.failed": "失败",
+  "agent.thinking": "思考中",
+  "agent.thinking_done": "已思考",
   "agent.applying": "正在应用",
   "agent.applied": "已应用",
   "agent.apply_failed": "应用失败",
-  "agent.rejected": "已忽略"
+  "agent.rejected": "已忽略",
+  "agent.conflict": "状态冲突，请刷新后再试"
 }
