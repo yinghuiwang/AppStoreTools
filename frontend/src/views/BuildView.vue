@@ -185,6 +185,7 @@ watch([scheme, signing, certificate], () => {
 });
 onMounted(() => {
   if (route.query.action === "build-upload") mode.value = "full";
+  if (scannedOnce.value) return;
   scanMessage.value = t("build.scan_waiting");
   void loadOptions();
 });

@@ -45,6 +45,7 @@ type GuardStatus = {
 
 const { t } = useI18n();
 const loading = ref(true);
+const loaded = ref(false);
 const guard = ref<GuardStatus | null>(null);
 const profiles = ref<string[]>([]);
 const details = ref<Record<string, { already_bound?: boolean }>>({});
@@ -128,14 +129,16 @@ function isCurrentApp(row: AppBinding) {
 }
 
 async function loadGuard() {
-  loading.value = true;
+  if (!loaded.value) loading.value = true;
   try {
     guard.value = await httpJson<GuardStatus>("/api/guard/status");
     if (guard.value) rebuildAppRows(guard.value);
     else appRows.value = [];
+    loaded.value = true;
   } catch {
     guard.value = null;
     appRows.value = [];
+    loaded.value = true;
   } finally {
     loading.value = false;
   }
@@ -207,7 +210,7 @@ onMounted(() => {
         <h2>{{ t("guard.title") }}</h2>
         <el-button @click="openAdd">{{ t("guard.manual_add") }}</el-button>
       </div>
-      <PageLoading v-if="loading" size="block" />
+      <PageLoading v-if="loading && !loaded" size="block" />
       <p v-else-if="!guard" class="err">{{ t("guard.load_failed") }}</p>
       <template v-else>
         <div class="status-row">

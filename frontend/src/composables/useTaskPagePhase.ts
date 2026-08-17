@@ -11,7 +11,7 @@ export const TASK_PAGE_IDS: readonly TaskPageId[] = [
   "listing-upload",
 ];
 
-/** Route component names cached by <keep-alive> in AppShell. */
+/** Route component names for task form pages. AppShell keep-alive caches all routes. */
 export const TASK_KEEP_ALIVE_NAMES: string[] = [
   "ListingView",
   "WhatsNewView",

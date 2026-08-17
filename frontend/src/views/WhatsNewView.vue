@@ -133,7 +133,7 @@ watch([status, logTaskId], async () => {
 });
 
 onMounted(() => {
-  void loadCheck();
+  if (!check.value) void loadCheck();
   void pullTranslateResult();
 });
 </script>

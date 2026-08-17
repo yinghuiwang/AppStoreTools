@@ -61,7 +61,7 @@ async function run() {
   }
 }
 
-onMounted(() => { void loadCheck(); });
+onMounted(() => { if (!check.value) void loadCheck(); });
 </script>
 
 <template>

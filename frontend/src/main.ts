@@ -7,6 +7,8 @@ import { router } from "./router";
 import { i18n } from "./i18n";
 import { useProfile } from "@/composables/useProfile";
 
+let spaMounted = false;
+
 function applyFavicon() {
   const styles = getComputedStyle(document.documentElement);
   const dim = (styles.getPropertyValue("--accent-dim") || "#23c9a8").trim() || "#23c9a8";
@@ -33,7 +35,12 @@ function applyFavicon() {
   link.href = "data:image/svg+xml," + encodeURIComponent(svg);
 }
 
+function clearBootChrome(root: HTMLElement) {
+  root.classList.remove("spa-boot");
+}
+
 function renderBootLoading(root: HTMLElement) {
+  if (spaMounted) return;
   root.textContent = "";
   root.className = "spa-boot";
   const wrap = document.createElement("div");
@@ -50,6 +57,7 @@ function renderBootLoading(root: HTMLElement) {
 }
 
 function renderBootFailed(root: HTMLElement, retry: () => void) {
+  if (spaMounted) return;
   root.textContent = "";
   root.className = "spa-boot";
   const p = document.createElement("p");
@@ -67,12 +75,16 @@ async function boot() {
   document.documentElement.classList.add("dark");
   const root = document.getElementById("app");
   if (!root) return;
-  renderBootLoading(root);
+  if (!spaMounted) renderBootLoading(root);
   const { refresh, snapshot } = useProfile();
   try {
     await refresh();
   } catch {
     renderBootFailed(root, boot);
+    return;
+  }
+  if (spaMounted) {
+    clearBootChrome(root);
     return;
   }
   const lang = snapshot.value?.lang === "zh" ? "zh" : "en";
@@ -81,12 +93,14 @@ async function boot() {
   applyFavicon();
   // Drop boot chrome before mount — Vue keeps #app attributes; spa-boot's
   // flex centering would otherwise shrink .shell to content width.
-  root.classList.remove("spa-boot");
+  clearBootChrome(root);
   root.replaceChildren();
   const app = createApp(App);
   app.use(router);
   app.use(i18n);
   app.mount(root);
+  spaMounted = true;
+  clearBootChrome(root);
 }
 
 void boot();

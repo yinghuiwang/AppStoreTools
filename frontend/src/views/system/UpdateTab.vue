@@ -56,7 +56,7 @@ async function check() {
 
 async function loadVersions() {
   versionError.value = "";
-  versionsLoading.value = true;
+  if (!versions.value.length) versionsLoading.value = true;
   try {
     const data = await httpJson<{ ok: boolean; versions: string[]; message?: string }>("/api/update/versions");
     versions.value = data.versions || [];
@@ -69,7 +69,7 @@ async function loadVersions() {
 
 async function loadBranches() {
   branchError.value = "";
-  branchesLoading.value = true;
+  if (!branches.value.length) branchesLoading.value = true;
   try {
     const data = await httpJson<{ ok: boolean; branches: string[]; message?: string }>("/api/update/branches");
     branches.value = data.branches || [];
@@ -156,7 +156,7 @@ onMounted(() => {
         <button type="button" :class="{ on: advanced === 'branch' }" @click="advanced = 'branch'; loadBranches()">{{ t("update.pin_branch") }}</button>
       </div>
       <div v-show="advanced === 'specific'" class="page-stack">
-        <PageLoading v-if="versionsLoading" size="inline" />
+        <PageLoading v-if="versionsLoading && !versions.length" size="inline" />
         <label class="field">
           <span>{{ t("update.version_label") }}</span>
           <select v-if="versions.length" v-model="selectedVersion" class="field-input">
@@ -168,7 +168,7 @@ onMounted(() => {
         <el-button type="primary" :disabled="versionsLoading" @click="run(selectedVersion, '')">{{ t("update.install_version") }}</el-button>
       </div>
       <div v-show="advanced === 'branch'" class="page-stack">
-        <PageLoading v-if="branchesLoading" size="inline" />
+        <PageLoading v-if="branchesLoading && !branches.length" size="inline" />
         <label class="field">
           <span>{{ t("update.branch_label") }}</span>
           <select v-if="branches.length" v-model="selectedBranch" class="field-input">

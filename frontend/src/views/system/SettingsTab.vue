@@ -33,6 +33,7 @@ const webhook = reactive<WebhookConfig>({
 const webhookError = ref("");
 const testResults = ref<{ provider: string; ok: boolean; error?: string }[]>([]);
 const loading = ref(true);
+const loaded = ref(false);
 const kinds = [
   ["metadata", "settings.task_metadata"],
   ["build", "settings.task_build"],
@@ -156,9 +157,10 @@ async function testProvider(provider: string) {
 }
 
 onMounted(async () => {
-  loading.value = true;
+  if (!loaded.value) loading.value = true;
   try {
     await Promise.all([loadLlm(), loadWebhook()]);
+    loaded.value = true;
   } finally {
     loading.value = false;
   }
@@ -172,7 +174,7 @@ onMounted(async () => {
         <h2>{{ t("settings.llm_title") }}</h2>
         <el-button :disabled="loading" @click="openCreate">{{ t("settings.add_config") }}</el-button>
       </div>
-      <PageLoading v-if="loading" size="block" />
+      <PageLoading v-if="loading && !loaded" size="block" />
       <template v-else>
       <div v-if="showForm" class="form-box">
         <p>{{ isEditing ? t("settings.edit_config") : t("settings.new_config") }}</p>
@@ -210,7 +212,7 @@ onMounted(async () => {
         <h2>{{ t("settings.webhook_title") }}</h2>
         <el-button type="primary" :disabled="loading" @click="saveWebhook">{{ t("common.save") }}</el-button>
       </div>
-      <PageLoading v-if="loading" size="block" />
+      <PageLoading v-if="loading && !loaded" size="block" />
       <template v-else>
       <p v-if="webhookError" class="err">{{ webhookError }}</p>
       <label class="check"><input v-model="webhook.enabled" type="checkbox" /> {{ t("settings.webhook_enable") }}</label>

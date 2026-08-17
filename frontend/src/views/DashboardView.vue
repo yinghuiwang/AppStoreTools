@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import { httpJson } from "@/api/http";
@@ -77,8 +77,9 @@ const router = useRouter();
 const { snapshot } = useProfile();
 const rail = useRightRail();
 const logs = useTaskLog();
+defineOptions({ name: "DashboardView" });
 const loading = ref(true);
-const refreshStatus = ref("");
+const refreshError = ref("");
 const summary = ref<Summary | null>(null);
 const range = ref<"7d" | "30d" | "90d">("30d");
 const profileFilter = ref(snapshot.value?.current_profile || "");
@@ -149,7 +150,6 @@ async function load() {
   refreshController = controller;
   const first = !summary.value;
   loading.value = first;
-  if (!first) refreshStatus.value = t("dashboard.refreshing");
   try {
     const qs = new URLSearchParams({ range: range.value, profile: profileFilter.value });
     if (kind.value) qs.set("kind", kind.value);
@@ -160,11 +160,11 @@ async function load() {
     });
     if (requestId !== refreshRequest) return;
     summary.value = next;
-    refreshStatus.value = "";
+    refreshError.value = "";
   } catch (err) {
     if (requestId !== refreshRequest) return;
     if (err instanceof DOMException && err.name === "AbortError") return;
-    refreshStatus.value = t("dashboard.refresh_failed");
+    refreshError.value = t("dashboard.refresh_failed");
   } finally {
     if (requestId === refreshRequest) {
       loading.value = false;
@@ -215,7 +215,15 @@ watch(
 
 onMounted(() => {
   document.addEventListener("visibilitychange", onVisible);
+});
+
+onActivated(() => {
   void load();
+});
+
+onDeactivated(() => {
+  refreshController?.abort();
+  clearPoll();
 });
 
 onUnmounted(() => {
@@ -226,12 +234,12 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="page-stack dash" :aria-busy="Boolean(refreshStatus)">
+  <div class="page-stack dash" :aria-busy="loading && !summary">
     <header class="dash-toolbar">
       <div class="dash-id">
         <p class="kicker">COMMAND WORKSPACE</p>
         <h1>{{ t("index.title") }}</h1>
-        <p class="refresh-status" role="status" aria-live="polite">{{ refreshStatus }}</p>
+        <p v-if="refreshError" class="refresh-status" role="status" aria-live="polite">{{ refreshError }}</p>
       </div>
       <section class="filters" :aria-label="t('index.filter_aria')">
         <fieldset>
@@ -357,7 +365,7 @@ onUnmounted(() => {
             </article>
             <p v-if="!running.length" class="empty-state">{{ t("index.empty_running") }}</p>
           </template>
-          <p v-else-if="!loading" class="empty-state">{{ refreshStatus || t("index.empty_running") }}</p>
+          <p v-else-if="!loading" class="empty-state">{{ refreshError || t("index.empty_running") }}</p>
         </div>
       </section>
 
@@ -445,7 +453,7 @@ onUnmounted(() => {
               </td>
             </tr>
             <tr v-if="!historyTasks.length">
-              <td colspan="6" class="empty-state">{{ loading && !summary ? t("dashboard.refreshing") : t("index.empty_history") }}</td>
+              <td colspan="6" class="empty-state">{{ t("index.empty_history") }}</td>
             </tr>
           </tbody>
         </table>

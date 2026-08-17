@@ -25,7 +25,8 @@ def test_appshell_keep_alive_includes_task_pages():
     shell = (SRC / "layouts/AppShell.vue").read_text(encoding="utf-8")
     phase = (SRC / "composables/useTaskPagePhase.ts").read_text(encoding="utf-8")
     assert "<keep-alive" in shell
-    assert "TASK_KEEP_ALIVE_NAMES" in shell
+    assert ":include" not in shell
+    assert "current_profile" in shell
     assert "bindTaskPageProfile" in shell
     for name in ("ListingView", "WhatsNewView", "UrlsView", "BuildView", "IapView"):
         assert f'"{name}"' in phase

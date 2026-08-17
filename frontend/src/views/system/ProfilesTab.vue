@@ -27,6 +27,7 @@ const defaultName = ref("");
 const canCreate = ref(true);
 const dialog = ref(false);
 const loading = ref(true);
+const loaded = ref(false);
 const editing = ref("");
 const keyFile = ref<File | null>(null);
 const form = reactive({
@@ -51,7 +52,7 @@ const rows = computed(() =>
 );
 
 async function load() {
-  loading.value = true;
+  if (!loaded.value) loading.value = true;
   try {
     const data = await httpJson<{
       profiles: string[];
@@ -63,6 +64,7 @@ async function load() {
     details.value = data.profile_details || {};
     defaultName.value = data.default || "";
     canCreate.value = data.can_create !== false;
+    loaded.value = true;
   } finally {
     loading.value = false;
   }
@@ -155,7 +157,7 @@ onMounted(() => { void load(); });
         <el-button type="primary" :disabled="!canCreate" :title="canCreate ? t('profiles.add_title') : t('profiles.cannot_create')" @click="openCreate">{{ t("profiles.add") }}</el-button>
         <el-button @click="importLocal">{{ t("profiles.import_confirm") }}</el-button>
       </div>
-      <PageLoading v-if="loading" size="block" />
+      <PageLoading v-if="loading && !loaded" size="block" />
       <p v-else-if="!rows.length" class="empty-state">
         {{ t("profiles.empty") }}
         <span class="empty-hint">{{ t("profiles.empty_hint") }}</span>

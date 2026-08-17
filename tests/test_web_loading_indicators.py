@@ -86,9 +86,12 @@ def test_dashboard_refresh_uses_status_text_not_second_spinner():
     src = _read("views/DashboardView.vue")
     assert src.count("<PageLoading") == 1
     assert 'v-if="loading && !summary"' in src
-    assert "dashboard.refreshing" in src
+    assert "dashboard.refreshing" not in src
     assert "PageLoading v-if=\"refreshing\"" not in src
     assert 'size="inline"' not in src
+    assert "refreshError" in src
+    assert "onActivated" in src
+    assert "onDeactivated" in src
 
 
 def test_build_refresh_prefers_button_after_first_scan():
@@ -96,3 +99,40 @@ def test_build_refresh_prefers_button_after_first_scan():
     assert "scannedOnce" in src
     assert ':loading="optionsLoading && scannedOnce"' in src
     assert 'PageLoading v-if="optionsLoading && !scannedOnce"' in src
+    assert "if (scannedOnce.value) return" in src
+
+
+def test_spa_boot_is_pre_mount_only():
+    main = _read("main.ts")
+    router = _read("router/index.ts")
+    assert "renderBootLoading" in main
+    assert "spa.booting" in main
+    assert "clearBootChrome" in main
+    assert "spaMounted" in main
+    assert "app.mount" in main
+    mount_at = main.find("app.mount")
+    assert mount_at != -1
+    assert main.find("clearBootChrome(root)", mount_at) != -1
+    assert "beforeEach" not in router
+    assert "spa-boot" not in router
+    assert "PageLoading" not in _read("layouts/AppShell.vue")
+    assert "PageLoading" not in _read("App.vue")
+
+
+def test_system_pages_do_not_cover_existing_content_on_refresh():
+    profiles = _read("views/system/ProfilesTab.vue")
+    guard = _read("views/system/GuardTab.vue")
+    settings = _read("views/system/SettingsTab.vue")
+    update = _read("views/system/UpdateTab.vue")
+    assert 'PageLoading v-if="loading && !loaded"' in profiles
+    assert 'PageLoading v-if="loading"' not in profiles.replace(
+        'PageLoading v-if="loading && !loaded"', ""
+    )
+    assert 'PageLoading v-if="loading && !loaded"' in guard
+    assert 'PageLoading v-if="loading && !loaded"' in settings
+    assert settings.count('PageLoading v-if="loading && !loaded"') == 2
+    assert 'PageLoading v-if="versionsLoading && !versions.length"' in update
+    assert 'PageLoading v-if="branchesLoading && !branches.length"' in update
+    assert 'PageLoading v-if="versionsLoading"' not in update.replace(
+        'PageLoading v-if="versionsLoading && !versions.length"', ""
+    )

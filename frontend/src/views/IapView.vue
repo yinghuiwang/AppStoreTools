@@ -121,7 +121,7 @@ async function uploadShots() {
   rail.openLogs(task_id);
 }
 
-onMounted(() => { void check(); });
+onMounted(() => { if (!checkMsg.value) void check(); });
 </script>
 
 <template>
