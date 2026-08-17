@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, inject, onMounted, ref, watch, type Ref } from "vue";
 import { useI18n } from "vue-i18n";
+import { ArrowDown, ArrowUp, Plus } from "@element-plus/icons-vue";
 import { ApiError, apiErrorMessage, httpJson } from "@/api/http";
+import ExampleHelp from "@/components/ExampleHelp.vue";
 import PageLoading from "@/components/PageLoading.vue";
 import { useBrowse } from "@/composables/useBrowse";
 import { useImageViewer } from "@/composables/useImageViewer";
@@ -10,6 +12,7 @@ import LocalePicker from "./LocalePicker.vue";
 
 type Shot = { file_name: string; order: number; thumb_url: string; local_path: string; remote_id: string };
 type LocaleRow = { locale: string; fields: Record<string, string>; screenshots: Record<string, Shot[]> };
+type ShotPick = { kind: "add"; locale: string; displayType: string } | { kind: "replace"; path: string };
 
 const FIELDS = ["name", "subtitle", "description", "keywords", "supportUrl", "marketingUrl", "privacyPolicyUrl"];
 
@@ -30,6 +33,8 @@ const loading = ref(false);
 const loaded = ref(false);
 const empty = computed(() => (snapshot.value?.current_profile || "") === "");
 const current = computed(() => locales.value.find((row) => row.locale === active.value) || locales.value[0]);
+const shotFileInput = ref<HTMLInputElement | null>(null);
+const shotPick = ref<ShotPick | null>(null);
 
 async function load() {
   alert.value = "";
@@ -129,6 +134,27 @@ function openShots(group: Shot[], start: number) {
   viewer.show(group.map((item) => ({ src: item.thumb_url, title: item.file_name })), start);
 }
 
+function openAddShot(locale: string, displayType: string) {
+  shotPick.value = { kind: "add", locale, displayType };
+  shotFileInput.value?.click();
+}
+
+function openReplaceShot(path: string) {
+  shotPick.value = { kind: "replace", path };
+  shotFileInput.value?.click();
+}
+
+function onShotFileChange(e: Event) {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  const pick = shotPick.value;
+  input.value = "";
+  shotPick.value = null;
+  if (!file || !pick) return;
+  if (pick.kind === "add") void addShot(pick.locale, pick.displayType, file);
+  else void replaceShot(pick.path, file);
+}
+
 onMounted(() => { if (!empty.value) void load(); });
 watch(reloadTick, () => { if (!empty.value) void load(); });
 </script>
@@ -144,20 +170,20 @@ watch(reloadTick, () => { if (!empty.value) void load(); });
     </el-alert>
     <div class="card">
       <p>{{ t("metadata.wb_hint") }}</p>
-      <label class="field">
-        <span>{{ t("metadata.csv_path") }}</span>
+      <div class="field">
+        <ExampleHelp kind="csv" :label="t('metadata.csv_path')" />
         <div class="field-row">
           <input v-model="csvPath" class="field-input" />
           <el-button @click="browse.pick({ mode: 'file', ext: '.csv', initialPath: csvPath }).then((p) => { if (p) csvPath = p; })">{{ t("filebrowser.browse") }}</el-button>
         </div>
-      </label>
-      <label class="field">
-        <span>{{ t("metadata.shots_dir") }}</span>
+      </div>
+      <div class="field">
+        <ExampleHelp kind="shots" :label="t('metadata.shots_dir')" />
         <div class="field-row">
           <input v-model="shotsDir" class="field-input" />
           <el-button @click="browse.pick({ mode: 'dir', initialPath: shotsDir }).then((p) => { if (p) shotsDir = p; })">{{ t("filebrowser.browse") }}</el-button>
         </div>
-      </label>
+      </div>
       <div class="field-row">
         <el-button
           :disabled="empty || (loading && !loaded)"
@@ -166,8 +192,6 @@ watch(reloadTick, () => { if (!empty.value) void load(); });
         >{{ t("metadata.load_preview") }}</el-button>
         <el-button type="primary" :disabled="empty" @click="save">{{ t("metadata.save_csv") }}</el-button>
         <el-button @click="pickerOpen = true">{{ t("metadata.locales_btn") }}</el-button>
-        <a href="/api/examples/csv">{{ t("common.download_sample_csv") }}</a>
-        <a href="/api/examples/screenshots">{{ t("common.download_sample_shots") }}</a>
       </div>
     </div>
     <PageLoading v-if="loading && !loaded" size="block" />
@@ -190,26 +214,44 @@ watch(reloadTick, () => { if (!empty.value) void load(); });
         </label>
         <h3>{{ t("metadata.shots_section") }}</h3>
         <p v-if="!Object.keys(current.screenshots || {}).length" class="muted">{{ t("metadata.shots_empty") }}</p>
+        <input
+          ref="shotFileInput"
+          class="file-hidden"
+          type="file"
+          accept="image/png,image/jpeg"
+          tabindex="-1"
+          @change="onShotFileChange"
+        />
         <div v-for="(group, dtype) in current.screenshots" :key="dtype" class="shots">
           <div class="shot-head">
             <strong>{{ dtype }}</strong>
-            <label class="add">
+            <el-button size="small" :icon="Plus" @click="openAddShot(current.locale, String(dtype))">
               {{ t("metadata.shots_add") }}
-              <input type="file" accept="image/png,image/jpeg" @change="(e) => { const f = (e.target as HTMLInputElement).files?.[0]; if (f) addShot(current.locale, String(dtype), f); }" />
-            </label>
+            </el-button>
           </div>
           <div class="thumbs">
-            <figure v-for="(item, idx) in group" :key="item.local_path || item.file_name">
+            <figure v-for="(item, idx) in group" :key="item.local_path || item.file_name" class="thumb">
               <img :src="item.thumb_url" :alt="item.file_name" @click="openShots(group, idx)" />
-              <figcaption>{{ item.file_name }}</figcaption>
-              <div class="field-row">
-                <el-button size="small" @click="moveShot(current.locale, String(dtype), idx, -1)">↑</el-button>
-                <el-button size="small" @click="moveShot(current.locale, String(dtype), idx, 1)">↓</el-button>
-                <label class="add">
-                  {{ t("metadata.shots_replace") }}
-                  <input type="file" accept="image/png,image/jpeg" @change="(e) => { const f = (e.target as HTMLInputElement).files?.[0]; if (f) replaceShot(item.local_path, f); }" />
-                </label>
-                <el-button size="small" @click="deleteShot(item.local_path)">{{ t("metadata.shots_delete") }}</el-button>
+              <figcaption :title="item.file_name">{{ item.file_name }}</figcaption>
+              <div class="thumb-actions">
+                <el-button
+                  size="small"
+                  :icon="ArrowUp"
+                  :disabled="idx === 0"
+                  :title="t('metadata.shots_move_up')"
+                  :aria-label="t('metadata.shots_move_up')"
+                  @click="moveShot(current.locale, String(dtype), idx, -1)"
+                />
+                <el-button
+                  size="small"
+                  :icon="ArrowDown"
+                  :disabled="idx === group.length - 1"
+                  :title="t('metadata.shots_move_down')"
+                  :aria-label="t('metadata.shots_move_down')"
+                  @click="moveShot(current.locale, String(dtype), idx, 1)"
+                />
+                <el-button size="small" @click="openReplaceShot(item.local_path)">{{ t("metadata.shots_replace") }}</el-button>
+                <el-button size="small" type="danger" plain @click="deleteShot(item.local_path)">{{ t("metadata.shots_delete") }}</el-button>
               </div>
             </figure>
           </div>
@@ -225,14 +267,27 @@ watch(reloadTick, () => { if (!empty.value) void load(); });
 aside { display: flex; flex-direction: column; gap: 4px; }
 aside button { text-align: left; background: var(--surface); color: var(--text-muted); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
 aside button.on { color: var(--accent); border-color: var(--accent-dim); }
-.editors { display: flex; flex-direction: column; gap: 10px; }
+.editors { position: relative; display: flex; flex-direction: column; gap: 10px; }
 .muted { color: var(--text-muted); }
-.thumbs { display: flex; flex-wrap: wrap; gap: 12px; }
-figure { margin: 0; width: 140px; }
-figure img { width: 140px; height: 240px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); cursor: zoom-in; }
-figcaption { font-size: 11px; color: var(--text-muted); word-break: break-all; }
-.add { font-size: 12px; color: var(--accent); }
-.add input { display: block; margin-top: 4px; }
-.shot-head { display: flex; justify-content: space-between; align-items: center; margin: 8px 0; }
+.thumbs { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+.thumb { margin: 0; width: 148px; display: flex; flex-direction: column; gap: 6px; }
+.thumb img { width: 148px; height: 254px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); cursor: zoom-in; display: block; }
+figcaption { font-size: 11px; color: var(--text-muted); word-break: break-all; line-height: 1.3; }
+.thumb-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.thumb-actions :deep(.el-button) { margin: 0; width: 100%; }
+.file-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.shot-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 8px 0; }
 @media (max-width: 1100px) { .workbench { grid-template-columns: 1fr; } }
 </style>

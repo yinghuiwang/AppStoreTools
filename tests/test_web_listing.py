@@ -723,6 +723,12 @@ def test_listing_local_tab_has_screenshot_workbench():
     assert "/api/listing/screenshots/reorder" in src
     assert "LocalePicker" in src
     assert "metadata.save_csv" in src
+    assert "file-hidden" in src
+    assert "openAddShot" in src
+    assert "openReplaceShot" in src
+    assert src.count('type="file"') == 1
+    assert "未选择任何文件" not in src
+    assert 'class="add"' not in src
 
 
 def test_listing_screenshots_add_requires_profile(client, tmp_path):
