@@ -76,7 +76,12 @@ onMounted(() => { void loadCheck(); });
       <div class="field-row">
         <PageLoading v-if="checking && !check" size="inline" />
         <p v-else-if="check">{{ check.message }}</p>
-        <el-button size="small" :loading="checking" @click="loadCheck">{{ t("common.check_env") }}</el-button>
+        <el-button
+          size="small"
+          :loading="checking && !!check"
+          :disabled="checking && !check"
+          @click="loadCheck"
+        >{{ t("common.check_env") }}</el-button>
       </div>
       <label class="field">
         <span>{{ t("urls.choose_type") }}</span>

@@ -129,7 +129,11 @@ onMounted(() => {
     <el-alert v-if="snapshot?.is_editable" type="warning" show-icon :title="t('update.editable_title')" :description="t('update.editable_body')" />
     <div class="card">
       <div class="toolbar">
-        <el-button :loading="checking" @click="check">{{ checking ? t("update.checking") : t("update.title") }}</el-button>
+        <el-button
+          :loading="checking && !!checkResult"
+          :disabled="checking && !checkResult"
+          @click="check"
+        >{{ checking && !checkResult ? t("update.checking") : t("update.title") }}</el-button>
         <span class="mono muted">
           {{ t("update.current_version", { version: checkResult?.detail?.current || snapshot?.version || "" }) }}
           <template v-if="checkResult?.detail?.current_commit || snapshot?.commit">

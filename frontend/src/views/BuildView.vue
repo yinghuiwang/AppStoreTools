@@ -68,6 +68,7 @@ const dryRun = ref(false);
 const reuseArchive = ref(false);
 const options = ref<Options>({ schemes: [], certificates: [], profiles: [] });
 const optionsLoading = ref(false);
+const scannedOnce = ref(false);
 const scanStatus = ref<ScanStatus>("idle");
 const scanMessage = ref("");
 const showScanSidebar = computed(() => mode.value !== "deploy");
@@ -115,6 +116,7 @@ async function loadOptions() {
     scanMessage.value = t("build.options_fail_prefix") + msg;
   } finally {
     optionsLoading.value = false;
+    scannedOnce.value = true;
   }
 }
 
@@ -262,12 +264,17 @@ onMounted(() => {
               <template v-else-if="scanStatus === 'success'">{{ t("build.scan_success") }}</template>
               <template v-else-if="scanStatus === 'error'">{{ t("build.scan_error") }}</template>
             </span>
-            <el-button size="small" :disabled="optionsLoading" @click="loadOptions">{{ t("build.refresh") }}</el-button>
+            <el-button
+              size="small"
+              :loading="optionsLoading && scannedOnce"
+              :disabled="optionsLoading && !scannedOnce"
+              @click="loadOptions"
+            >{{ t("build.refresh") }}</el-button>
           </div>
         </div>
 
         <div class="scan-banner" :data-status="scanStatus">
-          <PageLoading v-if="optionsLoading" size="inline" :text="scanMessage" />
+          <PageLoading v-if="optionsLoading && !scannedOnce" size="inline" :text="scanMessage" />
           <span v-else>{{ scanMessage || t("build.scan_waiting") }}</span>
         </div>
 

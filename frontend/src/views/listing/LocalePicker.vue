@@ -68,8 +68,11 @@ onMounted(() => { void load(); });
     <p v-if="!presenceAvailable" class="hint">{{ t("metadata.locales_presence_unavailable") }}</p>
     <div class="field-row">
       <input v-model="query" class="field-input" :placeholder="t('metadata.locales_search')" />
-      <el-button :loading="loading" @click="load">{{ t("metadata.locales_refresh") }}</el-button>
-      <PageLoading v-if="loading && rows.length" size="inline" />
+      <el-button
+        :loading="loading && rows.length > 0"
+        :disabled="loading && !rows.length"
+        @click="load"
+      >{{ t("metadata.locales_refresh") }}</el-button>
     </div>
     <PageLoading v-if="loading && !rows.length" size="block" />
     <p v-else-if="error" class="err">{{ error }}</p>

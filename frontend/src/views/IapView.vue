@@ -147,7 +147,11 @@ onMounted(() => { void check(); });
         <label class="check"><input v-model="updateExisting" type="checkbox" /> {{ t("iap.update_existing") }}</label>
         <label class="check"><input v-model="verbose" type="checkbox" /> {{ t("build.verbose") }}</label>
         <div class="field-row">
-          <el-button :disabled="empty" :loading="checking" @click="check">{{ t("iap.check_config") }}</el-button>
+          <el-button
+            :disabled="empty || (checking && !checkMsg)"
+            :loading="checking && !!checkMsg"
+            @click="check"
+          >{{ t("iap.check_config") }}</el-button>
           <el-button type="primary" :disabled="empty" @click="run">{{ t("common.submit") }}</el-button>
         </div>
       </div>
@@ -155,7 +159,6 @@ onMounted(() => { void check(); });
         <h2>{{ t("iap.review_title") }}</h2>
         <div class="field-row">
           <el-button :disabled="empty" :loading="scanning" @click="scan">{{ t("iap.scan_missing") }}</el-button>
-          <PageLoading v-if="scanning" size="inline" />
         </div>
         <p v-if="targets.length">{{ t("iap.found_missing", { n: targets.length }) }}</p>
         <p v-else class="muted">{{ t("iap.no_missing") }}</p>

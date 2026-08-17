@@ -159,7 +159,11 @@ watch(reloadTick, () => { if (!empty.value) void load(); });
         </div>
       </label>
       <div class="field-row">
-        <el-button :disabled="empty" :loading="loading" @click="load">{{ t("metadata.load_preview") }}</el-button>
+        <el-button
+          :disabled="empty || (loading && !loaded)"
+          :loading="loading && loaded"
+          @click="load"
+        >{{ t("metadata.load_preview") }}</el-button>
         <el-button type="primary" :disabled="empty" @click="save">{{ t("metadata.save_csv") }}</el-button>
         <el-button @click="pickerOpen = true">{{ t("metadata.locales_btn") }}</el-button>
         <a href="/api/examples/csv">{{ t("common.download_sample_csv") }}</a>

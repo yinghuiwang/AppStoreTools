@@ -177,7 +177,11 @@ onMounted(() => { void load(); });
       <p>{{ t("metadata.diff_hint") }}</p>
       <p v-if="version">{{ t("metadata.diff_version", { version: version.versionString || "", state: version.appStoreState || "" }) }}</p>
       <div class="field-row">
-        <el-button :loading="loading" @click="load">{{ t("metadata.diff_load") }}</el-button>
+        <el-button
+          :loading="loading && loaded"
+          :disabled="loading && !loaded"
+          @click="load"
+        >{{ t("metadata.diff_load") }}</el-button>
         <el-button @click="filter = 'all'">{{ t("metadata.diff_filter_all") }}</el-button>
         <el-button @click="filter = 'diff'">{{ t("metadata.diff_filter_diff") }}</el-button>
         <el-button type="primary" @click="pullText">{{ t("metadata.diff_pull") }}</el-button>

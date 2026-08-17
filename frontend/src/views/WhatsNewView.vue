@@ -117,7 +117,12 @@ onMounted(() => { void loadCheck(); });
       <div class="field-row check-row">
         <p v-if="check">{{ check.message }}</p>
         <PageLoading v-else-if="checking" size="inline" :text="t('whats_new.checking')" />
-        <el-button size="small" :loading="checking" @click="loadCheck">{{ t("whats_new.recheck") }}</el-button>
+        <el-button
+          size="small"
+          :loading="checking && !!check"
+          :disabled="checking && !check"
+          @click="loadCheck"
+        >{{ t("whats_new.recheck") }}</el-button>
       </div>
       <label class="check"><input v-model="translateMode" type="checkbox" /> {{ t("whats_new.translate_mode") }}</label>
       <label class="field">
@@ -130,7 +135,6 @@ onMounted(() => { void loadCheck(); });
       </label>
       <div>
         <span class="lbl">{{ t("urls.locales") }}</span>
-        <PageLoading v-if="checking && !check" size="inline" />
         <label v-for="code in check?.detail?.locales || []" :key="code" class="check">
           <input type="checkbox" :checked="locales.includes(code)" @change="toggleLocale(code, ($event.target as HTMLInputElement).checked)" />
           {{ code }}
