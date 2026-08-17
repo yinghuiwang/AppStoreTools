@@ -417,6 +417,29 @@ def test_built_spa_serves_textarea_composer():
     assert "data-agent-send" in js
 
 
+def test_agent_stream_sends_form_paths():
+    src = (FRONTEND / "composables" / "useAgent.ts").read_text(encoding="utf-8")
+    assert "collectedFormPaths" in src
+    assert "form_paths" in src
+    helper = (FRONTEND / "composables" / "useFormPaths.ts").read_text(encoding="utf-8")
+    assert "rememberFormPath" in helper
+    assert "snap?.paths" in helper or "paths.csv" in helper
+
+
+def test_tool_display_names_are_i18n_friendly():
+    src = (FRONTEND / "components" / "AgentPanel.vue").read_text(encoding="utf-8")
+    assert "toolDisplayName" in src
+    assert "agent.tool.name." in src
+    zh = json.loads((ROOT / "src" / "asc" / "web" / "locales" / "zh.json").read_text(encoding="utf-8"))
+    en = json.loads((ROOT / "src" / "asc" / "web" / "locales" / "en.json").read_text(encoding="utf-8"))
+    for name in ("grep", "search_files", "read_file", "write_file", "create_file", "delete_file"):
+        key = f"agent.tool.name.{name}"
+        assert zh[key]
+        assert en[key]
+        assert zh[key] != name
+        assert en[key] != name
+
+
 def test_thinking_body_is_collapsed_until_expanded():
     src = (FRONTEND / "components" / "AgentPanel.vue").read_text(encoding="utf-8")
     assert "data-agent-thinking" in src

@@ -63,6 +63,7 @@ function mutationLine(mutation: Record<string, unknown>): string {
   let after = "";
   if (mutation.fields != null) after = trunc(mutation.fields, 80);
   else if (mutation.after != null) after = trunc(mutation.after, 80);
+  else if (mutation.content != null) after = trunc(mutation.content, 80);
   else if (mutation.value != null) after = trunc(mutation.value, 80);
   else if (mutation.action) after = String(mutation.action);
   let line = `${op} ${path}`.trim();
@@ -84,6 +85,12 @@ function toolStatusLabel(status: string): string {
   if (status === "running") return t("agent.tool.running");
   if (status === "success") return t("agent.tool.success");
   return t("agent.tool.failed");
+}
+
+function toolDisplayName(name: string): string {
+  const key = `agent.tool.name.${name}`;
+  const label = t(key);
+  return label === key ? name : label;
 }
 
 function isTool(msg: AgentMessage): msg is Extract<AgentMessage, { kind: "tool" }> {
@@ -295,7 +302,7 @@ onBeforeUnmount(() => {
                   <el-icon v-else class="err" :size="14">
                     <CircleClose />
                   </el-icon>
-                  <span class="tool-name mono" data-agent-tool-name>{{ msg.name }}</span>
+                  <span class="tool-name mono" data-agent-tool-name>{{ toolDisplayName(msg.name) }}</span>
                   <span class="tool-status" :data-agent-tool-status="msg.status">
                     {{ toolStatusLabel(msg.status) }}
                   </span>

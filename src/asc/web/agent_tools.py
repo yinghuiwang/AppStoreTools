@@ -27,6 +27,19 @@ from asc.listing.local import (
 )
 from asc.listing.models import FIELD_NAMES
 from asc.web.agent_redact import redact_obj, redact_text
+from asc.web.agent_workspace import (
+    FILE_MUTATION_OPS,
+    _FORM_PATH_PARAM_KEYS,
+    apply_file_mutation,
+    build_file_mutation,
+    collect_form_allowed_roots,
+    file_mutation_summary,
+    is_blocked_workspace_path,
+    normalize_allowed_roots,
+    tool_grep,
+    tool_read_file,
+    validate_file_mutation,
+)
 from asc.web.task_runner import FORBIDDEN_REPLAY_KEYS
 
 MODEL_TOOL_NAMES = (
@@ -35,6 +48,12 @@ MODEL_TOOL_NAMES = (
     "get_task_log",
     "get_profile_context",
     "inspect_local",
+    "grep",
+    "search_files",
+    "read_file",
+    "write_file",
+    "create_file",
+    "delete_file",
     "propose_fix",
 )
 
@@ -56,7 +75,14 @@ _CREDENTIALS_SECTION_RE = re.compile(r"(?is)^\[credentials\][^\[]*")
 _CREDENTIALS_BLOCK_RE = re.compile(r"(?im)^\[credentials\][^\[]*")
 _CONFLICT = {"ok": False, "code": "conflict"}
 _ALLOWED_MUTATION_OPS = frozenset(
-    {"csv_set_fields", "json_patch", "toml_set", "text_replace", "screenshot_fs"}
+    {
+        "csv_set_fields",
+        "json_patch",
+        "toml_set",
+        "text_replace",
+        "screenshot_fs",
+        *FILE_MUTATION_OPS,
+    }
 )
 _TOML_ALLOWED_KEYS = frozenset(
     {
@@ -177,6 +203,84 @@ OPENAI_TOOLS: list[dict] = [
         },
         ["summary"],
     ),
+    _tool_schema(
+        "grep",
+        "Search file contents under the project/workspace root with a regex or literal. "
+        "Paths are project-relative. Cannot leave the workspace. Skips secrets "
+        "(.env, *.p8, keys/, credentials, .git) and large/binary/ignored dirs. "
+        "Does not write files.",
+        {
+            "pattern": {"type": "string", "description": "Regex (default) or literal string"},
+            "path": {
+                "type": "string",
+                "description": "Optional project-relative file or directory (default: workspace root)",
+            },
+            "literal": {
+                "type": "boolean",
+                "description": "If true, treat pattern as a literal substring",
+            },
+        },
+        ["pattern"],
+    ),
+    _tool_schema(
+        "search_files",
+        "Alias of grep. Search file contents under the project/workspace root. "
+        "Paths are project-relative. Secrets and ignored dirs are skipped. Read-only.",
+        {
+            "pattern": {"type": "string", "description": "Regex (default) or literal string"},
+            "path": {"type": "string", "description": "Optional project-relative file or directory"},
+            "literal": {"type": "boolean", "description": "If true, treat pattern as a literal"},
+        },
+        ["pattern"],
+    ),
+    _tool_schema(
+        "read_file",
+        "Read a text file under the project/workspace root. Paths are project-relative. "
+        "Use offset/limit (1-based lines) to avoid dumping the whole repo. "
+        "Secret files (.env, *.p8, keys/, credentials, .git) are forbidden. Read-only.",
+        {
+            "path": {"type": "string", "description": "Project-relative path"},
+            "offset": {
+                "type": "integer",
+                "description": "1-based start line (default 1)",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Max lines to return (default 200, cap 400)",
+            },
+        },
+        ["path"],
+    ),
+    _tool_schema(
+        "write_file",
+        "Draft a plan to write/replace a text file. Does not write until the user applies. "
+        "Path is project-relative and must stay inside the workspace. "
+        "Secret files (.env, *.p8, keys/, credentials, .git) are forbidden.",
+        {
+            "path": {"type": "string", "description": "Project-relative path to write"},
+            "content": {"type": "string", "description": "Full file content to write after apply"},
+        },
+        ["path", "content"],
+    ),
+    _tool_schema(
+        "create_file",
+        "Draft a plan to create a new text file. Does not write until the user applies. "
+        "Fails if the file already exists. Path is project-relative; secrets are forbidden.",
+        {
+            "path": {"type": "string", "description": "Project-relative path to create"},
+            "content": {"type": "string", "description": "File content to write after apply"},
+        },
+        ["path", "content"],
+    ),
+    _tool_schema(
+        "delete_file",
+        "Draft a plan to delete one file. Does not delete until the user applies. "
+        "Cannot delete directories, the project root, or secret files. Path is project-relative.",
+        {
+            "path": {"type": "string", "description": "Project-relative file to delete"},
+        },
+        ["path"],
+    ),
 ]
 
 
@@ -188,9 +292,17 @@ class AgentToolContext:
     project_root: Path
     turn_seq: int
     session_id: str = ""
+    form_paths: list[str] | None = None
+    profile: str = ""
 
     def __post_init__(self) -> None:
         self.project_root = Path(self.project_root).resolve()
+        cleaned: list[str] = []
+        for item in self.form_paths or []:
+            text = str(item or "").strip()
+            if text:
+                cleaned.append(text)
+        self.form_paths = cleaned
 
 
 class _ApplyStepError(Exception):
@@ -353,7 +465,7 @@ def _tool_inspect_local(ctx: AgentToolContext, arguments: dict) -> dict:
         resolved = _resolve_user_path(ctx.project_root, raw_path)
     except Exception:
         return {"ok": False, "error": "path is not on the allow-list"}
-    if _is_forbidden_path(resolved) or not _is_allowed_path(ctx, resolved):
+    if _is_forbidden_path(resolved, ctx.project_root) or not _is_allowed_path(ctx, resolved):
         return {"ok": False, "error": "path is not on the allow-list"}
     if not resolved.exists():
         return {"ok": False, "error": "path not found"}
@@ -420,12 +532,107 @@ def _tool_propose_fix(ctx: AgentToolContext, arguments: dict) -> dict:
     return {"ok": True, "plan_id": plan_id, "status": "draft"}
 
 
+def _ctx_form_path_values(ctx: AgentToolContext) -> list[str]:
+    values: list[str] = list(ctx.form_paths or [])
+    params = _bound_replay_params(ctx)
+    for key in _FORM_PATH_PARAM_KEYS:
+        item = params.get(key)
+        if item:
+            values.append(str(item))
+    csv_path, shots, iap = _bound_profile_paths(ctx)
+    for item in (csv_path, shots, iap):
+        if item:
+            values.append(str(item))
+    profile = (ctx.profile or "").strip()
+    if not profile and ctx.bound_task_id:
+        state = ctx.task_store.get_state(str(ctx.bound_task_id))
+        if state:
+            profile = str(state.get("profile") or "")
+    if profile:
+        try:
+            cfg = Config(app_name=str(profile))
+            project = cfg.build_project
+            if project:
+                values.append(str(project))
+        except Exception:
+            pass
+    defaults, build = _load_local_defaults_build(ctx.project_root)
+    for item in (
+        defaults.get("csv"),
+        defaults.get("screenshots"),
+        build.get("project"),
+        build.get("output"),
+    ):
+        if item:
+            values.append(str(item))
+    return values
+
+
+def ctx_allowed_roots(ctx: AgentToolContext) -> list[Path]:
+    extras = collect_form_allowed_roots(ctx.project_root, _ctx_form_path_values(ctx))
+    return normalize_allowed_roots(ctx.project_root, extras)
+
+
+def _tool_grep(ctx: AgentToolContext, arguments: dict) -> dict:
+    return tool_grep(ctx.project_root, arguments, allowed_roots=ctx_allowed_roots(ctx))
+
+
+def _tool_read_file(ctx: AgentToolContext, arguments: dict) -> dict:
+    return tool_read_file(ctx.project_root, arguments, allowed_roots=ctx_allowed_roots(ctx))
+
+
+def _tool_file_plan(ctx: AgentToolContext, op: str, arguments: dict) -> dict:
+    if not ctx.session_id:
+        return {"ok": False, "error": "session_id is required"}
+    if ctx.agent_store is None:
+        return {"ok": False, "error": "agent store is required"}
+    mutation, error = build_file_mutation(
+        op, ctx.project_root, arguments, allowed_roots=ctx_allowed_roots(ctx)
+    )
+    if error or mutation is None:
+        return {"ok": False, "error": error or "invalid path"}
+    summary = file_mutation_summary(op, str(mutation.get("path") or arguments.get("path") or ""))
+    plan_id = ctx.agent_store.insert_plan_draft(
+        ctx.session_id,
+        ctx.turn_seq,
+        summary,
+        [mutation],
+        None,
+        [],
+    )
+    return {
+        "ok": True,
+        "plan_id": plan_id,
+        "status": "draft",
+        "summary": summary,
+        "path": mutation.get("path"),
+    }
+
+
+def _tool_write_file(ctx: AgentToolContext, arguments: dict) -> dict:
+    return _tool_file_plan(ctx, "file_replace", arguments)
+
+
+def _tool_create_file(ctx: AgentToolContext, arguments: dict) -> dict:
+    return _tool_file_plan(ctx, "file_create", arguments)
+
+
+def _tool_delete_file(ctx: AgentToolContext, arguments: dict) -> dict:
+    return _tool_file_plan(ctx, "file_delete", arguments)
+
+
 _HANDLERS: dict[str, Callable[[AgentToolContext, dict], dict]] = {
     "get_task": _tool_get_task,
     "list_failed_tasks": _tool_list_failed_tasks,
     "get_task_log": _tool_get_task_log,
     "get_profile_context": _tool_get_profile_context,
     "inspect_local": _tool_inspect_local,
+    "grep": _tool_grep,
+    "search_files": _tool_grep,
+    "read_file": _tool_read_file,
+    "write_file": _tool_write_file,
+    "create_file": _tool_create_file,
+    "delete_file": _tool_delete_file,
     "propose_fix": _tool_propose_fix,
 }
 
@@ -560,25 +767,8 @@ def _resolve_user_path(project_root: Path, value: str | Path) -> Path:
     return path.resolve()
 
 
-def _home_asc() -> Path:
-    return (Path.home() / ".config" / "asc").resolve()
-
-
-def _is_forbidden_path(path: Path) -> bool:
-    if path.suffix.lower() == ".p8":
-        return True
-    if path.name.lower() in {"llm.toml", "guard.json"}:
-        return True
-    if path.suffix.lower() == ".toml" and path.parent.name.lower() == "profiles":
-        return True
-    home_asc = _home_asc()
-    for root in (home_asc / "keys", home_asc / "profiles"):
-        try:
-            _assert_under_root(root, path)
-            return True
-        except (PathTraversalError, OSError, ValueError):
-            continue
-    return False
+def _is_forbidden_path(path: Path, project_root: Path | None = None) -> bool:
+    return is_blocked_workspace_path(path, project_root)
 
 
 def _allow_roots(ctx: AgentToolContext) -> list[Path]:
@@ -694,6 +884,10 @@ def _validate_mutation(ctx: AgentToolContext, mutation: Any) -> str | None:
     op = mutation.get("op")
     if op not in _ALLOWED_MUTATION_OPS:
         return f"unsupported op: {op!r}"
+    if op in FILE_MUTATION_OPS:
+        return validate_file_mutation(
+            ctx.project_root, mutation, allowed_roots=ctx_allowed_roots(ctx)
+        )
     resolved, error = _resolve_mutation_path(ctx, mutation.get("path"))
     if error:
         return error
@@ -716,7 +910,7 @@ def _resolve_mutation_path(ctx: AgentToolContext, raw_path: Any) -> tuple[Path |
         resolved = _resolve_user_path(ctx.project_root, raw_path)
     except Exception:
         return None, "path is not on the allow-list"
-    if _is_forbidden_path(resolved) or not _is_allowed_path(ctx, resolved):
+    if _is_forbidden_path(resolved, ctx.project_root) or not _is_allowed_path(ctx, resolved):
         return None, "path is not on the allow-list"
     return resolved, None
 
@@ -735,8 +929,8 @@ def _bound_profile_paths(ctx: AgentToolContext) -> tuple[Any, Any, Any]:
     csv_path = None
     screenshots_path = None
     iap_path = None
-    profile = None
-    if ctx.bound_task_id:
+    profile = (ctx.profile or "").strip() or None
+    if not profile and ctx.bound_task_id:
         state = ctx.task_store.get_state(str(ctx.bound_task_id))
         if state:
             profile = state.get("profile")
@@ -880,10 +1074,18 @@ def _apply_one_mutation(ctx: AgentToolContext, mutation: Any) -> None:
     error = _validate_mutation(ctx, mutation)
     if error:
         raise _ApplyStepError(error)
+    op = mutation.get("op") if isinstance(mutation, dict) else None
+    if op in FILE_MUTATION_OPS:
+        try:
+            apply_file_mutation(
+                ctx.project_root, mutation, allowed_roots=ctx_allowed_roots(ctx)
+            )
+        except Exception as exc:
+            raise _ApplyStepError(str(exc)) from exc
+        return
     resolved, path_error = _resolve_mutation_path(ctx, mutation.get("path"))
     if path_error or resolved is None:
         raise _ApplyStepError(path_error or "path is required")
-    op = mutation.get("op")
     if op == "csv_set_fields":
         _apply_csv_set_fields(mutation, resolved)
     elif op == "json_patch":

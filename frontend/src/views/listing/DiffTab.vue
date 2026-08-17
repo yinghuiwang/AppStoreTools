@@ -3,6 +3,7 @@ import { computed, inject, onActivated, onMounted, ref, watch, type Ref } from "
 import { useI18n } from "vue-i18n";
 import { ApiError, apiErrorMessage, httpJson } from "@/api/http";
 import PageLoading from "@/components/PageLoading.vue";
+import { rememberFormPath } from "@/composables/useFormPaths";
 import { useImageViewer } from "@/composables/useImageViewer";
 import { useProfile } from "@/composables/useProfile";
 import { useRightRail } from "@/composables/useRightRail";
@@ -24,6 +25,10 @@ const { setActiveTask, channelOf } = useTaskLog();
 const reloadTick = inject<Ref<number>>("listingReload", ref(0));
 const csvPath = ref(snapshot.value?.paths.csv || "data/appstore_info.csv");
 const shotsDir = ref(snapshot.value?.paths.screenshots || "data/screenshots");
+watch([csvPath, shotsDir], ([csv, shots]) => {
+  rememberFormPath("listing.csv_path", csv);
+  rememberFormPath("listing.screenshots_dir", shots);
+}, { immediate: true });
 const mtime = ref<number | null>(null);
 const version = ref<Version | null>(null);
 const locales = ref<LocaleDiff[]>([]);

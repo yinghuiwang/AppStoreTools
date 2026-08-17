@@ -6,6 +6,7 @@ import { ApiError, apiErrorMessage, httpForm, httpJson } from "@/api/http";
 import ExampleHelp from "@/components/ExampleHelp.vue";
 import TaskRunBar from "@/components/TaskRunBar.vue";
 import { useBrowse } from "@/composables/useBrowse";
+import { rememberFormPath } from "@/composables/useFormPaths";
 import { useProfile } from "@/composables/useProfile";
 import { useRightRail } from "@/composables/useRightRail";
 import { useTaskLog } from "@/composables/useTaskLog";
@@ -22,6 +23,10 @@ const { isForm, isRun, taskId, enterRun, backToForm } = useTaskPagePhase("listin
 const empty = computed(() => (snapshot.value?.current_profile || "") === "");
 const csvPath = ref(snapshot.value?.paths.csv || "data/appstore_info.csv");
 const shotsDir = ref(snapshot.value?.paths.screenshots || "data/screenshots");
+watch([csvPath, shotsDir], ([csv, shots]) => {
+  rememberFormPath("listing.csv_path", csv);
+  rememberFormPath("listing.screenshots_dir", shots);
+}, { immediate: true });
 const includeMetadata = ref(true);
 const includeScreenshots = ref(true);
 const dryRun = ref(false);

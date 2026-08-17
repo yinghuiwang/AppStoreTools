@@ -94,7 +94,11 @@ def _system_prompt(lang: str) -> str:
         "Never claim files were already changed or that a task was rerun. "
         "Never ask for or repeat secrets, API keys, issuer_id, key_id, .p8 paths, or PEM keys. "
         "Available tools: get_task, list_failed_tasks, get_task_log, get_profile_context, "
-        "inspect_local, propose_fix. Do not call apply_fix or rerun_task."
+        "inspect_local, grep, search_files, read_file, write_file, create_file, delete_file, "
+        "propose_fix. Paths are relative to the project root and must stay inside the workspace. "
+        "Never read or write secrets (.env, *.p8, keys/, credentials, .git). "
+        "write_file, create_file, and delete_file only draft a plan; the user must apply it. "
+        "Do not call apply_fix or rerun_task."
     )
 
 
@@ -174,6 +178,8 @@ def _tool_summary(name: str, result: dict[str, Any]) -> str:
     if name == "list_failed_tasks":
         tasks = result.get("tasks") or []
         return f"{len(tasks)} failed tasks"
+    if result.get("summary"):
+        return redact_text(str(result.get("summary")))[:_SUMMARY_MAX]
     return "ok"
 
 
@@ -335,6 +341,8 @@ class WebAgent:
         auto_analyze: bool,
         lang: str,
         llm_client: Any,
+        form_paths: list[str] | None = None,
+        profile: str = "",
     ) -> Iterator[tuple[str, str]]:
         session_id = session_id or None
         task_id = task_id or None
@@ -399,6 +407,8 @@ class WebAgent:
                 self.project_root,
                 turn_seq=turn_seq,
                 session_id=session_id,
+                form_paths=form_paths or [],
+                profile=profile or self._profile_for_task(bound_task_id),
             )
             tool_batches = 0
             while True:

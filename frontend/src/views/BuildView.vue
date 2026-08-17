@@ -6,6 +6,7 @@ import { ApiError, apiErrorMessage, httpForm, httpJson } from "@/api/http";
 import BuildStageProgress from "@/components/BuildStageProgress.vue";
 import PageLoading from "@/components/PageLoading.vue";
 import { useBrowse } from "@/composables/useBrowse";
+import { rememberFormPath } from "@/composables/useFormPaths";
 import { useProfile } from "@/composables/useProfile";
 import { useRightRail } from "@/composables/useRightRail";
 import { useTaskPagePhase } from "@/composables/useTaskPagePhase";
@@ -66,6 +67,10 @@ const project = ref("");
 const scheme = ref("");
 const destination = ref("testflight");
 const ipaPath = ref("");
+watch([project, ipaPath], ([proj, ipa]) => {
+  rememberFormPath("build.project", proj);
+  rememberFormPath("build.ipa_path", ipa);
+}, { immediate: true });
 const certificate = ref("");
 const profileName = ref("");
 const verbose = ref(false);

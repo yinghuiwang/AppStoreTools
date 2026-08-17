@@ -6,6 +6,7 @@ import { httpJson } from "@/api/http";
 import ExampleHelp from "@/components/ExampleHelp.vue";
 import PageLoading from "@/components/PageLoading.vue";
 import { useBrowse } from "@/composables/useBrowse";
+import { rememberFormPath } from "@/composables/useFormPaths";
 import { useProfile } from "@/composables/useProfile";
 
 type Detail = {
@@ -109,6 +110,8 @@ async function save() {
   body.set("app_id", form.app_id);
   body.set("csv", form.csv);
   body.set("screenshots", form.screenshots);
+  rememberFormPath("profile.csv", form.csv);
+  rememberFormPath("profile.screenshots", form.screenshots);
   if (keyFile.value) body.set("key_file", keyFile.value);
   if (editing.value) {
     await httpJson(`/api/profiles/${encodeURIComponent(editing.value)}`, { method: "PUT", body });

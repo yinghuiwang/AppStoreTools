@@ -15,11 +15,12 @@ def _ctx(tmp_path, store, task_id=None, agent_store=None, session_id=""):
     )
 
 
-def test_openai_tools_are_exactly_six_readonly_or_propose():
+def test_openai_tools_match_model_names_and_keep_writes_gated():
     names = {t["function"]["name"] for t in OPENAI_TOOLS}
     assert names == set(MODEL_TOOL_NAMES)
     assert "apply_fix" not in names
     assert "rerun_task" not in names
+    assert {"grep", "read_file", "write_file", "create_file", "delete_file"} <= names
 
 
 def test_hallucinated_apply_fix_does_not_write(tmp_path):

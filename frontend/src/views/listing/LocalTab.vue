@@ -6,6 +6,7 @@ import { ApiError, apiErrorMessage, httpJson } from "@/api/http";
 import ExampleHelp from "@/components/ExampleHelp.vue";
 import PageLoading from "@/components/PageLoading.vue";
 import { useBrowse } from "@/composables/useBrowse";
+import { rememberFormPath } from "@/composables/useFormPaths";
 import { useImageViewer } from "@/composables/useImageViewer";
 import { useProfile } from "@/composables/useProfile";
 import LocalePicker from "./LocalePicker.vue";
@@ -23,6 +24,10 @@ const { snapshot } = useProfile();
 const reloadTick = inject<Ref<number>>("listingReload", ref(0));
 const csvPath = ref(snapshot.value?.paths.csv || "data/appstore_info.csv");
 const shotsDir = ref(snapshot.value?.paths.screenshots || "data/screenshots");
+watch([csvPath, shotsDir], ([csv, shots]) => {
+  rememberFormPath("listing.csv_path", csv);
+  rememberFormPath("listing.screenshots_dir", shots);
+}, { immediate: true });
 const locales = ref<LocaleRow[]>([]);
 const mtime = ref<number | null>(null);
 const conflict = ref(false);

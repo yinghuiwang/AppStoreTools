@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { ApiError, apiErrorMessage, httpForm, httpJson } from "@/api/http";
 import ExampleHelp from "@/components/ExampleHelp.vue";
 import PageLoading from "@/components/PageLoading.vue";
 import TaskRunBar from "@/components/TaskRunBar.vue";
 import { useBrowse } from "@/composables/useBrowse";
+import { rememberFormPath } from "@/composables/useFormPaths";
 import { useImageViewer } from "@/composables/useImageViewer";
 import { useProfile } from "@/composables/useProfile";
 import { useRightRail } from "@/composables/useRightRail";
@@ -33,6 +34,7 @@ const empty = computed(() => (snapshot.value?.current_profile || "") === "");
 const alert = ref("");
 const checkMsg = ref("");
 const iapFile = ref(snapshot.value?.paths.iap || "data/iap_packages.json");
+watch(iapFile, (value) => rememberFormPath("iap.iap_file", value), { immediate: true });
 const dryRun = ref(false);
 const updateExisting = ref(false);
 const verbose = ref(false);

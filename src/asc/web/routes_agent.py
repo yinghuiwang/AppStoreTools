@@ -102,6 +102,18 @@ def _failed_matches(row: dict[str, Any], needle: str) -> bool:
     )
 
 
+def _form_paths_from_body(body: dict[str, Any]) -> list[str]:
+    raw = body.get("form_paths")
+    if not isinstance(raw, list):
+        return []
+    paths: list[str] = []
+    for item in raw:
+        text = str(item or "").strip()
+        if text:
+            paths.append(text)
+    return paths
+
+
 def _sse_frames(
     agent: WebAgent,
     *,
@@ -111,6 +123,8 @@ def _sse_frames(
     auto_analyze: bool,
     lang: str,
     llm_client: Any,
+    form_paths: list[str] | None = None,
+    profile: str = "",
 ):
     frames: queue.Queue = queue.Queue()
     session_holder: list[str | None] = [session_id]
@@ -124,6 +138,8 @@ def _sse_frames(
                 auto_analyze=auto_analyze,
                 lang=lang,
                 llm_client=llm_client,
+                form_paths=form_paths,
+                profile=profile,
             ):
                 if event == "session":
                     try:
@@ -174,6 +190,7 @@ async def agent_stream(request: Request):
     lang = _lang(request)
     llm_client = _llm_client_or_none()
     agent = _web_agent()
+    cookie = (request.cookies.get("asc_profile") or "").strip()
     return StreamingResponse(
         _sse_frames(
             agent,
@@ -183,6 +200,8 @@ async def agent_stream(request: Request):
             auto_analyze=_as_bool(body.get("auto_analyze")),
             lang=lang,
             llm_client=llm_client,
+            form_paths=_form_paths_from_body(body),
+            profile=cookie,
         ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
@@ -266,6 +285,7 @@ async def agent_apply(request: Request):
 
     session = agent_store.get_session(plan["session_id"])
     bound_task_id = (session or {}).get("task_id")
+    cookie = (request.cookies.get("asc_profile") or "").strip()
     ctx = AgentToolContext(
         _current_task_store(),
         agent_store,
@@ -273,6 +293,8 @@ async def agent_apply(request: Request):
         Path.cwd(),
         turn_seq=int(plan.get("turn_seq") or 1),
         session_id=plan.get("session_id") or "",
+        form_paths=_form_paths_from_body(body),
+        profile=cookie or str((session or {}).get("profile") or ""),
     )
     result = apply_fix(ctx, plan_id)
     if not result.get("ok"):

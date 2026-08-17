@@ -1,6 +1,7 @@
 import { ref, type Ref } from "vue";
 import { ApiError, httpJson } from "@/api/http";
 import { i18n } from "@/i18n";
+import { collectedFormPaths } from "@/composables/useFormPaths";
 import { useRightRail } from "@/composables/useRightRail";
 import {
   applyAgentEvent,
@@ -129,6 +130,8 @@ async function send(opts: { message: string; autoAnalyze?: boolean }): Promise<v
   };
   if (sessionId.value) body.session_id = sessionId.value;
   if (boundTaskId.value) body.task_id = boundTaskId.value;
+  const formPaths = collectedFormPaths();
+  if (formPaths.length) body.form_paths = formPaths;
   try {
     const response = await fetch("/api/agent/stream", {
       method: "POST",
@@ -240,7 +243,11 @@ async function apply(planId: string, rerun: boolean): Promise<void> {
     }>("/api/agent/apply", {
       method: "POST",
       skipNotify: true,
-      body: JSON.stringify({ plan_id: planId, rerun }),
+      body: JSON.stringify({
+        plan_id: planId,
+        rerun,
+        form_paths: collectedFormPaths(),
+      }),
     });
     card.plan.status = String(payload.status || "applied");
     if (payload.rerun_error) card.plan.error = String(payload.rerun_error);
