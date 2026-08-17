@@ -142,3 +142,34 @@ def test_retry_paths_map_legacy_system_tabs() -> None:
     dash = (FRONTEND / "views" / "DashboardView.vue").read_text(encoding="utf-8")
     assert '"/update"' in dash
     assert "/system/update" not in dash
+
+
+def test_dashboard_restores_workspace_capabilities() -> None:
+    dash = (FRONTEND / "views" / "DashboardView.vue").read_text(encoding="utf-8")
+    assert "showNoApp" not in dash
+    assert "/api/dashboard/summary" in dash
+    assert 'range: range.value' in dash or 'range: range.value, profile:' in dash
+    assert 't("index.range_7d")' in dash or "index.range_${item}" in dash
+    assert 't("index.all_apps")' in dash
+    assert 't("index.all_statuses")' in dash
+    assert 't("index.all_kinds")' in dash
+    assert 't("index.metric_saved")' in dash
+    assert 't("index.metric_success")' in dash
+    assert 't("index.running_title")' in dash
+    assert 't("index.history_title")' in dash
+    assert "rail.openLogs" in dash
+    assert "/api/task/" in dash and "/cancel" in dash
+    assert "openAgent" in dash
+    assert "retryTo" in dash
+    assert '"/listing?tab=upload"' in dash
+    assert 'tab: "upload"' in dash
+    assert 'action: "check"' in dash
+    assert 'action: "all"' in dash
+    assert 'action: "metadata"' in dash
+    assert 'action: "screenshots"' in dash
+    assert 'action: "build-upload"' in dash
+    assert 'path: "/listing"' in dash
+    assert 'path: "/build"' in dash
+    assert "schedulePoll" in dash
+    assert "dashboard.refreshing" in dash
+    assert "dashboard.canceling" in dash

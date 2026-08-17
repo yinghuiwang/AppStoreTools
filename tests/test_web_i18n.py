@@ -130,10 +130,15 @@ def test_homepage_feature_chrome_catalog():
     assert t("index.title", lang="en") == "Release Console"
     assert t("index.action_check", lang="en") == "Check environment"
     assert t("index.summary_aria", lang="en") == "Task overview"
+    assert t("index.quick_title", lang="en") == "Quick actions"
     assert t("index.title", lang="zh") == "发布控制台"
     dash = (Path(__file__).resolve().parents[1] / "frontend/src/views/DashboardView.vue").read_text(encoding="utf-8")
     assert 't("index.title")' in dash
     assert "index.metrics_aria" in dash
+    assert "index.quick_title" in dash
+    assert 'action: "check"' in dash
+    assert 'path: "/listing"' in dash
+    assert 'path: "/build"' in dash
 
 
 def test_settings_and_metadata_catalogs():

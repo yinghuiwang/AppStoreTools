@@ -57,6 +57,15 @@ def test_update_tab_first_check_prefers_page_loading():
     assert ':loading="checking && !!checkResult"' in src
 
 
+def test_dashboard_refresh_uses_status_text_not_second_spinner():
+    src = _read("views/DashboardView.vue")
+    assert src.count("<PageLoading") == 1
+    assert 'v-if="loading && !summary"' in src
+    assert "dashboard.refreshing" in src
+    assert "PageLoading v-if=\"refreshing\"" not in src
+    assert 'size="inline"' not in src
+
+
 def test_build_refresh_prefers_button_after_first_scan():
     src = _read("views/BuildView.vue")
     assert "scannedOnce" in src
