@@ -173,3 +173,9 @@ def test_dashboard_restores_workspace_capabilities() -> None:
     assert "schedulePoll" in dash
     assert "dashboard.refreshing" in dash
     assert "dashboard.canceling" in dash
+    assert "align-items: stretch" in dash
+    assert "dash-toolbar" in dash
+    assert "dash-split" in dash
+    assert "minmax(0, 1.15fr) minmax(0, 1fr)" in dash
+    assert "flex: 1.35 1 0" in dash
+    assert "overflow: auto" in dash

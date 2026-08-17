@@ -227,96 +227,96 @@ onUnmounted(() => {
 
 <template>
   <div class="page-stack dash" :aria-busy="Boolean(refreshStatus)">
-    <header class="dash-head">
-      <div>
+    <header class="dash-toolbar">
+      <div class="dash-id">
         <p class="kicker">COMMAND WORKSPACE</p>
         <h1>{{ t("index.title") }}</h1>
+        <p class="refresh-status" role="status" aria-live="polite">{{ refreshStatus }}</p>
       </div>
-      <p class="refresh-status" role="status" aria-live="polite">{{ refreshStatus }}</p>
+      <section class="filters" :aria-label="t('index.filter_aria')">
+        <fieldset>
+          <legend>{{ t("index.range") }}</legend>
+          <div class="seg">
+            <button
+              v-for="item in (['7d', '30d', '90d'] as const)"
+              :key="item"
+              type="button"
+              :class="{ on: range === item }"
+              :aria-pressed="range === item"
+              @click="range = item"
+            >
+              {{ t(`index.range_${item}`) }}
+            </button>
+          </div>
+        </fieldset>
+        <label>
+          <span>App</span>
+          <select v-model="profileFilter" class="field-input">
+            <option value="">{{ t("index.all_apps") }}</option>
+            <option v-for="name in snapshot?.profiles || []" :key="name" :value="name">{{ name }}</option>
+          </select>
+        </label>
+        <label>
+          <span>{{ t("index.status") }}</span>
+          <select v-model="statusFilter" class="field-input">
+            <option value="">{{ t("index.all_statuses") }}</option>
+            <option value="pending">{{ t("index.status.pending") }}</option>
+            <option value="running">{{ t("index.status.running") }}</option>
+            <option value="done">{{ t("index.status.done") }}</option>
+            <option value="error">{{ t("index.status.error") }}</option>
+            <option value="canceled">{{ t("index.status.canceled") }}</option>
+          </select>
+        </label>
+        <label>
+          <span>{{ t("index.kind") }}</span>
+          <select v-model="kind" class="field-input">
+            <option value="">{{ t("index.all_kinds") }}</option>
+            <option value="metadata">{{ t("index.kind_metadata") }}</option>
+            <option value="build">{{ t("index.kind_build") }}</option>
+            <option value="whats-new">{{ t("index.kind_whats_new") }}</option>
+            <option value="iap">{{ t("index.kind_iap") }}</option>
+            <option value="iap-review-screenshots">{{ t("index.kind_iap_review") }}</option>
+            <option value="urls">{{ t("index.kind_urls") }}</option>
+            <option value="update">{{ t("index.kind_update") }}</option>
+          </select>
+        </label>
+      </section>
     </header>
 
-    <section class="filters" :aria-label="t('index.filter_aria')">
-      <fieldset>
-        <legend>{{ t("index.range") }}</legend>
-        <div class="seg">
-          <button
-            v-for="item in (['7d', '30d', '90d'] as const)"
-            :key="item"
-            type="button"
-            :class="{ on: range === item }"
-            :aria-pressed="range === item"
-            @click="range = item"
-          >
-            {{ t(`index.range_${item}`) }}
-          </button>
-        </div>
-      </fieldset>
-      <label>
-        <span>App</span>
-        <select v-model="profileFilter" class="field-input">
-          <option value="">{{ t("index.all_apps") }}</option>
-          <option v-for="name in snapshot?.profiles || []" :key="name" :value="name">{{ name }}</option>
-        </select>
-      </label>
-      <label>
-        <span>{{ t("index.status") }}</span>
-        <select v-model="statusFilter" class="field-input">
-          <option value="">{{ t("index.all_statuses") }}</option>
-          <option value="pending">{{ t("index.status.pending") }}</option>
-          <option value="running">{{ t("index.status.running") }}</option>
-          <option value="done">{{ t("index.status.done") }}</option>
-          <option value="error">{{ t("index.status.error") }}</option>
-          <option value="canceled">{{ t("index.status.canceled") }}</option>
-        </select>
-      </label>
-      <label>
-        <span>{{ t("index.kind") }}</span>
-        <select v-model="kind" class="field-input">
-          <option value="">{{ t("index.all_kinds") }}</option>
-          <option value="metadata">{{ t("index.kind_metadata") }}</option>
-          <option value="build">{{ t("index.kind_build") }}</option>
-          <option value="whats-new">{{ t("index.kind_whats_new") }}</option>
-          <option value="iap">{{ t("index.kind_iap") }}</option>
-          <option value="iap-review-screenshots">{{ t("index.kind_iap_review") }}</option>
-          <option value="urls">{{ t("index.kind_urls") }}</option>
-          <option value="update">{{ t("index.kind_update") }}</option>
-        </select>
-      </label>
-    </section>
-
-    <section v-if="loading && !summary" class="metrics-loading" :aria-label="t('index.summary_aria')">
-      <PageLoading size="block" />
-    </section>
-
-    <template v-else-if="summary">
-      <section class="metrics" :aria-label="t('index.metrics_aria')">
-        <article class="metric metric--accent">
-          <span>{{ t("index.metric_saved") }}</span>
-          <strong>{{ formatDuration(summary.metrics.saved_seconds) }}</strong>
-          <small>{{ t("index.metric_saved_hint") }}</small>
-        </article>
-        <article class="metric metric--ok">
-          <span>{{ t("index.metric_success") }}</span>
-          <strong>{{ summary.metrics.success_rate == null ? "—" : `${summary.metrics.success_rate}%` }}</strong>
-          <small>{{ t("index.metric_completed", { n: summary.metrics.completed_count }) }}</small>
-        </article>
-        <article class="metric metric--err">
-          <span>{{ t("index.metric_failed") }}</span>
-          <strong>{{ formatDuration(summary.metrics.failed_seconds) }}</strong>
-          <small>{{ t("index.metric_failed_hint") }}</small>
-        </article>
-        <article class="metric metric--info">
-          <span>{{ t("index.metric_running") }}</span>
-          <strong>{{ summary.metrics.running_count }}</strong>
-          <small>{{ t("index.metric_running_hint") }}</small>
-        </article>
+    <div class="dash-top">
+      <section v-if="loading && !summary" class="metrics-loading" :aria-label="t('index.summary_aria')">
+        <PageLoading size="block" />
       </section>
-      <details class="card estimate">
-        <summary>{{ t("index.estimate_summary") }}</summary>
-        <p><strong>{{ t("index.estimate_p1") }}</strong></p>
-        <p>{{ t("index.estimate_p2") }}</p>
-      </details>
-    </template>
+      <template v-else-if="summary">
+        <section class="metrics" :aria-label="t('index.metrics_aria')">
+          <article class="metric metric--accent">
+            <span>{{ t("index.metric_saved") }}</span>
+            <strong>{{ formatDuration(summary.metrics.saved_seconds) }}</strong>
+            <small>{{ t("index.metric_saved_hint") }}</small>
+          </article>
+          <article class="metric metric--ok">
+            <span>{{ t("index.metric_success") }}</span>
+            <strong>{{ summary.metrics.success_rate == null ? "—" : `${summary.metrics.success_rate}%` }}</strong>
+            <small>{{ t("index.metric_completed", { n: summary.metrics.completed_count }) }}</small>
+          </article>
+          <article class="metric metric--err">
+            <span>{{ t("index.metric_failed") }}</span>
+            <strong>{{ formatDuration(summary.metrics.failed_seconds) }}</strong>
+            <small>{{ t("index.metric_failed_hint") }}</small>
+          </article>
+          <article class="metric metric--info">
+            <span>{{ t("index.metric_running") }}</span>
+            <strong>{{ summary.metrics.running_count }}</strong>
+            <small>{{ t("index.metric_running_hint") }}</small>
+          </article>
+        </section>
+        <details class="estimate">
+          <summary>{{ t("index.estimate_summary") }}</summary>
+          <p><strong>{{ t("index.estimate_p1") }}</strong></p>
+          <p>{{ t("index.estimate_p2") }}</p>
+        </details>
+      </template>
+    </div>
 
     <div class="dash-split">
       <section class="card running" aria-labelledby="running-tasks-title">
@@ -327,36 +327,38 @@ onUnmounted(() => {
           </div>
           <span class="count">{{ running.length }}</span>
         </div>
-        <template v-if="summary">
-        <article v-for="task in running" :key="task.id" class="run-row">
-          <div class="run-pulse" aria-hidden="true"><span /></div>
-          <div class="run-main">
-            <div class="run-title">
-              <strong>{{ task.title || t("dashboard.unnamed_task") }}</strong>
-              <span>{{ task.profile || t("index.no_profile") }}</span>
-            </div>
-            <div
-              class="bar"
-              role="progressbar"
-              :aria-label="t('index.progress_aria', { title: task.title || t('dashboard.unnamed_task') })"
-              aria-valuemin="0"
-              aria-valuemax="100"
-              :aria-valuenow="task.progress?.pct || 0"
-            >
-              <span :style="{ width: `${task.progress?.pct || 0}%` }" />
-            </div>
-            <small>{{ task.progress?.msg || (task.status === "pending" ? t("index.waiting") : t("index.executing")) }}</small>
-          </div>
-          <div class="run-actions">
-            <el-button size="small" @click="rail.openLogs(task.id)">{{ t("index.log") }}</el-button>
-            <el-button size="small" :disabled="isCancelling(task)" @click="cancel(task.id)">
-              {{ isCancelling(task) ? t("dashboard.canceling") : t("index.cancel") }}
-            </el-button>
-          </div>
-        </article>
-        <p v-if="!running.length" class="empty-state">{{ t("index.empty_running") }}</p>
-        </template>
-        <p v-else-if="!loading" class="empty-state">{{ refreshStatus || t("index.empty_running") }}</p>
+        <div class="run-list">
+          <template v-if="summary">
+            <article v-for="task in running" :key="task.id" class="run-row">
+              <div class="run-pulse" aria-hidden="true"><span /></div>
+              <div class="run-main">
+                <div class="run-title">
+                  <strong>{{ task.title || t("dashboard.unnamed_task") }}</strong>
+                  <span>{{ task.profile || t("index.no_profile") }}</span>
+                </div>
+                <div
+                  class="bar"
+                  role="progressbar"
+                  :aria-label="t('index.progress_aria', { title: task.title || t('dashboard.unnamed_task') })"
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                  :aria-valuenow="task.progress?.pct || 0"
+                >
+                  <span :style="{ width: `${task.progress?.pct || 0}%` }" />
+                </div>
+                <small>{{ task.progress?.msg || (task.status === "pending" ? t("index.waiting") : t("index.executing")) }}</small>
+              </div>
+              <div class="run-actions">
+                <el-button size="small" @click="rail.openLogs(task.id)">{{ t("index.log") }}</el-button>
+                <el-button size="small" :disabled="isCancelling(task)" @click="cancel(task.id)">
+                  {{ isCancelling(task) ? t("dashboard.canceling") : t("index.cancel") }}
+                </el-button>
+              </div>
+            </article>
+            <p v-if="!running.length" class="empty-state">{{ t("index.empty_running") }}</p>
+          </template>
+          <p v-else-if="!loading" class="empty-state">{{ refreshStatus || t("index.empty_running") }}</p>
+        </div>
       </section>
 
       <nav class="card quick" :aria-label="t('index.quick_aria')">
@@ -367,23 +369,25 @@ onUnmounted(() => {
           </div>
           <span>{{ t("index.quick_hint") }}</span>
         </div>
-        <router-link
-          v-for="action in QUICK_ACTIONS"
-          :key="action.titleKey"
-          class="quick-link"
-          :to="action.to"
-        >
-          <span class="quick-mark" aria-hidden="true">{{ action.mark }}</span>
-          <span>
-            <strong>{{ t(action.titleKey) }}</strong>
-            <small>{{ t(action.descKey) }}</small>
-          </span>
-          <span class="quick-arrow" aria-hidden="true">›</span>
-        </router-link>
+        <div class="quick-list">
+          <router-link
+            v-for="action in QUICK_ACTIONS"
+            :key="action.titleKey"
+            class="quick-link"
+            :to="action.to"
+          >
+            <span class="quick-mark" aria-hidden="true">{{ action.mark }}</span>
+            <span>
+              <strong>{{ t(action.titleKey) }}</strong>
+              <small>{{ t(action.descKey) }}</small>
+            </span>
+            <span class="quick-arrow" aria-hidden="true">›</span>
+          </router-link>
+        </div>
       </nav>
     </div>
 
-    <section v-if="summary" class="card history" aria-labelledby="task-history-title">
+    <section class="card history" aria-labelledby="task-history-title">
       <div class="section-head">
         <div>
           <p class="kicker">TASK LEDGER</p>
@@ -441,7 +445,7 @@ onUnmounted(() => {
               </td>
             </tr>
             <tr v-if="!historyTasks.length">
-              <td colspan="6" class="empty-state">{{ t("index.empty_history") }}</td>
+              <td colspan="6" class="empty-state">{{ loading && !summary ? t("dashboard.refreshing") : t("index.empty_history") }}</td>
             </tr>
           </tbody>
         </table>
@@ -451,48 +455,90 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.dash { width: 100%; }
-.metrics-loading { min-height: 72px; }
-.dash-head {
+.dash {
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  gap: 8px;
+  overflow: hidden;
+}
+.dash-toolbar {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 16px;
+  gap: 8px 16px;
+  flex-wrap: wrap;
+  width: 100%;
+  flex: 0 0 auto;
 }
-.dash-head h1 { margin: 0; font-size: 28px; letter-spacing: -0.03em; }
+.dash-id { min-width: 180px; }
+.dash-id h1 {
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+}
 .kicker {
-  margin: 0 0 6px;
-  font-size: 11px;
-  letter-spacing: 0.18em;
+  margin: 0 0 4px;
+  font-size: 10px;
+  letter-spacing: 0.16em;
   color: var(--accent-dim);
 }
 .refresh-status {
-  margin: 0;
-  min-height: 1.2em;
+  margin: 2px 0 0;
+  min-height: 1.1em;
   color: var(--text-muted);
   font-size: 12px;
 }
-.filters { display: flex; flex-wrap: wrap; gap: 16px; align-items: end; }
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: end;
+  margin-left: auto;
+}
 .filters fieldset { border: 0; padding: 0; margin: 0; }
 .filters legend,
 .filters span {
   display: block;
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-faint);
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
+}
+.filters .field-input {
+  width: 140px;
+  padding: 6px 8px;
 }
 .seg { display: flex; gap: 4px; }
 .seg button {
   background: var(--raised);
   color: var(--text-muted);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 6px 10px;
+  border-radius: 6px;
+  padding: 5px 9px;
 }
 .seg button.on { color: #0a0a0c; background: var(--accent); border-color: transparent; }
-.metric { position: relative; overflow: hidden; }
+.dash-top {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  flex: 0 0 auto;
+}
+.metrics {
+  width: 100%;
+  gap: 8px;
+}
+.metrics-loading { min-height: 64px; }
+.metric {
+  position: relative;
+  overflow: hidden;
+  padding: 10px 12px;
+  border-radius: 8px;
+}
 .metric::before {
   content: "";
   position: absolute;
@@ -503,21 +549,56 @@ onUnmounted(() => {
 .metric--ok::before { background: var(--ok); }
 .metric--err::before { background: var(--err); }
 .metric--info::before { background: var(--info); }
-.estimate p { margin: 8px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.metric strong {
+  font-size: 20px;
+  margin: 4px 0 2px;
+}
+.estimate {
+  padding: 4px 2px 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.estimate summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.estimate p { margin: 6px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.45; }
 .dash-split {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
-  gap: 16px;
-  align-items: start;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 8px;
+  align-items: stretch;
+  flex: 1 1 0;
+  min-height: 160px;
+}
+.running,
+.quick,
+.history {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 8px;
+}
+.running,
+.quick {
+  height: 100%;
+}
+.running,
+.history {
+  padding: 10px 12px 0;
 }
 .section-head {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex: 0 0 auto;
 }
-.section-head h2 { margin: 0; font-size: 15px; }
+.section-head h2 { margin: 0; font-size: 14px; }
 .section-head > span { color: var(--text-faint); font-size: 12px; }
 .count {
   min-width: 28px;
@@ -530,12 +611,19 @@ onUnmounted(() => {
   font-size: 12px;
   text-align: center;
 }
+.run-list,
+.quick-list,
+.table-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
 .run-row {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr) auto;
-  gap: 12px;
+  gap: 10px;
   align-items: center;
-  padding: 12px 0;
+  padding: 8px 0;
   border-bottom: 1px solid var(--border);
 }
 .run-row:last-of-type { border-bottom: 0; }
@@ -564,18 +652,23 @@ onUnmounted(() => {
   height: 4px;
   background: var(--raised);
   border-radius: 99px;
-  margin-top: 8px;
+  margin-top: 6px;
   overflow: hidden;
 }
 .bar span { display: block; height: 100%; background: var(--info); }
-.quick { display: flex; flex-direction: column; gap: 0; padding: 18px 0 8px; }
-.quick .section-head { padding: 0 20px; }
+.running .empty-state,
+.quick .empty-state {
+  margin: 0;
+  padding: 12px 4px;
+}
+.quick { padding: 10px 0 0; }
+.quick .section-head { padding: 0 12px; }
 .quick-link {
   display: grid;
   grid-template-columns: 28px minmax(0, 1fr) 12px;
   align-items: center;
   gap: 10px;
-  padding: 10px 20px;
+  padding: 8px 12px;
   color: var(--text);
   text-decoration: none;
   border-top: 1px solid var(--border);
@@ -586,8 +679,8 @@ onUnmounted(() => {
   box-shadow: inset 3px 0 0 var(--accent-dim);
 }
 .quick-mark {
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   display: grid;
   place-items: center;
   border: 1px solid var(--border);
@@ -604,20 +697,27 @@ onUnmounted(() => {
 }
 .quick-link small { margin-top: 2px; color: var(--text-muted); font-size: 12px; }
 .quick-arrow { color: var(--text-faint); font-size: 18px; }
-.table-wrap { overflow: auto; }
+.history {
+  flex: 1.35 1 0;
+  min-height: 180px;
+}
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   text-align: left;
   color: var(--text-faint);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  padding: 8px 10px;
+  padding: 6px 8px;
+  background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
 td {
-  padding: 10px;
+  padding: 8px;
   border-bottom: 1px solid var(--border);
   color: var(--text-muted);
   vertical-align: middle;
@@ -626,6 +726,7 @@ td strong,
 td small { display: block; }
 td strong { color: var(--text); font-weight: 500; }
 td small { margin-top: 2px; color: var(--text-faint); font-size: 11px; }
+td.empty-state { padding: 16px 8px; }
 tr.is-error td { background: color-mix(in srgb, var(--err) 8%, transparent); }
 tr.is-running td { background: color-mix(in srgb, var(--info) 7%, transparent); }
 .status { display: inline-flex; align-items: center; gap: 6px; }
@@ -648,6 +749,23 @@ tr.is-running td { background: color-mix(in srgb, var(--info) 7%, transparent); 
 .actions { white-space: nowrap; }
 @keyframes dash-pulse { 50% { opacity: 0.35; } }
 @media (max-width: 1100px) {
-  .dash-split { grid-template-columns: 1fr; }
+  .dash {
+    height: auto;
+    overflow: visible;
+    flex: none;
+  }
+  .dash-split {
+    grid-template-columns: 1fr;
+    flex: none;
+    min-height: 0;
+  }
+  .running,
+  .quick,
+  .history {
+    height: auto;
+  }
+  .history { flex: none; min-height: 240px; }
+  .run-list,
+  .quick-list { flex: none; overflow: visible; }
 }
 </style>
