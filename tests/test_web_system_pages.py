@@ -141,6 +141,9 @@ def test_guard_tab_restores_old_information_architecture() -> None:
     assert t("guard.credential", lang="zh") == "凭证 Key ID"
     assert t("guard.credential", lang="en") == "Credential key ID"
     assert t("guard.app_id", lang="en") == "App ID"
+    assert "<t-dialog" in src
+    assert "dialog-form" in src
+    assert src.find('class="page-stack"') < src.find("<t-dialog")
 
 
 def test_profiles_tab_uses_full_width_wrapping_cards() -> None:
@@ -160,8 +163,9 @@ def test_profiles_tab_uses_full_width_wrapping_cards() -> None:
     assert 'v-if="!row.isDefault"' in src
     assert "profiles-page" in src
     assert "max-width: none" in src
-    assert "<el-dialog" in src
-    assert src.find("profiles-page") < src.find("<el-dialog")
+    assert "<t-dialog" in src
+    assert src.find("profiles-page") < src.find("<t-dialog")
+    assert "dialog-form" in src
 
 
 def test_retry_paths_map_legacy_system_tabs() -> None:
@@ -227,7 +231,7 @@ def test_page_modules_grow_and_main_column_scrolls() -> None:
     assert "overflow: auto" in shell
     assert ".page-stack > :last-child" in tokens
     assert ".page-stack > :last-child.card" in tokens
-    assert ":is(button, .el-button)" in tokens
+    assert ":is(button, .t-button)" in tokens
     assert "flex: 0 0 auto" in tokens
     assert "listing-tabs" in listing
     assert "overflow: visible" in listing

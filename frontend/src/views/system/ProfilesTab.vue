@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { ElMessage } from "element-plus";
+import { MessagePlugin } from "tdesign-vue-next";
 import { httpJson } from "@/api/http";
 import ExampleHelp from "@/components/ExampleHelp.vue";
 import PageLoading from "@/components/PageLoading.vue";
@@ -117,7 +117,7 @@ async function save() {
     await httpJson(`/api/profiles/${encodeURIComponent(editing.value)}`, { method: "PUT", body });
   } else {
     if (!keyFile.value) {
-      ElMessage.error("key_file");
+      MessagePlugin.error("key_file");
       return;
     }
     await httpJson("/api/profiles", { method: "POST", body });
@@ -157,8 +157,8 @@ onMounted(() => { void load(); });
   <div class="page-stack profiles-page">
     <div class="card">
       <div class="toolbar">
-        <el-button type="primary" :disabled="!canCreate" :title="canCreate ? t('profiles.add_title') : t('profiles.cannot_create')" @click="openCreate">{{ t("profiles.add") }}</el-button>
-        <el-button @click="importLocal">{{ t("profiles.import_confirm") }}</el-button>
+        <t-button theme="primary" :disabled="!canCreate" :title="canCreate ? t('profiles.add_title') : t('profiles.cannot_create')" @click="openCreate">{{ t("profiles.add") }}</t-button>
+        <t-button @click="importLocal">{{ t("profiles.import_confirm") }}</t-button>
       </div>
       <PageLoading v-if="loading && !loaded" size="block" />
       <p v-else-if="!rows.length" class="empty-state">
@@ -172,9 +172,9 @@ onMounted(() => { void load(); });
             <span v-if="row.isDefault" class="badge">{{ t("common.default") }}</span>
           </header>
           <div class="actions">
-            <el-button size="small" @click="openEdit(row.name)">{{ t("common.edit") }}</el-button>
-            <el-button v-if="!row.isDefault" size="small" @click="setDefault(row.name)">{{ t("common.set_default") }}</el-button>
-            <el-button size="small" @click="remove(row.name)">{{ t("common.delete") }}</el-button>
+            <t-button size="small" @click="openEdit(row.name)">{{ t("common.edit") }}</t-button>
+            <t-button v-if="!row.isDefault" size="small" @click="setDefault(row.name)">{{ t("common.set_default") }}</t-button>
+            <t-button size="small" @click="remove(row.name)">{{ t("common.delete") }}</t-button>
           </div>
           <dl class="profile-meta">
             <div class="meta-item">
@@ -190,8 +190,8 @@ onMounted(() => { void load(); });
       </div>
     </div>
   </div>
-  <el-dialog v-model="dialog" :title="editing ? t('common.edit') : t('profiles.create')" width="520px">
-    <div class="page-stack">
+  <t-dialog v-model:visible="dialog" :header="editing ? t('common.edit') : t('profiles.create')" width="520px" placement="center">
+    <div class="dialog-form">
       <label class="field"><span>{{ t("profiles.name") }}</span><input v-model="form.name" class="field-input" /></label>
       <label class="field"><span>Issuer ID</span><input v-model="form.issuer_id" class="field-input" /></label>
       <label class="field"><span>Key ID</span><input v-model="form.key_id" class="field-input" /></label>
@@ -200,14 +200,14 @@ onMounted(() => { void load(); });
         <ExampleHelp kind="csv" :label="t('profiles.csv_optional')" />
         <div class="field-row">
           <input v-model="form.csv" class="field-input" />
-          <el-button @click="pickCsv">{{ t("filebrowser.browse") }}</el-button>
+          <t-button @click="pickCsv">{{ t("filebrowser.browse") }}</t-button>
         </div>
       </div>
       <div class="field">
         <ExampleHelp kind="shots" :label="t('profiles.shots_optional')" />
         <div class="field-row">
           <input v-model="form.screenshots" class="field-input" />
-          <el-button @click="pickShots">{{ t("filebrowser.browse") }}</el-button>
+          <t-button @click="pickShots">{{ t("filebrowser.browse") }}</t-button>
         </div>
       </div>
       <label class="field">
@@ -216,13 +216,18 @@ onMounted(() => { void load(); });
       </label>
     </div>
     <template #footer>
-      <el-button @click="dialog = false">{{ t("common.cancel") }}</el-button>
-      <el-button type="primary" @click="save">{{ t("common.save") }}</el-button>
+      <t-button @click="dialog = false">{{ t("common.cancel") }}</t-button>
+      <t-button theme="primary" @click="save">{{ t("common.save") }}</t-button>
     </template>
-  </el-dialog>
+  </t-dialog>
 </template>
 
 <style scoped>
+.dialog-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
 .profiles-page {
   align-self: stretch;
   flex: 1 1 auto;
@@ -311,7 +316,7 @@ onMounted(() => { void load(); });
   align-self: start;
   gap: 8px;
 }
-.actions :deep(.el-button + .el-button) {
+.actions :deep(.t-button + .t-button) {
   margin-left: 0;
 }
 .profile-meta {

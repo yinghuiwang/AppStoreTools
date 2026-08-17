@@ -172,7 +172,7 @@ onMounted(async () => {
     <div class="card">
       <div class="toolbar">
         <h2>{{ t("settings.llm_title") }}</h2>
-        <el-button :disabled="loading" @click="openCreate">{{ t("settings.add_config") }}</el-button>
+        <t-button :disabled="loading" @click="openCreate">{{ t("settings.add_config") }}</t-button>
       </div>
       <PageLoading v-if="loading && !loaded" size="block" />
       <template v-else>
@@ -187,8 +187,8 @@ onMounted(async () => {
         <label class="field"><span>Model</span><input v-model="llmForm.model" class="field-input" /></label>
         <p v-if="llmError" class="err">{{ llmError }}</p>
         <div class="field-row">
-          <el-button type="primary" @click="saveLlm">{{ t("common.save") }}</el-button>
-          <el-button @click="showForm = false">{{ t("common.cancel") }}</el-button>
+          <t-button theme="primary" @click="saveLlm">{{ t("common.save") }}</t-button>
+          <t-button @click="showForm = false">{{ t("common.cancel") }}</t-button>
         </div>
       </div>
       <p v-if="!Object.keys(configs).length" class="empty-state">{{ t("settings.empty_configs") }}</p>
@@ -199,9 +199,9 @@ onMounted(async () => {
           <div class="muted">{{ cfg.base_url }} / {{ cfg.model }}</div>
         </div>
         <div class="field-row">
-          <el-button v-if="name !== defaultName" size="small" @click="setDefault(String(name))">{{ t("common.set_default") }}</el-button>
-          <el-button size="small" @click="openEdit(String(name))">{{ t("common.edit") }}</el-button>
-          <el-button size="small" @click="deleteLlm(String(name))">{{ t("common.delete") }}</el-button>
+          <t-button v-if="name !== defaultName" size="small" @click="setDefault(String(name))">{{ t("common.set_default") }}</t-button>
+          <t-button size="small" @click="openEdit(String(name))">{{ t("common.edit") }}</t-button>
+          <t-button size="small" @click="deleteLlm(String(name))">{{ t("common.delete") }}</t-button>
         </div>
       </div>
       </template>
@@ -210,7 +210,7 @@ onMounted(async () => {
     <div class="card">
       <div class="toolbar">
         <h2>{{ t("settings.webhook_title") }}</h2>
-        <el-button type="primary" :disabled="loading" @click="saveWebhook">{{ t("common.save") }}</el-button>
+        <t-button theme="primary" :disabled="loading" @click="saveWebhook">{{ t("common.save") }}</t-button>
       </div>
       <PageLoading v-if="loading && !loaded" size="block" />
       <template v-else>
@@ -250,7 +250,7 @@ onMounted(async () => {
           <span>{{ t("settings.secret_ph") }}</span>
           <input v-model="webhook.providers[id].secret" type="password" class="field-input" :placeholder="webhook.providers[id].has_secret ? t('settings.secret_kept') : ''" />
         </label>
-        <el-button size="small" @click="testProvider(id)">{{ t("settings.save_test") }}</el-button>
+        <t-button size="small" @click="testProvider(id)">{{ t("settings.save_test") }}</t-button>
       </div>
       <ul v-if="testResults.length" class="results">
         <li v-for="row in testResults" :key="row.provider">{{ row.provider }}: {{ row.ok ? t("settings.test_ok") : (row.error || t("settings.test_failed")) }}</li>

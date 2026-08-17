@@ -188,23 +188,23 @@ onMounted(() => { void load(); });
 
 <template>
   <div class="page-stack">
-    <el-alert v-if="alert" :type="(alert.level === 'warning' ? 'warning' : 'error')" show-icon :title="alert.message" />
-    <el-alert v-if="conflict" type="warning" show-icon :title="t('metadata.wb_conflict')">
-      <el-button size="small" @click="load">{{ t("metadata.diff_reload") }}</el-button>
-    </el-alert>
+    <t-alert v-if="alert" :theme="(alert.level === 'warning' ? 'warning' : 'error')" :title="alert.message" />
+    <t-alert v-if="conflict" theme="warning" :title="t('metadata.wb_conflict')">
+      <t-button size="small" @click="load">{{ t("metadata.diff_reload") }}</t-button>
+    </t-alert>
     <div class="card">
       <p>{{ t("metadata.diff_hint") }}</p>
       <p v-if="version">{{ t("metadata.diff_version", { version: version.versionString || "", state: version.appStoreState || "" }) }}</p>
       <div class="field-row">
-        <el-button
+        <t-button
           :loading="loading && loaded"
           :disabled="loading && !loaded"
           @click="load"
-        >{{ t("metadata.diff_load") }}</el-button>
-        <el-button @click="filter = 'all'">{{ t("metadata.diff_filter_all") }}</el-button>
-        <el-button @click="filter = 'diff'">{{ t("metadata.diff_filter_diff") }}</el-button>
-        <el-button type="primary" @click="pullText">{{ t("metadata.diff_pull") }}</el-button>
-        <el-button @click="pullShots">{{ t("metadata.diff_shots_pull") }}</el-button>
+        >{{ t("metadata.diff_load") }}</t-button>
+        <t-button @click="filter = 'all'">{{ t("metadata.diff_filter_all") }}</t-button>
+        <t-button @click="filter = 'diff'">{{ t("metadata.diff_filter_diff") }}</t-button>
+        <t-button theme="primary" @click="pullText">{{ t("metadata.diff_pull") }}</t-button>
+        <t-button @click="pullShots">{{ t("metadata.diff_shots_pull") }}</t-button>
       </div>
     </div>
     <PageLoading v-if="loading && !loaded" size="block" />

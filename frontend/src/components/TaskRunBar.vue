@@ -109,24 +109,24 @@ async function onCancel() {
     <header class="head">
       <h2>{{ resolvedHeadline }}</h2>
       <div class="actions">
-        <el-button size="small" @click="rail.openLogs(props.taskId)">{{ t("common.logs") }}</el-button>
-        <el-button
+        <t-button size="small" @click="rail.openLogs(props.taskId)">{{ t("common.logs") }}</t-button>
+        <t-button
           v-if="canCancel"
           size="small"
-          type="danger"
-          plain
+          theme="danger"
+          variant="outline"
           :disabled="canceling"
           @click="onCancel"
         >
           {{ canceling ? t("common.canceling") : t("common.cancel_upload") }}
-        </el-button>
-        <el-button
+        </t-button>
+        <t-button
           size="small"
-          :type="finished ? 'primary' : 'default'"
+          :theme="finished ? 'primary' : 'default'"
           @click="emit('back')"
         >
           {{ backLabel }}
-        </el-button>
+        </t-button>
       </div>
     </header>
 

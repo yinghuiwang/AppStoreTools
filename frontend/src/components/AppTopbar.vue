@@ -2,7 +2,7 @@
 import { computed, ref } from "vue";
 import { useRoute } from "vue-router";
 import { useI18n } from "vue-i18n";
-import { ElMessage } from "element-plus";
+import { MessagePlugin } from "tdesign-vue-next";
 import { httpForm } from "@/api/http";
 import { useProfile } from "@/composables/useProfile";
 
@@ -42,7 +42,7 @@ async function onProfileChange(event: Event) {
   try {
     await switchProfile(name);
   } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : String(err));
+    MessagePlugin.error(err instanceof Error ? err.message : String(err));
     el.value = previous;
     if (selectEl.value) selectEl.value.value = previous;
   }
@@ -55,7 +55,7 @@ async function setLang(code: "zh" | "en") {
     document.documentElement.lang = code === "zh" ? "zh-CN" : "en";
     localStorage.setItem("asc_lang", code);
   } catch {
-    ElMessage.error(t("lang.switch_failed"));
+    MessagePlugin.error(t("lang.switch_failed"));
   }
 }
 </script>

@@ -1,0 +1,105 @@
+html.dark,
+html[theme-mode="dark"] {
+  --td-brand-color-1: #10241f;
+  --td-brand-color-2: #16352e;
+  --td-brand-color-3: #1b4a40;
+  --td-brand-color-4: #147d72;
+  --td-brand-color-5: #1aa890;
+  --td-brand-color-6: #1fbe9c;
+  --td-brand-color-7: #23c9a8;
+  --td-brand-color-8: #4ad4b6;
+  --td-brand-color-9: #8ff5d2;
+  --td-brand-color-10: #d7fbf0;
+  --td-brand-color: var(--td-brand-color-7);
+  --td-brand-color-hover: var(--td-brand-color-8);
+  --td-brand-color-focus: var(--td-brand-color-2);
+  --td-brand-color-active: var(--td-brand-color-4);
+  --td-brand-color-disabled: var(--td-brand-color-3);
+  --td-brand-color-light: var(--td-brand-color-1);
+  --td-brand-color-light-hover: var(--td-brand-color-2);
+  --td-bg-color-page: var(--bg);
+  --td-bg-color-container: var(--surface);
+  --td-bg-color-container-hover: var(--overlay);
+  --td-bg-color-secondarycontainer: var(--raised);
+  --td-bg-color-component: var(--raised);
+  --td-bg-color-component-hover: var(--overlay);
+  --td-bg-color-specialcomponent: var(--surface);
+  --td-text-color-primary: var(--text);
+  --td-text-color-secondary: var(--text-muted);
+  --td-text-color-placeholder: var(--text-faint);
+  --td-text-color-brand: var(--accent-dim);
+  --td-text-color-link: var(--accent);
+  --td-border-level-1-color: var(--border);
+  --td-border-level-2-color: var(--border-strong);
+  --td-component-stroke: var(--border);
+  --td-component-border: var(--border);
+  --td-mask-active: rgba(10, 10, 12, 0.72);
+  --td-shadow-3: 0 8px 28px rgba(0, 0, 0, 0.45);
+  --td-font-family: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+  --td-success-color: var(--ok);
+  --td-warning-color: var(--warn);
+  --td-error-color: var(--err);
+}
+
+html.dark .t-button--theme-primary.t-button--variant-base {
+  background: linear-gradient(135deg, var(--accent-dim), var(--accent));
+  color: #0a0a0c;
+  font-weight: 600;
+  border: none;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.1);
+  box-shadow: none;
+}
+
+html.dark .t-button--theme-primary.t-button--variant-base:hover {
+  background: linear-gradient(135deg, var(--accent-dim), var(--accent));
+  box-shadow: 0 0 20px var(--accent-glow-strong), 0 2px 8px rgba(0, 0, 0, 0.3);
+  transform: translateY(-1px);
+}
+
+html.dark .t-button--theme-primary.t-button--variant-base:active {
+  transform: translateY(0);
+}
+
+html.dark .t-button--theme-primary.t-button--variant-base.t-is-disabled,
+html.dark .t-button--theme-primary.t-button--variant-base:disabled {
+  opacity: 0.5;
+  transform: none;
+  box-shadow: none;
+}
+
+html.dark .t-tabs__nav-item.t-is-active {
+  color: var(--accent);
+}
+
+html.dark .t-tabs__bar {
+  background-color: var(--accent-dim);
+}
+
+html.dark .t-tabs {
+  overflow: visible;
+  background-color: transparent;
+}
+
+html.dark .t-tabs__content,
+html.dark .t-tab-panel {
+  overflow: visible;
+  background-color: transparent;
+}
+
+html.dark .t-dialog,
+html.dark .t-dialog__ctx .t-dialog {
+  background: var(--overlay);
+  border: 1px solid var(--border);
+}
+
+html.dark .t-input,
+html.dark .t-textarea__inner,
+html.dark .t-select-input {
+  background-color: var(--raised);
+}
+
+html.dark .t-notification,
+html.dark .t-message {
+  background: var(--overlay);
+  border: 1px solid var(--border);
+}

@@ -208,7 +208,7 @@ onMounted(() => {
     <div class="card">
       <div class="toolbar">
         <h2>{{ t("guard.title") }}</h2>
-        <el-button @click="openAdd">{{ t("guard.manual_add") }}</el-button>
+        <t-button @click="openAdd">{{ t("guard.manual_add") }}</t-button>
       </div>
       <PageLoading v-if="loading && !loaded" size="block" />
       <p v-else-if="!guard" class="err">{{ t("guard.load_failed") }}</p>
@@ -315,9 +315,9 @@ onMounted(() => {
                 <span class="k">{{ t("guard.note") }}</span>
                 <div class="field-row">
                   <input v-model="row.note" class="field-input" :placeholder="t('guard.note')" />
-                  <el-button size="small" :loading="savingNote === row.app_id" @click="saveNote(row)">
+                  <t-button size="small" :loading="savingNote === row.app_id" @click="saveNote(row)">
                     {{ savingNote === row.app_id ? t("guard.saving") : t("guard.save_note") }}
-                  </el-button>
+                  </t-button>
                 </div>
               </div>
             </article>
@@ -334,9 +334,10 @@ onMounted(() => {
         </div>
       </template>
     </div>
-    <el-dialog v-model="addOpen" :title="t('guard.manual_add_title')" width="480px">
-      <p class="hint">{{ t("guard.manual_add_desc") }}</p>
-      <div class="page-stack">
+  </div>
+  <t-dialog v-model:visible="addOpen" :header="t('guard.manual_add_title')" width="480px" placement="center">
+    <p class="hint">{{ t("guard.manual_add_desc") }}</p>
+    <div class="dialog-form">
         <label class="field">
           <span>{{ t("guard.machine") }}</span>
           <input
@@ -366,16 +367,20 @@ onMounted(() => {
         <p v-if="addError" class="err">{{ addError }}</p>
       </div>
       <template #footer>
-        <el-button @click="addOpen = false">{{ t("common.cancel") }}</el-button>
-        <el-button type="primary" :loading="addSaving" :disabled="!availableProfiles.length" @click="submitAdd">
+        <t-button @click="addOpen = false">{{ t("common.cancel") }}</t-button>
+        <t-button theme="primary" :loading="addSaving" :disabled="!availableProfiles.length" @click="submitAdd">
           {{ addSaving ? t("guard.saving") : t("guard.manual_add_submit") }}
-        </el-button>
+        </t-button>
       </template>
-    </el-dialog>
-  </div>
+    </t-dialog>
 </template>
 
 <style scoped>
+.dialog-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
 .card { display: flex; flex-direction: column; }
 .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 h2, h3 {

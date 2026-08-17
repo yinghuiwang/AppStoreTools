@@ -12,12 +12,13 @@ function onClosed(visible: boolean) {
 </script>
 
 <template>
-  <el-dialog
-    :model-value="open"
-    :title="t('filebrowser.title')"
+  <t-dialog
+    :visible="open"
+    :header="t('filebrowser.title')"
     width="520px"
-    append-to-body
-    @update:model-value="onClosed"
+    attach="body"
+    placement="center"
+    @update:visible="onClosed"
   >
     <p class="path mono">{{ currentPath }}</p>
     <p v-if="error" class="err">{{ error }}</p>
@@ -32,17 +33,17 @@ function onClosed(visible: boolean) {
     </ul>
     <p v-if="!loading && !entries.length && !error" class="empty">{{ t("filebrowser.empty") }}</p>
     <template #footer>
-      <el-button @click="cancel()">{{ t("filebrowser.cancel") }}</el-button>
-      <el-button
+      <t-button @click="cancel()">{{ t("filebrowser.cancel") }}</t-button>
+      <t-button
         v-if="mode === 'dir'"
-        type="primary"
+        theme="primary"
         :disabled="loading"
         @click="choose(currentPath)"
       >
         {{ t("filebrowser.select_dir") }}
-      </el-button>
+      </t-button>
     </template>
-  </el-dialog>
+  </t-dialog>
 </template>
 
 <style scoped>

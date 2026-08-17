@@ -199,10 +199,10 @@ onMounted(() => {
 <template>
   <div class="page-stack">
     <h1>{{ t("build.title") }}</h1>
-    <el-alert v-if="empty" type="warning" show-icon :title="t('index.no_app')">
+    <t-alert v-if="empty" theme="warning" :title="t('index.no_app')">
       <router-link to="/profiles">{{ t("nav.profiles") }}</router-link>
-    </el-alert>
-    <el-alert v-if="alert" type="error" show-icon :title="alert" />
+    </t-alert>
+    <t-alert v-if="alert" theme="error" :title="alert" />
 
     <div v-if="isForm" class="build-layout" :class="{ 'has-scan': showScanSidebar }">
       <div class="card build-form">
@@ -216,7 +216,7 @@ onMounted(() => {
         <label v-if="mode !== 'deploy'" class="field"><span>{{ t("build.project_field") }}</span>
           <div class="field-row">
             <input v-model="project" class="field-input" :placeholder="t('build.auto_detect')" />
-            <el-button @click="pickProject">{{ t("filebrowser.browse") }}</el-button>
+            <t-button @click="pickProject">{{ t("filebrowser.browse") }}</t-button>
           </div>
         </label>
         <label v-if="mode !== 'deploy'" class="field"><span>{{ t("build.scheme") }}</span>
@@ -255,13 +255,13 @@ onMounted(() => {
         <label v-if="mode === 'deploy'" class="field"><span>{{ t("build.ipa_path") }}</span>
           <div class="field-row">
             <input v-model="ipaPath" class="field-input" />
-            <el-button @click="pickIpa">{{ t("filebrowser.browse") }}</el-button>
+            <t-button @click="pickIpa">{{ t("filebrowser.browse") }}</t-button>
           </div>
         </label>
         <label class="check"><input v-model="verbose" type="checkbox" /> {{ t("build.verbose") }}</label>
         <label class="check"><input v-model="dryRun" type="checkbox" /> {{ t("build.dry_run") }}</label>
         <label v-if="mode !== 'deploy'" class="check"><input v-model="reuseArchive" type="checkbox" /> {{ t("build.reuse_reuse") }}</label>
-        <el-button type="primary" :disabled="empty || optionsLoading" @click="run">{{ t("common.submit") }}</el-button>
+        <t-button theme="primary" :disabled="empty || optionsLoading" @click="run">{{ t("common.submit") }}</t-button>
       </div>
 
       <aside v-if="showScanSidebar" class="card build-scan" aria-live="polite">
@@ -273,12 +273,12 @@ onMounted(() => {
               <template v-else-if="scanStatus === 'success'">{{ t("build.scan_success") }}</template>
               <template v-else-if="scanStatus === 'error'">{{ t("build.scan_error") }}</template>
             </span>
-            <el-button
+            <t-button
               size="small"
               :loading="optionsLoading && scannedOnce"
               :disabled="optionsLoading && !scannedOnce"
               @click="loadOptions"
-            >{{ t("build.refresh") }}</el-button>
+            >{{ t("build.refresh") }}</t-button>
           </div>
         </div>
 

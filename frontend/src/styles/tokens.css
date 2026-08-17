@@ -112,11 +112,17 @@ a:hover {
   flex: 0 0 auto;
 }
 
-.page-stack > :is(button, .el-button),
-.page-stack > :last-child:is(button, .el-button, .check, label.check) {
+.page-stack > :is(button, .t-button),
+.page-stack > :last-child:is(button, .t-button, .check, label.check) {
   flex: 0 0 auto;
   height: auto;
   align-self: stretch;
+}
+
+.dialog-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .card {

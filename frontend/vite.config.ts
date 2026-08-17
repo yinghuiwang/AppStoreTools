@@ -3,18 +3,18 @@ import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 import AutoImport from "unplugin-auto-import/vite";
 import Components from "unplugin-vue-components/vite";
-import { ElementPlusResolver } from "unplugin-vue-components/resolvers";
+import { TDesignResolver } from "@tdesign-vue-next/auto-import-resolver";
 
 export default defineConfig(({ command }) => ({
   base: command === "build" ? "/static/spa/" : "/",
   plugins: [
     vue(),
     AutoImport({
-      resolvers: [ElementPlusResolver({ importStyle: "css" })],
+      resolvers: [TDesignResolver({ library: "vue-next" })],
       dts: "src/auto-imports.d.ts",
     }),
     Components({
-      resolvers: [ElementPlusResolver({ importStyle: "css" })],
+      resolvers: [TDesignResolver({ library: "vue-next" })],
       dts: "src/components.d.ts",
     }),
   ],

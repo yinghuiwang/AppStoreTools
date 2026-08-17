@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { ElMessage } from "element-plus";
+import { MessagePlugin } from "tdesign-vue-next";
 import PageLoading from "@/components/PageLoading.vue";
 import { useRightRail } from "@/composables/useRightRail";
 import { useTaskLog } from "@/composables/useTaskLog";
@@ -32,9 +32,9 @@ function canCancel() {
 async function copyLogs() {
   try {
     await navigator.clipboard.writeText(lines.value.map((l) => l.message).join("\n"));
-    ElMessage.success(t("drawer.copied"));
+    MessagePlugin.success(t("drawer.copied"));
   } catch {
-    ElMessage.error(t("drawer.copy_failed"));
+    MessagePlugin.error(t("drawer.copy_failed"));
   }
 }
 

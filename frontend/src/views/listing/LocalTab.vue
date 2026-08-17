@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, onMounted, ref, watch, type Ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { ArrowDown, ArrowUp, Plus } from "@element-plus/icons-vue";
+import { AddIcon, ChevronDownIcon, ChevronUpIcon } from "tdesign-icons-vue-next";
 import { ApiError, apiErrorMessage, httpJson } from "@/api/http";
 import ExampleHelp from "@/components/ExampleHelp.vue";
 import PageLoading from "@/components/PageLoading.vue";
@@ -166,37 +166,37 @@ watch(reloadTick, () => { if (!empty.value) void load(); });
 
 <template>
   <div class="page-stack">
-    <el-alert v-if="empty" type="warning" show-icon :title="t('index.no_app')">
+    <t-alert v-if="empty" theme="warning" :title="t('index.no_app')">
       <router-link to="/profiles">{{ t("nav.profiles") }}</router-link>
-    </el-alert>
-    <el-alert v-if="alert" type="error" show-icon :title="alert" />
-    <el-alert v-if="conflict" type="warning" show-icon :title="t('metadata.wb_conflict')">
-      <el-button size="small" @click="load">{{ t("metadata.load_preview") }}</el-button>
-    </el-alert>
+    </t-alert>
+    <t-alert v-if="alert" theme="error" :title="alert" />
+    <t-alert v-if="conflict" theme="warning" :title="t('metadata.wb_conflict')">
+      <t-button size="small" @click="load">{{ t("metadata.load_preview") }}</t-button>
+    </t-alert>
     <div class="card">
       <p>{{ t("metadata.wb_hint") }}</p>
       <div class="field">
         <ExampleHelp kind="csv" :label="t('metadata.csv_path')" />
         <div class="field-row">
           <input v-model="csvPath" class="field-input" />
-          <el-button @click="browse.pick({ mode: 'file', ext: '.csv', initialPath: csvPath }).then((p) => { if (p) csvPath = p; })">{{ t("filebrowser.browse") }}</el-button>
+          <t-button @click="browse.pick({ mode: 'file', ext: '.csv', initialPath: csvPath }).then((p) => { if (p) csvPath = p; })">{{ t("filebrowser.browse") }}</t-button>
         </div>
       </div>
       <div class="field">
         <ExampleHelp kind="shots" :label="t('metadata.shots_dir')" />
         <div class="field-row">
           <input v-model="shotsDir" class="field-input" />
-          <el-button @click="browse.pick({ mode: 'dir', initialPath: shotsDir }).then((p) => { if (p) shotsDir = p; })">{{ t("filebrowser.browse") }}</el-button>
+          <t-button @click="browse.pick({ mode: 'dir', initialPath: shotsDir }).then((p) => { if (p) shotsDir = p; })">{{ t("filebrowser.browse") }}</t-button>
         </div>
       </div>
       <div class="field-row">
-        <el-button
+        <t-button
           :disabled="empty || (loading && !loaded)"
           :loading="loading && loaded"
           @click="load"
-        >{{ t("metadata.load_preview") }}</el-button>
-        <el-button type="primary" :disabled="empty" @click="save">{{ t("metadata.save_csv") }}</el-button>
-        <el-button @click="pickerOpen = true">{{ t("metadata.locales_btn") }}</el-button>
+        >{{ t("metadata.load_preview") }}</t-button>
+        <t-button theme="primary" :disabled="empty" @click="save">{{ t("metadata.save_csv") }}</t-button>
+        <t-button @click="pickerOpen = true">{{ t("metadata.locales_btn") }}</t-button>
       </div>
     </div>
     <PageLoading v-if="loading && !loaded" size="block" />
@@ -230,41 +230,46 @@ watch(reloadTick, () => { if (!empty.value) void load(); });
         <div v-for="(group, dtype) in current.screenshots" :key="dtype" class="shots">
           <div class="shot-head">
             <strong>{{ dtype }}</strong>
-            <el-button size="small" :icon="Plus" @click="openAddShot(current.locale, String(dtype))">
+            <t-button size="small" @click="openAddShot(current.locale, String(dtype))">
+              <template #icon><AddIcon /></template>
               {{ t("metadata.shots_add") }}
-            </el-button>
+            </t-button>
           </div>
           <div class="thumbs">
             <figure v-for="(item, idx) in group" :key="item.local_path || item.file_name" class="thumb">
               <img :src="item.thumb_url" :alt="item.file_name" @click="openShots(group, idx)" />
               <figcaption :title="item.file_name">{{ item.file_name }}</figcaption>
               <div class="thumb-actions">
-                <el-button
+                <t-button
                   size="small"
-                  :icon="ArrowUp"
+                  shape="square"
                   :disabled="idx === 0"
                   :title="t('metadata.shots_move_up')"
                   :aria-label="t('metadata.shots_move_up')"
                   @click="moveShot(current.locale, String(dtype), idx, -1)"
-                />
-                <el-button
+                >
+                  <template #icon><ChevronUpIcon /></template>
+                </t-button>
+                <t-button
                   size="small"
-                  :icon="ArrowDown"
+                  shape="square"
                   :disabled="idx === group.length - 1"
                   :title="t('metadata.shots_move_down')"
                   :aria-label="t('metadata.shots_move_down')"
                   @click="moveShot(current.locale, String(dtype), idx, 1)"
-                />
-                <el-button size="small" @click="openReplaceShot(item.local_path)">{{ t("metadata.shots_replace") }}</el-button>
-                <el-button size="small" type="danger" plain @click="deleteShot(item.local_path)">{{ t("metadata.shots_delete") }}</el-button>
+                >
+                  <template #icon><ChevronDownIcon /></template>
+                </t-button>
+                <t-button size="small" @click="openReplaceShot(item.local_path)">{{ t("metadata.shots_replace") }}</t-button>
+                <t-button size="small" theme="danger" variant="outline" @click="deleteShot(item.local_path)">{{ t("metadata.shots_delete") }}</t-button>
               </div>
             </figure>
           </div>
         </div>
       </div>
     </div>
-    <LocalePicker v-model:open="pickerOpen" />
   </div>
+  <LocalePicker v-model:open="pickerOpen" />
 </template>
 
 <style scoped>
@@ -285,7 +290,7 @@ aside button.on { color: var(--accent); border-color: var(--accent-dim); }
 .thumb img { width: 148px; height: 254px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); cursor: zoom-in; display: block; }
 figcaption { font-size: 11px; color: var(--text-muted); word-break: break-all; line-height: 1.3; }
 .thumb-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
-.thumb-actions :deep(.el-button) { margin: 0; width: 100%; }
+.thumb-actions :deep(.t-button) { margin: 0; width: 100%; }
 .file-hidden {
   position: absolute;
   width: 1px;

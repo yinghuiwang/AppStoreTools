@@ -55,11 +55,11 @@ onActivated(() => {
 </script>
 
 <template>
-  <el-tabs class="listing-tabs" v-model="tab">
-    <el-tab-pane :label="$t('listing.tab.upload')" name="upload"><UploadTab /></el-tab-pane>
-    <el-tab-pane :label="$t('listing.tab.local')" name="local"><LocalTab /></el-tab-pane>
-    <el-tab-pane :label="$t('listing.tab.diff')" name="diff"><DiffTab /></el-tab-pane>
-  </el-tabs>
+  <t-tabs class="listing-tabs" v-model="tab">
+    <t-tab-panel :label="$t('listing.tab.upload')" value="upload" :destroy-on-hide="false"><UploadTab /></t-tab-panel>
+    <t-tab-panel :label="$t('listing.tab.local')" value="local" :destroy-on-hide="false"><LocalTab /></t-tab-panel>
+    <t-tab-panel :label="$t('listing.tab.diff')" value="diff" :destroy-on-hide="false"><DiffTab /></t-tab-panel>
+  </t-tabs>
 </template>
 
 <style scoped>
@@ -69,17 +69,22 @@ onActivated(() => {
   flex: 1 1 auto;
   width: 100%;
   min-width: 0;
+  overflow: visible;
+  background: transparent;
 }
-.listing-tabs :deep(.el-tabs__header) {
+.listing-tabs :deep(.t-tabs__header) {
   flex: 0 0 auto;
 }
-.listing-tabs :deep(.el-tabs__content) {
+.listing-tabs :deep(.t-tabs__content) {
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
   overflow: visible;
+  background: transparent;
 }
-.listing-tabs :deep(.el-tab-pane) {
+.listing-tabs :deep(.t-tab-panel) {
   flex: 1 1 auto;
+  overflow: visible;
+  background: transparent;
 }
 </style>

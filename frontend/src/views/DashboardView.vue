@@ -363,10 +363,10 @@ onUnmounted(() => {
                 <small>{{ task.progress?.msg || (task.status === "pending" ? t("index.waiting") : t("index.executing")) }}</small>
               </div>
               <div class="run-actions">
-                <el-button size="small" @click="rail.openLogs(task.id)">{{ t("index.log") }}</el-button>
-                <el-button size="small" :disabled="isCancelling(task)" @click="cancel(task.id)">
+                <t-button size="small" @click="rail.openLogs(task.id)">{{ t("index.log") }}</t-button>
+                <t-button size="small" :disabled="isCancelling(task)" @click="cancel(task.id)">
                   {{ isCancelling(task) ? t("dashboard.canceling") : t("index.cancel") }}
-                </el-button>
+                </t-button>
               </div>
             </article>
             <p v-if="!running.length" class="empty-state">{{ t("index.empty_running") }}</p>
@@ -441,21 +441,21 @@ onUnmounted(() => {
               <td class="mono">{{ startedAt(row.created_at) }}</td>
               <td class="mono">{{ row.duration_label || formatDuration(row.duration_seconds || 0) }}</td>
               <td class="actions">
-                <el-button size="small" @click="rail.openLogs(row.id)">{{ t("index.log") }}</el-button>
-                <el-button
+                <t-button size="small" @click="rail.openLogs(row.id)">{{ t("index.log") }}</t-button>
+                <t-button
                   v-if="row.status === 'error'"
                   size="small"
                   @click="rail.openAgent({ taskId: row.id, autoAnalyze: true })"
                 >
                   {{ t("drawer.explain_with_agent") }}
-                </el-button>
-                <el-button
+                </t-button>
+                <t-button
                   v-if="row.status === 'error' && retryTo(row.retry_path)"
                   size="small"
                   @click="router.push(retryTo(row.retry_path))"
                 >
                   {{ t("index.retry") }}
-                </el-button>
+                </t-button>
               </td>
             </tr>
             <tr v-if="!historyTasks.length">
@@ -747,7 +747,12 @@ tr.is-running td { background: color-mix(in srgb, var(--info) 7%, transparent); 
 .status.is-pending { color: var(--accent); }
 .status.is-pending::before { background: var(--accent); }
 .status.is-canceled { color: var(--text-muted); }
-.actions { white-space: nowrap; }
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
 @keyframes dash-pulse { 50% { opacity: 0.35; } }
 @media (max-width: 1100px) {
   .dash-split {

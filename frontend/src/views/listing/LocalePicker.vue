@@ -63,16 +63,16 @@ onMounted(() => { void load(); });
 </script>
 
 <template>
-  <el-dialog v-model="open" :title="t('metadata.locales_title')" width="560px">
+  <t-dialog v-model:visible="open" :header="t('metadata.locales_title')" width="560px" :footer="false" placement="center">
     <p class="hint">{{ t("metadata.locales_hint") }}</p>
     <p v-if="!presenceAvailable" class="hint">{{ t("metadata.locales_presence_unavailable") }}</p>
     <div class="field-row">
       <input v-model="query" class="field-input" :placeholder="t('metadata.locales_search')" />
-      <el-button
+      <t-button
         :loading="loading && rows.length > 0"
         :disabled="loading && !rows.length"
         @click="load"
-      >{{ t("metadata.locales_refresh") }}</el-button>
+      >{{ t("metadata.locales_refresh") }}</t-button>
     </div>
     <PageLoading v-if="loading && !rows.length" size="block" />
     <p v-else-if="error" class="err">{{ error }}</p>
@@ -85,7 +85,7 @@ onMounted(() => { void load(); });
       </li>
       <li v-if="!filtered.length">{{ t("metadata.locales_empty") }}</li>
     </ul>
-  </el-dialog>
+  </t-dialog>
 </template>
 
 <style scoped>

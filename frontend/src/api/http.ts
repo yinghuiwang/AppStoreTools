@@ -1,4 +1,4 @@
-import { ElNotification } from "element-plus";
+import { NotifyPlugin } from "tdesign-vue-next";
 
 export class ApiError extends Error {
   status: number;
@@ -27,7 +27,7 @@ export function apiErrorMessage(err: ApiError): string {
 function notifyGuard(err: ApiError, skip?: boolean) {
   if (skip) return;
   if (err.status === 403 || err.status === 409) {
-    ElNotification({ type: "error", message: apiErrorMessage(err), duration: 6000 });
+    NotifyPlugin.error({ content: apiErrorMessage(err), duration: 6000 });
   }
 }
 

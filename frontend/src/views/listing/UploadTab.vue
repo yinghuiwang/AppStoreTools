@@ -102,23 +102,23 @@ onMounted(() => {
 
 <template>
   <div class="page-stack">
-    <el-alert v-if="empty" type="warning" show-icon :title="t('index.no_app')">
+    <t-alert v-if="empty" theme="warning" :title="t('index.no_app')">
       <router-link to="/profiles">{{ t("nav.profiles") }}</router-link>
-    </el-alert>
-    <el-alert v-if="alert" type="error" show-icon :title="alert" />
+    </t-alert>
+    <t-alert v-if="alert" theme="error" :title="alert" />
     <div v-if="isForm" class="card">
       <div class="field">
         <ExampleHelp kind="csv" :label="t('metadata.csv_path')" />
         <div class="field-row">
           <input v-model="csvPath" class="field-input" />
-          <el-button @click="pickCsv">{{ t("filebrowser.browse") }}</el-button>
+          <t-button @click="pickCsv">{{ t("filebrowser.browse") }}</t-button>
         </div>
       </div>
       <div class="field">
         <ExampleHelp kind="shots" :label="t('metadata.shots_dir')" />
         <div class="field-row">
           <input v-model="shotsDir" class="field-input" />
-          <el-button @click="pickShots">{{ t("filebrowser.browse") }}</el-button>
+          <t-button @click="pickShots">{{ t("filebrowser.browse") }}</t-button>
         </div>
       </div>
       <div>
@@ -129,8 +129,8 @@ onMounted(() => {
       <label class="check"><input v-model="dryRun" type="checkbox" /> {{ t("common.dry_run") }}</label>
       <label class="check"><input v-model="verbose" type="checkbox" /> {{ t("build.verbose") }}</label>
       <div class="field-row">
-        <el-button :disabled="empty" :loading="checkingEnv" @click="checkEnv">{{ t("common.check_env") }}</el-button>
-        <el-button type="primary" :disabled="empty" @click="run">{{ t("common.submit") }}</el-button>
+        <t-button :disabled="empty" :loading="checkingEnv" @click="checkEnv">{{ t("common.check_env") }}</t-button>
+        <t-button theme="primary" :disabled="empty" @click="run">{{ t("common.submit") }}</t-button>
       </div>
       <p v-if="checkMsg">{{ checkMsg }}</p>
     </div>

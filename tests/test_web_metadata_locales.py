@@ -247,7 +247,7 @@ def test_locale_picker_uses_catalog_then_presence():
 def test_locale_picker_stays_usable_when_presence_fails():
     src = Path("frontend/src/views/listing/LocalePicker.vue").read_text(encoding="utf-8")
     assert "presenceAvailable.value = false" in src
-    assert "el-dialog" in src
+    assert "t-dialog" in src
     assert "metadata.locales_presence_unavailable" in src
 
 

@@ -124,23 +124,24 @@ onMounted(() => {
 
 <template>
   <div class="page-stack">
-    <el-alert
+    <t-alert
       v-if="pending"
-      type="info"
-      show-icon
+      theme="info"
       :title="t('update.restarting')"
-      :description="t('update.restarting_hint')"
+      :message="t('update.restarting_hint')"
     >
-      <el-button size="small" @click="ack">{{ t("common.cancel") }}</el-button>
-    </el-alert>
-    <el-alert v-if="snapshot?.is_editable" type="warning" show-icon :title="t('update.editable_title')" :description="t('update.editable_body')" />
+      <template #operation>
+        <t-button size="small" @click="ack">{{ t("common.cancel") }}</t-button>
+      </template>
+    </t-alert>
+    <t-alert v-if="snapshot?.is_editable" theme="warning" :title="t('update.editable_title')" :message="t('update.editable_body')" />
     <div class="card">
       <div class="toolbar">
-        <el-button
+        <t-button
           :loading="checking && !!checkResult"
           :disabled="checking && !checkResult"
           @click="check"
-        >{{ checking && !checkResult ? t("update.checking") : t("update.title") }}</el-button>
+        >{{ checking && !checkResult ? t("update.checking") : t("update.title") }}</t-button>
       </div>
       <PageLoading v-if="checking && !checkResult" size="inline" :text="t('update.checking')" />
       <div v-else class="version-block">
@@ -157,7 +158,7 @@ onMounted(() => {
       <p class="found-label">{{ t("update.found") }}</p>
       <p class="version-num mono">{{ checkResult.detail.latest }}</p>
       <p v-if="snapshot?.is_editable">{{ t("update.editable_latest_blocked") }}</p>
-      <el-button v-else type="primary" @click="run()">{{ t("update.install_now") }}</el-button>
+      <t-button v-else theme="primary" @click="run()">{{ t("update.install_now") }}</t-button>
     </div>
     <div class="card">
       <h2>{{ t("update.advanced") }}</h2>
@@ -175,7 +176,7 @@ onMounted(() => {
           <input v-else v-model="selectedVersion" class="field-input" :placeholder="t('update.version_ph')" />
         </label>
         <p v-if="versionError" class="muted">{{ versionError }}</p>
-        <el-button type="primary" :disabled="versionsLoading" @click="run(selectedVersion, '')">{{ t("update.install_version") }}</el-button>
+        <t-button theme="primary" :disabled="versionsLoading" @click="run(selectedVersion, '')">{{ t("update.install_version") }}</t-button>
       </div>
       <div v-show="advanced === 'branch'" class="form-stack">
         <PageLoading v-if="branchesLoading && !branches.length" size="inline" />
@@ -187,7 +188,7 @@ onMounted(() => {
           <input v-else v-model="selectedBranch" class="field-input" :placeholder="t('update.branch_ph')" />
         </label>
         <p v-if="branchError" class="muted">{{ branchError }}</p>
-        <el-button type="primary" :disabled="branchesLoading" @click="run('', selectedBranch)">{{ t("update.install_branch") }}</el-button>
+        <t-button theme="primary" :disabled="branchesLoading" @click="run('', selectedBranch)">{{ t("update.install_branch") }}</t-button>
       </div>
       <label class="check"><input v-model="verbose" type="checkbox" /> {{ t("build.verbose") }}</label>
       <p class="muted">{{ t("update.note") }}</p>

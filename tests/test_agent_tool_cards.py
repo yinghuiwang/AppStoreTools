@@ -391,15 +391,15 @@ def test_composer_is_multiline_textarea_with_icon_send():
     assert "--composer-min: 56px" in src
     assert "--composer-max: 136px" in src
     assert "white-space: nowrap" in src
-    assert "Promotion" in src
-    assert "VideoPause" in src
+    assert "SendIcon" in src
+    assert "PauseIcon" in src
     assert "data-agent-send" in src
     assert "data-agent-stop" in src
     assert "align-items: flex-end" in src
     send_btn = src.split('data-agent-send')[1].split("</button>", 1)[0]
     assert "agent.send" in send_btn
     assert "{{ t(\"agent.send\") }}" not in send_btn.split(":title")[0]
-    assert "<el-icon" in send_btn
+    assert "<SendIcon" in send_btn
     composer = src.split(".composer {", 1)[1].split(".row {", 1)[0]
     assert "padding: 10px;" in composer
     assert "min-width: 0" in composer

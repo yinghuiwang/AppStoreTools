@@ -1,7 +1,7 @@
 import { createApp } from "vue";
-import "element-plus/theme-chalk/dark/css-vars.css";
+import "tdesign-vue-next/es/style/index.css";
 import "@/styles/tokens.css";
-import "@/styles/element-overrides.css";
+import "@/styles/tdesign-overrides.css";
 import App from "./App.vue";
 import { router } from "./router";
 import { i18n } from "./i18n";
@@ -73,6 +73,7 @@ function renderBootFailed(root: HTMLElement, retry: () => void) {
 
 async function boot() {
   document.documentElement.classList.add("dark");
+  document.documentElement.setAttribute("theme-mode", "dark");
   const root = document.getElementById("app");
   if (!root) return;
   if (!spaMounted) renderBootLoading(root);

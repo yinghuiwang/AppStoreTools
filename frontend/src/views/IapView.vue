@@ -129,17 +129,17 @@ onMounted(() => { if (!checkMsg.value) void check(); });
 <template>
   <div class="page-stack">
     <h1>{{ t("iap.title") }}</h1>
-    <el-alert v-if="empty" type="warning" show-icon :title="t('index.no_app')">
+    <t-alert v-if="empty" theme="warning" :title="t('index.no_app')">
       <router-link to="/profiles">{{ t("nav.profiles") }}</router-link>
-    </el-alert>
-    <el-alert v-if="alert" type="error" show-icon :title="alert" />
+    </t-alert>
+    <t-alert v-if="alert" theme="error" :title="alert" />
     <template v-if="isForm">
       <div class="card">
         <div class="field">
           <ExampleHelp kind="iap" :label="t('iap.file')" />
           <div class="field-row">
             <input v-model="iapFile" class="field-input" />
-            <el-button @click="browse.pick({ mode: 'file', ext: '.json', initialPath: iapFile }).then((p) => { if (p) iapFile = p; })">{{ t("filebrowser.browse") }}</el-button>
+            <t-button @click="browse.pick({ mode: 'file', ext: '.json', initialPath: iapFile }).then((p) => { if (p) iapFile = p; })">{{ t("filebrowser.browse") }}</t-button>
           </div>
         </div>
         <PageLoading v-if="checking && !checkMsg" size="inline" />
@@ -148,18 +148,18 @@ onMounted(() => { if (!checkMsg.value) void check(); });
         <label class="check"><input v-model="updateExisting" type="checkbox" /> {{ t("iap.update_existing") }}</label>
         <label class="check"><input v-model="verbose" type="checkbox" /> {{ t("build.verbose") }}</label>
         <div class="field-row">
-          <el-button
+          <t-button
             :disabled="empty || (checking && !checkMsg)"
             :loading="checking && !!checkMsg"
             @click="check"
-          >{{ t("iap.check_config") }}</el-button>
-          <el-button type="primary" :disabled="empty" @click="run">{{ t("common.submit") }}</el-button>
+          >{{ t("iap.check_config") }}</t-button>
+          <t-button theme="primary" :disabled="empty" @click="run">{{ t("common.submit") }}</t-button>
         </div>
       </div>
       <div class="card">
         <h2>{{ t("iap.review_title") }}</h2>
         <div class="field-row">
-          <el-button :disabled="empty" :loading="scanning" @click="scan">{{ t("iap.scan_missing") }}</el-button>
+          <t-button :disabled="empty" :loading="scanning" @click="scan">{{ t("iap.scan_missing") }}</t-button>
         </div>
         <p v-if="targets.length">{{ t("iap.found_missing", { n: targets.length }) }}</p>
         <p v-else class="muted">{{ t("iap.no_missing") }}</p>
@@ -170,13 +170,13 @@ onMounted(() => { if (!checkMsg.value) void check(); });
           </div>
           <div class="field-row">
             <input v-model="paths[item.id]" class="field-input" />
-            <el-button size="small" @click="pickPath(item.id)">{{ t("filebrowser.browse") }}</el-button>
+            <t-button size="small" @click="pickPath(item.id)">{{ t("filebrowser.browse") }}</t-button>
             <img v-if="paths[item.id]" class="thumb" :src="`/api/listing/thumb?path=${encodeURIComponent(paths[item.id])}&root=${encodeURIComponent(paths[item.id].replace(/[/\\\\][^/\\\\]+$/, '') || '.')}`" alt="" @click="previewPath(paths[item.id])" />
           </div>
         </div>
         <label class="check"><input v-model="reviewDry" type="checkbox" /> {{ t("iap.preview") }}</label>
         <label class="check"><input v-model="reviewVerbose" type="checkbox" /> {{ t("build.verbose") }}</label>
-        <el-button type="primary" :disabled="empty || !targets.length" @click="uploadShots">{{ t("iap.upload_shots") }}</el-button>
+        <t-button theme="primary" :disabled="empty || !targets.length" @click="uploadShots">{{ t("iap.upload_shots") }}</t-button>
       </div>
     </template>
     <TaskRunBar v-if="isRun && taskId" :task-id="taskId" @back="backToForm" />

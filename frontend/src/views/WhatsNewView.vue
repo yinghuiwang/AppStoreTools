@@ -143,20 +143,20 @@ onMounted(() => {
 <template>
   <div class="page-stack">
     <h1>{{ t("whats_new.title") }}</h1>
-    <el-alert v-if="empty" type="warning" show-icon :title="t('index.no_app')">
+    <t-alert v-if="empty" theme="warning" :title="t('index.no_app')">
       <router-link to="/profiles">{{ t("nav.profiles") }}</router-link>
-    </el-alert>
-    <el-alert v-if="alert" type="error" show-icon :title="alert" />
+    </t-alert>
+    <t-alert v-if="alert" theme="error" :title="alert" />
     <div v-if="isForm" class="card">
       <div class="field-row check-row">
         <p v-if="check">{{ check.message }}</p>
         <PageLoading v-else-if="checking" size="inline" :text="t('whats_new.checking')" />
-        <el-button
+        <t-button
           size="small"
           :loading="checking && !!check"
           :disabled="checking && !check"
           @click="loadCheck"
-        >{{ t("whats_new.recheck") }}</el-button>
+        >{{ t("whats_new.recheck") }}</t-button>
       </div>
     </div>
     <div v-if="isForm" class="card">
@@ -184,9 +184,9 @@ onMounted(() => {
       <label class="check"><input v-model="dryRun" type="checkbox" /> {{ t("common.dry_run") }}</label>
       <label class="check"><input v-model="verbose" type="checkbox" /> {{ t("build.verbose") }}</label>
       <div class="field-row">
-        <el-button v-if="translateMode" :disabled="empty" @click="previewTranslate">{{ t("whats_new.preview_translate") }}</el-button>
-        <el-button v-if="translateMode" type="primary" :disabled="empty" @click="runTranslateAndUpload">{{ t("whats_new.translate_upload") }}</el-button>
-        <el-button v-else type="primary" :disabled="empty" @click="runDirect">{{ t("whats_new.upload_direct") }}</el-button>
+        <t-button v-if="translateMode" :disabled="empty" @click="previewTranslate">{{ t("whats_new.preview_translate") }}</t-button>
+        <t-button v-if="translateMode" theme="primary" :disabled="empty" @click="runTranslateAndUpload">{{ t("whats_new.translate_upload") }}</t-button>
+        <t-button v-else theme="primary" :disabled="empty" @click="runDirect">{{ t("whats_new.upload_direct") }}</t-button>
       </div>
     </div>
     <div v-if="isForm && translateMode && Object.keys(translations).length" class="card">
@@ -195,7 +195,7 @@ onMounted(() => {
         <span>{{ locale }}</span>
         <textarea v-model="translations[locale]" rows="4" class="field-input" />
       </label>
-      <el-button type="primary" :disabled="empty" @click="uploadTranslations">{{ t("whats_new.confirm_upload") }}</el-button>
+      <t-button theme="primary" :disabled="empty" @click="uploadTranslations">{{ t("whats_new.confirm_upload") }}</t-button>
     </div>
     <TaskRunBar v-if="isRun && taskId" :task-id="taskId" @back="backToForm">
       <template #after>
@@ -205,7 +205,7 @@ onMounted(() => {
             <span>{{ locale }}</span>
             <textarea v-model="translations[locale]" rows="4" class="field-input" />
           </label>
-          <el-button type="primary" :disabled="empty" @click="uploadTranslations">{{ t("whats_new.confirm_upload") }}</el-button>
+          <t-button theme="primary" :disabled="empty" @click="uploadTranslations">{{ t("whats_new.confirm_upload") }}</t-button>
         </div>
       </template>
     </TaskRunBar>

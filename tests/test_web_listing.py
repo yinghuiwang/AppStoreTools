@@ -766,9 +766,9 @@ def test_upload_tab_has_scope_without_locale_checkboxes():
 
 def test_listing_view_tabs_start_with_upload():
     src = Path("frontend/src/views/ListingView.vue").read_text(encoding="utf-8")
-    upload = src.index('name="upload"')
-    local = src.index('name="local"')
-    diff = src.index('name="diff"')
+    upload = src.index('value="upload"')
+    local = src.index('value="local"')
+    diff = src.index('value="diff"')
     assert upload < local < diff
     assert "listing-tabs" in src
     assert "overflow: visible" in src
@@ -793,6 +793,9 @@ def test_listing_local_tab_has_screenshot_workbench():
     assert src.count('type="file"') == 1
     assert "未选择任何文件" not in src
     assert 'class="add"' not in src
+    assert ':icon="AddIcon"' not in src
+    assert "<template #icon>" in src
+    assert 'shape="square"' in src
 
 
 def test_listing_screenshots_add_requires_profile(client, tmp_path):

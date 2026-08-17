@@ -68,20 +68,20 @@ onMounted(() => { if (!check.value) void loadCheck(); });
   <div class="page-stack">
     <h1>{{ t("urls.title") }}</h1>
     <p class="muted">{{ t("urls.subtitle") }}</p>
-    <el-alert v-if="empty" type="warning" show-icon :title="t('index.no_app')">
+    <t-alert v-if="empty" theme="warning" :title="t('index.no_app')">
       <router-link to="/profiles">{{ t("nav.profiles") }}</router-link>
-    </el-alert>
-    <el-alert v-if="alert" type="error" show-icon :title="alert" />
+    </t-alert>
+    <t-alert v-if="alert" theme="error" :title="alert" />
     <div v-if="isForm" class="card">
       <div class="field-row">
         <PageLoading v-if="checking && !check" size="inline" />
         <p v-else-if="check">{{ check.message }}</p>
-        <el-button
+        <t-button
           size="small"
           :loading="checking && !!check"
           :disabled="checking && !check"
           @click="loadCheck"
-        >{{ t("common.check_env") }}</el-button>
+        >{{ t("common.check_env") }}</t-button>
       </div>
       <label class="field">
         <span>{{ t("urls.choose_type") }}</span>
@@ -102,7 +102,7 @@ onMounted(() => { if (!check.value) void loadCheck(); });
       </div>
       <label class="check"><input v-model="dryRun" type="checkbox" /> {{ t("common.dry_run") }}</label>
       <label class="check"><input v-model="verbose" type="checkbox" /> {{ t("build.verbose") }}</label>
-      <el-button type="primary" :disabled="empty" @click="run">{{ t("urls.submit") }}</el-button>
+      <t-button theme="primary" :disabled="empty" @click="run">{{ t("urls.submit") }}</t-button>
     </div>
     <TaskRunBar v-if="isRun && taskId" :task-id="taskId" @back="backToForm" />
   </div>

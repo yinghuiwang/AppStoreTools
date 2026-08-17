@@ -3,7 +3,14 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { useI18n } from "vue-i18n";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
-import { CircleCheck, CircleClose, Loading, Plus, Promotion, VideoPause } from "@element-plus/icons-vue";
+import {
+  AddIcon,
+  CheckCircleFilledIcon,
+  CloseCircleFilledIcon,
+  LoadingIcon,
+  PauseIcon,
+  SendIcon,
+} from "tdesign-icons-vue-next";
 import { useAgent, type AgentMessage, type AgentPlan } from "@/composables/useAgent";
 import { useRightRail } from "@/composables/useRightRail";
 import PageLoading from "@/components/PageLoading.vue";
@@ -263,12 +270,13 @@ onBeforeUnmount(() => {
           data-agent-thinking
           :data-agent-thinking-open="thinkOpenNames(idx).length ? 'true' : 'false'"
         >
-          <el-collapse
+          <t-collapse
+            borderless
             :model-value="thinkOpenNames(idx)"
             @update:model-value="onThinkToggle(idx, $event)"
           >
-            <el-collapse-item :name="thinkName(idx)">
-              <template #title>
+            <t-collapse-panel :value="thinkName(idx)">
+              <template #header>
                 <span class="thinking-title" data-agent-thinking-title>
                   {{ msg.streaming ? t("agent.thinking") : t("agent.thinking_done") }}
                 </span>
@@ -278,30 +286,25 @@ onBeforeUnmount(() => {
                 class="thinking-body"
                 data-agent-thinking-body
               >{{ msg.text }}</pre>
-            </el-collapse-item>
-          </el-collapse>
+            </t-collapse-panel>
+          </t-collapse>
         </article>
         <article
           v-else-if="msg.kind === 'tool'"
           class="tool-card"
           :data-agent-tool="msg.id"
         >
-          <el-collapse
+          <t-collapse
+            borderless
             :model-value="toolOpenNames(msg.id)"
             @update:model-value="onToolToggle(msg.id, $event)"
           >
-            <el-collapse-item :name="msg.id">
-              <template #title>
+            <t-collapse-panel :value="msg.id">
+              <template #header>
                 <span class="tool-head">
-                  <el-icon v-if="msg.status === 'running'" class="is-loading" :size="14">
-                    <Loading />
-                  </el-icon>
-                  <el-icon v-else-if="msg.status === 'success'" class="ok" :size="14">
-                    <CircleCheck />
-                  </el-icon>
-                  <el-icon v-else class="err" :size="14">
-                    <CircleClose />
-                  </el-icon>
+                  <LoadingIcon v-if="msg.status === 'running'" class="is-loading" size="14px" />
+                  <CheckCircleFilledIcon v-else-if="msg.status === 'success'" class="ok" size="14px" />
+                  <CloseCircleFilledIcon v-else class="err" size="14px" />
                   <span class="tool-name mono" data-agent-tool-name>{{ toolDisplayName(msg.name) }}</span>
                   <span class="tool-status" :data-agent-tool-status="msg.status">
                     {{ toolStatusLabel(msg.status) }}
@@ -309,8 +312,8 @@ onBeforeUnmount(() => {
                 </span>
               </template>
               <pre v-if="msg.summary" class="tool-summary" data-agent-tool-summary>{{ msg.summary }}</pre>
-            </el-collapse-item>
-          </el-collapse>
+            </t-collapse-panel>
+          </t-collapse>
         </article>
         <div
           v-else-if="msg.kind === 'assistant'"
@@ -371,7 +374,7 @@ onBeforeUnmount(() => {
             :title="t('agent.attach')"
             @click="toggleAttach"
           >
-            <el-icon :size="16"><Plus /></el-icon>
+            <AddIcon size="16px" />
           </button>
           <div v-show="attachOpen" class="menu" data-agent-attach-menu>
             <p>{{ t("agent.attach_task") }}</p>
@@ -418,7 +421,7 @@ onBeforeUnmount(() => {
             :aria-label="t('agent.stop')"
             @click="stop()"
           >
-            <el-icon :size="16"><VideoPause /></el-icon>
+            <PauseIcon size="16px" />
           </button>
           <button
             v-else
@@ -428,7 +431,7 @@ onBeforeUnmount(() => {
             :title="t('agent.send')"
             :aria-label="t('agent.send')"
           >
-            <el-icon :size="16"><Promotion /></el-icon>
+            <SendIcon size="16px" />
           </button>
         </form>
       </div>
@@ -534,14 +537,14 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
-.thinking :deep(.el-collapse),
-.tool-card :deep(.el-collapse) {
+.thinking :deep(.t-collapse),
+.tool-card :deep(.t-collapse) {
   border: 0;
   background: transparent;
 }
 
-.thinking :deep(.el-collapse-item__header),
-.tool-card :deep(.el-collapse-item__header) {
+.thinking :deep(.t-collapse-panel__header),
+.tool-card :deep(.t-collapse-panel__header) {
   height: auto;
   min-height: 36px;
   line-height: 1.4;
@@ -552,14 +555,14 @@ onBeforeUnmount(() => {
   font-size: 12px;
 }
 
-.thinking :deep(.el-collapse-item__wrap),
-.tool-card :deep(.el-collapse-item__wrap) {
+.thinking :deep(.t-collapse-panel__body),
+.tool-card :deep(.t-collapse-panel__body) {
   background: transparent;
   border: 0;
 }
 
-.thinking :deep(.el-collapse-item__content),
-.tool-card :deep(.el-collapse-item__content) {
+.thinking :deep(.t-collapse-panel__content),
+.tool-card :deep(.t-collapse-panel__content) {
   padding: 0 10px 10px;
   color: var(--text-muted);
 }
@@ -578,6 +581,11 @@ onBeforeUnmount(() => {
 .tool-status {
   color: var(--text-faint);
   font-size: 11px;
+}
+
+.tool-head .is-loading {
+  color: var(--accent-dim);
+  animation: agent-spin 0.85s linear infinite;
 }
 
 .tool-head .ok {
@@ -690,8 +698,8 @@ onBeforeUnmount(() => {
   font-size: 0;
 }
 
-.plus :deep(.el-icon),
-.send :deep(.el-icon) {
+.plus :deep(svg),
+.send :deep(svg) {
   font-size: 16px;
 }
 
@@ -771,5 +779,11 @@ form[data-agent-stream] {
   display: flex;
   align-items: flex-end;
   gap: var(--composer-gap);
+}
+
+@keyframes agent-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>

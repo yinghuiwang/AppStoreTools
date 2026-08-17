@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
-import { Loading } from "@element-plus/icons-vue";
+import { LoadingIcon } from "tdesign-icons-vue-next";
 
 const props = withDefaults(
   defineProps<{
@@ -15,7 +15,7 @@ const props = withDefaults(
 
 const { t } = useI18n();
 const label = computed(() => props.text || t("common.loading"));
-const iconPx = computed(() => (props.size === "inline" ? 14 : 18));
+const iconSize = computed(() => (props.size === "inline" ? "14px" : "18px"));
 </script>
 
 <template>
@@ -26,9 +26,7 @@ const iconPx = computed(() => (props.size === "inline" ? 14 : 18));
     :aria-busy="true"
     :aria-label="label"
   >
-    <el-icon class="page-loading__icon" :size="iconPx">
-      <Loading />
-    </el-icon>
+    <LoadingIcon class="page-loading__icon" :size="iconSize" />
     <span class="page-loading__text">{{ label }}</span>
   </div>
 </template>
