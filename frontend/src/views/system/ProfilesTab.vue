@@ -3,6 +3,7 @@ import { onMounted, reactive, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { ElMessage } from "element-plus";
 import { httpJson } from "@/api/http";
+import ExampleHelp from "@/components/ExampleHelp.vue";
 import PageLoading from "@/components/PageLoading.vue";
 import { useBrowse } from "@/composables/useBrowse";
 import { useProfile } from "@/composables/useProfile";
@@ -163,20 +164,20 @@ onMounted(() => { void load(); });
         <label class="field"><span>Issuer ID</span><input v-model="form.issuer_id" class="field-input" /></label>
         <label class="field"><span>Key ID</span><input v-model="form.key_id" class="field-input" /></label>
         <label class="field"><span>App ID</span><input v-model="form.app_id" class="field-input" /></label>
-        <label class="field">
-          <span>CSV</span>
+        <div class="field">
+          <ExampleHelp kind="csv" :label="t('profiles.csv_optional')" />
           <div class="field-row">
             <input v-model="form.csv" class="field-input" />
             <el-button @click="pickCsv">{{ t("filebrowser.browse") }}</el-button>
           </div>
-        </label>
-        <label class="field">
-          <span>Screenshots</span>
+        </div>
+        <div class="field">
+          <ExampleHelp kind="shots" :label="t('profiles.shots_optional')" />
           <div class="field-row">
             <input v-model="form.screenshots" class="field-input" />
             <el-button @click="pickShots">{{ t("filebrowser.browse") }}</el-button>
           </div>
-        </label>
+        </div>
         <label class="field">
           <span>.p8</span>
           <input type="file" accept=".p8" @change="keyFile = ($event.target as HTMLInputElement).files?.[0] || null" />

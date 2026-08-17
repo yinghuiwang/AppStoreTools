@@ -20,6 +20,7 @@ declare module 'vue' {
     ElTableColumn: typeof import('element-plus/es')['ElTableColumn']
     ElTabPane: typeof import('element-plus/es')['ElTabPane']
     ElTabs: typeof import('element-plus/es')['ElTabs']
+    ExampleHelp: typeof import('./components/ExampleHelp.vue')['default']
     FileBrowser: typeof import('./components/FileBrowser.vue')['default']
     ImageViewer: typeof import('./components/ImageViewer.vue')['default']
     PageLoading: typeof import('./components/PageLoading.vue')['default']

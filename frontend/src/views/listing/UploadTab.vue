@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute } from "vue-router";
 import { ApiError, apiErrorMessage, httpForm, httpJson } from "@/api/http";
+import ExampleHelp from "@/components/ExampleHelp.vue";
 import PageLoading from "@/components/PageLoading.vue";
 import TaskRunBar from "@/components/TaskRunBar.vue";
 import { useBrowse } from "@/composables/useBrowse";
@@ -10,9 +11,8 @@ import { useProfile } from "@/composables/useProfile";
 import { useRightRail } from "@/composables/useRightRail";
 import { useTaskPagePhase } from "@/composables/useTaskPagePhase";
 
-type LocaleRow = { locale: string; fields: Record<string, string>; screenshots: Record<string, { file_name: string }[]> };
+type LocaleRow = { locale: string };
 
-const FIELDS = ["name", "subtitle", "description", "keywords", "supportUrl", "marketingUrl", "privacyPolicyUrl"];
 const { t } = useI18n();
 const route = useRoute();
 const browse = useBrowse();
@@ -31,11 +31,12 @@ const checkMsg = ref("");
 const alert = ref("");
 const locales = ref<LocaleRow[]>([]);
 const selectedLocales = ref<string[]>([]);
-const fieldsByLocale = ref<Record<string, string[]>>({});
-const scopes = ref<{ locale: string; display_type: string }[]>([]);
-const omitFilters = ref(false);
 const loadingLocal = ref(false);
 const checkingEnv = ref(false);
+
+const allLocalesSelected = computed(
+  () => locales.value.length > 0 && locales.value.every((row) => selectedLocales.value.includes(row.locale)),
+);
 
 async function loadLocal() {
   loadingLocal.value = true;
@@ -43,10 +44,28 @@ async function loadLocal() {
     const qs = new URLSearchParams({ csv_path: csvPath.value, screenshots_dir: shotsDir.value });
     const data = await httpJson<{ snapshot: { locales: LocaleRow[] } }>(`/api/listing/local?${qs}`);
     locales.value = data.snapshot?.locales || [];
+    selectedLocales.value = locales.value.map((row) => row.locale);
   } catch {
     locales.value = [];
+    selectedLocales.value = [];
   } finally {
     loadingLocal.value = false;
+  }
+}
+
+async function pickCsv() {
+  const path = await browse.pick({ mode: "file", ext: ".csv", initialPath: csvPath.value });
+  if (path) {
+    csvPath.value = path;
+    void loadLocal();
+  }
+}
+
+async function pickShots() {
+  const path = await browse.pick({ mode: "dir", initialPath: shotsDir.value });
+  if (path) {
+    shotsDir.value = path;
+    void loadLocal();
   }
 }
 
@@ -71,21 +90,16 @@ function toggleLocale(code: string, on: boolean) {
     : selectedLocales.value.filter((item) => item !== code);
 }
 
-function toggleField(locale: string, field: string, on: boolean) {
-  const cur = fieldsByLocale.value[locale] || [];
-  fieldsByLocale.value = {
-    ...fieldsByLocale.value,
-    [locale]: on ? Array.from(new Set([...cur, field])) : cur.filter((item) => item !== field),
-  };
-}
-
-function toggleScope(locale: string, displayType: string, on: boolean) {
-  const next = scopes.value.filter((s) => !(s.locale === locale && s.display_type === displayType));
-  scopes.value = on ? [...next, { locale, display_type: displayType }] : next;
+function toggleAll(on: boolean) {
+  selectedLocales.value = on ? locales.value.map((row) => row.locale) : [];
 }
 
 async function run() {
   alert.value = "";
+  if (locales.value.length && selectedLocales.value.length === 0) {
+    alert.value = t("metadata.upload_no_locales");
+    return;
+  }
   try {
     const body = new URLSearchParams();
     body.set("csv_path", csvPath.value);
@@ -94,10 +108,8 @@ async function run() {
     body.set("include_screenshots", includeScreenshots.value ? "true" : "");
     body.set("dry_run", dryRun.value ? "true" : "");
     body.set("verbose", verbose.value ? "true" : "");
-    if (!omitFilters.value) {
+    if (locales.value.length && !allLocalesSelected.value) {
       body.set("locales_json", JSON.stringify(selectedLocales.value));
-      body.set("fields_by_locale_json", JSON.stringify(fieldsByLocale.value));
-      body.set("screenshot_scopes_json", JSON.stringify(scopes.value));
     }
     const { task_id } = await httpForm<{ task_id: string }>("/api/metadata/run", body);
     taskId.value = task_id;
@@ -116,7 +128,6 @@ onMounted(() => {
   } else if (action === "all") {
     includeMetadata.value = true;
     includeScreenshots.value = true;
-    omitFilters.value = true;
   } else if (action === "metadata") {
     includeMetadata.value = true;
     includeScreenshots.value = false;
@@ -135,43 +146,40 @@ onMounted(() => {
     </el-alert>
     <el-alert v-if="alert" type="error" show-icon :title="alert" />
     <div v-if="isForm" class="card">
-      <label class="field">
-        <span>{{ t("metadata.csv_path") }}</span>
+      <div class="field">
+        <ExampleHelp kind="csv" :label="t('metadata.csv_path')" />
         <div class="field-row">
           <input v-model="csvPath" class="field-input" />
-          <el-button @click="browse.pick({ mode: 'file', ext: '.csv', initialPath: csvPath }).then((p) => { if (p) csvPath = p; })">{{ t("filebrowser.browse") }}</el-button>
+          <el-button @click="pickCsv">{{ t("filebrowser.browse") }}</el-button>
         </div>
-        <a href="/api/examples/csv" download>{{ t("common.download_sample_csv") }}</a>
-      </label>
-      <label class="field">
-        <span>{{ t("metadata.shots_dir") }}</span>
+      </div>
+      <div class="field">
+        <ExampleHelp kind="shots" :label="t('metadata.shots_dir')" />
         <div class="field-row">
           <input v-model="shotsDir" class="field-input" />
-          <el-button @click="browse.pick({ mode: 'dir', initialPath: shotsDir }).then((p) => { if (p) shotsDir = p; })">{{ t("filebrowser.browse") }}</el-button>
+          <el-button @click="pickShots">{{ t("filebrowser.browse") }}</el-button>
         </div>
-        <a href="/api/examples/screenshots" download>{{ t("common.download_sample_shots") }}</a>
-      </label>
+      </div>
       <div>
         <span class="lbl">{{ t("metadata.scope") }}</span>
         <label class="check"><input v-model="includeMetadata" type="checkbox" /> {{ t("metadata.scope_metadata") }}</label>
         <label class="check"><input v-model="includeScreenshots" type="checkbox" /> {{ t("metadata.scope_screenshots") }}</label>
       </div>
-      <PageLoading v-if="loadingLocal" size="inline" />
-      <div v-for="row in locales" :key="row.locale" class="locale">
-        <label class="check">
-          <input type="checkbox" :checked="selectedLocales.includes(row.locale)" @change="toggleLocale(row.locale, ($event.target as HTMLInputElement).checked)" />
-          {{ row.locale }}
-        </label>
-        <div class="fields">
-          <label v-for="field in FIELDS" :key="field" class="check">
-            <input type="checkbox" :checked="(fieldsByLocale[row.locale] || []).includes(field)" @change="toggleField(row.locale, field, ($event.target as HTMLInputElement).checked)" />
-            {{ t(`metadata.field_${field}`) }}
+      <div>
+        <span class="lbl">{{ t("metadata.upload_locales") }}</span>
+        <PageLoading v-if="loadingLocal" size="inline" />
+        <template v-else>
+          <label v-if="locales.length" class="check">
+            <input type="checkbox" :checked="allLocalesSelected" @change="toggleAll(($event.target as HTMLInputElement).checked)" />
+            {{ t("metadata.upload_locales_all") }}
           </label>
-        </div>
-        <label v-for="(_, dtype) in row.screenshots" :key="String(dtype)" class="check">
-          <input type="checkbox" :checked="scopes.some((s) => s.locale === row.locale && s.display_type === dtype)" @change="toggleScope(row.locale, String(dtype), ($event.target as HTMLInputElement).checked)" />
-          {{ dtype }}
-        </label>
+          <div class="locale-list">
+            <label v-for="row in locales" :key="row.locale" class="check">
+              <input type="checkbox" :checked="selectedLocales.includes(row.locale)" @change="toggleLocale(row.locale, ($event.target as HTMLInputElement).checked)" />
+              {{ row.locale }}
+            </label>
+          </div>
+        </template>
       </div>
       <label class="check"><input v-model="dryRun" type="checkbox" /> {{ t("common.dry_run") }}</label>
       <label class="check"><input v-model="verbose" type="checkbox" /> {{ t("build.verbose") }}</label>
@@ -189,6 +197,5 @@ onMounted(() => {
 .card { display: flex; flex-direction: column; gap: 10px; }
 .check { display: flex; gap: 8px; align-items: center; }
 .lbl { display: block; font-size: 12px; color: var(--text-muted); }
-.locale { border-top: 1px solid var(--border); padding-top: 8px; }
-.fields { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 6px 0 6px 22px; }
+.locale-list { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 6px; }
 </style>

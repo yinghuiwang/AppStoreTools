@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { ApiError, apiErrorMessage, httpForm, httpJson } from "@/api/http";
+import ExampleHelp from "@/components/ExampleHelp.vue";
 import PageLoading from "@/components/PageLoading.vue";
 import TaskRunBar from "@/components/TaskRunBar.vue";
 import { useBrowse } from "@/composables/useBrowse";
@@ -133,14 +134,13 @@ onMounted(() => { void check(); });
     <el-alert v-if="alert" type="error" show-icon :title="alert" />
     <template v-if="isForm">
       <div class="card">
-        <label class="field">
-          <span>{{ t("iap.file") }}</span>
+        <div class="field">
+          <ExampleHelp kind="iap" :label="t('iap.file')" />
           <div class="field-row">
             <input v-model="iapFile" class="field-input" />
             <el-button @click="browse.pick({ mode: 'file', ext: '.json', initialPath: iapFile }).then((p) => { if (p) iapFile = p; })">{{ t("filebrowser.browse") }}</el-button>
           </div>
-        </label>
-        <a href="/api/examples/iap.json">{{ t("iap.download_sample") }}</a>
+        </div>
         <PageLoading v-if="checking && !checkMsg" size="inline" />
         <p v-else-if="checkMsg">{{ checkMsg }}</p>
         <label class="check"><input v-model="dryRun" type="checkbox" /> {{ t("iap.dry_run") }}</label>
