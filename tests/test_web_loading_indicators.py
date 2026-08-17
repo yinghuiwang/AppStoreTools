@@ -27,6 +27,25 @@ def test_whats_new_avoids_duplicate_check_spinners():
     assert src.count("<PageLoading") == 1
 
 
+def test_whats_new_translate_mode_is_workflow_block_not_under_check():
+    src = _read("views/WhatsNewView.vue")
+    template = src.split("<template>", 1)[1].split("</template>", 1)[0]
+    check_pos = template.find('class="field-row check-row"')
+    mode_pos = template.find('class="mode-block"')
+    translate_pos = template.find('v-model="translateMode"')
+    source_pos = template.find('whats_new.source_lang')
+    text_pos = template.find('whats_new.text')
+    preview_pos = template.find('whats_new.preview_translate')
+    between_check_and_mode = template[check_pos:mode_pos]
+    assert check_pos != -1 and mode_pos != -1
+    assert between_check_and_mode.count("</div>") >= 2
+    assert "translateMode" not in between_check_and_mode
+    assert mode_pos < translate_pos < source_pos < text_pos
+    assert 'v-if="translateMode"' in template
+    assert 'v-if="isForm && translateMode && Object.keys(translations).length"' in template
+    assert preview_pos > source_pos
+
+
 def test_iap_check_and_scan_use_single_indicator_each():
     src = _read("views/IapView.vue")
     assert 'PageLoading v-if="checking && !checkMsg"' in src

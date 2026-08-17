@@ -134,16 +134,23 @@ onMounted(() => {
           @click="loadCheck"
         >{{ t("whats_new.recheck") }}</el-button>
       </div>
-      <label class="check"><input v-model="translateMode" type="checkbox" /> {{ t("whats_new.translate_mode") }}</label>
-      <label class="field">
-        <span>{{ t("whats_new.source_lang") }}</span>
-        <input v-model="sourceLocale" class="field-input" :placeholder="t('whats_new.auto_detect')" />
-      </label>
+    </div>
+    <div v-if="isForm" class="card">
+      <div class="mode-block">
+        <label class="check"><input v-model="translateMode" type="checkbox" /> {{ t("whats_new.translate_mode") }}</label>
+        <label v-if="translateMode" class="field">
+          <span>{{ t("whats_new.source_lang") }}</span>
+          <select v-model="sourceLocale" class="field-input">
+            <option value="auto">{{ t("whats_new.auto_detect") }}</option>
+            <option v-for="code in check?.detail?.locales || []" :key="code" :value="code">{{ code }}</option>
+          </select>
+        </label>
+      </div>
       <label class="field">
         <span>{{ t("whats_new.text") }}</span>
         <textarea v-model="text" rows="8" class="field-input" :placeholder="t('whats_new.placeholder')" />
       </label>
-      <div>
+      <div v-if="!translateMode">
         <span class="lbl">{{ t("urls.locales") }}</span>
         <label v-for="code in check?.detail?.locales || []" :key="code" class="check">
           <input type="checkbox" :checked="locales.includes(code)" @change="toggleLocale(code, ($event.target as HTMLInputElement).checked)" />
@@ -157,7 +164,7 @@ onMounted(() => {
         <el-button v-else type="primary" :disabled="empty" @click="runDirect">{{ t("whats_new.upload_direct") }}</el-button>
       </div>
     </div>
-    <div v-if="isForm && Object.keys(translations).length" class="card">
+    <div v-if="isForm && translateMode && Object.keys(translations).length" class="card">
       <h2>{{ t("whats_new.preview_title") }}</h2>
       <label v-for="(value, locale) in translations" :key="locale" class="field">
         <span>{{ locale }}</span>
@@ -185,5 +192,14 @@ h1, h2 { margin: 0 0 8px; }
 .card { display: flex; flex-direction: column; gap: 10px; }
 .check { display: flex; gap: 8px; align-items: center; }
 .lbl { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+.mode-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--raised);
+}
 .preview { display: flex; flex-direction: column; gap: 10px; padding-top: 4px; }
 </style>
