@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { httpForm, httpJson } from "@/api/http";
 import PageLoading from "@/components/PageLoading.vue";
@@ -44,6 +44,13 @@ const advanced = ref<"specific" | "branch">("specific");
 const pending = ref<PostRestart | null>(null);
 const verbose = ref(false);
 let lastBootId = snapshot.value?.boot_id || "";
+
+const currentVersion = computed(
+  () => checkResult.value?.detail?.current || snapshot.value?.version || "",
+);
+const currentCommit = computed(
+  () => checkResult.value?.detail?.current_commit || snapshot.value?.commit || "",
+);
 
 async function check() {
   checking.value = true;
@@ -134,18 +141,21 @@ onMounted(() => {
           :disabled="checking && !checkResult"
           @click="check"
         >{{ checking && !checkResult ? t("update.checking") : t("update.title") }}</el-button>
-        <span class="mono muted">
-          {{ t("update.current_version", { version: checkResult?.detail?.current || snapshot?.version || "" }) }}
-          <template v-if="checkResult?.detail?.current_commit || snapshot?.commit">
-            (commit {{ checkResult?.detail?.current_commit || snapshot?.commit }})
-          </template>
-        </span>
       </div>
       <PageLoading v-if="checking && !checkResult" size="inline" :text="t('update.checking')" />
-      <p v-else-if="checkResult">{{ checkResult.message }}</p>
+      <div v-else class="version-block">
+        <div class="version-row">
+          <span class="version-label">{{ t("update.current_short") }}</span>
+          <span class="version-num mono">{{ currentVersion }}</span>
+        </div>
+        <p v-if="currentCommit" class="version-commit mono">commit {{ currentCommit }}</p>
+        <span v-if="checkResult?.detail?.is_latest" class="badge-latest">{{ t("update.badge_latest") }}</span>
+        <p v-else-if="checkResult && !checkResult.ok" class="muted">{{ checkResult.message }}</p>
+      </div>
     </div>
     <div v-if="checkResult?.detail && !checkResult.detail.is_latest" class="card">
-      <p>{{ t("update.found") }} <span class="mono">{{ checkResult.detail.latest }}</span></p>
+      <p class="found-label">{{ t("update.found") }}</p>
+      <p class="version-num mono">{{ checkResult.detail.latest }}</p>
       <p v-if="snapshot?.is_editable">{{ t("update.editable_latest_blocked") }}</p>
       <el-button v-else type="primary" @click="run()">{{ t("update.install_now") }}</el-button>
     </div>
@@ -155,7 +165,7 @@ onMounted(() => {
         <button type="button" :class="{ on: advanced === 'specific' }" @click="advanced = 'specific'; loadVersions()">{{ t("update.pin_version") }}</button>
         <button type="button" :class="{ on: advanced === 'branch' }" @click="advanced = 'branch'; loadBranches()">{{ t("update.pin_branch") }}</button>
       </div>
-      <div v-show="advanced === 'specific'" class="page-stack">
+      <div v-show="advanced === 'specific'" class="form-stack">
         <PageLoading v-if="versionsLoading && !versions.length" size="inline" />
         <label class="field">
           <span>{{ t("update.version_label") }}</span>
@@ -167,7 +177,7 @@ onMounted(() => {
         <p v-if="versionError" class="muted">{{ versionError }}</p>
         <el-button type="primary" :disabled="versionsLoading" @click="run(selectedVersion, '')">{{ t("update.install_version") }}</el-button>
       </div>
-      <div v-show="advanced === 'branch'" class="page-stack">
+      <div v-show="advanced === 'branch'" class="form-stack">
         <PageLoading v-if="branchesLoading && !branches.length" size="inline" />
         <label class="field">
           <span>{{ t("update.branch_label") }}</span>
@@ -186,7 +196,7 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.card { display: flex; flex-direction: column; flex: 1 1 auto; }
+.card { display: flex; flex-direction: column; flex: 0 0 auto; }
 .toolbar { display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; }
 .muted { color: var(--text-muted); font-size: 13px; }
 h2 { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
@@ -194,4 +204,35 @@ h2 { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: 
 .seg button { flex: 1; background: var(--raised); color: var(--text-muted); border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
 .seg button.on { color: #0a0a0c; background: linear-gradient(135deg, var(--accent-dim), var(--accent)); border-color: transparent; }
 .check { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.form-stack { display: flex; flex-direction: column; gap: 12px; }
+.version-block { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+.version-row { display: flex; flex-direction: column; gap: 4px; }
+.version-label {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.version-num {
+  font-size: 22px;
+  font-weight: 650;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+.version-commit { margin: 0; font-size: 12px; color: var(--text-faint); }
+.found-label { margin: 0 0 4px; font-size: 12px; color: var(--text-muted); }
+.badge-latest {
+  display: inline-flex;
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ok) 35%, transparent);
+}
 </style>

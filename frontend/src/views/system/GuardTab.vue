@@ -376,7 +376,7 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.card { display: flex; flex-direction: column; flex: 1 1 auto; }
+.card { display: flex; flex-direction: column; }
 .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 h2, h3 {
   margin: 0;

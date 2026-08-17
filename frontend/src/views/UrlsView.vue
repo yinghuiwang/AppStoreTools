@@ -111,7 +111,7 @@ onMounted(() => { if (!check.value) void loadCheck(); });
 <style scoped>
 h1 { margin: 0; }
 .muted { color: var(--text-muted); font-size: 13px; }
-.card { display: flex; flex-direction: column; gap: 10px; flex: 1 1 auto; }
+.card { display: flex; flex-direction: column; gap: 10px; }
 .check { display: flex; gap: 8px; align-items: center; }
 .lbl { display: block; font-size: 12px; color: var(--text-muted); }
 </style>

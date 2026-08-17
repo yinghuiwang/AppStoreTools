@@ -99,6 +99,14 @@ def test_update_tab_keeps_status_in_check_card() -> None:
     assert 't("update.found")' in src
     assert 't("update.install_now")' in src
     assert 't("update.up_to_date")' not in src
+    assert 't("update.badge_latest")' in src
+    assert 't("update.current_short")' in src
+    assert "version-num" in src
+    assert "badge-latest" in src
+    assert 't("update.current_version"' not in src
+    assert 'class="page-stack"' in src
+    assert 'class="form-stack"' in src
+    assert src.count('class="page-stack"') == 1
     assert "dryRun" not in src
     assert 't("common.dry_run")' not in src
     assert "verbose" in src
@@ -218,6 +226,9 @@ def test_page_modules_grow_and_main_column_scrolls() -> None:
     assert ".shell-main" in shell
     assert "overflow: auto" in shell
     assert ".page-stack > :last-child" in tokens
+    assert ".page-stack > :last-child.card" in tokens
+    assert ":is(button, .el-button)" in tokens
+    assert "flex: 0 0 auto" in tokens
     assert "listing-tabs" in listing
     assert "overflow: visible" in listing
     assert "overflow: auto" not in local

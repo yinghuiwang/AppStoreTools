@@ -127,7 +127,7 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.card { display: flex; flex-direction: column; gap: 10px; flex: 1 1 auto; }
+.card { display: flex; flex-direction: column; gap: 10px; }
 .check { display: flex; gap: 8px; align-items: center; }
 .lbl { display: block; font-size: 12px; color: var(--text-muted); }
 </style>

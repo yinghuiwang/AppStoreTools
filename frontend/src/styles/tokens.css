@@ -102,9 +102,21 @@ a:hover {
   min-width: 0;
 }
 
-/* Leftover main-column height goes into the last module, not a void below it. */
+/* Leftover column height may fill the last *content* module (workbench, layout).
+   Never stretch controls or ordinary cards — those hug their content. */
 .page-stack > :last-child {
   flex: 1 1 auto;
+}
+
+.page-stack > :last-child.card {
+  flex: 0 0 auto;
+}
+
+.page-stack > :is(button, .el-button),
+.page-stack > :last-child:is(button, .el-button, .check, label.check) {
+  flex: 0 0 auto;
+  height: auto;
+  align-self: stretch;
 }
 
 .card {

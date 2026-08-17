@@ -183,7 +183,7 @@ onMounted(() => { if (!checkMsg.value) void check(); });
 
 <style scoped>
 h1, h2 { margin: 0 0 8px; }
-.card { display: flex; flex-direction: column; gap: 10px; flex: 1 1 auto; }
+.card { display: flex; flex-direction: column; gap: 10px; }
 .check { display: flex; gap: 8px; align-items: center; }
 .muted { color: var(--text-muted); font-size: 12px; }
 .shot-row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); }
