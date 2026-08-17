@@ -166,7 +166,7 @@ watch(reloadTick, () => { if (!empty.value) void load(); });
         <a href="/api/examples/screenshots">{{ t("common.download_sample_shots") }}</a>
       </div>
     </div>
-    <PageLoading v-if="loading && !loaded" size="page" />
+    <PageLoading v-if="loading && !loaded" size="block" />
     <p v-else-if="!locales.length" class="empty-state">{{ t("metadata.wb_empty") }}</p>
     <div v-else class="workbench">
       <aside>

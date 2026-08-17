@@ -21,7 +21,7 @@ function onClosed(visible: boolean) {
   >
     <p class="path mono">{{ currentPath }}</p>
     <p v-if="error" class="err">{{ error }}</p>
-    <PageLoading v-if="loading" />
+    <PageLoading v-if="loading" size="block" />
     <ul v-else class="list">
       <li v-for="entry in entries" :key="entry.path">
         <button type="button" @click="enter(entry)">

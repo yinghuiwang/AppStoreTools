@@ -69,8 +69,9 @@ onMounted(() => { void load(); });
     <div class="field-row">
       <input v-model="query" class="field-input" :placeholder="t('metadata.locales_search')" />
       <el-button :loading="loading" @click="load">{{ t("metadata.locales_refresh") }}</el-button>
+      <PageLoading v-if="loading && rows.length" size="inline" />
     </div>
-    <PageLoading v-if="loading" />
+    <PageLoading v-if="loading && !rows.length" size="block" />
     <p v-else-if="error" class="err">{{ error }}</p>
     <ul v-else class="list">
       <li v-for="row in filtered" :key="row.code" @click="copy(row.code)">

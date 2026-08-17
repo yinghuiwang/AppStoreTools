@@ -90,6 +90,7 @@ onMounted(() => {
     <div v-if="!logTaskId" class="empty">{{ t("rail.logs.empty") }}</div>
     <PageLoading
       v-else-if="!lines.length && (connection === 'connecting' || connection === 'reconnecting')"
+      size="block"
       :text="t('common.loading')"
     />
     <pre v-else ref="scroller" class="stream mono">

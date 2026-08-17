@@ -154,7 +154,7 @@ onMounted(() => {
 
     <p v-if="showNoApp" class="empty-state">{{ t("index.no_app") }}</p>
 
-    <PageLoading v-else-if="loading" size="page" />
+    <PageLoading v-else-if="loading" size="block" />
     <template v-else-if="summary">
       <section class="metrics" :aria-label="t('index.metrics_aria')">
         <article class="metric">
@@ -239,7 +239,7 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.dash { max-width: 1180px; }
+.dash { width: 100%; }
 header h1 { margin: 0; font-size: 28px; letter-spacing: -0.03em; }
 .kicker { margin: 0 0 6px; font-size: 11px; letter-spacing: 0.18em; color: var(--accent-dim); }
 .filters { display: flex; flex-wrap: wrap; gap: 16px; align-items: end; }

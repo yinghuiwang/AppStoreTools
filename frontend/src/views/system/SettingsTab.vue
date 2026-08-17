@@ -167,13 +167,13 @@ onMounted(async () => {
 
 <template>
   <div class="page-stack">
-    <PageLoading v-if="loading" size="page" />
-    <template v-else>
     <div class="card">
       <div class="toolbar">
         <h2>{{ t("settings.llm_title") }}</h2>
-        <el-button @click="openCreate">{{ t("settings.add_config") }}</el-button>
+        <el-button :disabled="loading" @click="openCreate">{{ t("settings.add_config") }}</el-button>
       </div>
+      <PageLoading v-if="loading" size="block" />
+      <template v-else>
       <div v-if="showForm" class="form-box">
         <p>{{ isEditing ? t("settings.edit_config") : t("settings.new_config") }}</p>
         <label class="field">
@@ -202,13 +202,16 @@ onMounted(async () => {
           <el-button size="small" @click="deleteLlm(String(name))">{{ t("common.delete") }}</el-button>
         </div>
       </div>
+      </template>
     </div>
 
     <div class="card">
       <div class="toolbar">
         <h2>{{ t("settings.webhook_title") }}</h2>
-        <el-button type="primary" @click="saveWebhook">{{ t("common.save") }}</el-button>
+        <el-button type="primary" :disabled="loading" @click="saveWebhook">{{ t("common.save") }}</el-button>
       </div>
+      <PageLoading v-if="loading" size="block" />
+      <template v-else>
       <p v-if="webhookError" class="err">{{ webhookError }}</p>
       <label class="check"><input v-model="webhook.enabled" type="checkbox" /> {{ t("settings.webhook_enable") }}</label>
       <div class="split">
@@ -250,8 +253,8 @@ onMounted(async () => {
       <ul v-if="testResults.length" class="results">
         <li v-for="row in testResults" :key="row.provider">{{ row.provider }}: {{ row.ok ? t("settings.test_ok") : (row.error || t("settings.test_failed")) }}</li>
       </ul>
+      </template>
     </div>
-    </template>
   </div>
 </template>
 

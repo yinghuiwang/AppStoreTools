@@ -122,7 +122,7 @@ onMounted(() => {
     </el-alert>
     <el-alert v-if="alert" type="error" show-icon :title="alert" />
     <div v-if="isForm" class="card">
-      <PageLoading v-if="optionsLoading && !optionsReady" />
+      <PageLoading v-if="optionsLoading && !optionsReady" size="block" />
       <template v-else>
       <div v-if="optionsLoading" class="field-row">
         <PageLoading size="inline" />

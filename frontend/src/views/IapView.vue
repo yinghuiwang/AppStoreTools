@@ -141,7 +141,7 @@ onMounted(() => { void check(); });
           </div>
         </label>
         <a href="/api/examples/iap.json">{{ t("iap.download_sample") }}</a>
-        <PageLoading v-if="checking && !checkMsg" />
+        <PageLoading v-if="checking && !checkMsg" size="inline" />
         <p v-else-if="checkMsg">{{ checkMsg }}</p>
         <label class="check"><input v-model="dryRun" type="checkbox" /> {{ t("iap.dry_run") }}</label>
         <label class="check"><input v-model="updateExisting" type="checkbox" /> {{ t("iap.update_existing") }}</label>

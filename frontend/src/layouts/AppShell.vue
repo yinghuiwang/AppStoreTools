@@ -51,7 +51,9 @@ onMounted(() => {
 
 .shell-main {
   flex: 1;
+  min-width: 0;
+  width: 100%;
   overflow: auto;
-  padding: 24px 28px 40px;
+  padding: 12px 12px 24px;
 }
 </style>

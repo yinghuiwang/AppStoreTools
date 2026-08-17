@@ -137,7 +137,7 @@ onMounted(() => {
           </template>
         </span>
       </div>
-      <PageLoading v-if="checking && !checkResult" :text="t('update.checking')" />
+      <PageLoading v-if="checking && !checkResult" size="inline" :text="t('update.checking')" />
       <p v-else-if="checkResult">{{ checkResult.message }}</p>
     </div>
     <div v-if="checkResult?.detail && !checkResult.detail.is_latest" class="card">

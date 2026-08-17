@@ -184,7 +184,7 @@ onMounted(() => { void load(); });
         <el-button @click="pullShots">{{ t("metadata.diff_shots_pull") }}</el-button>
       </div>
     </div>
-    <PageLoading v-if="loading && !loaded" size="page" />
+    <PageLoading v-if="loading && !loaded" size="block" />
     <p v-else-if="!locales.length" class="empty-state">{{ t("metadata.diff_empty") }}</p>
     <section v-for="loc in visible" :key="loc.locale" class="card">
       <h3>{{ loc.locale }}</h3>

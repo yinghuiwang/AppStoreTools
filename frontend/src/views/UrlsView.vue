@@ -73,33 +73,31 @@ onMounted(() => { void loadCheck(); });
     </el-alert>
     <el-alert v-if="alert" type="error" show-icon :title="alert" />
     <div v-if="isForm" class="card">
-      <PageLoading v-if="checking && !check" />
-      <template v-else>
-        <div class="field-row">
-          <p v-if="check">{{ check.message }}</p>
-          <el-button size="small" :loading="checking" @click="loadCheck">{{ t("common.check_env") }}</el-button>
-        </div>
-        <label class="field">
-          <span>{{ t("urls.choose_type") }}</span>
-          <select v-model="field" class="field-input">
-            <option value="supportUrl">{{ t("urls.support") }}</option>
-            <option value="marketingUrl">{{ t("urls.marketing") }}</option>
-            <option value="privacyPolicyUrl">{{ t("urls.privacy") }}</option>
-          </select>
+      <div class="field-row">
+        <PageLoading v-if="checking && !check" size="inline" />
+        <p v-else-if="check">{{ check.message }}</p>
+        <el-button size="small" :loading="checking" @click="loadCheck">{{ t("common.check_env") }}</el-button>
+      </div>
+      <label class="field">
+        <span>{{ t("urls.choose_type") }}</span>
+        <select v-model="field" class="field-input">
+          <option value="supportUrl">{{ t("urls.support") }}</option>
+          <option value="marketingUrl">{{ t("urls.marketing") }}</option>
+          <option value="privacyPolicyUrl">{{ t("urls.privacy") }}</option>
+        </select>
+      </label>
+      <label class="field"><span>{{ t("urls.address") }}</span><input v-model="url" class="field-input" /></label>
+      <div>
+        <span class="lbl">{{ t("urls.locales") }}</span>
+        <p class="muted">{{ t("urls.locales_hint") }}</p>
+        <label v-for="code in check?.detail?.locales || []" :key="code" class="check">
+          <input type="checkbox" :checked="locales.includes(code)" @change="toggle(code, ($event.target as HTMLInputElement).checked)" />
+          {{ code }}
         </label>
-        <label class="field"><span>{{ t("urls.address") }}</span><input v-model="url" class="field-input" /></label>
-        <div>
-          <span class="lbl">{{ t("urls.locales") }}</span>
-          <p class="muted">{{ t("urls.locales_hint") }}</p>
-          <label v-for="code in check?.detail?.locales || []" :key="code" class="check">
-            <input type="checkbox" :checked="locales.includes(code)" @change="toggle(code, ($event.target as HTMLInputElement).checked)" />
-            {{ code }}
-          </label>
-        </div>
-        <label class="check"><input v-model="dryRun" type="checkbox" /> {{ t("common.dry_run") }}</label>
-        <label class="check"><input v-model="verbose" type="checkbox" /> {{ t("build.verbose") }}</label>
-        <el-button type="primary" :disabled="empty" @click="run">{{ t("urls.submit") }}</el-button>
-      </template>
+      </div>
+      <label class="check"><input v-model="dryRun" type="checkbox" /> {{ t("common.dry_run") }}</label>
+      <label class="check"><input v-model="verbose" type="checkbox" /> {{ t("build.verbose") }}</label>
+      <el-button type="primary" :disabled="empty" @click="run">{{ t("urls.submit") }}</el-button>
     </div>
     <TaskRunBar v-if="isRun && taskId" :task-id="taskId" @back="backToForm" />
   </div>

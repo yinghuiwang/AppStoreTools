@@ -7,7 +7,7 @@ const props = withDefaults(
   defineProps<{
     /** Override default `common.loading` label. */
     text?: string;
-    /** page: centered block; block: in-flow; inline: beside controls. */
+    /** page: reserved for rare full-region placeholders; prefer block/inline in business UI. */
     size?: "page" | "block" | "inline";
   }>(),
   { size: "block" },
@@ -45,12 +45,12 @@ const iconPx = computed(() => (props.size === "inline" ? 14 : 18));
 
 .page-loading.is-page {
   justify-content: center;
-  min-height: 160px;
-  padding: 28px 8px;
+  min-height: 72px;
+  padding: 16px 8px;
 }
 
 .page-loading.is-block {
-  padding: 16px 4px;
+  padding: 10px 2px;
 }
 
 .page-loading.is-inline {

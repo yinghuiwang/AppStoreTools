@@ -144,7 +144,7 @@ onMounted(() => { void load(); });
         <a href="/api/examples/csv">{{ t("common.download_sample_csv") }}</a>
         <a href="/api/examples/screenshots">{{ t("common.download_sample_shots") }}</a>
       </div>
-      <PageLoading v-if="loading" />
+      <PageLoading v-if="loading" size="block" />
       <el-table v-else :data="profiles.map((name) => ({ name, ...(details[name] || {}) }))">
         <el-table-column prop="name" :label="t('profiles.name')" />
         <el-table-column prop="app_id" label="App ID" />
