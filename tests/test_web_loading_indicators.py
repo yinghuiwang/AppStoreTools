@@ -36,6 +36,8 @@ def test_whats_new_translate_mode_is_workflow_block_not_under_check():
     source_pos = template.find('whats_new.source_lang')
     text_pos = template.find('whats_new.text')
     preview_pos = template.find('whats_new.preview_translate')
+    upload_pos = template.find('whats_new.translate_upload')
+    direct_pos = template.find('whats_new.upload_direct')
     between_check_and_mode = template[check_pos:mode_pos]
     assert check_pos != -1 and mode_pos != -1
     assert between_check_and_mode.count("</div>") >= 2
@@ -44,6 +46,10 @@ def test_whats_new_translate_mode_is_workflow_block_not_under_check():
     assert 'v-if="translateMode"' in template
     assert 'v-if="isForm && translateMode && Object.keys(translations).length"' in template
     assert preview_pos > source_pos
+    assert preview_pos != -1 and upload_pos != -1 and direct_pos != -1
+    assert preview_pos < upload_pos
+    assert "runTranslateAndUpload" in src
+    assert "translate: true" in src
 
 
 def test_iap_check_and_scan_use_single_indicator_each():

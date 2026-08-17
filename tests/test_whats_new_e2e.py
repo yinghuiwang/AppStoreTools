@@ -1,13 +1,18 @@
 """End-to-end integration tests for whats-new translate feature."""
 from __future__ import annotations
 
-import pytest
+import json
+from pathlib import Path
 from unittest.mock import MagicMock, patch
-from typer.testing import CliRunner
+
+import pytest
 from fastapi.testclient import TestClient
+from typer.testing import CliRunner
 
 from asc.cli import app
 from asc.web.server import create_app
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture
@@ -184,3 +189,23 @@ class TestWhatsNewPageLoads:
 
         assert response.status_code == 200
         assert 'src="/static/spa/' in response.text
+
+
+class TestWhatsNewVueTranslateAndUploadAction:
+    """Vue restore of the legacy one-step translate+upload button."""
+
+    def test_translate_and_upload_posts_run_with_translate_flag(self):
+        vue = (ROOT / "frontend" / "src" / "views" / "WhatsNewView.vue").read_text(encoding="utf-8")
+        zh = json.loads((ROOT / "src" / "asc" / "web" / "locales" / "zh.json").read_text(encoding="utf-8"))
+        en = json.loads((ROOT / "src" / "asc" / "web" / "locales" / "en.json").read_text(encoding="utf-8"))
+
+        assert "async function runTranslateAndUpload" in vue
+        assert 't("whats_new.preview_translate")' in vue
+        assert 't("whats_new.translate_upload")' in vue
+        assert 't("whats_new.upload_direct")' in vue
+        assert '"/api/whats-new/run"' in vue
+        assert "translate: true" in vue
+        assert "enterRun(task_id" in vue
+        assert "rail.openLogs(task_id)" in vue
+        assert zh["whats_new.translate_upload"] == "翻译并上传"
+        assert en["whats_new.translate_upload"] == "Translate & upload"

@@ -76,6 +76,28 @@ async function previewTranslate() {
   }
 }
 
+async function runTranslateAndUpload() {
+  alert.value = "";
+  translations.value = {};
+  try {
+    const { task_id } = await httpJson<{ task_id: string }>("/api/whats-new/run", {
+      method: "POST",
+      body: JSON.stringify({
+        text: text.value,
+        source_locale: sourceLocale.value,
+        translate: true,
+        dry_run: dryRun.value,
+        verbose: verbose.value,
+      }),
+    });
+    enterRun(task_id, { translateTaskId: "" });
+    rail.openLogs(task_id);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 400) alert.value = apiErrorMessage(err);
+    else throw err;
+  }
+}
+
 async function uploadTranslations() {
   const body = new URLSearchParams({
     translations_json: JSON.stringify(translations.value),
@@ -160,7 +182,8 @@ onMounted(() => {
       <label class="check"><input v-model="dryRun" type="checkbox" /> {{ t("common.dry_run") }}</label>
       <label class="check"><input v-model="verbose" type="checkbox" /> {{ t("build.verbose") }}</label>
       <div class="field-row">
-        <el-button v-if="translateMode" type="primary" :disabled="empty" @click="previewTranslate">{{ t("whats_new.preview_translate") }}</el-button>
+        <el-button v-if="translateMode" :disabled="empty" @click="previewTranslate">{{ t("whats_new.preview_translate") }}</el-button>
+        <el-button v-if="translateMode" type="primary" :disabled="empty" @click="runTranslateAndUpload">{{ t("whats_new.translate_upload") }}</el-button>
         <el-button v-else type="primary" :disabled="empty" @click="runDirect">{{ t("whats_new.upload_direct") }}</el-button>
       </div>
     </div>
