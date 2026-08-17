@@ -79,10 +79,14 @@ async function boot() {
   i18n.global.locale.value = lang;
   document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
   applyFavicon();
+  // Drop boot chrome before mount — Vue keeps #app attributes; spa-boot's
+  // flex centering would otherwise shrink .shell to content width.
+  root.classList.remove("spa-boot");
+  root.replaceChildren();
   const app = createApp(App);
   app.use(router);
   app.use(i18n);
-  app.mount("#app");
+  app.mount(root);
 }
 
 void boot();

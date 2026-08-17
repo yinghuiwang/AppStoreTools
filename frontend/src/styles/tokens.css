@@ -46,7 +46,12 @@ html,
 body,
 #app {
   min-height: 100%;
+  width: 100%;
   margin: 0;
+}
+
+#app {
+  display: block;
 }
 
 body {
@@ -96,6 +101,8 @@ a:hover {
 }
 
 .card {
+  width: 100%;
+  box-sizing: border-box;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -126,12 +133,21 @@ a:hover {
 .card input[type="url"],
 .card textarea,
 .card select {
+  width: 100%;
+  box-sizing: border-box;
   background: var(--raised);
   border: 1px solid var(--border);
   color: var(--text);
   border-radius: 6px;
   padding: 8px 10px;
   font-size: 13px;
+}
+
+.field-row .field-input,
+.field-row > input {
+  flex: 1;
+  min-width: 0;
+  width: auto;
 }
 
 .empty-state {
