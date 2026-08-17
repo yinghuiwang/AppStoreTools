@@ -743,28 +743,25 @@ def test_listing_screenshots_replace_rejects_new_name_traversal(client, tmp_path
     assert not (shots / "evil.png").exists()
 
 
-def test_upload_tab_uses_flat_locale_picker():
-    """Upload tab keeps metadata/screenshot scope + locale list; no field/device checkboxes."""
-    from asc.web.i18n import t
-
+def test_upload_tab_has_scope_without_locale_checkboxes():
+    """Upload tab only chooses metadata/screenshot scope; locales come from CSV + shot dirs."""
     src = Path("frontend/src/views/listing/UploadTab.vue").read_text(encoding="utf-8")
     assert "fields_by_locale_json" not in src
     assert "screenshot_scopes_json" not in src
+    assert "locales_json" not in src
+    assert "selectedLocales" not in src
+    assert "toggleLocale" not in src
+    assert "toggleAll" not in src
     assert "toggleField" not in src
     assert "toggleScope" not in src
     assert "APP_IPHONE" not in src
     assert "metadata.field_name" not in src
-    assert "locales_json" in src
-    assert "metadata.upload_locales" in src
-    assert "metadata.upload_locales_all" in src
+    assert "metadata.upload_locales" not in src
+    assert "metadata.upload_locales_all" not in src
+    assert "metadata.upload_no_locales" not in src
     assert "includeMetadata" in src
     assert "includeScreenshots" in src
-    assert t("metadata.upload_locales", lang="zh") == "语言"
-    assert t("metadata.upload_locales_all", lang="zh") == "全部语言"
-    assert t("metadata.upload_no_locales", lang="zh") == "请至少勾选一种语言"
-    assert t("metadata.upload_locales", lang="en") == "Locales"
-    assert t("metadata.upload_locales_all", lang="en") == "All locales"
-    assert t("metadata.upload_no_locales", lang="en") == "Select at least one locale"
+    assert "metadata.scope" in src
 
 
 def test_listing_view_tabs_start_with_upload():

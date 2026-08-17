@@ -4,14 +4,11 @@ import { useI18n } from "vue-i18n";
 import { useRoute } from "vue-router";
 import { ApiError, apiErrorMessage, httpForm, httpJson } from "@/api/http";
 import ExampleHelp from "@/components/ExampleHelp.vue";
-import PageLoading from "@/components/PageLoading.vue";
 import TaskRunBar from "@/components/TaskRunBar.vue";
 import { useBrowse } from "@/composables/useBrowse";
 import { useProfile } from "@/composables/useProfile";
 import { useRightRail } from "@/composables/useRightRail";
 import { useTaskPagePhase } from "@/composables/useTaskPagePhase";
-
-type LocaleRow = { locale: string };
 
 const { t } = useI18n();
 const route = useRoute();
@@ -28,44 +25,16 @@ const dryRun = ref(false);
 const verbose = ref(false);
 const checkMsg = ref("");
 const alert = ref("");
-const locales = ref<LocaleRow[]>([]);
-const selectedLocales = ref<string[]>([]);
-const loadingLocal = ref(false);
 const checkingEnv = ref(false);
-
-const allLocalesSelected = computed(
-  () => locales.value.length > 0 && locales.value.every((row) => selectedLocales.value.includes(row.locale)),
-);
-
-async function loadLocal() {
-  loadingLocal.value = true;
-  try {
-    const qs = new URLSearchParams({ csv_path: csvPath.value, screenshots_dir: shotsDir.value });
-    const data = await httpJson<{ snapshot: { locales: LocaleRow[] } }>(`/api/listing/local?${qs}`);
-    locales.value = data.snapshot?.locales || [];
-    selectedLocales.value = locales.value.map((row) => row.locale);
-  } catch {
-    locales.value = [];
-    selectedLocales.value = [];
-  } finally {
-    loadingLocal.value = false;
-  }
-}
 
 async function pickCsv() {
   const path = await browse.pick({ mode: "file", ext: ".csv", initialPath: csvPath.value });
-  if (path) {
-    csvPath.value = path;
-    void loadLocal();
-  }
+  if (path) csvPath.value = path;
 }
 
 async function pickShots() {
   const path = await browse.pick({ mode: "dir", initialPath: shotsDir.value });
-  if (path) {
-    shotsDir.value = path;
-    void loadLocal();
-  }
+  if (path) shotsDir.value = path;
 }
 
 async function checkEnv() {
@@ -83,22 +52,8 @@ async function checkEnv() {
   }
 }
 
-function toggleLocale(code: string, on: boolean) {
-  selectedLocales.value = on
-    ? Array.from(new Set([...selectedLocales.value, code]))
-    : selectedLocales.value.filter((item) => item !== code);
-}
-
-function toggleAll(on: boolean) {
-  selectedLocales.value = on ? locales.value.map((row) => row.locale) : [];
-}
-
 async function run() {
   alert.value = "";
-  if (locales.value.length && selectedLocales.value.length === 0) {
-    alert.value = t("metadata.upload_no_locales");
-    return;
-  }
   try {
     const body = new URLSearchParams();
     body.set("csv_path", csvPath.value);
@@ -107,9 +62,6 @@ async function run() {
     body.set("include_screenshots", includeScreenshots.value ? "true" : "");
     body.set("dry_run", dryRun.value ? "true" : "");
     body.set("verbose", verbose.value ? "true" : "");
-    if (locales.value.length && !allLocalesSelected.value) {
-      body.set("locales_json", JSON.stringify(selectedLocales.value));
-    }
     const { task_id } = await httpForm<{ task_id: string }>("/api/metadata/run", body);
     enterRun(task_id);
     rail.openLogs(task_id);
@@ -133,7 +85,6 @@ onMounted(() => {
     includeMetadata.value = false;
     includeScreenshots.value = true;
   }
-  void loadLocal();
 });
 </script>
 
@@ -163,22 +114,6 @@ onMounted(() => {
         <label class="check"><input v-model="includeMetadata" type="checkbox" /> {{ t("metadata.scope_metadata") }}</label>
         <label class="check"><input v-model="includeScreenshots" type="checkbox" /> {{ t("metadata.scope_screenshots") }}</label>
       </div>
-      <div>
-        <span class="lbl">{{ t("metadata.upload_locales") }}</span>
-        <PageLoading v-if="loadingLocal" size="inline" />
-        <template v-else>
-          <label v-if="locales.length" class="check">
-            <input type="checkbox" :checked="allLocalesSelected" @change="toggleAll(($event.target as HTMLInputElement).checked)" />
-            {{ t("metadata.upload_locales_all") }}
-          </label>
-          <div class="locale-list">
-            <label v-for="row in locales" :key="row.locale" class="check">
-              <input type="checkbox" :checked="selectedLocales.includes(row.locale)" @change="toggleLocale(row.locale, ($event.target as HTMLInputElement).checked)" />
-              {{ row.locale }}
-            </label>
-          </div>
-        </template>
-      </div>
       <label class="check"><input v-model="dryRun" type="checkbox" /> {{ t("common.dry_run") }}</label>
       <label class="check"><input v-model="verbose" type="checkbox" /> {{ t("build.verbose") }}</label>
       <div class="field-row">
@@ -195,5 +130,4 @@ onMounted(() => {
 .card { display: flex; flex-direction: column; gap: 10px; }
 .check { display: flex; gap: 8px; align-items: center; }
 .lbl { display: block; font-size: 12px; color: var(--text-muted); }
-.locale-list { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 6px; }
 </style>
