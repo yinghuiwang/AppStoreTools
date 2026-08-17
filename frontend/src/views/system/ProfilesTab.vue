@@ -228,6 +228,7 @@ onMounted(() => { void load(); });
 <style scoped>
 .profiles-page {
   align-self: stretch;
+  flex: 1 1 auto;
   width: 100%;
   min-width: 0;
   max-width: none;
@@ -287,7 +288,10 @@ th {
 .col-name { width: 22%; }
 .col-app { width: 18%; }
 .col-issuer { width: auto; }
-.col-actions { width: 1%; }
+.col-actions {
+  width: 1%;
+  white-space: nowrap;
+}
 .col-app,
 .col-issuer {
   overflow: hidden;
