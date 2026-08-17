@@ -141,8 +141,6 @@ onMounted(() => { void load(); });
       <div class="toolbar">
         <el-button type="primary" :disabled="!canCreate" :title="canCreate ? t('profiles.add_title') : t('profiles.cannot_create')" @click="openCreate">{{ t("profiles.add") }}</el-button>
         <el-button @click="importLocal">{{ t("profiles.import_confirm") }}</el-button>
-        <a href="/api/examples/csv">{{ t("common.download_sample_csv") }}</a>
-        <a href="/api/examples/screenshots">{{ t("common.download_sample_shots") }}</a>
       </div>
       <PageLoading v-if="loading" size="block" />
       <el-table v-else :data="profiles.map((name) => ({ name, ...(details[name] || {}) }))">

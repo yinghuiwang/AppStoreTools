@@ -141,6 +141,7 @@ onMounted(() => {
           <input v-model="csvPath" class="field-input" />
           <el-button @click="browse.pick({ mode: 'file', ext: '.csv', initialPath: csvPath }).then((p) => { if (p) csvPath = p; })">{{ t("filebrowser.browse") }}</el-button>
         </div>
+        <a href="/api/examples/csv" download>{{ t("common.download_sample_csv") }}</a>
       </label>
       <label class="field">
         <span>{{ t("metadata.shots_dir") }}</span>
@@ -148,6 +149,7 @@ onMounted(() => {
           <input v-model="shotsDir" class="field-input" />
           <el-button @click="browse.pick({ mode: 'dir', initialPath: shotsDir }).then((p) => { if (p) shotsDir = p; })">{{ t("filebrowser.browse") }}</el-button>
         </div>
+        <a href="/api/examples/screenshots" download>{{ t("common.download_sample_shots") }}</a>
       </label>
       <div>
         <span class="lbl">{{ t("metadata.scope") }}</span>
