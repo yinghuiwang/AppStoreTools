@@ -74,7 +74,7 @@ function rebuildAppRows(status: GuardStatus) {
 
   function ensure(info: BindingInfo): AppBinding {
     const appId = String(info.app_id || "");
-    const key = info.profile_name || info.app_name || appId || "_";
+    const key = `${info.profile_name || ""}|${info.app_name || ""}|${appId || "_"}`;
     if (!apps[key]) {
       apps[key] = {
         profile_name: info.profile_name || "",
@@ -106,7 +106,7 @@ function rebuildAppRows(status: GuardStatus) {
   appRows.value = Object.values(apps).sort((a, b) => {
     if (a.profile_name === current) return -1;
     if (b.profile_name === current) return 1;
-    return 0;
+    return a.profile_name.localeCompare(b.profile_name);
   });
 }
 
@@ -126,6 +126,10 @@ function formatBoundAt(value?: string) {
 function isCurrentApp(row: AppBinding) {
   const current = guard.value?.current_profile || "";
   return Boolean(current && row.profile_name === current);
+}
+
+function cardKey(row: AppBinding) {
+  return `${row.profile_name}|${row.app_name}|${row.app_id || "_"}`;
 }
 
 async function loadGuard() {
@@ -282,10 +286,10 @@ onMounted(() => {
         <section v-if="appRows.length" class="section">
           <h3>{{ t("guard.bindings") }}</h3>
           <div class="bind-list">
-            <article v-for="row in appRows" :key="row.app_id || row.profile_name" class="panel bind-card">
+            <article v-for="row in appRows" :key="cardKey(row)" class="panel bind-card">
               <header class="bind-head">
                 <span class="star" :class="{ on: isCurrentApp(row) }">{{ isCurrentApp(row) ? "★" : "" }}</span>
-                <span class="mono name">{{ row.profile_name || row.app_id }}</span>
+                <span class="mono name">{{ row.profile_name || row.app_name || row.app_id }}</span>
                 <span v-if="row.app_name && row.app_name !== row.profile_name" class="muted">{{ row.app_name }}</span>
                 <span v-if="isCurrentApp(row)" class="badge">{{ t("guard.current") }}</span>
               </header>
@@ -431,7 +435,7 @@ h2, h3 {
 .meta .mono { color: var(--text); margin-left: 6px; }
 .bind-list { display: flex; flex-direction: column; gap: 12px; }
 .bind-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
-.star { width: 12px; color: var(--warn); }
+.star { width: 12px; color: var(--warn); flex-shrink: 0; }
 .name { font-size: 13px; font-weight: 600; color: var(--text); }
 .badge {
   font-size: 10px;

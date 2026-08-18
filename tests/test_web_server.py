@@ -1718,6 +1718,114 @@ def test_guard_status_returns_machine_ip_credential_and_profile_name(client):
     assert env["ip"]["profile_name"] == "myapp"
 
 
+def test_guard_status_returns_all_bindings_not_just_current(client):
+    """Current profile/environment must not trim other machines, IPs, or apps."""
+    from unittest.mock import patch, MagicMock
+
+    mock_guard = MagicMock()
+    mock_guard.get_status.return_value = {
+        "enabled": True,
+        "app_notes": {"111": "office", "222": "other desk"},
+        "bundle_bindings": {},
+        "bindings": {
+            "machine": {
+                "SERIAL-CURRENT": {
+                    "app_id": "111",
+                    "app_name": "app-one",
+                    "issuer_id": "ISS1",
+                    "bound_at": "2026-05-18T10:00:00",
+                },
+                "SERIAL-OTHER-MAC": {
+                    "app_id": "222",
+                    "app_name": "app-two",
+                    "issuer_id": "ISS2",
+                    "bound_at": "2026-04-01T09:00:00",
+                },
+                "SERIAL-THIRD": {
+                    "app_id": "111",
+                    "app_name": "app-one",
+                    "issuer_id": "ISS1",
+                    "bound_at": "2026-03-01T08:00:00",
+                },
+            },
+            "ip": {
+                "1.1.1.1": {
+                    "app_id": "111",
+                    "app_name": "app-one",
+                    "issuer_id": "ISS1",
+                    "bound_at": "2026-05-18T10:00:00",
+                },
+                "8.8.8.8": {
+                    "app_id": "222",
+                    "app_name": "app-two",
+                    "issuer_id": "ISS2",
+                    "bound_at": "2026-04-01T09:00:00",
+                },
+            },
+            "credential": {
+                "KEY-ONE": {
+                    "app_id": "111",
+                    "app_name": "app-one",
+                    "issuer_id": "ISS1",
+                    "bound_at": "2026-05-18T10:00:00",
+                },
+                "KEY-TWO": {
+                    "app_id": "222",
+                    "app_name": "app-two",
+                    "issuer_id": "ISS2",
+                    "bound_at": "2026-04-01T09:00:00",
+                },
+            },
+        },
+    }
+    mock_guard.current_environment.return_value = {
+        "machine": {
+            "fingerprint": "SERIAL-CURRENT",
+            "bound": True,
+            "app_id": "111",
+            "app_name": "app-one",
+            "note": "office",
+        },
+        "ip": {
+            "address": "1.1.1.1",
+            "available": True,
+            "bound": True,
+            "app_id": "111",
+            "app_name": "app-one",
+            "note": "office",
+        },
+    }
+    mock_config = MagicMock()
+    mock_config.list_apps.return_value = ["app-one", "app-two"]
+    mock_config.get_app_profile.side_effect = lambda name: {
+        "app-one": {"app_id": "111"},
+        "app-two": {"app_id": "222"},
+    }[name]
+    client.cookies.set("asc_profile", "app-one")
+    with patch("asc.guard.Guard", return_value=mock_guard), \
+         patch("asc.config.Config", return_value=mock_config):
+        resp = client.get("/api/guard/status")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["current_profile"] == "app-one"
+    assert set(data["bindings"]["machine"]) == {
+        "SERIAL-CURRENT",
+        "SERIAL-OTHER-MAC",
+        "SERIAL-THIRD",
+    }
+    assert set(data["bindings"]["ip"]) == {"1.1.1.1", "8.8.8.8"}
+    assert set(data["bindings"]["credential"]) == {"KEY-ONE", "KEY-TWO"}
+    assert data["bindings"]["machine"]["SERIAL-OTHER-MAC"]["profile_name"] == "app-two"
+    assert data["bindings"]["machine"]["SERIAL-CURRENT"]["profile_name"] == "app-one"
+    assert data["bindings"]["credential"]["KEY-TWO"]["app_id"] == "222"
+    assert data["app_notes"]["222"] == "other desk"
+    env = data["current_environment"]
+    assert env["machine"]["fingerprint"] == "SERIAL-CURRENT"
+    assert len(data["bindings"]["machine"]) == 3
+    assert len(data["bindings"]["ip"]) == 2
+    assert len(data["bindings"]["credential"]) == 2
+
+
 def test_guard_note_api_updates_app_note(client):
     from unittest.mock import patch, MagicMock
     mock_guard = MagicMock()

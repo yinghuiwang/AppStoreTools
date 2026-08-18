@@ -134,6 +134,8 @@ def test_guard_tab_restores_old_information_architecture() -> None:
     assert 'v-if="row.credential"' in src
     assert 'v-if="row.machine"' in src
     assert 'v-if="row.ip"' in src
+    assert 'class="detail-grid"' in src
+    assert ":key=\"row.app_id || row.profile_name\"" not in src
     assert 't("guard.app_id")' in src
     assert 't("guard.manual_add")' in src
     assert 't("guard.save_note")' in src
@@ -152,6 +154,30 @@ def test_guard_tab_restores_old_information_architecture() -> None:
     assert "<t-dialog" in src
     assert "dialog-form" in src
     assert src.find('class="page-stack"') < src.find("<t-dialog")
+
+
+def test_guard_tab_lists_every_binding_not_just_current() -> None:
+    """Binding details must render every machine/ip/credential, not only current."""
+    src = (FRONTEND / "views" / "system" / "GuardTab.vue").read_text(encoding="utf-8")
+    rebuild = src[src.find("function rebuildAppRows") : src.find("function appLabel")]
+    assert "function rebuildAppRows" in rebuild
+    assert ".filter(" not in rebuild
+    assert "current_environment" not in rebuild
+    assert 'appendValue(ensure(info), "machine"' in rebuild
+    assert 'appendValue(ensure(info), "ip"' in rebuild
+    assert 'appendValue(ensure(info), "credential"' in rebuild
+    assert "bindings.machine" in rebuild
+    assert "bindings.ip" in rebuild
+    assert "bindings.credential" in rebuild
+    assert "{{ row.machine }}" in src
+    assert "{{ row.ip }}" in src
+    assert "{{ row.credential }}" in src
+    assert 'v-if="row.machine"' in src
+    assert 'v-if="row.ip"' in src
+    assert 'v-if="row.credential"' in src
+    assert "isCurrentApp" in src
+    assert ":key=\"row.app_id || row.profile_name\"" not in src
+    assert "cardKey" in src
 
 
 def test_profiles_tab_uses_full_width_wrapping_cards() -> None:
