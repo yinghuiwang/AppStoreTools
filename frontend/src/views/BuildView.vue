@@ -6,6 +6,14 @@ import { ApiError, apiErrorMessage, httpForm, httpJson } from "@/api/http";
 import BuildStageProgress from "@/components/BuildStageProgress.vue";
 import PageLoading from "@/components/PageLoading.vue";
 import { useBrowse } from "@/composables/useBrowse";
+import {
+  BUILD_FORM_KEY_PREFIX,
+  buildFormPayload,
+  formMemoryKey,
+  parseBuildStored,
+  readFormMemory,
+  writeFormMemory,
+} from "@/composables/useFormMemory";
 import { rememberFormPath } from "@/composables/useFormPaths";
 import { useProfile } from "@/composables/useProfile";
 import { useRightRail } from "@/composables/useRightRail";
@@ -76,6 +84,49 @@ const profileName = ref("");
 const verbose = ref(false);
 const dryRun = ref(false);
 const reuseArchive = ref(false);
+const appProfile = computed(() => snapshot.value?.current_profile || "");
+
+function restoreBuildMemory() {
+  const saved = parseBuildStored(readFormMemory(formMemoryKey(BUILD_FORM_KEY_PREFIX, appProfile.value)));
+  if (!saved) return;
+  if (saved.mode) mode.value = saved.mode;
+  if (saved.project) project.value = saved.project;
+  if (saved.scheme) scheme.value = saved.scheme;
+  if (saved.destination) destination.value = saved.destination;
+  if (saved.signing) signing.value = saved.signing;
+  if (saved.certificate) certificate.value = saved.certificate;
+  if (saved.provisioning_profile) profileName.value = saved.provisioning_profile;
+  if (saved.reuse_archive !== undefined) reuseArchive.value = saved.reuse_archive === "reuse";
+  if (saved.ipa_path) ipaPath.value = saved.ipa_path;
+  verbose.value = !!saved.verbose;
+  dryRun.value = !!saved.dry_run;
+}
+
+function saveBuildMemory() {
+  writeFormMemory(
+    formMemoryKey(BUILD_FORM_KEY_PREFIX, appProfile.value),
+    buildFormPayload({
+      mode: mode.value,
+      project: project.value,
+      scheme: scheme.value,
+      destination: destination.value,
+      signing: signing.value,
+      certificate: certificate.value,
+      provisioning_profile: profileName.value,
+      reuse_archive: reuseArchive.value ? "reuse" : "",
+      ipa_path: ipaPath.value,
+      verbose: verbose.value,
+      dry_run: dryRun.value,
+    }),
+  );
+}
+
+restoreBuildMemory();
+watch(
+  [mode, project, scheme, destination, signing, certificate, profileName, reuseArchive, ipaPath, verbose, dryRun],
+  saveBuildMemory,
+);
+
 const options = ref<Options>({ schemes: [], certificates: [], profiles: [] });
 const optionsLoading = ref(false);
 const scannedOnce = ref(false);

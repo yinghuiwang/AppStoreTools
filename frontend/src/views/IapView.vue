@@ -6,6 +6,14 @@ import ExampleHelp from "@/components/ExampleHelp.vue";
 import PageLoading from "@/components/PageLoading.vue";
 import TaskRunBar from "@/components/TaskRunBar.vue";
 import { useBrowse } from "@/composables/useBrowse";
+import {
+  IAP_FORM_KEY_PREFIX,
+  formMemoryKey,
+  iapFormPayload,
+  parseIapStored,
+  readFormMemory,
+  writeFormMemory,
+} from "@/composables/useFormMemory";
 import { rememberFormPath } from "@/composables/useFormPaths";
 import { useImageViewer } from "@/composables/useImageViewer";
 import { useProfile } from "@/composables/useProfile";
@@ -34,10 +42,35 @@ const empty = computed(() => (snapshot.value?.current_profile || "") === "");
 const alert = ref("");
 const checkMsg = ref("");
 const iapFile = ref(snapshot.value?.paths.iap || "data/iap_packages.json");
-watch(iapFile, (value) => rememberFormPath("iap.iap_file", value), { immediate: true });
 const dryRun = ref(false);
 const updateExisting = ref(false);
 const verbose = ref(false);
+const appProfile = computed(() => snapshot.value?.current_profile || "");
+
+function restoreIapMemory() {
+  const saved = parseIapStored(readFormMemory(formMemoryKey(IAP_FORM_KEY_PREFIX, appProfile.value)));
+  if (!saved) return;
+  if (saved.iap_file) iapFile.value = saved.iap_file;
+  dryRun.value = !!saved.dry_run;
+  updateExisting.value = !!saved.update_existing;
+  if (saved.verbose !== undefined) verbose.value = saved.verbose;
+}
+
+function saveIapMemory() {
+  writeFormMemory(
+    formMemoryKey(IAP_FORM_KEY_PREFIX, appProfile.value),
+    iapFormPayload({
+      iap_file: iapFile.value,
+      dry_run: dryRun.value,
+      update_existing: updateExisting.value,
+      verbose: verbose.value,
+    }),
+  );
+}
+
+restoreIapMemory();
+watch(iapFile, (value) => rememberFormPath("iap.iap_file", value), { immediate: true });
+watch([iapFile, dryRun, updateExisting, verbose], saveIapMemory);
 const targets = ref<Target[]>([]);
 const paths = ref<Record<string, string>>({});
 const reviewDry = ref(false);

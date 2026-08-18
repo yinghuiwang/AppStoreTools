@@ -3,6 +3,7 @@ import { computed, inject, onActivated, onMounted, ref, watch, type Ref } from "
 import { useI18n } from "vue-i18n";
 import { ApiError, apiErrorMessage, httpJson } from "@/api/http";
 import PageLoading from "@/components/PageLoading.vue";
+import { hydrateListingForm } from "@/composables/useFormMemory";
 import { rememberFormPath } from "@/composables/useFormPaths";
 import { useImageViewer } from "@/composables/useImageViewer";
 import { useProfile } from "@/composables/useProfile";
@@ -23,8 +24,12 @@ const rail = useRightRail();
 const { listingTab } = useListingTab();
 const { setActiveTask, channelOf } = useTaskLog();
 const reloadTick = inject<Ref<number>>("listingReload", ref(0));
-const csvPath = ref(snapshot.value?.paths.csv || "data/appstore_info.csv");
-const shotsDir = ref(snapshot.value?.paths.screenshots || "data/screenshots");
+const listing = hydrateListingForm(snapshot.value?.current_profile || "", {
+  csv: snapshot.value?.paths.csv || "data/appstore_info.csv",
+  screenshots: snapshot.value?.paths.screenshots || "data/screenshots",
+});
+const csvPath = listing.csv_path;
+const shotsDir = listing.screenshots_dir;
 watch([csvPath, shotsDir], ([csv, shots]) => {
   rememberFormPath("listing.csv_path", csv);
   rememberFormPath("listing.screenshots_dir", shots);

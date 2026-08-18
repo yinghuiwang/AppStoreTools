@@ -6,6 +6,7 @@ import { ApiError, apiErrorMessage, httpJson } from "@/api/http";
 import ExampleHelp from "@/components/ExampleHelp.vue";
 import PageLoading from "@/components/PageLoading.vue";
 import { useBrowse } from "@/composables/useBrowse";
+import { hydrateListingForm } from "@/composables/useFormMemory";
 import { rememberFormPath } from "@/composables/useFormPaths";
 import { useImageViewer } from "@/composables/useImageViewer";
 import { useProfile } from "@/composables/useProfile";
@@ -22,8 +23,12 @@ const browse = useBrowse();
 const viewer = useImageViewer();
 const { snapshot } = useProfile();
 const reloadTick = inject<Ref<number>>("listingReload", ref(0));
-const csvPath = ref(snapshot.value?.paths.csv || "data/appstore_info.csv");
-const shotsDir = ref(snapshot.value?.paths.screenshots || "data/screenshots");
+const listing = hydrateListingForm(snapshot.value?.current_profile || "", {
+  csv: snapshot.value?.paths.csv || "data/appstore_info.csv",
+  screenshots: snapshot.value?.paths.screenshots || "data/screenshots",
+});
+const csvPath = listing.csv_path;
+const shotsDir = listing.screenshots_dir;
 watch([csvPath, shotsDir], ([csv, shots]) => {
   rememberFormPath("listing.csv_path", csv);
   rememberFormPath("listing.screenshots_dir", shots);
