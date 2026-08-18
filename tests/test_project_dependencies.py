@@ -10,16 +10,26 @@ except ModuleNotFoundError:  # pragma: no cover - Python < 3.11
 
 
 def test_web_spa_assets_are_packaged():
-    pyproject_path = Path(__file__).resolve().parents[1] / "pyproject.toml"
-    pyproject = tomllib.loads(pyproject_path.read_text())
+    root = Path(__file__).resolve().parents[1]
+    pyproject = tomllib.loads((root / "pyproject.toml").read_text())
 
     dependencies = pyproject["project"]["dependencies"]
-    force_include = pyproject["tool"]["hatch"]["build"]["targets"]["wheel"]["force-include"]
+    wheel = pyproject["tool"]["hatch"]["build"]["targets"]["wheel"]
+    force_include = wheel.get("force-include", {})
+    spa_index = root / "src" / "asc" / "web" / "static" / "spa" / "index.html"
 
     assert not any(dep.lower().startswith("jinja2") for dep in dependencies)
-    assert force_include["src/asc/web/static/spa"] == "asc/web/static/spa"
-    assert force_include["src/asc/web/locales/zh.json"] == "asc/web/locales/zh.json"
-    assert force_include["src/asc/web/locales/en.json"] == "asc/web/locales/en.json"
+    assert wheel["packages"] == ["src/asc"]
+    # hatchling>=1.30 errors if force-include restates files already in packages.
+    overlapping = [
+        source
+        for source in force_include
+        if source == "src/asc" or source.startswith("src/asc/")
+    ]
+    assert overlapping == []
+    assert spa_index.is_file()
+    assert "/static/spa/assets/" in spa_index.read_text(encoding="utf-8")
+    assert list((spa_index.parent / "assets").glob("index-*.js"))
 
 
 def test_cryptography_is_not_a_hard_install_dependency():

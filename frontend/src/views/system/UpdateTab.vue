@@ -45,12 +45,18 @@ const pending = ref<PostRestart | null>(null);
 const verbose = ref(false);
 let lastBootId = snapshot.value?.boot_id || "";
 
+const REPO_URL = "https://github.com/yinghuiwang/AppStoreTools";
+
 const currentVersion = computed(
   () => checkResult.value?.detail?.current || snapshot.value?.version || "",
 );
 const currentCommit = computed(
   () => checkResult.value?.detail?.current_commit || snapshot.value?.commit || "",
 );
+const githubUrl = computed(() => {
+  const branch = advanced.value === "branch" ? selectedBranch.value.trim() : "";
+  return branch ? `${REPO_URL}/tree/${branch}` : REPO_URL;
+});
 
 async function check() {
   checking.value = true;
@@ -142,6 +148,12 @@ onMounted(() => {
           :disabled="checking && !checkResult"
           @click="check"
         >{{ checking && !checkResult ? t("update.checking") : t("update.title") }}</t-button>
+        <t-button
+          tag="a"
+          :href="githubUrl"
+          target="_blank"
+          rel="noopener"
+        >{{ t("update.open_github") }}</t-button>
       </div>
       <PageLoading v-if="checking && !checkResult" size="inline" :text="t('update.checking')" />
       <div v-else class="version-block">

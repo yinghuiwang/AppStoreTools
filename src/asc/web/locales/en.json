@@ -570,6 +570,7 @@
   "update.version_list_failed": "Unable to load versions; enter a version manually",
   "update.version_required": "Please select or enter a version",
   "update.branch_required": "Please enter a branch name",
+  "update.open_github": "Open GitHub repository",
   "urls.confirm_cancel_task": "Cancel the current task? Completed App Store Connect operations will not be rolled back automatically.",
   "common.utf8_prefix": "UTF-8",
   "metadata.csv_help_utf8": "UTF-8 encoding, header row required, BOM supported.",

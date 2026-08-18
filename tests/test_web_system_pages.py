@@ -111,6 +111,10 @@ def test_update_tab_keeps_status_in_check_card() -> None:
     assert 't("common.dry_run")' not in src
     assert "verbose" in src
     assert 't("build.verbose")' in src
+    assert 't("update.open_github")' in src
+    assert "https://github.com/yinghuiwang/AppStoreTools" in src
+    assert 'target="_blank"' in src
+    assert 'rel="noopener"' in src
 
 
 def test_guard_tab_restores_old_information_architecture() -> None:

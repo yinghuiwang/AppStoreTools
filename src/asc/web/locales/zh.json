@@ -570,6 +570,7 @@
   "update.version_list_failed": "无法获取版本列表，请手动输入版本号",
   "update.version_required": "请选择或输入版本号",
   "update.branch_required": "请输入分支名",
+  "update.open_github": "打开 GitHub 仓库",
   "urls.confirm_cancel_task": "确定要终止当前任务吗？已完成的 App Store Connect 操作不会自动回滚。",
   "common.utf8_prefix": "UTF-8",
   "metadata.csv_help_utf8": "UTF-8 编码，首行为表头，支持 BOM。",
