@@ -185,6 +185,54 @@ class AgentStore:
             "updated_at": now,
         }
 
+    def create_session(self, profile: str = "", task_id: str | None = None) -> dict:
+        """Always insert a new session. Unlike get_or_create_session, never reuse by task."""
+        lookup_id = task_id if task_id else None
+        session_id = str(uuid.uuid4())
+        now = self._now()
+        with self._connection(write=True) as conn:
+            conn.execute(
+                """
+                INSERT INTO sessions (id, task_id, profile, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (session_id, lookup_id, profile, now, now),
+            )
+        return {
+            "id": session_id,
+            "task_id": lookup_id,
+            "profile": profile,
+            "created_at": now,
+            "updated_at": now,
+        }
+
+    def list_sessions(self, limit: int = 50) -> list[dict]:
+        if limit <= 0:
+            return []
+        with self._connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    s.id, s.task_id, s.profile, s.created_at, s.updated_at,
+                    (
+                        SELECT m.content FROM messages m
+                        WHERE m.session_id = s.id AND m.role = 'user'
+                        ORDER BY m.seq ASC
+                        LIMIT 1
+                    ) AS title
+                FROM sessions s
+                ORDER BY s.updated_at DESC, s.created_at DESC
+                LIMIT ?
+                """,
+                (int(limit),),
+            ).fetchall()
+        items: list[dict] = []
+        for row in rows:
+            item = self._session_from_row(row)
+            item["title"] = str(row["title"] or "")
+            items.append(item)
+        return items
+
     def get_session(self, session_id: str) -> dict | None:
         with self._connection() as conn:
             row = conn.execute(

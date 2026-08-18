@@ -122,6 +122,28 @@ def test_claim_pending_is_atomic_across_threads(tmp_path: Path):
         store.close()
 
 
+def test_list_sessions_newest_first_with_first_user_title(tmp_path: Path):
+    store = AgentStore(tmp_path / "agent.db")
+    try:
+        older = store.get_or_create_session(None, "p")
+        bound = store.get_or_create_session("task-x", "p")
+        store.append_message(older["id"], "user", "first hello")
+        store.append_message(older["id"], "assistant", "reply")
+        store.append_message(bound["id"], "user", "bound task question")
+        empty = store.create_session("p")
+        listed = store.list_sessions()
+        assert [row["id"] for row in listed] == [empty["id"], bound["id"], older["id"]]
+        by_id = {row["id"]: row for row in listed}
+        assert by_id[older["id"]]["title"] == "first hello"
+        assert by_id[bound["id"]]["title"] == "bound task question"
+        assert by_id[empty["id"]]["title"] == ""
+        assert by_id[bound["id"]]["task_id"] == "task-x"
+        assert store.list_sessions(limit=0) == []
+        assert store.create_session("p")["id"] != empty["id"]
+    finally:
+        store.close()
+
+
 def test_list_messages_returns_latest_limited_in_order(tmp_path: Path):
     store = AgentStore(tmp_path / "agent.db")
     try:

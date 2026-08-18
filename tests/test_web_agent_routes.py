@@ -279,7 +279,10 @@ def test_sessions_by_session_id_and_missing_ids(tmp_path, monkeypatch):
     session = agents.get_or_create_session(None, "")
     agents.append_message(session["id"], "user", "hi")
     client = TestClient(create_app())
-    assert client.get("/api/agent/sessions").status_code == 400
+    listed = client.get("/api/agent/sessions")
+    assert listed.status_code == 200
+    rows = listed.json()["sessions"]
+    assert any(row["id"] == session["id"] and row["title"] == "hi" for row in rows)
     missing = client.get("/api/agent/sessions?session_id=does-not-exist")
     assert missing.status_code == 404
     ok = client.get(f"/api/agent/sessions?session_id={session['id']}")
@@ -288,6 +291,14 @@ def test_sessions_by_session_id_and_missing_ids(tmp_path, monkeypatch):
     assert payload["session"]["id"] == session["id"]
     assert payload["session"]["task_id"] is None
     assert [row["content"] for row in payload["messages"]] == ["hi"]
+    created = client.post("/api/agent/sessions", json={})
+    assert created.status_code == 200
+    new_session = created.json()["session"]
+    assert new_session["id"] != session["id"]
+    assert created.json()["messages"] == []
+    assert created.json()["plans"] == []
+    newest = client.get("/api/agent/sessions").json()["sessions"]
+    assert newest[0]["id"] == new_session["id"]
     store.close()
     agents.close()
 

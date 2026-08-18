@@ -420,11 +420,25 @@ def agent_sessions(
         profile = str((state or {}).get("profile") or "")
         session = agent_store.get_or_create_session(bound, profile)
     else:
-        raise HTTPException(status_code=400, detail="session_id or task_id is required")
+        return {"sessions": agent_store.list_sessions()}
     return {
         "session": session,
         "messages": agent_store.list_messages(session["id"]),
         "plans": agent_store.list_plans(session["id"], statuses=("pending",)),
+    }
+
+
+@router.post("/sessions")
+async def agent_create_session(request: Request):
+    body = await _json_body(request)
+    cookie = (request.cookies.get("asc_profile") or "").strip()
+    profile = _opt_str(body.get("profile")) or cookie or ""
+    task_id = _opt_str(body.get("task_id"))
+    session = agent_store.create_session(profile, task_id)
+    return {
+        "session": session,
+        "messages": [],
+        "plans": [],
     }
 
 

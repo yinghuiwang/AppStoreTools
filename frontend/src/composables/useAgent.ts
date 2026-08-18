@@ -13,6 +13,21 @@ import {
 
 export type { AgentPlan, AgentToolStatus } from "@/composables/agentStream";
 
+export type AgentSessionSummary = {
+  id: string;
+  task_id?: string | null;
+  profile?: string;
+  created_at?: string;
+  updated_at?: string;
+  title?: string;
+};
+
+type SessionPayload = {
+  session?: { id?: string; task_id?: string | null };
+  messages?: StoreRow[];
+  plans?: AgentPlan[];
+};
+
 type ChatEngineApi = {
   sendUserMessage: (params: ChatRequestParams) => Promise<void>;
   abortChat: () => Promise<void>;
@@ -23,6 +38,7 @@ type ChatEngineApi = {
 const sessionId = ref("");
 const boundTaskId = ref("");
 const pendingAutoAnalyze = ref(false);
+const sessions = ref<AgentSessionSummary[]>([]);
 let engineApi: ChatEngineApi | null = null;
 let bindSeq = 0;
 
@@ -59,6 +75,17 @@ function applySessionValue(value: unknown) {
   syncRail();
 }
 
+async function listSessions(): Promise<void> {
+  try {
+    const payload = await httpJson<{ sessions?: AgentSessionSummary[] }>("/api/agent/sessions", {
+      skipNotify: true,
+    });
+    sessions.value = payload.sessions || [];
+  } catch {
+    /* keep last list */
+  }
+}
+
 export const agentChatServiceConfig: ChatServiceConfig = {
   endpoint: "/api/agent/agui",
   protocol: "agui",
@@ -85,12 +112,18 @@ export const agentChatServiceConfig: ChatServiceConfig = {
   onMessage: (chunk) => {
     const data = parseChunkData(chunk);
     if (!data) return null;
-    if (data.type === "CUSTOM" && data.name === "session") applySessionValue(data.value);
+    if (data.type === "CUSTOM" && data.name === "session") {
+      applySessionValue(data.value);
+      void listSessions();
+    }
     if (data.type === "RUN_STARTED" && data.threadId) {
       sessionId.value = String(data.threadId);
       syncRail();
     }
-    if (data.type === "CUSTOM" && data.name === "done") applySessionValue(data.value);
+    if (data.type === "CUSTOM" && data.name === "done") {
+      applySessionValue(data.value);
+      void listSessions();
+    }
     return null;
   },
   onAbort: async () => {
@@ -136,14 +169,12 @@ async function stop(): Promise<void> {
   await engineApi?.abortChat();
 }
 
-function ingestSessionPayload(payload: {
-  session?: { id?: string; task_id?: string };
-  messages?: StoreRow[];
-  plans?: AgentPlan[];
-}) {
+function ingestSessionPayload(payload: SessionPayload) {
   const session = payload.session || {};
-  if (session.id) sessionId.value = String(session.id);
-  if (session.task_id) boundTaskId.value = String(session.task_id);
+  if (session.id) {
+    sessionId.value = String(session.id);
+    boundTaskId.value = session.task_id ? String(session.task_id) : "";
+  }
   syncRail();
   replaceMessages(historyToChatMessages(payload.messages || [], payload.plans || []));
 }
@@ -152,19 +183,59 @@ async function restoreMessages(): Promise<void> {
   const rail = useRightRail();
   const sid = sessionId.value || rail.sessionId.value;
   const tid = boundTaskId.value || rail.boundTaskId.value;
-  if (!sid && !tid) return;
+  const pending = listSessions();
+  if (!sid && !tid) {
+    await pending;
+    return;
+  }
   const qs = sid
     ? `session_id=${encodeURIComponent(sid)}`
     : `task_id=${encodeURIComponent(tid)}`;
   try {
-    const payload = await httpJson<{
-      session?: { id?: string; task_id?: string };
-      messages?: StoreRow[];
-      plans?: AgentPlan[];
-    }>(`/api/agent/sessions?${qs}`, { skipNotify: true });
+    const payload = await httpJson<SessionPayload>(`/api/agent/sessions?${qs}`, {
+      skipNotify: true,
+    });
     ingestSessionPayload(payload);
   } catch {
     /* keep chrome without crashing */
+  }
+  await pending;
+}
+
+async function openSession(id: string): Promise<void> {
+  const sid = String(id || "");
+  if (!sid || sid === sessionId.value) return;
+  const seq = ++bindSeq;
+  await stop();
+  if (seq !== bindSeq) return;
+  try {
+    const payload = await httpJson<SessionPayload>(
+      `/api/agent/sessions?session_id=${encodeURIComponent(sid)}`,
+      { skipNotify: true },
+    );
+    if (seq !== bindSeq) return;
+    ingestSessionPayload(payload);
+    await listSessions();
+  } catch {
+    if (seq !== bindSeq) return;
+  }
+}
+
+async function createSession(): Promise<void> {
+  const seq = ++bindSeq;
+  await stop();
+  if (seq !== bindSeq) return;
+  try {
+    const payload = await httpJson<SessionPayload>("/api/agent/sessions", {
+      method: "POST",
+      skipNotify: true,
+      body: "{}",
+    });
+    if (seq !== bindSeq) return;
+    ingestSessionPayload(payload);
+    await listSessions();
+  } catch {
+    if (seq !== bindSeq) return;
   }
 }
 
@@ -175,13 +246,13 @@ async function bindTask(taskId: string, opts?: { autoAnalyze?: boolean }): Promi
   replaceMessages([]);
   syncRail();
   try {
-    const payload = await httpJson<{
-      session?: { id?: string; task_id?: string };
-      messages?: StoreRow[];
-      plans?: AgentPlan[];
-    }>(`/api/agent/sessions?task_id=${encodeURIComponent(taskId)}`, { skipNotify: true });
+    const payload = await httpJson<SessionPayload>(
+      `/api/agent/sessions?task_id=${encodeURIComponent(taskId)}`,
+      { skipNotify: true },
+    );
     if (seq !== bindSeq) return;
     ingestSessionPayload(payload);
+    await listSessions();
     const history = payload.messages || [];
     if (opts?.autoAnalyze === true && history.length === 0) {
       await send({ message: t("agent.auto_analyze_label"), autoAnalyze: true });
@@ -276,6 +347,7 @@ export function useAgent() {
     sessionId,
     boundTaskId,
     pendingAutoAnalyze,
+    sessions,
     send,
     stop,
     bindTask,
@@ -283,5 +355,8 @@ export function useAgent() {
     reject,
     searchFailed,
     restoreMessages,
+    listSessions,
+    openSession,
+    createSession,
   };
 }

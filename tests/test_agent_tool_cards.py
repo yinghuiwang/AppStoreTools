@@ -427,6 +427,25 @@ def test_agent_stream_sends_form_paths():
     assert "snap?.paths" in helper or "paths.csv" in helper
 
 
+def test_agent_session_list_and_create_use_rest():
+    src = (FRONTEND / "composables" / "useAgent.ts").read_text(encoding="utf-8")
+    assert "listSessions" in src
+    assert "createSession" in src
+    assert "openSession" in src
+    assert 'method: "POST"' in src
+    assert '"/api/agent/sessions"' in src
+    panel = (FRONTEND / "components" / "AgentPanel.vue").read_text(encoding="utf-8")
+    assert "data-agent-sessions" in panel
+    assert "data-agent-new-session" in panel
+    assert "data-agent-session-list" in panel
+    assert "data-agent-session-current" in panel
+    assert "agent.sessions" in panel
+    assert "agent.new_session" in panel
+    assert "agent.untitled_session" in panel
+    assert "ChatBubbleHistoryIcon" in panel
+    assert "ChatAddIcon" in panel
+
+
 def test_tool_display_names_are_i18n_friendly():
     src = (FRONTEND / "components" / "AgentPanel.vue").read_text(encoding="utf-8")
     assert "toolDisplayName" in src

@@ -13,7 +13,14 @@ import {
   type AIMessageContent,
   type ChatMessagesData,
 } from "@tdesign-vue-next/chat";
-import { AddIcon, CheckCircleFilledIcon, CloseCircleFilledIcon, LoadingIcon } from "tdesign-icons-vue-next";
+import {
+  AddIcon,
+  ChatAddIcon,
+  ChatBubbleHistoryIcon,
+  CheckCircleFilledIcon,
+  CloseCircleFilledIcon,
+  LoadingIcon,
+} from "tdesign-icons-vue-next";
 import enUS from "tdesign-vue-next/es/locale/en_US";
 import zhCN from "tdesign-vue-next/es/locale/zh_CN";
 import {
@@ -38,10 +45,25 @@ const { chatEngine, messages, status } = useChat({
   chatServiceConfig: agentChatServiceConfig,
 });
 const generating = computed(() => status.value === "pending" || status.value === "streaming");
-const { sessionId, boundTaskId, send, stop, bindTask, apply, reject, searchFailed, restoreMessages } = useAgent();
+const {
+  sessionId,
+  boundTaskId,
+  sessions,
+  send,
+  stop,
+  bindTask,
+  apply,
+  reject,
+  searchFailed,
+  restoreMessages,
+  listSessions,
+  openSession,
+  createSession,
+} = useAgent();
 const rail = useRightRail();
 const draft = ref("");
 const attachOpen = ref(false);
+const listOpen = ref(false);
 const search = ref("");
 const results = ref<Array<Record<string, unknown>>>([]);
 const rerunByPlan = ref<Record<string, boolean>>({});
@@ -324,7 +346,53 @@ function onDocPointerDown(event: PointerEvent) {
 }
 
 function onDocKeydown(event: KeyboardEvent) {
-  if (event.key === "Escape" && attachOpen.value) closeAttach();
+  if (event.key === "Escape" && attachOpen.value) {
+    closeAttach();
+    return;
+  }
+  if (event.key === "Escape" && listOpen.value) listOpen.value = false;
+}
+
+function toggleList() {
+  listOpen.value = !listOpen.value;
+  if (listOpen.value) {
+    closeAttach();
+    void listSessions();
+  }
+}
+
+function sessionTitle(row: { title?: string }): string {
+  const text = String(row.title || "").replace(/\s+/g, " ").trim();
+  return text ? trunc(text, 48) : t("agent.untitled_session");
+}
+
+function sessionTime(row: { updated_at?: string; created_at?: string }): string {
+  const raw = row.updated_at || row.created_at || "";
+  if (!raw) return "";
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return raw;
+  return date.toLocaleString(locale.value === "zh" ? "zh-CN" : "en-US", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+async function onNewSession() {
+  listOpen.value = false;
+  await createSession();
+}
+
+async function onPickSession(id: unknown) {
+  const sid = String(id || "");
+  if (!sid) return;
+  if (sid === sessionId.value) {
+    listOpen.value = false;
+    return;
+  }
+  listOpen.value = false;
+  await openSession(sid);
 }
 
 function stampComposerField() {
@@ -443,17 +511,59 @@ onBeforeUnmount(() => {
           <span class="title mono" data-agent-title>{{ t("nav.agent") }}</span>
           <div v-if="boundSummary" class="bound mono" data-agent-bound>{{ boundSummary }}</div>
         </div>
-        <button
-          type="button"
-          class="icon"
-          data-agent-close
-          :aria-label="t('agent.close')"
-          @click="rail.collapse()"
-        >
-          ×
-        </button>
+        <div class="actions">
+          <button
+            type="button"
+            class="icon"
+            data-agent-sessions
+            :class="{ 'is-on': listOpen }"
+            :aria-expanded="listOpen ? 'true' : 'false'"
+            :aria-label="t('agent.sessions')"
+            :title="t('agent.sessions')"
+            @click="toggleList"
+          >
+            <ChatBubbleHistoryIcon size="16px" />
+          </button>
+          <button
+            type="button"
+            class="icon"
+            data-agent-new-session
+            :aria-label="t('agent.new_session')"
+            :title="t('agent.new_session')"
+            @click="onNewSession"
+          >
+            <ChatAddIcon size="16px" />
+          </button>
+          <button
+            type="button"
+            class="icon"
+            data-agent-close
+            :aria-label="t('agent.close')"
+            @click="rail.collapse()"
+          >
+            ×
+          </button>
+        </div>
       </header>
+      <div v-show="listOpen" class="session-list" data-agent-session-list>
+        <p class="session-list-title">{{ t("agent.sessions") }}</p>
+        <p v-if="!sessions.length" class="session-empty">{{ t("agent.session_empty") }}</p>
+        <button
+          v-for="row in sessions"
+          :key="row.id"
+          type="button"
+          class="session-item"
+          :class="{ 'is-current': row.id === sessionId }"
+          :data-agent-session="row.id"
+          :data-agent-session-current="row.id === sessionId ? 'true' : 'false'"
+          @click="onPickSession(row.id)"
+        >
+          <span class="session-item-title">{{ sessionTitle(row) }}</span>
+          <span class="session-item-time mono">{{ sessionTime(row) }}</span>
+        </button>
+      </div>
       <t-chat-list
+        v-show="!listOpen"
         class="messages"
         data-agent-messages
         layout="both"
@@ -714,6 +824,14 @@ onBeforeUnmount(() => {
 
 .lead {
   min-width: 0;
+  flex: 1;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
 }
 
 .title {
@@ -731,11 +849,85 @@ onBeforeUnmount(() => {
 }
 
 .icon {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: transparent;
   border: 0;
   color: var(--text-muted);
   font-size: 18px;
   cursor: pointer;
+  border-radius: 6px;
+}
+
+.icon:hover,
+.icon.is-on {
+  color: var(--accent);
+  background: var(--accent-glow);
+}
+
+.session-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 12px 16px;
+  background: #121218;
+}
+
+.session-list-title {
+  margin: 0 0 8px;
+  font-size: 10px;
+  color: var(--text-faint);
+  letter-spacing: 0.04em;
+}
+
+.session-empty {
+  margin: 12px 0 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.session-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--text);
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.session-item + .session-item {
+  margin-top: 4px;
+}
+
+.session-item:hover {
+  background: var(--overlay);
+  border-color: var(--border);
+}
+
+.session-item.is-current {
+  background: var(--accent-glow);
+  border-color: var(--accent-deep);
+}
+
+.session-item-title {
+  font-size: 13px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-item-time {
+  color: var(--text-faint);
+  font-size: 10px;
 }
 
 .messages {

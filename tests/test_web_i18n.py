@@ -289,3 +289,11 @@ def test_agent_attach_i18n_keys():
     assert "optional" in t("agent.attach_task", lang="en").lower()
     assert t("agent.close", lang="en") == "Close Agent panel"
     assert "optional" in t("agent.empty", lang="en").lower()
+    assert t("agent.sessions", lang="zh") == "会话列表"
+    assert t("agent.new_session", lang="zh") == "新建会话"
+    assert t("agent.session_empty", lang="zh") == "还没有会话"
+    assert t("agent.untitled_session", lang="zh") == "新会话"
+    assert t("agent.sessions", lang="en") == "Sessions"
+    assert t("agent.new_session", lang="en") == "New session"
+    assert t("agent.session_empty", lang="en") == "No sessions yet"
+    assert t("agent.untitled_session", lang="en") == "New chat"
