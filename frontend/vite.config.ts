@@ -10,11 +10,17 @@ export default defineConfig(({ command }) => ({
   plugins: [
     vue(),
     AutoImport({
-      resolvers: [TDesignResolver({ library: "vue-next" })],
+      resolvers: [
+        TDesignResolver({ library: "vue-next" }),
+        TDesignResolver({ library: "chat" }),
+      ],
       dts: "src/auto-imports.d.ts",
     }),
     Components({
-      resolvers: [TDesignResolver({ library: "vue-next" })],
+      resolvers: [
+        TDesignResolver({ library: "vue-next" }),
+        TDesignResolver({ library: "chat" }),
+      ],
       dts: "src/components.d.ts",
     }),
   ],

@@ -1,3 +1,5 @@
+import type { AIMessageContent, ChatMessagesData } from "@tdesign-vue-next/chat";
+
 export type AgentPlan = {
   id: string;
   status: string;
@@ -10,21 +12,6 @@ export type AgentPlan = {
 
 export type AgentToolStatus = "running" | "success" | "error";
 
-export type AgentMessage =
-  | { kind: "user"; text: string }
-  | { kind: "assistant"; text: string }
-  | { kind: "error"; text: string }
-  | { kind: "thinking"; text: string; streaming?: boolean; hold?: string; mode?: ThinkMode }
-  | {
-      kind: "tool";
-      id: string;
-      name: string;
-      status: AgentToolStatus;
-      summary: string;
-      ok?: boolean;
-    }
-  | { kind: "plan"; plan: AgentPlan };
-
 export type StoreRow = {
   role?: string;
   content?: string;
@@ -35,15 +22,6 @@ export type StoreRow = {
 const TOOL_CALLS_MARK = "_tool_calls";
 const OPEN_TAGS = ["<think>", "<thinking>", "<reasoning>"];
 const CLOSE_TAGS = ["</think>", "</thinking>", "</reasoning>"];
-
-export type ThinkMode = "text" | "think";
-
-export type ThinkSplit = {
-  thinking: string;
-  visible: string;
-  mode: ThinkMode;
-  hold: string;
-};
 
 function parseObj(data: string): Record<string, unknown> {
   try {
@@ -81,11 +59,12 @@ function suffixPrefixLen(buf: string, tags: string[]): number {
   return max;
 }
 
-export function splitThinkDelta(mode: ThinkMode, hold: string, chunk: string): ThinkSplit {
-  let buf = hold + chunk;
+/** One-shot split for persisted assistant text. Live thinking uses AG-UI events. */
+export function splitStoredThink(text: string): { thinking: string; visible: string } {
+  let buf = text;
   let thinking = "";
   let visible = "";
-  let current = mode;
+  let current: "text" | "think" = "text";
   while (buf) {
     const tags = current === "text" ? OPEN_TAGS : CLOSE_TAGS;
     const hit = findTag(buf, tags);
@@ -103,163 +82,13 @@ export function splitThinkDelta(mode: ThinkMode, hold: string, chunk: string): T
     buf = buf.slice(hit.index + hit.length);
     current = current === "text" ? "think" : "text";
   }
-  return { thinking, visible, mode: current, hold: buf };
-}
-
-function toolIndexById(messages: AgentMessage[], id: string): number {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const msg = messages[i];
-    if (msg.kind === "tool" && msg.id === id) return i;
-  }
-  return -1;
-}
-
-function upsertTool(messages: AgentMessage[], next: Extract<AgentMessage, { kind: "tool" }>): AgentMessage[] {
-  const idx = toolIndexById(messages, next.id);
-  if (idx >= 0) {
-    const copy = messages.slice();
-    copy[idx] = { ...(messages[idx] as Extract<AgentMessage, { kind: "tool" }>), ...next };
-    return copy;
-  }
-  return [...messages, next];
-}
-
-function lastThinkIndex(messages: AgentMessage[]): number {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const msg = messages[i];
-    if (msg.kind === "plan") continue;
-    if (msg.kind === "thinking") return i;
-    if (msg.kind === "user" || msg.kind === "tool" || msg.kind === "error") return -1;
-  }
-  return -1;
-}
-
-function streamMeta(messages: AgentMessage[]): { mode: ThinkMode; hold: string } {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const msg = messages[i];
-    if (msg.kind === "plan") continue;
-    if (msg.kind === "thinking") {
-      return {
-        mode: msg.mode === "think" ? "think" : "text",
-        hold: msg.hold || "",
-      };
-    }
-    if (msg.kind === "user" || msg.kind === "tool" || msg.kind === "error") break;
-  }
-  return { mode: "text", hold: "" };
-}
-
-export function appendAssistantToken(messages: AgentMessage[], fragment: string): AgentMessage[] {
-  const last = messages[messages.length - 1];
-  if (last && last.kind === "assistant") {
-    const copy = messages.slice();
-    copy[copy.length - 1] = { kind: "assistant", text: last.text + fragment };
-    return copy;
-  }
-  return [...messages, { kind: "assistant", text: fragment }];
-}
-
-export function applyToolStart(messages: AgentMessage[], data: string): AgentMessage[] {
-  const payload = parseObj(data);
-  const id = String(payload.id || "");
-  if (!id) return messages;
-  const prev = toolIndexById(messages, id);
-  const existing = prev >= 0 ? (messages[prev] as Extract<AgentMessage, { kind: "tool" }>) : null;
-  return upsertTool(messages, {
-    kind: "tool",
-    id,
-    name: String(payload.name || existing?.name || "tool"),
-    status: "running",
-    summary: existing?.summary || "",
-    ok: existing?.ok,
-  });
-}
-
-export function applyToolResult(messages: AgentMessage[], data: string): AgentMessage[] {
-  const payload = parseObj(data);
-  const id = String(payload.id || "");
-  if (!id) return messages;
-  const ok = payload.ok !== false;
-  const prev = toolIndexById(messages, id);
-  const existing = prev >= 0 ? (messages[prev] as Extract<AgentMessage, { kind: "tool" }>) : null;
-  return upsertTool(messages, {
-    kind: "tool",
-    id,
-    name: String(payload.name || existing?.name || "tool"),
-    status: ok ? "success" : "error",
-    summary: String(payload.summary || existing?.summary || ""),
-    ok,
-  });
-}
-
-export function applyThinking(messages: AgentMessage[], text: string): AgentMessage[] {
-  if (!text.trim()) return messages;
-  const idx = lastThinkIndex(messages);
-  if (idx >= 0) {
-    const current = messages[idx] as Extract<AgentMessage, { kind: "thinking" }>;
-    const copy = messages.slice();
-    copy[idx] = { ...current, text: current.text + text, streaming: true };
-    return copy;
-  }
-  return [...messages, { kind: "thinking", text, streaming: true, mode: "text" }];
-}
-
-function stampThinkState(messages: AgentMessage[], mode: ThinkMode, hold: string): AgentMessage[] {
-  const idx = lastThinkIndex(messages);
-  if (idx >= 0) {
-    const current = messages[idx] as Extract<AgentMessage, { kind: "thinking" }>;
-    const copy = messages.slice();
-    copy[idx] = { ...current, mode, hold, streaming: current.streaming || mode === "think" };
-    return copy;
-  }
-  if (mode === "think" || hold) {
-    return [...messages, { kind: "thinking", text: "", streaming: mode === "think", mode, hold }];
-  }
-  return messages;
-}
-
-export function applyToken(messages: AgentMessage[], fragment: string): AgentMessage[] {
-  const meta = streamMeta(messages);
-  const split = splitThinkDelta(meta.mode, meta.hold, fragment);
-  let next = messages;
-  if (split.thinking) next = applyThinking(next, split.thinking);
-  if (split.visible) next = appendAssistantToken(next, split.visible);
-  return stampThinkState(next, split.mode, split.hold);
-}
-
-export function finishThinkStream(messages: AgentMessage[]): AgentMessage[] {
-  const meta = streamMeta(messages);
-  let next = messages;
-  if (meta.hold) {
-    if (meta.mode === "think") next = applyThinking(next, meta.hold);
-    else next = appendAssistantToken(next, meta.hold);
-  }
-  return next
-    .map((msg) =>
-      msg.kind === "thinking" ? { ...msg, streaming: false, hold: "", mode: "text" as const } : msg,
-    )
-    .filter((msg) => msg.kind !== "thinking" || Boolean(msg.text.trim()));
-}
-
-export function applyAgentEvent(messages: AgentMessage[], event: string, data: string): AgentMessage[] {
-  if (event === "token") return applyToken(messages, data);
-  if (event === "tool_start") return applyToolStart(messages, data);
-  if (event === "tool_result") return applyToolResult(messages, data);
-  if (event === "thinking") return applyThinking(messages, data);
-  return messages;
-}
-
-function splitStoredText(text: string): { thinking: string; visible: string } {
-  const split = splitThinkDelta("text", "", text);
-  const thinking = split.thinking + (split.mode === "think" ? split.hold : "");
-  const visible = split.visible + (split.mode === "text" ? split.hold : "");
+  if (current === "think") thinking += buf;
+  else visible += buf;
   return { thinking, visible };
 }
 
-function pushSplitAssistant(next: AgentMessage[], raw: string) {
-  const { thinking, visible } = splitStoredText(raw);
-  if (thinking.trim()) next.push({ kind: "thinking", text: thinking, streaming: false });
-  if (visible) next.push({ kind: "assistant", text: visible });
+function uid(prefix: string): string {
+  return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function summaryFromStoredTool(content: string): { ok: boolean; summary: string } {
@@ -273,41 +102,166 @@ function summaryFromStoredTool(content: string): { ok: boolean; summary: string 
   return { ok: true, summary: content.slice(0, 200) };
 }
 
-export function historyToMessages(rows: StoreRow[], plans: AgentPlan[] = []): AgentMessage[] {
-  const next: AgentMessage[] = [];
+function toolcallBlock(row: StoreRow): AIMessageContent {
+  const parsed = summaryFromStoredTool(String(row.content || ""));
+  return {
+    type: "toolcall",
+    status: "complete",
+    data: {
+      toolCallId: String(row.tool_call_id || uid("tool")),
+      toolCallName: String(row.tool_name || "tool"),
+      result: JSON.stringify({
+        id: row.tool_call_id,
+        name: row.tool_name,
+        ok: parsed.ok,
+        summary: parsed.summary,
+      }),
+    },
+  };
+}
+
+function planActivity(plan: AgentPlan): AIMessageContent {
+  return {
+    type: "activity",
+    status: "complete",
+    data: {
+      activityType: "propose_fix",
+      content: plan,
+    },
+  };
+}
+
+export function historyToChatMessages(rows: StoreRow[], plans: AgentPlan[] = []): ChatMessagesData[] {
+  const out: ChatMessagesData[] = [];
+  let assistant: AIMessageContent[] = [];
+
+  const flushAssistant = () => {
+    if (!assistant.length) return;
+    out.push({
+      id: uid("assistant"),
+      role: "assistant",
+      status: "complete",
+      content: assistant,
+    });
+    assistant = [];
+  };
+
   for (const row of rows) {
     if (row.role === "user") {
-      next.push({ kind: "user", text: String(row.content || "") });
+      flushAssistant();
+      out.push({
+        id: uid("user"),
+        role: "user",
+        status: "complete",
+        content: [{ type: "text", data: String(row.content || "") }],
+      });
       continue;
     }
     if (row.role === "assistant" && row.tool_name === TOOL_CALLS_MARK) {
       try {
         const payload = JSON.parse(String(row.content || "{}")) as { content?: string };
         const text = String(payload.content || "").trim();
-        if (text) pushSplitAssistant(next, text);
+        if (text) {
+          const { thinking, visible } = splitStoredThink(text);
+          if (thinking.trim()) {
+            assistant.push({
+              type: "thinking",
+              status: "complete",
+              data: { text: thinking },
+            });
+          }
+          if (visible) assistant.push({ type: "markdown", status: "complete", data: visible });
+        }
       } catch {
         /* skip unreadable tool-call envelope */
       }
       continue;
     }
     if (row.role === "tool") {
-      const id = String(row.tool_call_id || "");
-      if (!id) continue;
-      const parsed = summaryFromStoredTool(String(row.content || ""));
-      next.push({
-        kind: "tool",
-        id,
-        name: String(row.tool_name || "tool"),
-        status: parsed.ok ? "success" : "error",
-        summary: parsed.summary,
-        ok: parsed.ok,
-      });
+      if (!row.tool_call_id) continue;
+      assistant.push(toolcallBlock(row));
       continue;
     }
     if (row.role === "assistant") {
-      pushSplitAssistant(next, String(row.content || ""));
+      const { thinking, visible } = splitStoredThink(String(row.content || ""));
+      if (thinking.trim()) {
+        assistant.push({ type: "thinking", status: "complete", data: { text: thinking } });
+      }
+      if (visible) assistant.push({ type: "markdown", status: "complete", data: visible });
     }
   }
-  for (const plan of plans) next.push({ kind: "plan", plan });
-  return next;
+  for (const plan of plans) assistant.push(planActivity(plan));
+  flushAssistant();
+  return out;
+}
+
+export function userTextOf(msg: ChatMessagesData): string {
+  if (msg.role !== "user") return "";
+  return msg.content
+    .map((block) => (typeof block.data === "string" ? block.data : ""))
+    .join("");
+}
+
+export function assistantTextOf(msg: ChatMessagesData): string {
+  if (msg.role !== "assistant" || !msg.content) return "";
+  return msg.content
+    .filter((block) => block.type === "markdown" || block.type === "text")
+    .map((block) => (typeof block.data === "string" ? block.data : ""))
+    .join("");
+}
+
+export function isPlanActivity(block: AIMessageContent): block is AIMessageContent & {
+  type: "activity";
+  data: { activityType: string; content: AgentPlan };
+} {
+  return (
+    block.type === "activity" &&
+    Boolean(block.data) &&
+    (block.data as { activityType?: string }).activityType === "propose_fix"
+  );
+}
+
+export function planFromActivity(block: AIMessageContent): AgentPlan | null {
+  if (!isPlanActivity(block)) return null;
+  const content = (block.data as { content?: AgentPlan }).content;
+  return content && content.id ? content : null;
+}
+
+export function toolStatusOf(block: AIMessageContent): AgentToolStatus {
+  if (block.status === "pending" || block.status === "streaming") return "running";
+  const raw = block.type === "toolcall" ? String(block.data?.result || "") : "";
+  const parsed = parseObj(raw);
+  return parsed.ok === false ? "error" : "success";
+}
+
+export function toolSummaryOf(block: AIMessageContent): string {
+  if (block.type !== "toolcall") return "";
+  const raw = String(block.data?.result || "");
+  const parsed = parseObj(raw);
+  return String(parsed.summary || parsed.error || "").trim();
+}
+
+export function patchPlanInMessages(
+  messages: ChatMessagesData[],
+  planId: string,
+  patch: Partial<AgentPlan>,
+): ChatMessagesData[] {
+  return messages.map((msg) => {
+    if (msg.role !== "assistant" || !msg.content) return msg;
+    let changed = false;
+    const content = msg.content.map((block) => {
+      const plan = planFromActivity(block);
+      if (!plan || plan.id !== planId) return block;
+      changed = true;
+      return {
+        ...block,
+        type: "activity",
+        data: {
+          activityType: "propose_fix",
+          content: { ...plan, ...patch },
+        },
+      } as AIMessageContent;
+    });
+    return changed ? { ...msg, content } : msg;
+  });
 }

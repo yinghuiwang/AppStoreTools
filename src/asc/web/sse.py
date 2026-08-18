@@ -8,6 +8,14 @@ from contextlib import contextmanager
 from typing import Generator
 
 
+def format_sse_data(data: str, event_id: int | str | None = None) -> str:
+    """Format a data-only SSE frame (AG-UI / default TDesign Chat protocol)."""
+    prefix = f"id: {event_id}\n" if event_id is not None else ""
+    normalized = str(data).replace("\r\n", "\n").replace("\r", "\n")
+    data_block = "".join(f"data: {line}\n" for line in normalized.split("\n"))
+    return f"{prefix}{data_block}\n"
+
+
 def format_sse_event(event: str, data: str, event_id: int | str | None = None) -> str:
     """Format a single SSE message frame.
 

@@ -381,26 +381,24 @@ def test_attach_menu_closes_on_outside_click_not_inside():
     assert "data-agent-attach-menu" in src
 
 
-def test_composer_is_multiline_textarea_with_icon_send():
+def test_composer_uses_tdesign_chat_sender():
     src = (FRONTEND / "components" / "AgentPanel.vue").read_text(encoding="utf-8")
-    assert "<textarea" in src
-    assert 'rows="2"' in src
+    assert "t-chat-sender" in src
+    assert "ChatSender" in src
+    assert "data-agent-stream" in src
     assert 'type="text"' not in src.split("data-agent-stream", 1)[1].split("</form>", 1)[0]
-    assert "width: 52px" not in src
-    assert "min-width: 52px" not in src
+    assert "minRows: 2" in src
+    assert "maxRows: 6" in src
     assert "--composer-min: 56px" in src
     assert "--composer-max: 136px" in src
-    assert "white-space: nowrap" in src
-    assert "SendIcon" in src
-    assert "PauseIcon" in src
     assert "data-agent-send" in src
     assert "data-agent-stop" in src
-    assert "align-items: flex-end" in src
-    send_btn = src.split('data-agent-send')[1].split("</button>", 1)[0]
+    assert "@send" in src
+    assert "@stop" in src
+    send_btn = src.split("data-agent-send")[1].split("</button>", 1)[0]
     assert "agent.send" in send_btn
     assert "{{ t(\"agent.send\") }}" not in send_btn.split(":title")[0]
-    assert "<SendIcon" in send_btn
-    composer = src.split(".composer {", 1)[1].split(".row {", 1)[0]
+    composer = src.split(".composer {", 1)[1].split(".attach {", 1)[0]
     assert "padding: 10px;" in composer
     assert "min-width: 0" in composer
 
@@ -421,6 +419,9 @@ def test_agent_stream_sends_form_paths():
     src = (FRONTEND / "composables" / "useAgent.ts").read_text(encoding="utf-8")
     assert "collectedFormPaths" in src
     assert "form_paths" in src
+    assert 'protocol: "agui"' in src
+    assert "/api/agent/agui" in src
+    assert "agentChatServiceConfig" in src
     helper = (FRONTEND / "composables" / "useFormPaths.ts").read_text(encoding="utf-8")
     assert "rememberFormPath" in helper
     assert "snap?.paths" in helper or "paths.csv" in helper
@@ -449,15 +450,46 @@ def test_tool_display_names_are_i18n_friendly():
         assert en[key] != name
 
 
-def test_thinking_body_is_collapsed_until_expanded():
+def test_thinking_streams_expanded_like_official():
     src = (FRONTEND / "components" / "AgentPanel.vue").read_text(encoding="utf-8")
     assert "data-agent-thinking" in src
     assert "data-agent-thinking-title" in src
     assert "data-agent-thinking-body" in src
-    assert "openThinks" in src
-    assert 'v-if="openThinks.includes(thinkName(idx))"' in src
+    assert "t-chat-thinking" in src
+    assert "thinkPayload" in src
+    assert "thinkStatus" in src
+    assert 'msg.streaming ? "pending"' in src
+    assert "return !msg.streaming" in src
     assert "agent.thinking_done" in src
-    assert 'data-agent-thinking-open' in src
-    assert "v-html=\"renderMd(msg.text)\"" in src
-    think_block = src.split("data-agent-thinking")[1].split("data-agent-tool")[0]
+    assert "data-agent-thinking-open" in src
+    assert ':content="thinkPayload(item.msg)"' in src
+    assert ':status="thinkStatus(item.msg)"' in src
+    assert ':collapsed="thinkCollapsed(item.msg, item.idx)"' in src
+    assert "v-if=\"!thinkCollapsed(item.msg, item.idx)\"" in src
+    think_block = src.split("<t-chat-thinking")[1].split("</t-chat-thinking>")[0]
+    assert "data-agent-thinking-body" in think_block
+    assert "item.msg.text" in think_block
+    assert "type: 'markdown'" in src or 'type: "markdown"' in src
+    assert "t-chat-content" in src
     assert "v-html" not in think_block
+
+
+def test_chat_list_uses_official_message_items():
+    src = (FRONTEND / "components" / "AgentPanel.vue").read_text(encoding="utf-8")
+    assert "ChatMessage" in src
+    assert "t-chat-message" in src
+    assert 'role="user"' in src
+    assert 'placement="right"' in src
+    assert 'variant="base"' in src
+    assert 'placement="left"' in src
+    assert ':reverse="false"' in src
+    assert "agent-turn-body" in src
+    assert '#actionbar' in src
+    assert 'status="pending"' in src or 'return msg.streaming ? "pending"' in src
+    assert "layout=\"block\"" in src
+    assert "chatTurns" in src
+    assert "useChat" in src
+    assert "agentChatServiceConfig" in src
+    assert ':content="assistantContent(turn)"' in src
+    assert ':status="assistantStatus(turn)"' in src
+    assert 'return "pending"' not in src.split("function assistantStatus")[1].split("function ")[0]

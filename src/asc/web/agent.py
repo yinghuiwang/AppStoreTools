@@ -510,7 +510,16 @@ class WebAgent:
                             )
                             return
                         name = call["name"]
-                        yield ("tool_start", _dump({"id": call["id"], "name": name}))
+                        yield (
+                            "tool_start",
+                            _dump(
+                                {
+                                    "id": call["id"],
+                                    "name": name,
+                                    "arguments": call["arguments"],
+                                }
+                            ),
+                        )
                         result = execute_model_tool(
                             ctx, name, _parse_arguments(call["arguments"])
                         )

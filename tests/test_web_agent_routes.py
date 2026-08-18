@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import threading
 from unittest.mock import patch
 
@@ -46,6 +47,79 @@ def test_agent_stream_is_sse_and_task_stream_still_exists(tmp_path, monkeypatch)
     assert "event: log" not in body
     task_stream = client.get(f"/api/task/{task_id}/stream")
     assert task_stream.status_code == 200
+    store.close()
+
+
+def test_agent_agui_streams_each_visible_token_as_text_content(tmp_path, monkeypatch):
+    store = TaskStore(tmp_path / "tasks.db")
+    _isolate_task_store(monkeypatch, store)
+    task_id = store.create("metadata", profile="myapp")
+    store.set_status(task_id, TaskStatus.ERROR)
+
+    def fake_turn(**kwargs):
+        yield ("session", '{"session_id":"s1","task_id":"%s"}' % task_id)
+        yield ("token", "Hel")
+        yield ("token", "lo")
+        yield ("token", " world")
+        yield ("done", '{"session_id":"s1","plan_ids":[]}')
+
+    monkeypatch.setattr("asc.web.agent.WebAgent.run_turn", lambda self, **k: fake_turn())
+    monkeypatch.setattr(
+        "asc.config.Config.get_active_llm_config",
+        lambda self: {"api_key": "k", "base_url": "http://x", "model": "m"},
+    )
+    client = TestClient(create_app())
+    resp = client.post(
+        "/api/agent/agui",
+        json={"task_id": task_id, "prompt": "hi"},
+    )
+    assert resp.status_code == 200
+    frames = [
+        line[5:].strip()
+        for line in resp.text.splitlines()
+        if line.startswith("data:") and line[5:].strip()
+    ]
+    payloads = [json.loads(frame) for frame in frames]
+    deltas = [
+        str(item.get("delta") or "")
+        for item in payloads
+        if item.get("type") == "TEXT_MESSAGE_CONTENT"
+    ]
+    assert deltas == ["Hel", "lo", " world"]
+    assert any(item.get("type") == "TEXT_MESSAGE_START" for item in payloads)
+    assert any(item.get("type") == "TEXT_MESSAGE_END" for item in payloads)
+    store.close()
+
+
+def test_agent_agui_is_sse_and_uses_official_event_types(tmp_path, monkeypatch):
+    store = TaskStore(tmp_path / "tasks.db")
+    _isolate_task_store(monkeypatch, store)
+    task_id = store.create("metadata", profile="myapp")
+    store.set_status(task_id, TaskStatus.ERROR)
+
+    def fake_turn(**kwargs):
+        yield ("session", '{"session_id":"s1","task_id":"%s"}' % task_id)
+        yield ("token", "<think>plan</think>hello")
+        yield ("done", '{"session_id":"s1","plan_ids":[]}')
+
+    monkeypatch.setattr("asc.web.agent.WebAgent.run_turn", lambda self, **k: fake_turn())
+    monkeypatch.setattr(
+        "asc.config.Config.get_active_llm_config",
+        lambda self: {"api_key": "k", "base_url": "http://x", "model": "m"},
+    )
+    client = TestClient(create_app())
+    resp = client.post(
+        "/api/agent/agui",
+        json={"task_id": task_id, "prompt": "hi", "auto_analyze": True},
+    )
+    assert resp.status_code == 200
+    assert "text/event-stream" in resp.headers["content-type"]
+    body = resp.text
+    assert "RUN_STARTED" in body
+    assert "THINKING_TEXT_MESSAGE_CONTENT" in body
+    assert "TEXT_MESSAGE_CONTENT" in body
+    assert "RUN_FINISHED" in body
+    assert "event: token" not in body
     store.close()
 
 

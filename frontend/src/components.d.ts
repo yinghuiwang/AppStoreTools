@@ -25,6 +25,7 @@ declare module 'vue' {
     TButton: typeof import('tdesign-vue-next')['Button']
     TCollapse: typeof import('tdesign-vue-next')['Collapse']
     TCollapsePanel: typeof import('tdesign-vue-next')['CollapsePanel']
+    TConfigProvider: typeof import('tdesign-vue-next')['ConfigProvider']
     TDialog: typeof import('tdesign-vue-next')['Dialog']
     TTabPanel: typeof import('tdesign-vue-next')['TabPanel']
     TTabs: typeof import('tdesign-vue-next')['Tabs']

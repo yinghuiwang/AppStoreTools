@@ -1,25 +1,29 @@
-import { ref, type Ref } from "vue";
+import { ref } from "vue";
+import type { ChatMessagesData, ChatRequestParams, ChatServiceConfig, SSEChunkData } from "@tdesign-vue-next/chat";
 import { ApiError, httpJson } from "@/api/http";
 import { i18n } from "@/i18n";
 import { collectedFormPaths } from "@/composables/useFormPaths";
 import { useRightRail } from "@/composables/useRightRail";
 import {
-  applyAgentEvent,
-  finishThinkStream,
-  historyToMessages,
-  type AgentMessage,
+  historyToChatMessages,
+  patchPlanInMessages,
   type AgentPlan,
   type StoreRow,
 } from "@/composables/agentStream";
 
-export type { AgentMessage, AgentPlan, AgentToolStatus } from "@/composables/agentStream";
+export type { AgentPlan, AgentToolStatus } from "@/composables/agentStream";
+
+type ChatEngineApi = {
+  sendUserMessage: (params: ChatRequestParams) => Promise<void>;
+  abortChat: () => Promise<void>;
+  setMessages: (messages: ChatMessagesData[], mode?: "replace" | "prepend" | "append") => void;
+  getMessages: () => ChatMessagesData[];
+};
 
 const sessionId = ref("");
 const boundTaskId = ref("");
-const messages: Ref<AgentMessage[]> = ref([]);
-const generating = ref(false);
-
-let abortController: AbortController | null = null;
+const pendingAutoAnalyze = ref(false);
+let engineApi: ChatEngineApi | null = null;
 let bindSeq = 0;
 
 function t(key: string): string {
@@ -33,142 +37,103 @@ function syncRail() {
   rail.persistChrome();
 }
 
-async function readAgentSse(
-  response: Response,
-  onEvent: (event: string, data: string) => void,
-  signal: AbortSignal,
-) {
-  const reader = response.body!.getReader();
-  const decoder = new TextDecoder();
-  let buf = "";
-  while (!signal.aborted) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    const chunks = buf.split("\n\n");
-    buf = chunks.pop() || "";
-    for (const chunk of chunks) {
-      let event = "message";
-      const dataLines: string[] = [];
-      for (const line of chunk.split("\n")) {
-        if (line.startsWith("event:")) event = line.slice(6).trim();
-        else if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
-      }
-      if (event) onEvent(event, dataLines.join("\n"));
-    }
+function parseChunkData(chunk: SSEChunkData): Record<string, unknown> | null {
+  const raw = chunk?.data;
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) return raw as Record<string, unknown>;
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
   }
 }
 
-async function loadPlanCards(planIds: string[]) {
-  for (const id of planIds) {
-    if (messages.value.some((msg) => msg.kind === "plan" && msg.plan.id === id)) continue;
-    try {
-      const plan = await httpJson<AgentPlan>(`/api/agent/plans/${encodeURIComponent(id)}`);
-      messages.value = [...messages.value, { kind: "plan", plan }];
-    } catch {
-      /* skip missing plan */
-    }
-  }
+function applySessionValue(value: unknown) {
+  if (!value || typeof value !== "object") return;
+  const session = value as { session_id?: string; task_id?: string };
+  if (session.session_id) sessionId.value = String(session.session_id);
+  if (session.task_id) boundTaskId.value = String(session.task_id);
+  syncRail();
 }
 
-function handleEvent(event: string, data: string) {
-  if (event === "session") {
-    try {
-      const session = JSON.parse(data) as { session_id?: string; task_id?: string };
-      if (session.session_id) sessionId.value = String(session.session_id);
-      if (session.task_id) boundTaskId.value = String(session.task_id);
+export const agentChatServiceConfig: ChatServiceConfig = {
+  endpoint: "/api/agent/agui",
+  protocol: "agui",
+  stream: true,
+  timeout: 0,
+  onRequest: (params) => ({
+    method: "POST",
+    credentials: "same-origin",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "text/event-stream",
+    },
+    body: JSON.stringify({
+      threadId: sessionId.value || undefined,
+      runId: params.messageID,
+      prompt: params.prompt,
+      message: params.prompt,
+      session_id: sessionId.value || undefined,
+      task_id: boundTaskId.value || undefined,
+      auto_analyze: pendingAutoAnalyze.value || Boolean(params.auto_analyze),
+      form_paths: collectedFormPaths(),
+    }),
+  }),
+  onMessage: (chunk) => {
+    const data = parseChunkData(chunk);
+    if (!data) return null;
+    if (data.type === "CUSTOM" && data.name === "session") applySessionValue(data.value);
+    if (data.type === "RUN_STARTED" && data.threadId) {
+      sessionId.value = String(data.threadId);
       syncRail();
-    } catch {
-      /* ignore */
     }
-    return;
-  }
-  if (event === "token" || event === "tool_start" || event === "tool_result" || event === "thinking") {
-    messages.value = applyAgentEvent(messages.value, event, data);
-    return;
-  }
-  if (event === "error") {
-    generating.value = false;
-    let text = data;
+    if (data.type === "CUSTOM" && data.name === "done") applySessionValue(data.value);
+    return null;
+  },
+  onAbort: async () => {
+    if (!sessionId.value) return;
     try {
-      const err = JSON.parse(data) as { code?: string; message?: string };
-      const key = err.code ? `agent.error.${err.code}` : "";
-      const translated = key ? t(key) : "";
-      text = translated && translated !== key ? translated : err.message || data;
+      await httpJson("/api/agent/stop", {
+        method: "POST",
+        skipNotify: true,
+        body: JSON.stringify({ session_id: sessionId.value }),
+      });
     } catch {
-      text = data;
+      /* best-effort */
     }
-    messages.value = [...finishThinkStream(messages.value), { kind: "error", text }];
-    return;
-  }
-  if (event === "stopped" || event === "done") {
-    generating.value = false;
-    messages.value = finishThinkStream(messages.value);
-    if (event === "done") {
-      try {
-        const done = JSON.parse(data) as { session_id?: string; plan_ids?: string[] };
-        if (done.session_id) {
-          sessionId.value = String(done.session_id);
-          syncRail();
-        }
-        if (done.plan_ids?.length) void loadPlanCards(done.plan_ids);
-      } catch {
-        /* done without cards */
-      }
-    }
-  }
+  },
+};
+
+export function attachAgentChatEngine(api: ChatEngineApi) {
+  engineApi = api;
+}
+
+export function detachAgentChatEngine() {
+  engineApi = null;
+}
+
+function replaceMessages(next: ChatMessagesData[]) {
+  engineApi?.setMessages(next, "replace");
 }
 
 async function send(opts: { message: string; autoAnalyze?: boolean }): Promise<void> {
-  abortController?.abort();
-  abortController = new AbortController();
-  const signal = abortController.signal;
-  generating.value = true;
-  const body: Record<string, unknown> = {
-    message: opts.message || "",
-    auto_analyze: opts.autoAnalyze === true,
-  };
-  if (sessionId.value) body.session_id = sessionId.value;
-  if (boundTaskId.value) body.task_id = boundTaskId.value;
-  const formPaths = collectedFormPaths();
-  if (formPaths.length) body.form_paths = formPaths;
+  if (!engineApi) return;
+  pendingAutoAnalyze.value = opts.autoAnalyze === true;
   try {
-    const response = await fetch("/api/agent/stream", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-      body: JSON.stringify(body),
-      credentials: "same-origin",
-      signal,
+    await engineApi.sendUserMessage({
+      prompt: opts.message,
+      auto_analyze: opts.autoAnalyze === true,
     });
-    if (!response.ok || !response.body) {
-      generating.value = false;
-      messages.value = [...messages.value, { kind: "error", text: t("agent.error.llm_unavailable") }];
-      return;
-    }
-    await readAgentSse(response, handleEvent, signal);
-  } catch (err) {
-    if ((err as { name?: string }).name === "AbortError") return;
-    generating.value = false;
-    messages.value = [...messages.value, { kind: "error", text: t("agent.error.llm_unavailable") }];
   } finally {
-    if (!signal.aborted) generating.value = false;
+    pendingAutoAnalyze.value = false;
   }
 }
 
 async function stop(): Promise<void> {
-  abortController?.abort();
-  abortController = null;
-  generating.value = false;
-  if (!sessionId.value) return;
-  try {
-    await httpJson("/api/agent/stop", {
-      method: "POST",
-      skipNotify: true,
-      body: JSON.stringify({ session_id: sessionId.value }),
-    });
-  } catch {
-    /* best-effort */
-  }
+  await engineApi?.abortChat();
 }
 
 function ingestSessionPayload(payload: {
@@ -180,7 +145,7 @@ function ingestSessionPayload(payload: {
   if (session.id) sessionId.value = String(session.id);
   if (session.task_id) boundTaskId.value = String(session.task_id);
   syncRail();
-  messages.value = historyToMessages(payload.messages || [], payload.plans || []);
+  replaceMessages(historyToChatMessages(payload.messages || [], payload.plans || []));
 }
 
 async function restoreMessages(): Promise<void> {
@@ -207,7 +172,7 @@ async function bindTask(taskId: string, opts?: { autoAnalyze?: boolean }): Promi
   const seq = ++bindSeq;
   boundTaskId.value = String(taskId);
   sessionId.value = "";
-  messages.value = [];
+  replaceMessages([]);
   syncRail();
   try {
     const payload = await httpJson<{
@@ -219,19 +184,35 @@ async function bindTask(taskId: string, opts?: { autoAnalyze?: boolean }): Promi
     ingestSessionPayload(payload);
     const history = payload.messages || [];
     if (opts?.autoAnalyze === true && history.length === 0) {
-      const label = t("agent.auto_analyze_label");
-      messages.value = [...messages.value, { kind: "user", text: label }];
-      await send({ message: label, autoAnalyze: true });
+      await send({ message: t("agent.auto_analyze_label"), autoAnalyze: true });
     }
   } catch {
     if (seq !== bindSeq) return;
   }
 }
 
+function findPlan(planId: string): AgentPlan | null {
+  const messages = engineApi?.getMessages() || [];
+  for (const msg of messages) {
+    if (msg.role !== "assistant" || !msg.content) continue;
+    for (const block of msg.content) {
+      if (block.type !== "activity") continue;
+      const plan = (block.data as unknown as { content?: AgentPlan } | undefined)?.content;
+      if (plan?.id === planId) return plan;
+    }
+  }
+  return null;
+}
+
+function writePlanPatch(planId: string, patch: Partial<AgentPlan>) {
+  const current = engineApi?.getMessages() || [];
+  replaceMessages(patchPlanInMessages(current, planId, patch));
+}
+
 async function apply(planId: string, rerun: boolean): Promise<void> {
   const rail = useRightRail();
-  const card = messages.value.find((m) => m.kind === "plan" && m.plan.id === planId);
-  if (!card || card.kind !== "plan") return;
+  const plan = findPlan(planId);
+  if (!plan) return;
   try {
     const payload = await httpJson<{
       ok?: boolean;
@@ -249,38 +230,34 @@ async function apply(planId: string, rerun: boolean): Promise<void> {
         form_paths: collectedFormPaths(),
       }),
     });
-    card.plan.status = String(payload.status || "applied");
-    if (payload.rerun_error) card.plan.error = String(payload.rerun_error);
-    messages.value = [...messages.value];
+    writePlanPatch(planId, {
+      status: String(payload.status || "applied"),
+      error: payload.rerun_error ? String(payload.rerun_error) : undefined,
+    });
     if (payload.new_task_id) rail.openLogs(payload.new_task_id);
   } catch (err) {
     if (err instanceof ApiError && err.status === 409) {
-      card.plan.status = "conflict";
-      messages.value = [...messages.value];
+      writePlanPatch(planId, { status: "conflict" });
       return;
     }
-    card.plan.status = "apply_failed";
-    card.plan.error = err instanceof Error ? err.message : String(err);
-    messages.value = [...messages.value];
+    writePlanPatch(planId, {
+      status: "apply_failed",
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
 async function reject(planId: string): Promise<void> {
-  const card = messages.value.find((m) => m.kind === "plan" && m.plan.id === planId);
   try {
     await httpJson("/api/agent/reject", {
       method: "POST",
       skipNotify: true,
       body: JSON.stringify({ plan_id: planId }),
     });
-    if (card && card.kind === "plan") {
-      card.plan.status = "rejected";
-      messages.value = [...messages.value];
-    }
+    writePlanPatch(planId, { status: "rejected" });
   } catch (err) {
-    if (err instanceof ApiError && err.status === 409 && card && card.kind === "plan") {
-      card.plan.status = "conflict";
-      messages.value = [...messages.value];
+    if (err instanceof ApiError && err.status === 409) {
+      writePlanPatch(planId, { status: "conflict" });
     }
   }
 }
@@ -298,8 +275,7 @@ export function useAgent() {
   return {
     sessionId,
     boundTaskId,
-    messages,
-    generating,
+    pendingAutoAnalyze,
     send,
     stop,
     bindTask,

@@ -5,6 +5,7 @@ import json
 import queue
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -12,10 +13,11 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from asc.web.agent import AGENT_TURN_TIMEOUT_SEC, WebAgent
+from asc.web.agent_agui import translate_legacy_events
 from asc.web.agent_store import agent_store
 from asc.web.agent_tools import AgentToolContext, apply_fix
 from asc.web.i18n import t
-from asc.web.sse import format_sse_event
+from asc.web.sse import format_sse_data, format_sse_event
 from asc.web.tasks import TASK_KIND_LABELS
 
 router = APIRouter()
@@ -114,6 +116,50 @@ def _form_paths_from_body(body: dict[str, Any]) -> list[str]:
     return paths
 
 
+def _last_user_text(messages: Any) -> str:
+    if not isinstance(messages, list):
+        return ""
+    for item in reversed(messages):
+        if not isinstance(item, dict) or item.get("role") != "user":
+            continue
+        content = item.get("content")
+        if isinstance(content, str) and content.strip():
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for block in content:
+                if isinstance(block, str) and block.strip():
+                    parts.append(block)
+                elif isinstance(block, dict):
+                    text = block.get("text") or block.get("data")
+                    if isinstance(text, str) and text.strip():
+                        parts.append(text)
+            if parts:
+                return "\n".join(parts)
+    return ""
+
+
+def _agui_turn_args(body: dict[str, Any]) -> dict[str, Any]:
+    forwarded = body.get("forwardedProps")
+    extra = forwarded if isinstance(forwarded, dict) else {}
+    merged = {**extra, **body}
+    session_id = _opt_str(
+        merged.get("threadId") or merged.get("session_id") or merged.get("thread_id")
+    )
+    task_id = _opt_str(merged.get("task_id"))
+    message = str(merged.get("prompt") or merged.get("message") or "").strip()
+    if not message:
+        message = _last_user_text(merged.get("messages"))
+    return {
+        "session_id": session_id,
+        "task_id": task_id,
+        "message": message,
+        "auto_analyze": _as_bool(merged.get("auto_analyze")),
+        "form_paths": _form_paths_from_body(merged),
+        "run_id": _opt_str(merged.get("runId") or merged.get("messageID")) or uuid.uuid4().hex,
+    }
+
+
 def _sse_frames(
     agent: WebAgent,
     *,
@@ -182,6 +228,102 @@ def _sse_frames(
     return generate()
 
 
+def _agui_frames(
+    agent: WebAgent,
+    *,
+    session_id: str | None,
+    task_id: str | None,
+    message: str,
+    auto_analyze: bool,
+    lang: str,
+    llm_client: Any,
+    form_paths: list[str] | None = None,
+    profile: str = "",
+    run_id: str,
+):
+    frames: queue.Queue = queue.Queue()
+    session_holder: list[str | None] = [session_id]
+    think_title = t("agent.thinking", lang=lang)
+    think_done = t("agent.thinking_done", lang=lang)
+
+    def produce() -> None:
+        try:
+            events = agent.run_turn(
+                session_id=session_id,
+                task_id=task_id,
+                message=message,
+                auto_analyze=auto_analyze,
+                lang=lang,
+                llm_client=llm_client,
+                form_paths=form_paths,
+                profile=profile,
+            )
+            for payload in translate_legacy_events(
+                events,
+                run_id=run_id,
+                think_title=think_title if think_title != "agent.thinking" else "Thinking...",
+                think_done_title=(
+                    think_done if think_done != "agent.thinking_done" else "Thought complete"
+                ),
+                agent_store=agent_store,
+            ):
+                if payload.get("type") == "RUN_STARTED" and payload.get("threadId"):
+                    session_holder[0] = str(payload["threadId"])
+                frames.put(
+                    format_sse_data(json.dumps(payload, ensure_ascii=False, default=str))
+                )
+        except Exception:
+            frames.put(
+                format_sse_data(
+                    json.dumps(
+                        {
+                            "type": "RUN_ERROR",
+                            "code": "llm_unavailable",
+                            "message": t("agent.error.llm_unavailable", lang=lang),
+                        },
+                        ensure_ascii=False,
+                    )
+                )
+            )
+        finally:
+            frames.put(_SENTINEL)
+
+    threading.Thread(target=produce, name="agent-agui", daemon=True).start()
+    deadline = time.monotonic() + AGENT_TURN_TIMEOUT_SEC
+
+    def generate():
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                sid = session_holder[0]
+                if sid:
+                    WebAgent().request_stop(sid)
+                    for plan in agent_store.list_plans(sid, statuses=("draft",)):
+                        agent_store.abandon_drafts(sid, plan["turn_seq"])
+                yield format_sse_data(
+                    json.dumps(
+                        {
+                            "type": "RUN_ERROR",
+                            "code": "timeout",
+                            "message": t("agent.error.timeout", lang=lang),
+                        },
+                        ensure_ascii=False,
+                    )
+                )
+                return
+            wait = min(AGENT_SSE_HEARTBEAT_SEC, remaining)
+            try:
+                item = frames.get(timeout=wait)
+            except queue.Empty:
+                yield ": heartbeat\n\n"
+                continue
+            if item is _SENTINEL:
+                return
+            yield item
+
+    return generate()
+
+
 @router.post("/stream")
 async def agent_stream(request: Request):
     body = await _json_body(request)
@@ -202,6 +344,32 @@ async def agent_stream(request: Request):
             llm_client=llm_client,
             form_paths=_form_paths_from_body(body),
             profile=cookie,
+        ),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post("/agui")
+async def agent_agui(request: Request):
+    body = await _json_body(request)
+    args = _agui_turn_args(body)
+    lang = _lang(request)
+    llm_client = _llm_client_or_none()
+    agent = _web_agent()
+    cookie = (request.cookies.get("asc_profile") or "").strip()
+    return StreamingResponse(
+        _agui_frames(
+            agent,
+            session_id=args["session_id"],
+            task_id=args["task_id"],
+            message=args["message"],
+            auto_analyze=args["auto_analyze"],
+            lang=lang,
+            llm_client=llm_client,
+            form_paths=args["form_paths"],
+            profile=cookie,
+            run_id=args["run_id"],
         ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},

@@ -1,56 +1,75 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import DOMPurify from "dompurify";
-import { marked } from "marked";
 import {
-  AddIcon,
-  CheckCircleFilledIcon,
-  CloseCircleFilledIcon,
-  LoadingIcon,
-  PauseIcon,
-  SendIcon,
-} from "tdesign-icons-vue-next";
-import { useAgent, type AgentMessage, type AgentPlan } from "@/composables/useAgent";
+  ChatActionbar as TChatActionbar,
+  ChatContent as TChatContent,
+  ChatList as TChatList,
+  ChatLoading as TChatLoading,
+  ChatMessage as TChatMessage,
+  ChatSender as TChatSender,
+  ChatThinking as TChatThinking,
+  useChat,
+  type AIMessageContent,
+  type ChatMessagesData,
+} from "@tdesign-vue-next/chat";
+import { AddIcon, CheckCircleFilledIcon, CloseCircleFilledIcon, LoadingIcon } from "tdesign-icons-vue-next";
+import enUS from "tdesign-vue-next/es/locale/en_US";
+import zhCN from "tdesign-vue-next/es/locale/zh_CN";
+import {
+  agentChatServiceConfig,
+  attachAgentChatEngine,
+  detachAgentChatEngine,
+  useAgent,
+  type AgentPlan,
+} from "@/composables/useAgent";
+import {
+  assistantTextOf,
+  planFromActivity,
+  toolStatusOf,
+  toolSummaryOf,
+  userTextOf,
+} from "@/composables/agentStream";
 import { useRightRail } from "@/composables/useRightRail";
-import PageLoading from "@/components/PageLoading.vue";
 
-const { t } = useI18n();
-const {
-  sessionId,
-  boundTaskId,
-  messages,
-  generating,
-  send,
-  stop,
-  bindTask,
-  apply,
-  reject,
-  searchFailed,
-  restoreMessages,
-} = useAgent();
+const { t, locale } = useI18n();
+const { chatEngine, messages, status } = useChat({
+  defaultMessages: [],
+  chatServiceConfig: agentChatServiceConfig,
+});
+const generating = computed(() => status.value === "pending" || status.value === "streaming");
+const { sessionId, boundTaskId, send, stop, bindTask, apply, reject, searchFailed, restoreMessages } = useAgent();
 const rail = useRightRail();
 const draft = ref("");
 const attachOpen = ref(false);
 const search = ref("");
 const results = ref<Array<Record<string, unknown>>>([]);
 const rerunByPlan = ref<Record<string, boolean>>({});
-const scroller = ref<HTMLElement | null>(null);
-const draftEl = ref<HTMLTextAreaElement | null>(null);
+const composerEl = ref<HTMLElement | null>(null);
 const attachWrap = ref<HTMLElement | null>(null);
 const openTools = ref<string[]>([]);
 const openThinks = ref<string[]>([]);
-const COMPOSER_LINE = 20;
-const COMPOSER_PAD_Y = 8;
-const COMPOSER_MIN_ROWS = 2;
-const COMPOSER_MAX_ROWS = 6;
-const COMPOSER_MIN = COMPOSER_PAD_Y * 2 + COMPOSER_LINE * COMPOSER_MIN_ROWS;
-const COMPOSER_MAX = COMPOSER_PAD_Y * 2 + COMPOSER_LINE * COMPOSER_MAX_ROWS;
+const thinkTouched = ref<string[]>([]);
 
-function renderMd(text: string): string {
-  const html = marked.parse(text || "", { async: false, gfm: true, breaks: true }) as string;
-  return DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
-}
+const senderTextareaProps = {
+  name: "message",
+  autosize: { minRows: 2, maxRows: 6 },
+};
+
+const markdownProps = { engine: "marked" as const, options: {} };
+
+const tdLocale = computed(() => {
+  const chat = (locale.value === "zh" ? zhCN : enUS).chat;
+  return {
+    chat: {
+      ...chat,
+      placeholder: t("agent.composer_placeholder"),
+      stopBtnText: t("agent.stop"),
+      loadingText: t("agent.thinking"),
+      loadingEndText: t("agent.thinking_done"),
+    },
+  };
+});
 
 function shortId(value: unknown): string {
   const text = String(value || "");
@@ -100,8 +119,139 @@ function toolDisplayName(name: string): string {
   return label === key ? name : label;
 }
 
-function isTool(msg: AgentMessage): msg is Extract<AgentMessage, { kind: "tool" }> {
-  return msg.kind === "tool";
+type ThinkMsg = { text: string; streaming?: boolean };
+type ToolMsg = { id: string; name: string; status: "running" | "success" | "error"; summary: string };
+type AssistantMsg = { text: string };
+
+type AssistantTurn = {
+  key: string;
+  kind: "assistant";
+  idx: number;
+  status: ChatMessagesData["status"];
+  thinks: Array<{ idx: number; msg: ThinkMsg }>;
+  tools: Array<{ idx: number; msg: ToolMsg }>;
+  assistant?: { idx: number; msg: AssistantMsg };
+  plans: AgentPlan[];
+};
+
+type ChatTurn =
+  | { key: string; kind: "user"; idx: number; text: string }
+  | { key: string; kind: "error"; idx: number; text: string }
+  | { key: string; kind: "plan"; idx: number; plan: AgentPlan }
+  | AssistantTurn;
+
+function thinkText(block: AIMessageContent): string {
+  const data = block.data as { text?: string } | string | unknown[] | undefined;
+  if (typeof data === "string") return data;
+  if (Array.isArray(data)) {
+    return data
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (!item || typeof item !== "object") return "";
+        const row = item as { data?: unknown; text?: unknown };
+        if (typeof row.data === "string") return row.data;
+        if (typeof row.text === "string") return row.text;
+        return "";
+      })
+      .join("");
+  }
+  return String(data?.text || "");
+}
+
+function isStreamingStatus(status: string | undefined): boolean {
+  return status === "pending" || status === "streaming";
+}
+
+function blockToThink(block: AIMessageContent, idx: number): { idx: number; msg: ThinkMsg } {
+  return {
+    idx,
+    msg: { text: thinkText(block), streaming: isStreamingStatus(block.status) },
+  };
+}
+
+function blockToTool(block: AIMessageContent, idx: number): { idx: number; msg: ToolMsg } {
+  const data = (block.data || {}) as { toolCallId?: string; toolCallName?: string };
+  return {
+    idx,
+    msg: {
+      id: String(data.toolCallId || `tool-${idx}`),
+      name: String(data.toolCallName || "tool"),
+      status: toolStatusOf(block),
+      summary: toolSummaryOf(block),
+    },
+  };
+}
+
+const chatTurns = computed((): ChatTurn[] => {
+  const turns: ChatTurn[] = [];
+  messages.value.forEach((msg, idx) => {
+    if (msg.role === "user") {
+      turns.push({ key: msg.id || `user-${idx}`, kind: "user", idx, text: userTextOf(msg) });
+      return;
+    }
+    if (msg.role === "system") {
+      const text = userTextOf(msg) || assistantTextOf(msg);
+      if (text) turns.push({ key: msg.id || `sys-${idx}`, kind: "error", idx, text });
+      return;
+    }
+    const content = msg.content || [];
+    const thinks: AssistantTurn["thinks"] = [];
+    const tools: AssistantTurn["tools"] = [];
+    const plans: AgentPlan[] = [];
+    let assistantText = "";
+    content.forEach((block, bi) => {
+      if (block.type === "thinking" || block.type === "reasoning") {
+        thinks.push(blockToThink(block, bi));
+        return;
+      }
+      if (block.type === "toolcall") {
+        tools.push(blockToTool(block, bi));
+        return;
+      }
+      const plan = planFromActivity(block);
+      if (plan) {
+        plans.push(plan);
+        return;
+      }
+      if (block.type === "markdown" || block.type === "text") {
+        assistantText += typeof block.data === "string" ? block.data : "";
+      }
+    });
+    if (msg.status === "error" && assistantText) {
+      turns.push({ key: msg.id || `error-${idx}`, kind: "error", idx, text: assistantText });
+      return;
+    }
+    if (!thinks.length && !tools.length && !assistantText && !plans.length) return;
+    turns.push({
+      key: msg.id || `assistant-${idx}`,
+      kind: "assistant",
+      idx,
+      status: msg.status,
+      thinks,
+      tools,
+      plans,
+      assistant: assistantText ? { idx, msg: { text: assistantText } } : undefined,
+    });
+    for (const plan of plans) {
+      turns.push({ key: `plan-${plan.id}`, kind: "plan", idx, plan });
+    }
+  });
+  return turns;
+});
+
+function assistantStatus(turn: AssistantTurn): "streaming" | "complete" | "error" {
+  // Official t-chat-item hides the content slot when status is pending, or
+  // streaming with empty content. Never pass pending; always pass content.
+  if (turn.status === "error") return "error";
+  const last = chatTurns.value[chatTurns.value.length - 1];
+  if (generating.value && last?.key === turn.key) return "streaming";
+  return "complete";
+}
+
+function assistantContent(turn: AssistantTurn): AIMessageContent[] {
+  const msg = messages.value[turn.idx];
+  if (msg?.role === "assistant" && msg.content?.length) return msg.content;
+  return [{ type: "markdown", data: turn.assistant?.msg.text || " " }];
 }
 
 function toolOpenNames(id: string): string[] {
@@ -120,25 +270,41 @@ function thinkName(idx: number): string {
   return `think-${idx}`;
 }
 
-function thinkOpenNames(idx: number): string[] {
-  const name = thinkName(idx);
-  return openThinks.value.includes(name) ? [name] : [];
+function thinkTitle(msg: ThinkMsg): string {
+  return msg.streaming ? t("agent.thinking") : t("agent.thinking_done");
 }
 
-function onThinkToggle(idx: number, names: string[] | string) {
+function thinkPayload(msg: ThinkMsg) {
+  return { title: thinkTitle(msg), text: msg.text };
+}
+
+function thinkStatus(msg: ThinkMsg) {
+  return msg.streaming ? "pending" : "complete";
+}
+
+function thinkCollapsed(msg: ThinkMsg, idx: number): boolean {
   const name = thinkName(idx);
-  const list = Array.isArray(names) ? names : [names];
-  const open = list.map(String).includes(name);
+  if (thinkTouched.value.includes(name)) {
+    return !openThinks.value.includes(name);
+  }
+  // Official ChatThinking demo: expand while pending, collapse when complete.
+  return !msg.streaming;
+}
+
+function onThinkCollapsed(idx: number, value: unknown, msg?: ThinkMsg) {
+  const name = thinkName(idx);
+  let collapsed = msg ? thinkCollapsed(msg, idx) : !openThinks.value.includes(name);
+  if (typeof value === "boolean") collapsed = value;
+  else if (value && typeof value === "object" && "detail" in value) {
+    const detail = (value as CustomEvent).detail;
+    if (typeof detail === "boolean") collapsed = detail;
+  }
+  if (!thinkTouched.value.includes(name)) {
+    thinkTouched.value = [...thinkTouched.value, name];
+  }
   const next = openThinks.value.filter((item) => item !== name);
-  if (open) next.push(name);
+  if (!collapsed) next.push(name);
   openThinks.value = next;
-}
-
-function autosizeDraft() {
-  const el = draftEl.value;
-  if (!el) return;
-  el.style.height = "auto";
-  el.style.height = `${Math.min(Math.max(el.scrollHeight, COMPOSER_MIN), COMPOSER_MAX)}px`;
 }
 
 function closeAttach() {
@@ -161,6 +327,16 @@ function onDocKeydown(event: KeyboardEvent) {
   if (event.key === "Escape" && attachOpen.value) closeAttach();
 }
 
+function stampComposerField() {
+  const root = composerEl.value;
+  if (!root) return;
+  const ta = root.querySelector("textarea");
+  if (!ta) return;
+  ta.setAttribute("name", "message");
+  ta.setAttribute("data-agent-input", "");
+  ta.setAttribute("rows", "2");
+}
+
 const boundSummary = computed(() => {
   const bits: string[] = [];
   if (boundTaskId.value) bits.push(shortId(boundTaskId.value));
@@ -170,20 +346,17 @@ const boundSummary = computed(() => {
 
 const panelOpen = computed(() => rail.open.value && rail.tab.value === "agent");
 
-async function onSubmit() {
-  const text = draft.value.trim();
-  if (!text || generating.value) return;
+async function onSubmit(text?: string) {
+  const value = (typeof text === "string" ? text : draft.value).trim();
+  if (!value || generating.value) return;
   draft.value = "";
   await nextTick();
-  autosizeDraft();
-  messages.value = [...messages.value, { kind: "user", text }];
-  await send({ message: text });
+  stampComposerField();
+  await send({ message: value });
 }
 
-function onComposerKeydown(event: KeyboardEvent) {
-  if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
-  event.preventDefault();
-  void onSubmit();
+function onSenderSend(value: string) {
+  void onSubmit(value);
 }
 
 async function runSearch() {
@@ -209,9 +382,17 @@ function applyPlan(plan: AgentPlan) {
 }
 
 watch(
-  () => messages.value.map((msg) => (isTool(msg) ? `${msg.id}:${msg.status}` : "")).join("|"),
+  () =>
+    chatTurns.value
+      .filter((turn): turn is AssistantTurn => turn.kind === "assistant")
+      .flatMap((turn) => turn.tools.map((item) => `${item.msg.id}:${item.msg.status}`))
+      .join("|"),
   () => {
-    const running = messages.value.filter(isTool).filter((msg) => msg.status === "running").map((msg) => msg.id);
+    const running = chatTurns.value
+      .filter((turn): turn is AssistantTurn => turn.kind === "assistant")
+      .flatMap((turn) => turn.tools)
+      .filter((item) => item.msg.status === "running")
+      .map((item) => item.msg.id);
     const seen = new Set(openTools.value);
     for (const id of running) {
       if (!seen.has(id)) openTools.value = [...openTools.value, id];
@@ -219,13 +400,23 @@ watch(
   },
 );
 
+watch(generating, async () => {
+  await nextTick();
+  stampComposerField();
+});
+
 watch(
-  () => messages.value.length,
-  async () => {
-    await nextTick();
-    const el = scroller.value;
-    if (el) el.scrollTop = el.scrollHeight;
+  chatEngine,
+  (engine) => {
+    if (!engine) return;
+    attachAgentChatEngine({
+      sendUserMessage: (params) => engine.sendUserMessage(params),
+      abortChat: () => engine.abortChat(),
+      setMessages: (next, mode) => engine.setMessages(next, mode),
+      getMessages: () => engine.messages || messages.value,
+    });
   },
+  { immediate: true },
 );
 
 onMounted(() => {
@@ -234,209 +425,274 @@ onMounted(() => {
   document.addEventListener("pointerdown", onDocPointerDown);
   document.addEventListener("keydown", onDocKeydown);
   void restoreMessages();
-  void nextTick(autosizeDraft);
+  void nextTick(stampComposerField);
 });
 
 onBeforeUnmount(() => {
+  detachAgentChatEngine();
   document.removeEventListener("pointerdown", onDocPointerDown);
   document.removeEventListener("keydown", onDocKeydown);
 });
 </script>
 
 <template>
-  <div class="agent" data-agent-panel :class="{ 'is-open': panelOpen }">
-    <header class="toolbar">
-      <div class="lead">
-        <span class="title mono" data-agent-title>{{ t("nav.agent") }}</span>
-        <div v-if="boundSummary" class="bound mono" data-agent-bound>{{ boundSummary }}</div>
-      </div>
-      <button
-        type="button"
-        class="icon"
-        data-agent-close
-        :aria-label="t('agent.close')"
-        @click="rail.collapse()"
-      >
-        ×
-      </button>
-    </header>
-    <div ref="scroller" class="messages" data-agent-messages>
-      <p v-if="!messages.length" class="empty agent-dock-empty">{{ t("agent.empty") }}</p>
-      <template v-for="(msg, idx) in messages" :key="idx">
-        <div v-if="msg.kind === 'user'" class="bubble user">{{ msg.text }}</div>
-        <article
-          v-else-if="msg.kind === 'thinking' && msg.text.trim()"
-          class="thinking"
-          data-agent-thinking
-          :data-agent-thinking-open="thinkOpenNames(idx).length ? 'true' : 'false'"
-        >
-          <t-collapse
-            borderless
-            :model-value="thinkOpenNames(idx)"
-            @update:model-value="onThinkToggle(idx, $event)"
-          >
-            <t-collapse-panel :value="thinkName(idx)">
-              <template #header>
-                <span class="thinking-title" data-agent-thinking-title>
-                  {{ msg.streaming ? t("agent.thinking") : t("agent.thinking_done") }}
-                </span>
-              </template>
-              <pre
-                v-if="openThinks.includes(thinkName(idx))"
-                class="thinking-body"
-                data-agent-thinking-body
-              >{{ msg.text }}</pre>
-            </t-collapse-panel>
-          </t-collapse>
-        </article>
-        <article
-          v-else-if="msg.kind === 'tool'"
-          class="tool-card"
-          :data-agent-tool="msg.id"
-        >
-          <t-collapse
-            borderless
-            :model-value="toolOpenNames(msg.id)"
-            @update:model-value="onToolToggle(msg.id, $event)"
-          >
-            <t-collapse-panel :value="msg.id">
-              <template #header>
-                <span class="tool-head">
-                  <LoadingIcon v-if="msg.status === 'running'" class="is-loading" size="14px" />
-                  <CheckCircleFilledIcon v-else-if="msg.status === 'success'" class="ok" size="14px" />
-                  <CloseCircleFilledIcon v-else class="err" size="14px" />
-                  <span class="tool-name mono" data-agent-tool-name>{{ toolDisplayName(msg.name) }}</span>
-                  <span class="tool-status" :data-agent-tool-status="msg.status">
-                    {{ toolStatusLabel(msg.status) }}
-                  </span>
-                </span>
-              </template>
-              <pre v-if="msg.summary" class="tool-summary" data-agent-tool-summary>{{ msg.summary }}</pre>
-            </t-collapse-panel>
-          </t-collapse>
-        </article>
-        <div
-          v-else-if="msg.kind === 'assistant'"
-          class="bubble assistant"
-          v-html="renderMd(msg.text)"
-        />
-        <div v-else-if="msg.kind === 'error'" class="bubble error">{{ msg.text }}</div>
-        <article v-else-if="msg.kind === 'plan'" class="plan" :data-agent-plan="msg.plan.id">
-          <p class="plan-summary">{{ msg.plan.summary }}</p>
-          <div
-            v-for="(mutation, mi) in msg.plan.mutations"
-            :key="mi"
-            class="mutation mono"
-          >
-            {{ mutationLine(mutation) }}
-          </div>
-          <div v-for="(step, si) in msg.plan.manual_steps || []" :key="'s' + si" class="mutation">
-            {{ step }}
-          </div>
-          <p v-if="msg.plan.rerun?.task_id" class="mutation mono">
-            {{ msg.plan.rerun.kind || "" }} · {{ shortId(msg.plan.rerun.task_id) }}
-          </p>
-          <p v-if="msg.plan.status && msg.plan.status !== 'pending'" data-agent-plan-status>
-            {{ planStatusLabel(msg.plan.status) }}
-            <template v-if="msg.plan.error"> — {{ msg.plan.error }}</template>
-          </p>
-          <div v-if="canAct(msg.plan)" class="plan-actions">
-            <label v-if="msg.plan.rerun">
-              <input
-                type="checkbox"
-                :checked="rerunByPlan[msg.plan.id] !== false"
-                @change="rerunByPlan[msg.plan.id] = ($event.target as HTMLInputElement).checked"
-              />
-              {{ t("agent.rerun_after_apply") }}
-            </label>
-            <button
-              v-if="msg.plan.mutations.length"
-              type="button"
-              @click="applyPlan(msg.plan)"
-            >
-              {{ t("agent.apply") }}
-            </button>
-            <button type="button" @click="reject(msg.plan.id)">{{ t("agent.ignore") }}</button>
-          </div>
-        </article>
-      </template>
-      <PageLoading v-if="generating" size="inline" :text="t('agent.generating')" />
-    </div>
-    <div class="composer">
-      <div class="row">
-        <div ref="attachWrap" class="attach" data-agent-attach-wrap>
-          <button
-            type="button"
-            class="plus"
-            data-agent-attach
-            :aria-expanded="attachOpen ? 'true' : 'false'"
-            :aria-label="t('agent.attach')"
-            :title="t('agent.attach')"
-            @click="toggleAttach"
-          >
-            <AddIcon size="16px" />
-          </button>
-          <div v-show="attachOpen" class="menu" data-agent-attach-menu>
-            <p>{{ t("agent.attach_task") }}</p>
-            <input
-              v-model="search"
-              type="search"
-              class="search"
-              data-agent-task-search
-              :placeholder="t('agent.search_placeholder')"
-              autocomplete="off"
-              @input="onSearchInput"
-            />
-            <div v-if="results.length" class="results" data-agent-search-results>
-              <button
-                v-for="task in results"
-                :key="String(task.id)"
-                type="button"
-                @click="pickTask(task.id)"
-              >
-                {{ [task.title || task.kind, shortId(task.id), task.profile].filter(Boolean).join(" · ") }}
-              </button>
-            </div>
-          </div>
+  <t-config-provider :global-config="tdLocale">
+    <div class="agent" data-agent-panel :class="{ 'is-open': panelOpen }">
+      <header class="toolbar">
+        <div class="lead">
+          <span class="title mono" data-agent-title>{{ t("nav.agent") }}</span>
+          <div v-if="boundSummary" class="bound mono" data-agent-bound>{{ boundSummary }}</div>
         </div>
-        <form data-agent-stream @submit.prevent="onSubmit">
-          <textarea
-            ref="draftEl"
-            v-model="draft"
-            name="message"
-            rows="2"
-            class="draft"
-            data-agent-input
-            :placeholder="t('agent.composer_placeholder')"
-            autocomplete="off"
-            @keydown="onComposerKeydown"
-            @input="autosizeDraft"
-          />
-          <button
-            v-if="generating"
-            type="button"
-            class="send"
-            data-agent-stop
-            :title="t('agent.stop')"
-            :aria-label="t('agent.stop')"
-            @click="stop()"
+        <button
+          type="button"
+          class="icon"
+          data-agent-close
+          :aria-label="t('agent.close')"
+          @click="rail.collapse()"
+        >
+          ×
+        </button>
+      </header>
+      <t-chat-list
+        class="messages"
+        data-agent-messages
+        layout="both"
+        animation="moving"
+        default-scroll-to="bottom"
+        :reverse="false"
+        :clear-history="false"
+        :auto-scroll="true"
+        :show-scroll-button="true"
+        :is-stream-load="generating"
+      >
+        <p v-if="!messages.length" class="empty agent-dock-empty">{{ t("agent.empty") }}</p>
+        <template v-for="turn in chatTurns" :key="turn.key">
+          <t-chat-message
+            v-if="turn.kind === 'user'"
+            class="agent-msg agent-msg--user"
+            role="user"
+            placement="right"
+            variant="base"
           >
-            <PauseIcon size="16px" />
-          </button>
-          <button
-            v-else
-            type="submit"
-            class="send"
-            data-agent-send
-            :title="t('agent.send')"
-            :aria-label="t('agent.send')"
+            <t-chat-content role="user" :content="{ type: 'text', data: turn.text }" />
+          </t-chat-message>
+          <t-chat-message
+            v-else-if="turn.kind === 'assistant'"
+            role="assistant"
+            placement="left"
+            variant="text"
+            :status="assistantStatus(turn)"
+            :content="assistantContent(turn)"
+            animation="moving"
           >
-            <SendIcon size="16px" />
-          </button>
-        </form>
-      </div>
+            <div class="agent-turn-body">
+              <div
+                v-for="item in turn.thinks"
+                v-show="item.msg.streaming || item.msg.text.trim()"
+                :key="item.idx"
+                class="thinking"
+                data-agent-thinking
+                :data-agent-thinking-open="thinkCollapsed(item.msg, item.idx) ? 'false' : 'true'"
+              >
+                <span class="thinking-title" data-agent-thinking-title>{{ thinkTitle(item.msg) }}</span>
+                <t-chat-thinking
+                  :content="thinkPayload(item.msg)"
+                  :status="thinkStatus(item.msg)"
+                  :collapsed="thinkCollapsed(item.msg, item.idx)"
+                  layout="block"
+                  animation="moving"
+                  @collapsed-change="onThinkCollapsed(item.idx, $event, item.msg)"
+                >
+                  <pre
+                    v-if="!thinkCollapsed(item.msg, item.idx)"
+                    class="thinking-body"
+                    data-agent-thinking-body
+                  >{{ item.msg.text }}</pre>
+                </t-chat-thinking>
+              </div>
+              <article
+                v-for="item in turn.tools"
+                :key="item.msg.id"
+                class="tool-card"
+                :data-agent-tool="item.msg.id"
+              >
+                <t-collapse
+                  borderless
+                  :model-value="toolOpenNames(item.msg.id)"
+                  @update:model-value="onToolToggle(item.msg.id, $event)"
+                >
+                  <t-collapse-panel :value="item.msg.id">
+                    <template #header>
+                      <span class="tool-head">
+                        <LoadingIcon v-if="item.msg.status === 'running'" class="is-loading" size="14px" />
+                        <CheckCircleFilledIcon v-else-if="item.msg.status === 'success'" class="ok" size="14px" />
+                        <CloseCircleFilledIcon v-else class="err" size="14px" />
+                        <span class="tool-name mono" data-agent-tool-name>{{ toolDisplayName(item.msg.name) }}</span>
+                        <span class="tool-status" :data-agent-tool-status="item.msg.status">
+                          {{ toolStatusLabel(item.msg.status) }}
+                        </span>
+                      </span>
+                    </template>
+                    <pre v-if="item.msg.summary" class="tool-summary" data-agent-tool-summary>{{ item.msg.summary }}</pre>
+                  </t-collapse-panel>
+                </t-collapse>
+              </article>
+              <div
+                v-if="turn.assistant"
+                class="agent-msg agent-msg--assistant agent-msg--md"
+              >
+                <t-chat-content
+                  role="assistant"
+                  :content="{ type: 'markdown', data: turn.assistant.msg.text }"
+                  :markdown-props="markdownProps"
+                />
+              </div>
+            </div>
+            <template #actionbar>
+              <t-chat-actionbar
+                v-if="turn.assistant?.msg.text.trim() && !generating"
+                :content="turn.assistant.msg.text"
+                :action-bar="['copy']"
+              />
+            </template>
+          </t-chat-message>
+          <t-chat-message
+            v-else-if="turn.kind === 'error'"
+            class="agent-msg agent-msg--error"
+            role="assistant"
+            placement="left"
+            variant="text"
+            status="error"
+          >
+            <t-chat-content role="assistant" status="error" :content="turn.text" />
+          </t-chat-message>
+          <t-chat-message
+            v-else-if="turn.kind === 'plan'"
+            role="assistant"
+            placement="left"
+            variant="text"
+          >
+            <article class="plan" :data-agent-plan="turn.plan.id">
+              <p class="plan-summary">{{ turn.plan.summary }}</p>
+              <div
+                v-for="(mutation, mi) in turn.plan.mutations"
+                :key="mi"
+                class="mutation mono"
+              >
+                {{ mutationLine(mutation) }}
+              </div>
+              <div v-for="(step, si) in turn.plan.manual_steps || []" :key="'s' + si" class="mutation">
+                {{ step }}
+              </div>
+              <p v-if="turn.plan.rerun?.task_id" class="mutation mono">
+                {{ turn.plan.rerun.kind || "" }} · {{ shortId(turn.plan.rerun.task_id) }}
+              </p>
+              <p v-if="turn.plan.status && turn.plan.status !== 'pending'" data-agent-plan-status>
+                {{ planStatusLabel(turn.plan.status) }}
+                <template v-if="turn.plan.error"> — {{ turn.plan.error }}</template>
+              </p>
+              <div v-if="canAct(turn.plan)" class="plan-actions">
+                <label v-if="turn.plan.rerun">
+                  <input
+                    type="checkbox"
+                    :checked="rerunByPlan[turn.plan.id] !== false"
+                    @change="rerunByPlan[turn.plan.id] = ($event.target as HTMLInputElement).checked"
+                  />
+                  {{ t("agent.rerun_after_apply") }}
+                </label>
+                <button
+                  v-if="turn.plan.mutations.length"
+                  type="button"
+                  @click="applyPlan(turn.plan)"
+                >
+                  {{ t("agent.apply") }}
+                </button>
+                <button type="button" @click="reject(turn.plan.id)">{{ t("agent.ignore") }}</button>
+              </div>
+            </article>
+          </t-chat-message>
+        </template>
+        <t-chat-message
+          v-if="generating && !chatTurns.some((turn) => turn.kind === 'assistant' && (turn.thinks.length || turn.tools.length || turn.assistant))"
+          role="assistant"
+          placement="left"
+          variant="text"
+          status="pending"
+          animation="moving"
+        >
+          <t-chat-loading animation="moving" :text="t('agent.generating')" />
+        </t-chat-message>
+      </t-chat-list>
+      <form
+        ref="composerEl"
+        class="composer"
+        data-agent-stream
+        @submit.prevent="onSubmit()"
+      >
+        <t-chat-sender
+          v-model="draft"
+          :placeholder="t('agent.composer_placeholder')"
+          :loading="generating"
+          :textarea-props="senderTextareaProps"
+          @send="onSenderSend"
+          @stop="stop()"
+        >
+          <template #footer-prefix>
+            <div ref="attachWrap" class="attach" data-agent-attach-wrap>
+              <button
+                type="button"
+                class="plus"
+                data-agent-attach
+                :aria-expanded="attachOpen ? 'true' : 'false'"
+                :aria-label="t('agent.attach')"
+                :title="t('agent.attach')"
+                @click="toggleAttach"
+              >
+                <AddIcon size="16px" />
+              </button>
+              <div v-show="attachOpen" class="menu" data-agent-attach-menu>
+                <p>{{ t("agent.attach_task") }}</p>
+                <input
+                  v-model="search"
+                  type="search"
+                  class="search"
+                  data-agent-task-search
+                  :placeholder="t('agent.search_placeholder')"
+                  autocomplete="off"
+                  @input="onSearchInput"
+                />
+                <div v-if="results.length" class="results" data-agent-search-results>
+                  <button
+                    v-for="task in results"
+                    :key="String(task.id)"
+                    type="button"
+                    @click="pickTask(task.id)"
+                  >
+                    {{ [task.title || task.kind, shortId(task.id), task.profile].filter(Boolean).join(" · ") }}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </template>
+        </t-chat-sender>
+        <button
+          type="submit"
+          hidden
+          data-agent-send
+          :title="t('agent.send')"
+          :aria-label="t('agent.send')"
+        />
+        <button
+          type="button"
+          hidden
+          data-agent-stop
+          :title="t('agent.stop')"
+          :aria-label="t('agent.stop')"
+          @click="stop()"
+        />
+      </form>
     </div>
-  </div>
+  </t-config-provider>
 </template>
 
 <style scoped>
@@ -486,10 +742,17 @@ onBeforeUnmount(() => {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 12px 14px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+}
+
+.agent :deep(.t-chat) {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+}
+
+.agent :deep(.t-chat__list) {
+  overflow: auto;
+  padding: var(--td-comp-paddingTB-l, 16px) var(--td-comp-paddingLR-l, 16px);
 }
 
 .empty {
@@ -497,39 +760,25 @@ onBeforeUnmount(() => {
   font-size: 13px;
 }
 
-.bubble {
+.agent-turn-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--td-chat-item-content-gap, var(--td-comp-margin-s, 8px));
+  width: 100%;
+}
+
+.agent-msg {
   max-width: 100%;
-  padding: 8px 10px;
-  border-radius: 10px;
-  font-size: 13px;
-  line-height: 1.5;
 }
 
-.bubble.user {
-  align-self: flex-end;
-  background: var(--raised);
-  color: var(--text);
+.agent-msg--user :deep(.t-chat__text) {
+  max-width: 100%;
 }
 
-.bubble.assistant {
-  background: #121218;
-  border: 1px solid var(--border);
+.thinking {
+  position: relative;
 }
 
-.bubble.error {
-  color: var(--err);
-  background: rgba(248, 113, 113, 0.08);
-}
-
-.bubble.assistant :deep(p) {
-  margin: 0 0 8px;
-}
-
-.bubble.assistant :deep(p:last-child) {
-  margin-bottom: 0;
-}
-
-.thinking,
 .tool-card {
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -537,13 +786,11 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
-.thinking :deep(.t-collapse),
 .tool-card :deep(.t-collapse) {
   border: 0;
   background: transparent;
 }
 
-.thinking :deep(.t-collapse-panel__header),
 .tool-card :deep(.t-collapse-panel__header) {
   height: auto;
   min-height: 36px;
@@ -555,13 +802,11 @@ onBeforeUnmount(() => {
   font-size: 12px;
 }
 
-.thinking :deep(.t-collapse-panel__body),
 .tool-card :deep(.t-collapse-panel__body) {
   background: transparent;
   border: 0;
 }
 
-.thinking :deep(.t-collapse-panel__content),
 .tool-card :deep(.t-collapse-panel__content) {
   padding: 0 10px 10px;
   color: var(--text-muted);
@@ -596,8 +841,7 @@ onBeforeUnmount(() => {
   color: var(--err);
 }
 
-.tool-summary,
-.thinking-body {
+.tool-summary {
   margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
@@ -607,8 +851,21 @@ onBeforeUnmount(() => {
 }
 
 .thinking-title {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+.thinking-body {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
   font-size: 12px;
+  line-height: 1.6;
   color: var(--text-muted);
+  font-family: inherit;
 }
 
 .plan {
@@ -660,29 +917,17 @@ onBeforeUnmount(() => {
   padding: 10px;
 }
 
-.row {
-  display: flex;
-  align-items: flex-end;
-  gap: var(--composer-gap);
-  min-width: 0;
-  width: 100%;
-}
-
 .attach {
   flex: 0 0 var(--composer-btn);
   width: var(--composer-btn);
 }
 
-.plus,
-.send {
+.plus {
   box-sizing: border-box;
-  flex: 0 0 var(--composer-btn);
   width: var(--composer-btn);
   min-width: var(--composer-btn);
-  max-width: var(--composer-btn);
   height: var(--composer-btn);
   min-height: var(--composer-btn);
-  max-height: var(--composer-btn);
   padding: 0;
   display: inline-flex;
   align-items: center;
@@ -698,8 +943,7 @@ onBeforeUnmount(() => {
   font-size: 0;
 }
 
-.plus :deep(svg),
-.send :deep(svg) {
+.plus :deep(svg) {
   font-size: 16px;
 }
 
@@ -723,34 +967,14 @@ onBeforeUnmount(() => {
   color: var(--text-faint);
 }
 
-.search,
-.draft {
+.search {
   background: var(--raised);
   border: 1px solid var(--border);
   color: var(--text);
   border-radius: 8px;
   padding: 8px 10px;
   box-sizing: border-box;
-}
-
-.search {
   width: 100%;
-}
-
-.draft {
-  flex: 1;
-  min-width: 0;
-  width: auto;
-  display: block;
-  margin: 0;
-  min-height: var(--composer-min);
-  height: var(--composer-min);
-  max-height: var(--composer-max);
-  line-height: 20px;
-  resize: none;
-  overflow-y: auto;
-  font: inherit;
-  field-sizing: fixed;
 }
 
 .results {
@@ -771,14 +995,6 @@ onBeforeUnmount(() => {
   cursor: pointer;
   font-size: 11px;
   font-family: "Fira Code", ui-monospace, monospace;
-}
-
-form[data-agent-stream] {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: flex-end;
-  gap: var(--composer-gap);
 }
 
 @keyframes agent-spin {

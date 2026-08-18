@@ -334,7 +334,7 @@ def agent_ui(chromium_browser, tmp_path, monkeypatch):
             return
         url = request.url
         body = request.post_data or ""
-        if "/api/agent/stream" in url:
+        if "/api/agent/agui" in url or "/api/agent/stream" in url:
             spies["stream"].append(body)
         elif "/api/agent/apply" in url:
             spies["apply"].append(body)

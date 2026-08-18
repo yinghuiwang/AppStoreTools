@@ -24,6 +24,8 @@ html[theme-mode="dark"] {
   --td-bg-color-component: var(--raised);
   --td-bg-color-component-hover: var(--overlay);
   --td-bg-color-specialcomponent: var(--surface);
+  --td-bg-color-secondarycomponent: var(--overlay);
+  --td-text-color-anti: #0a0a0c;
   --td-text-color-primary: var(--text);
   --td-text-color-secondary: var(--text-muted);
   --td-text-color-placeholder: var(--text-faint);
@@ -102,4 +104,58 @@ html.dark .t-notification,
 html.dark .t-message {
   background: var(--overlay);
   border: 1px solid var(--border);
+}
+
+html.dark .t-chat,
+html.dark .t-chat-sender,
+html.dark .t-chat__text,
+html.dark t-chat-item,
+html.dark .t-chat__item {
+  color: var(--text);
+}
+
+html.dark .t-chat-sender__textarea {
+  background-color: var(--raised);
+  border-color: var(--border);
+}
+
+html.dark .t-chat-sender__textarea--focus,
+html.dark .t-chat-sender__textarea:hover {
+  border-color: var(--accent-dim);
+}
+
+html.dark .t-chat-sender__button .t-chat-sender__button__default {
+  background-color: var(--accent-dim);
+  color: #0a0a0c;
+}
+
+html.dark .t-chat-sender__button .t-chat-sender__button__default:not(.t-chat-sender__button--disabled):hover {
+  background-color: var(--accent);
+}
+
+html.dark .t-chat__text .t-chat__text--user {
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+
+html.dark .t-chat__text--variant--base .t-chat__detail,
+html.dark .t-chat__item__content--base {
+  background: var(--raised);
+  border: 1px solid var(--border);
+}
+
+html.dark .t-chat__text .t-chat__text--user pre {
+  color: var(--text);
+}
+
+html.dark .t-chat__text .other__error {
+  background: rgba(248, 113, 113, 0.08);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+html.dark .t-chat__actions .t-button,
+html.dark .t-chat-actionbar .t-button {
+  color: var(--text-muted);
 }
