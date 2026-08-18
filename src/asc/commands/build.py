@@ -261,8 +261,8 @@ def generate_export_options(
         if certificate:
             opts["signingCertificate"] = certificate
         if profile:
-            from asc.commands.build_inputs import parse_mobileprovision
-            info = parse_mobileprovision(profile)
+            from asc.commands.build_inputs import parse_mobileprovision, resolve_profile_path
+            info = parse_mobileprovision(resolve_profile_path(profile))
             bid = bundle_id or info.bundle_id
             # ExportOptions expects profile UUID (or Name), NOT the file path.
             opts["provisioningProfiles"] = {bid: info.uuid}

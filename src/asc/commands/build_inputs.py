@@ -65,7 +65,9 @@ def _decode_profile_plist(path) -> dict:
         capture_output=True,
     )
     if result.returncode != 0 or not result.stdout:
-        raise RuntimeError(f"签名证书解析失败（security cms failed）。请尝试重新从 Apple Developer 下载证书：{path}")
+        raise RuntimeError(
+            f"描述文件解析失败（security cms failed）。请尝试重新从 Apple Developer 下载描述文件：{path}"
+        )
     return plistlib.loads(result.stdout)
 
 
@@ -82,7 +84,7 @@ def parse_mobileprovision(path) -> ProfileInfo:
     cert_blobs = plist.get("DeveloperCertificates") or []
     expiration = plist.get("ExpirationDate")
     if expiration is None:
-        raise RuntimeError(f"证书已过期或损坏：{path}。请重新从 Apple Developer 下载。")
+        raise RuntimeError(f"描述文件已过期或损坏：{path}。请重新从 Apple Developer 下载。")
     return ProfileInfo(
         path=str(path),
         uuid=plist.get("UUID", ""),
@@ -128,6 +130,41 @@ def detect_profiles(bundle_id: str, cert_sha1: Optional[str]) -> List[ProfileInf
             continue
         out.append(p)
     return out
+
+
+def resolve_profile_path(value: str, dirs=None) -> str:
+    """Resolve a profile path or Name to a real ``.mobileprovision`` file.
+
+    Existing files are returned unchanged. A Name such as ``AppStore`` is
+    looked up with ``scan_profiles`` in the Xcode 16 and legacy
+    MobileDevice directories.
+    """
+    text = (value or "").strip()
+    if not text:
+        raise ValueError("未指定描述文件")
+
+    candidate = Path(text).expanduser()
+    if candidate.is_file():
+        return str(candidate)
+
+    looks_like_path = (
+        candidate.is_absolute()
+        or "/" in text
+        or "\\" in text
+        or text.endswith(".mobileprovision")
+    )
+    if looks_like_path:
+        raise RuntimeError(f"找不到描述文件：{text}")
+
+    matches = [info for info in scan_profiles(dirs) if info.name == text]
+    if not matches:
+        raise RuntimeError(
+            f"找不到名为 {text!r} 的描述文件。"
+            "请确认已安装到 ~/Library/Developer/Xcode/UserData/Provisioning Profiles "
+            "或 ~/Library/MobileDevice/Provisioning Profiles"
+        )
+    live = [info for info in matches if not info.is_expired]
+    return (live or matches)[0].path
 
 
 @dataclass(frozen=True)
@@ -462,7 +499,7 @@ def prepare_build_inputs(
         bundle_id = detect_bundle_id(project_path, project_kind, scheme)
         if not bundle_id and cli.profile:
             from asc.commands.build import parse_bundle_id_from_profile
-            bundle_id = parse_bundle_id_from_profile(cli.profile)
+            bundle_id = parse_bundle_id_from_profile(resolve_profile_path(cli.profile))
         if not bundle_id:
             raise RuntimeError(
                 "无法确定 bundle ID：xcodebuild 解析失败且未提供 --profile"
@@ -504,7 +541,7 @@ def prepare_build_inputs(
 
         # 7. profile
         if cli.profile:
-            profile = cli.profile
+            profile = resolve_profile_path(cli.profile)
             cache["profile"] = profile
         elif config.build_profile and validate_cache_entry("profile", config.build_profile):
             profile = config.build_profile

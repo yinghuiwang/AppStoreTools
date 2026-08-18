@@ -248,7 +248,7 @@ onMounted(() => {
           <label class="field"><span>{{ t("build.profile") }}</span>
             <select v-model="profileName" class="field-input">
               <option value="">{{ t("build.auto_detect") }}</option>
-              <option v-for="item in options.profiles || []" :key="item.path" :value="item.name">{{ item.name }}</option>
+              <option v-for="item in options.profiles || []" :key="item.path" :value="item.path">{{ item.name }}</option>
             </select>
           </label>
         </template>

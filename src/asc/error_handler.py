@@ -119,11 +119,11 @@ ACTION_HINTS: dict[str, dict[str, str]] = {
     # BuildError patterns
     'security cms failed': {
         'en': 'Provisioning profile may be corrupted. Try re-downloading from Apple Developer portal.',
-        'zh': '签名证书解析失败，请尝试重新从 Apple Developer 下载证书。',
+        'zh': '描述文件解析失败，请尝试重新从 Apple Developer 下载描述文件。',
     },
     'missing ExpirationDate': {
         'en': 'Provisioning profile is invalid. Please re-download from Apple Developer portal.',
-        'zh': '证书已过期或损坏，请重新从 Apple Developer 下载。',
+        'zh': '描述文件已过期或损坏，请重新从 Apple Developer 下载。',
     },
     'xcodebuild archive failed': {
         'en': 'Build failed. Check the log file for details. Common causes: code signing issues, missing entitlements.',

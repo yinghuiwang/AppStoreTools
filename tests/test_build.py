@@ -189,6 +189,10 @@ def test_generate_export_options_manual(tmp_path, monkeypatch):
         "asc.commands.build_inputs.parse_mobileprovision",
         lambda _: fake_info,
     )
+    monkeypatch.setattr(
+        "asc.commands.build_inputs.resolve_profile_path",
+        lambda value, dirs=None: value,
+    )
 
     plist_path = generate_export_options(
         signing="manual",

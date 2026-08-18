@@ -88,11 +88,71 @@ def test_parse_mobileprovision_raises_when_expiration_missing(tmp_path, monkeypa
                    "Entitlements": {"application-identifier": "T.com.x"},
                    "DeveloperCertificates": []},
     )
-    with pytest.raises(RuntimeError, match="证书已过期或损坏"):
+    with pytest.raises(RuntimeError, match="描述文件已过期或损坏"):
         parse_mobileprovision(p)
 
 
-from asc.commands.build_inputs import scan_profiles
+from asc.commands.build_inputs import resolve_profile_path, scan_profiles
+
+
+def _write_named_profile(directory, *, name, uuid, bundle_id="com.example.app"):
+    directory.mkdir(parents=True, exist_ok=True)
+    plist = {
+        "UUID": uuid,
+        "Name": name,
+        "TeamIdentifier": ["TEAMID"],
+        "ExpirationDate": datetime.now(timezone.utc) + timedelta(days=365),
+        "Entitlements": {"application-identifier": f"TEAMID.{bundle_id}"},
+        "DeveloperCertificates": [b"<fake-cert-bytes>"],
+    }
+    path = directory / f"{uuid}.mobileprovision"
+    path.write_bytes(plistlib.dumps(plist))
+    return path
+
+
+def test_resolve_profile_path_matches_name_appstore(tmp_path, monkeypatch):
+    """Web/CLI may pass Name 'AppStore'; resolve it via the same profile dirs as scan_profiles."""
+    xcode16 = tmp_path / "Xcode16"
+    legacy = tmp_path / "MobileDevice"
+    expected = _write_named_profile(
+        xcode16, name="AppStore", uuid="AAAA-1111",
+    )
+    _write_named_profile(legacy, name="Other", uuid="BBBB-2222")
+
+    monkeypatch.setattr(
+        "asc.commands.build_inputs._decode_profile_plist",
+        lambda path: plistlib.loads(Path(path).read_bytes()),
+    )
+    monkeypatch.setattr("asc.commands.build_inputs._cert_sha1", lambda b: "ABC")
+
+    resolved = resolve_profile_path("AppStore", dirs=[xcode16, legacy])
+    assert resolved == str(expected)
+
+
+def test_resolve_profile_path_existing_file_is_unchanged(tmp_path, monkeypatch):
+    path = _write_named_profile(tmp_path, name="AppStore", uuid="CCCC-3333")
+    monkeypatch.setattr(
+        "asc.commands.build_inputs._decode_profile_plist",
+        lambda p: plistlib.loads(Path(p).read_bytes()),
+    )
+    assert resolve_profile_path(str(path)) == str(path)
+
+
+def test_resolve_profile_path_missing_file_gives_clear_error(tmp_path):
+    missing = tmp_path / "gone.mobileprovision"
+    with pytest.raises(RuntimeError, match="找不到描述文件") as exc:
+        resolve_profile_path(str(missing))
+    assert "证书" not in str(exc.value)
+    assert str(missing) in str(exc.value)
+
+
+def test_resolve_profile_path_unknown_name_gives_clear_error(tmp_path, monkeypatch):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    monkeypatch.setattr("asc.commands.build_inputs.scan_profiles", lambda dirs=None: [])
+    with pytest.raises(RuntimeError, match="找不到.*AppStore|找不到名为") as exc:
+        resolve_profile_path("AppStore", dirs=[empty])
+    assert "证书" not in str(exc.value)
 
 
 def test_scan_profiles_dedupes_by_uuid(tmp_path, monkeypatch):
@@ -541,6 +601,21 @@ def test_prepare_manual_signing_resolves_cert_and_profile(tmp_path, monkeypatch)
     assert r.signing == "manual"
     assert r.certificate == "Apple Distribution: T (T)"
     assert r.profile == "/p/x.mobileprovision"
+
+
+def test_prepare_resolves_profile_name_appstore_to_path(tmp_path, monkeypatch):
+    """Web Vue currently posts Name 'AppStore'; resolve before parse/cms."""
+    _patch_detection(monkeypatch)
+    real = str(tmp_path / "uuid.mobileprovision")
+    Path(real).write_bytes(b"x")
+    monkeypatch.setattr(
+        "asc.commands.build_inputs.resolve_profile_path",
+        lambda value, dirs=None: real if value == "AppStore" else value,
+    )
+    cfg = _make_config(monkeypatch, tmp_path)
+    cli = BuildInputsCLI(signing="manual", profile="AppStore")
+    resolved = prepare_build_inputs(cli, cfg, interactive=False)
+    assert resolved.profile == real
 
 
 def test_prepare_uses_cli_over_cache(tmp_path, monkeypatch):

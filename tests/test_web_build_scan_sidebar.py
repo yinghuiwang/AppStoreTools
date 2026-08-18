@@ -38,3 +38,6 @@ def test_build_view_restores_env_scan_sidebar():
     assert "build.scanning" in src or "scanStatus" in src
     assert "build.scan_hint" in src
     assert "build.step_detect" in src
+    # Old Jinja form posted the .mobileprovision path, not the display Name.
+    assert ':value="item.path"' in src
+    assert ':value="item.name"' not in src
