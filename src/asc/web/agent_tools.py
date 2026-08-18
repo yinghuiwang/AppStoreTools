@@ -330,6 +330,7 @@ class AgentToolContext:
     turn_seq: int
     session_id: str = ""
     form_paths: list[str] | None = None
+    attachment_paths: list[str] | None = None
     profile: str = ""
 
     def __post_init__(self) -> None:
@@ -340,6 +341,12 @@ class AgentToolContext:
             if text:
                 cleaned.append(text)
         self.form_paths = cleaned
+        attached: list[str] = []
+        for item in self.attachment_paths or []:
+            text = str(item or "").strip()
+            if text:
+                attached.append(text)
+        self.attachment_paths = attached
 
 
 class _ApplyStepError(Exception):
@@ -844,6 +851,8 @@ def _allow_roots(ctx: AgentToolContext) -> list[Path]:
     add(ctx.project_root / ".asc" / "config.toml")
     for name in _BUILD_LOG_NAMES:
         add(ctx.project_root / "build" / name)
+    for item in ctx.attachment_paths or []:
+        add(item)
 
     profile = None
     replay = None

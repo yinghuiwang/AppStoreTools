@@ -11,6 +11,11 @@ from typing import Any
 import requests
 
 from asc.llm import LLMHTTPError
+from asc.web.agent_attachments import (
+    attachment_form_paths,
+    merge_user_content_with_attachments,
+    normalize_attachments,
+)
 from asc.web.agent_redact import redact_obj, redact_text
 from asc.web.agent_tools import AgentToolContext, OPENAI_TOOLS, execute_model_tool
 from asc.web.i18n import t
@@ -105,7 +110,9 @@ def _system_prompt(lang: str) -> str:
         "Project paths stay inside the user workspace. Knowledge tools ignore project_root. "
         "Never read or write secrets (.env, *.p8, keys/, credentials, .git). "
         "write_file, create_file, and delete_file only draft a plan; the user must apply it. "
-        "Do not call apply_fix or rerun_task."
+        "Do not call apply_fix or rerun_task. "
+        "User messages may include an [attachments] section with workspace paths; "
+        "read those files with read_file or inspect_local before answering."
     )
 
 
@@ -356,6 +363,7 @@ class WebAgent:
         llm_client: Any,
         form_paths: list[str] | None = None,
         profile: str = "",
+        attachments: list[Any] | None = None,
     ) -> Iterator[tuple[str, str]]:
         session_id = session_id or None
         task_id = task_id or None
@@ -411,6 +419,15 @@ class WebAgent:
             if auto_analyze and bound_task_id:
                 injected = _auto_analyze_text(lang, str(bound_task_id))
                 user_content = f"{injected}\n{user_content}".strip() if user_content else injected
+            prepared = normalize_attachments(
+                attachments,
+                project_root=self.project_root,
+                session_id=str(session_id),
+            )
+            extra_paths = attachment_form_paths(prepared)
+            merged_form_paths = list(form_paths or [])
+            merged_form_paths.extend(extra_paths)
+            user_content = merge_user_content_with_attachments(user_content, prepared, lang)
             turn_seq = self._persist(session_id, "user", user_content)
 
             ctx = AgentToolContext(
@@ -420,7 +437,8 @@ class WebAgent:
                 self.project_root,
                 turn_seq=turn_seq,
                 session_id=session_id,
-                form_paths=form_paths or [],
+                form_paths=merged_form_paths,
+                attachment_paths=extra_paths,
                 profile=profile or self._profile_for_task(bound_task_id),
             )
             tool_batches = 0

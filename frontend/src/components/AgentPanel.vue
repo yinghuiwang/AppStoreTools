@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import {
+  Attachments as TAttachments,
   ChatActionbar as TChatActionbar,
   ChatContent as TChatContent,
   ChatList as TChatList,
@@ -21,6 +22,7 @@ import {
   CloseCircleFilledIcon,
   LoadingIcon,
 } from "tdesign-icons-vue-next";
+import { MessagePlugin } from "tdesign-vue-next";
 import enUS from "tdesign-vue-next/es/locale/en_US";
 import zhCN from "tdesign-vue-next/es/locale/zh_CN";
 import {
@@ -37,6 +39,20 @@ import {
   toolSummaryOf,
   userTextOf,
 } from "@/composables/agentStream";
+import {
+  AGENT_ATTACH_ACCEPT,
+  composeAttachmentPrompt,
+  draftFromFile,
+  draftFromPath,
+  isAllowedAttachmentName,
+  isImageAttachmentName,
+  rejectAttachment,
+  revokeAttachmentUrl,
+  toPayload,
+  toSenderItem,
+  type AgentDraftAttachment,
+} from "@/composables/agentAttachments";
+import { useBrowse } from "@/composables/useBrowse";
 import { useRightRail } from "@/composables/useRightRail";
 
 const { t, locale } = useI18n();
@@ -61,8 +77,14 @@ const {
   createSession,
 } = useAgent();
 const rail = useRightRail();
+const browse = useBrowse();
 const draft = ref("");
 const attachOpen = ref(false);
+const drafts = ref<AgentDraftAttachment[]>([]);
+const previewOpen = ref(false);
+const previewTitle = ref("");
+const previewBody = ref("");
+let attachSeq = 0;
 const listOpen = ref(false);
 const search = ref("");
 const results = ref<Array<Record<string, unknown>>>([]);
@@ -78,6 +100,22 @@ const senderTextareaProps = {
   autosize: { minRows: 2, maxRows: 6 },
 };
 
+const attachmentItems = computed(() => drafts.value.map(toSenderItem));
+
+const attachmentsProps = {
+  items: [] as ReturnType<typeof toSenderItem>[],
+  overflow: "scrollX" as const,
+};
+
+const senderActions = computed(() => [
+  { name: "uploadImage" as const, uploadProps: { multiple: true, accept: "image/*" } },
+  { name: "uploadAttachment" as const, uploadProps: { multiple: true, accept: AGENT_ATTACH_ACCEPT } },
+]);
+
+const sendDisabled = computed(
+  () => generating.value || (!draft.value.trim() && !drafts.value.length),
+);
+
 const markdownProps = { engine: "marked" as const, options: {} };
 
 const tdLocale = computed(() => {
@@ -89,6 +127,8 @@ const tdLocale = computed(() => {
       stopBtnText: t("agent.stop"),
       loadingText: t("agent.thinking"),
       loadingEndText: t("agent.thinking_done"),
+      uploadAttachmentText: t("agent.attach_file"),
+      uploadImageText: t("agent.attach_image"),
     },
   };
 });
@@ -329,6 +369,107 @@ function onThinkCollapsed(idx: number, value: unknown, msg?: ThinkMsg) {
   openThinks.value = next;
 }
 
+function rejectReasonText(reason: ReturnType<typeof rejectAttachment>): string {
+  if (reason === "limit") return t("agent.attach_limit");
+  if (reason === "too_large") return t("agent.attach_too_large");
+  if (reason === "total_too_large") return t("agent.attach_total_too_large");
+  if (reason === "type_blocked") return t("agent.attach_type_blocked");
+  return t("agent.attach_missing");
+}
+
+function draftTotalBytes(): number {
+  return drafts.value.reduce((sum, item) => sum + (item.size || 0), 0);
+}
+
+function nextAttachKey(): string {
+  attachSeq += 1;
+  return `att-${Date.now()}-${attachSeq}`;
+}
+
+function pushDraft(item: AgentDraftAttachment) {
+  drafts.value = [item, ...drafts.value];
+}
+
+async function addLocalFiles(files: ArrayLike<File>) {
+  const list = Array.from(files || []);
+  for (const file of list) {
+    const reason = rejectAttachment(file.name, file.size || 0, drafts.value.length, draftTotalBytes());
+    if (reason) {
+      MessagePlugin.warning(rejectReasonText(reason));
+      continue;
+    }
+    try {
+      pushDraft(await draftFromFile(file, nextAttachKey()));
+    } catch {
+      MessagePlugin.warning(t("agent.attach_type_blocked"));
+    }
+  }
+}
+
+function addPathFile(path: string) {
+  const text = String(path || "").trim();
+  if (!text) return;
+  const name = text.split(/[/\\]/).pop() || text;
+  const reason = rejectAttachment(name, 0, drafts.value.length, draftTotalBytes());
+  if (reason) {
+    MessagePlugin.warning(rejectReasonText(reason));
+    return;
+  }
+  if (!isAllowedAttachmentName(name)) {
+    MessagePlugin.warning(t("agent.attach_type_blocked"));
+    return;
+  }
+  if (drafts.value.some((item) => item.path === text)) return;
+  pushDraft(draftFromPath(text, nextAttachKey()));
+}
+
+function clearDrafts() {
+  for (const item of drafts.value) revokeAttachmentUrl(item);
+  drafts.value = [];
+}
+
+function attachmentItemOf(payload: unknown): { key: string; name: string } {
+  if (!payload || typeof payload !== "object") return { key: "", name: "" };
+  const row = payload as { key?: string; name?: string; detail?: unknown };
+  if (row.key || row.name) {
+    return { key: String(row.key || ""), name: String(row.name || "") };
+  }
+  return attachmentItemOf(row.detail);
+}
+
+function findDraft(payload: unknown): AgentDraftAttachment | undefined {
+  const { key, name } = attachmentItemOf(payload);
+  return drafts.value.find((item) => (key && item.key === key) || (!!name && item.name === name));
+}
+
+function onFileSelect(payload: { files?: File[] | FileList; name?: string }) {
+  void addLocalFiles(payload?.files || []);
+}
+
+function onRemoveAttachment(payload: unknown) {
+  const found = findDraft(payload);
+  if (!found) return;
+  revokeAttachmentUrl(found);
+  drafts.value = drafts.value.filter((item) => item.key !== found.key);
+}
+
+function onFileClick(payload: unknown) {
+  const item = findDraft(payload);
+  if (!item) return;
+  // Official Attachments imageViewer already previews image cards.
+  if (item.url && isImageAttachmentName(item.name)) return;
+  const text = item.content || item.path || item.description || item.name;
+  previewTitle.value = item.name;
+  previewBody.value = text.length > 8192 ? `${text.slice(0, 8192)}\n…` : text;
+  previewOpen.value = true;
+}
+
+async function pickProjectFile() {
+  closeAttach();
+  const path = await browse.pick({ mode: "file", initialPath: "." });
+  if (path) addPathFile(path);
+}
+
 function closeAttach() {
   attachOpen.value = false;
 }
@@ -415,12 +556,16 @@ const boundSummary = computed(() => {
 const panelOpen = computed(() => rail.open.value && rail.tab.value === "agent");
 
 async function onSubmit(text?: string) {
-  const value = (typeof text === "string" ? text : draft.value).trim();
+  const raw = (typeof text === "string" ? text : draft.value).trim();
+  const items = drafts.value.filter((item) => item.status !== "fail");
+  const value = composeAttachmentPrompt(raw, items) || (items.length ? t("agent.attach_default_prompt") : "");
   if (!value || generating.value) return;
+  const attachments = items.map(toPayload);
   draft.value = "";
+  clearDrafts();
   await nextTick();
   stampComposerField();
-  await send({ message: value });
+  await send({ message: value, attachments });
 }
 
 function onSenderSend(value: string) {
@@ -498,6 +643,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   detachAgentChatEngine();
+  clearDrafts();
   document.removeEventListener("pointerdown", onDocPointerDown);
   document.removeEventListener("keydown", onDocKeydown);
 });
@@ -743,10 +889,28 @@ onBeforeUnmount(() => {
           v-model="draft"
           :placeholder="t('agent.composer_placeholder')"
           :loading="generating"
+          :send-btn-disabled="sendDisabled"
           :textarea-props="senderTextareaProps"
+          :attachments-props="attachmentsProps"
           @send="onSenderSend"
           @stop="stop()"
+          @file-select="onFileSelect"
         >
+          <template #header>
+            <t-attachments
+              v-if="attachmentItems.length"
+              class="agent-attachments"
+              :items="attachmentItems"
+              overflow="scrollX"
+              :image-viewer="true"
+              :removable="true"
+              @remove="onRemoveAttachment"
+              @file-click="onFileClick"
+            />
+          </template>
+          <template #suffix="{ renderPresets }">
+            <component :is="renderPresets(senderActions)" />
+          </template>
           <template #footer-prefix>
             <div ref="attachWrap" class="attach" data-agent-attach-wrap>
               <button
@@ -761,6 +925,15 @@ onBeforeUnmount(() => {
                 <AddIcon size="16px" />
               </button>
               <div v-show="attachOpen" class="menu" data-agent-attach-menu>
+                <p>{{ t("agent.attach_more") }}</p>
+                <button
+                  type="button"
+                  class="menu-action"
+                  data-agent-attach-project
+                  @click="pickProjectFile"
+                >
+                  {{ t("agent.attach_project") }}
+                </button>
                 <p>{{ t("agent.attach_task") }}</p>
                 <input
                   v-model="search"
@@ -801,6 +974,18 @@ onBeforeUnmount(() => {
           @click="stop()"
         />
       </form>
+      <t-dialog
+        v-model:visible="previewOpen"
+        :header="previewTitle || t('agent.attach_preview')"
+        width="520px"
+        attach="body"
+        placement="center"
+        :cancel-btn="null"
+        :confirm-btn="t('agent.close')"
+        @confirm="previewOpen = false"
+      >
+        <pre class="preview-body" data-agent-attach-preview>{{ previewBody }}</pre>
+      </t-dialog>
     </div>
   </t-config-provider>
 </template>
@@ -1109,6 +1294,11 @@ onBeforeUnmount(() => {
   padding: 10px;
 }
 
+.agent-attachments {
+  display: block;
+  width: 100%;
+}
+
 .attach {
   flex: 0 0 var(--composer-btn);
   width: var(--composer-btn);
@@ -1137,6 +1327,31 @@ onBeforeUnmount(() => {
 
 .plus :deep(svg) {
   font-size: 16px;
+}
+
+.menu-action {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.preview-body {
+  margin: 0;
+  max-height: 360px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  font-family: "Fira Code", ui-monospace, monospace;
+  color: var(--text-muted);
 }
 
 .menu {

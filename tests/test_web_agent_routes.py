@@ -91,6 +91,33 @@ def test_agent_agui_streams_each_visible_token_as_text_content(tmp_path, monkeyp
     store.close()
 
 
+def test_agent_agui_forwards_attachments(tmp_path, monkeypatch):
+    store = TaskStore(tmp_path / "tasks.db")
+    _isolate_task_store(monkeypatch, store)
+    captured = {}
+
+    def fake_turn(self, **kwargs):
+        captured.update(kwargs)
+        yield ("session", '{"session_id":"s1","task_id":null}')
+        yield ("token", "ok")
+        yield ("done", '{"session_id":"s1","plan_ids":[]}')
+
+    monkeypatch.setattr("asc.web.agent.WebAgent.run_turn", fake_turn)
+    monkeypatch.setattr(
+        "asc.config.Config.get_active_llm_config",
+        lambda self: {"api_key": "k", "base_url": "http://x", "model": "m"},
+    )
+    client = TestClient(create_app())
+    attachments = [{"kind": "path", "name": "a.csv", "path": str(tmp_path / "a.csv")}]
+    resp = client.post(
+        "/api/agent/agui",
+        json={"prompt": "hi", "attachments": attachments},
+    )
+    assert resp.status_code == 200
+    assert captured.get("attachments") == attachments
+    store.close()
+
+
 def test_agent_agui_is_sse_and_uses_official_event_types(tmp_path, monkeypatch):
     store = TaskStore(tmp_path / "tasks.db")
     _isolate_task_store(monkeypatch, store)

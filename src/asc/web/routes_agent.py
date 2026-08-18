@@ -14,6 +14,7 @@ from fastapi.responses import StreamingResponse
 
 from asc.web.agent import AGENT_TURN_TIMEOUT_SEC, WebAgent
 from asc.web.agent_agui import translate_legacy_events
+from asc.web.agent_attachments import attachments_from_body
 from asc.web.agent_store import agent_store
 from asc.web.agent_tools import AgentToolContext, apply_fix
 from asc.web.i18n import t
@@ -156,6 +157,7 @@ def _agui_turn_args(body: dict[str, Any]) -> dict[str, Any]:
         "message": message,
         "auto_analyze": _as_bool(merged.get("auto_analyze")),
         "form_paths": _form_paths_from_body(merged),
+        "attachments": attachments_from_body(merged),
         "run_id": _opt_str(merged.get("runId") or merged.get("messageID")) or uuid.uuid4().hex,
     }
 
@@ -171,6 +173,7 @@ def _sse_frames(
     llm_client: Any,
     form_paths: list[str] | None = None,
     profile: str = "",
+    attachments: list[Any] | None = None,
 ):
     frames: queue.Queue = queue.Queue()
     session_holder: list[str | None] = [session_id]
@@ -186,6 +189,7 @@ def _sse_frames(
                 llm_client=llm_client,
                 form_paths=form_paths,
                 profile=profile,
+                attachments=attachments,
             ):
                 if event == "session":
                     try:
@@ -240,6 +244,7 @@ def _agui_frames(
     form_paths: list[str] | None = None,
     profile: str = "",
     run_id: str,
+    attachments: list[Any] | None = None,
 ):
     frames: queue.Queue = queue.Queue()
     session_holder: list[str | None] = [session_id]
@@ -257,6 +262,7 @@ def _agui_frames(
                 llm_client=llm_client,
                 form_paths=form_paths,
                 profile=profile,
+                attachments=attachments,
             )
             for payload in translate_legacy_events(
                 events,
@@ -344,6 +350,7 @@ async def agent_stream(request: Request):
             llm_client=llm_client,
             form_paths=_form_paths_from_body(body),
             profile=cookie,
+            attachments=attachments_from_body(body),
         ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
@@ -370,6 +377,7 @@ async def agent_agui(request: Request):
             form_paths=args["form_paths"],
             profile=cookie,
             run_id=args["run_id"],
+            attachments=args["attachments"],
         ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},

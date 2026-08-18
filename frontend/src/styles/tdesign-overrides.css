@@ -133,6 +133,48 @@ html.dark .t-chat-sender__button .t-chat-sender__button__default:not(.t-chat-sen
   background-color: var(--accent);
 }
 
+html.dark .t-chat-sender__upload,
+html.dark .t-chat-sender .t-button--variant-text {
+  color: var(--text-muted);
+}
+
+html.dark .t-chat-sender__upload:hover,
+html.dark .t-chat-sender .t-button--variant-text:hover {
+  color: var(--accent);
+}
+
+html.dark .t-attachments,
+html.dark .t-attachments-list,
+html.dark .t-attachments-list-wrap,
+html.dark .t-chat-sender__attachments,
+html.dark .t-chat-sender__attachment,
+html.dark .t-filecard,
+html.dark .t-filecard-item,
+html.dark .t-chat-sender .t-chat-sender__header {
+  background: var(--overlay);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+html.dark .t-filecard-overview,
+html.dark .t-filecard-content,
+html.dark .t-filecard-name,
+html.dark .t-filecard-desc {
+  color: var(--text);
+}
+
+html.dark .t-filecard-desc {
+  color: var(--text-muted);
+}
+
+html.dark .t-filecard-preview-mask {
+  background: rgba(10, 10, 12, 0.72);
+}
+
+html.dark .t-filecard-preview-close {
+  color: var(--accent);
+}
+
 html.dark .t-chat__text .t-chat__text--user {
   background: transparent;
   border: 0;

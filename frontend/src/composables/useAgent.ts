@@ -2,6 +2,7 @@ import { ref } from "vue";
 import type { ChatMessagesData, ChatRequestParams, ChatServiceConfig, SSEChunkData } from "@tdesign-vue-next/chat";
 import { ApiError, httpJson } from "@/api/http";
 import { i18n } from "@/i18n";
+import type { AgentAttachmentPayload } from "@/composables/agentAttachments";
 import { collectedFormPaths } from "@/composables/useFormPaths";
 import { useRightRail } from "@/composables/useRightRail";
 import {
@@ -38,6 +39,7 @@ type ChatEngineApi = {
 const sessionId = ref("");
 const boundTaskId = ref("");
 const pendingAutoAnalyze = ref(false);
+const pendingAttachments = ref<AgentAttachmentPayload[]>([]);
 const sessions = ref<AgentSessionSummary[]>([]);
 let engineApi: ChatEngineApi | null = null;
 let bindSeq = 0;
@@ -106,7 +108,11 @@ export const agentChatServiceConfig: ChatServiceConfig = {
       session_id: sessionId.value || undefined,
       task_id: boundTaskId.value || undefined,
       auto_analyze: pendingAutoAnalyze.value || Boolean(params.auto_analyze),
-      form_paths: collectedFormPaths(),
+      form_paths: [
+        ...collectedFormPaths(),
+        ...pendingAttachments.value.map((item) => item.path || "").filter(Boolean),
+      ],
+      attachments: pendingAttachments.value,
     }),
   }),
   onMessage: (chunk) => {
@@ -152,9 +158,14 @@ function replaceMessages(next: ChatMessagesData[]) {
   engineApi?.setMessages(next, "replace");
 }
 
-async function send(opts: { message: string; autoAnalyze?: boolean }): Promise<void> {
+async function send(opts: {
+  message: string;
+  autoAnalyze?: boolean;
+  attachments?: AgentAttachmentPayload[];
+}): Promise<void> {
   if (!engineApi) return;
   pendingAutoAnalyze.value = opts.autoAnalyze === true;
+  pendingAttachments.value = opts.attachments || [];
   try {
     await engineApi.sendUserMessage({
       prompt: opts.message,
@@ -162,6 +173,7 @@ async function send(opts: { message: string; autoAnalyze?: boolean }): Promise<v
     });
   } finally {
     pendingAutoAnalyze.value = false;
+    pendingAttachments.value = [];
   }
 }
 

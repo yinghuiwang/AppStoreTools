@@ -385,6 +385,18 @@ def test_composer_uses_tdesign_chat_sender():
     src = (FRONTEND / "components" / "AgentPanel.vue").read_text(encoding="utf-8")
     assert "t-chat-sender" in src
     assert "ChatSender" in src
+    assert "Attachments" in src
+    assert "t-attachments" in src
+    assert "attachments-props" in src
+    assert 'overflow="scrollX"' in src
+    assert "image-viewer" in src
+    assert "removable" in src
+    assert "file-select" in src
+    assert "@remove" in src
+    assert "file-click" in src
+    assert "renderPresets" in src
+    assert "uploadAttachment" in src
+    assert "data-agent-attach-project" in src
     assert "data-agent-stream" in src
     assert 'type="text"' not in src.split("data-agent-stream", 1)[1].split("</form>", 1)[0]
     assert "minRows: 2" in src
@@ -419,6 +431,8 @@ def test_agent_stream_sends_form_paths():
     src = (FRONTEND / "composables" / "useAgent.ts").read_text(encoding="utf-8")
     assert "collectedFormPaths" in src
     assert "form_paths" in src
+    assert "attachments" in src
+    assert "pendingAttachments" in src
     assert 'protocol: "agui"' in src
     assert "/api/agent/agui" in src
     assert "agentChatServiceConfig" in src

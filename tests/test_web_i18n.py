@@ -287,6 +287,15 @@ def test_agent_attach_i18n_keys():
     assert t("agent.attach", lang="zh") == "添加上下文"
     assert t("agent.attach_task", lang="zh").startswith("绑定失败任务")
     assert "optional" in t("agent.attach_task", lang="en").lower()
+    assert t("agent.attach_file", lang="zh") == "添加附件"
+    assert t("agent.attach_project", lang="zh") == "项目文件"
+    assert t("agent.attach_too_large", lang="en").startswith("File is too large")
+    assert "10 MB" in t("agent.attach_too_large", lang="en")
+    assert "10 MB" in t("agent.attach_too_large", lang="zh")
+    assert t("agent.attach_total_too_large", lang="en").startswith("Attachments exceed")
+    assert "32 MB" in t("agent.attach_total_too_large", lang="en")
+    assert "32 MB" in t("agent.attach_total_too_large", lang="zh")
+    assert t("agent.attach_limit", lang="en").startswith("Too many attachments")
     assert t("agent.close", lang="en") == "Close Agent panel"
     assert "optional" in t("agent.empty", lang="en").lower()
     assert t("agent.sessions", lang="zh") == "会话列表"
