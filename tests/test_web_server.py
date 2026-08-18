@@ -1633,6 +1633,91 @@ def test_guard_status_returns_full_fingerprint(client):
     assert data["current_environment"]["machine"]["app_name"] == "myapp"
 
 
+def test_guard_status_returns_machine_ip_credential_and_profile_name(client):
+    """Web Guard page groups these fields; API must not drop any of them."""
+    from unittest.mock import patch, MagicMock
+
+    mock_guard = MagicMock()
+    mock_guard.get_status.return_value = {
+        "enabled": True,
+        "app_notes": {"123": "office"},
+        "bundle_bindings": {},
+        "bindings": {
+            "machine": {
+                "SERIAL-FULL": {
+                    "app_id": "123",
+                    "app_name": "myapp",
+                    "issuer_id": "ISS1",
+                    "bound_at": "2026-05-18T10:00:00",
+                    "last_checked": "2026-05-19T11:00:00",
+                }
+            },
+            "ip": {
+                "1.2.3.4": {
+                    "app_id": "123",
+                    "app_name": "myapp",
+                    "issuer_id": "ISS1",
+                    "bound_at": "2026-05-18T10:00:00",
+                }
+            },
+            "credential": {
+                "KEY1": {
+                    "app_id": "123",
+                    "app_name": "myapp",
+                    "issuer_id": "ISS1",
+                    "bound_at": "2026-05-18T10:00:00",
+                }
+            },
+        },
+    }
+    mock_guard.current_environment.return_value = {
+        "machine": {
+            "fingerprint": "SERIAL-FULL",
+            "bound": True,
+            "app_id": "123",
+            "app_name": "myapp",
+            "note": "office",
+        },
+        "ip": {
+            "address": "1.2.3.4",
+            "available": True,
+            "bound": True,
+            "app_id": "123",
+            "app_name": "myapp",
+            "note": "office",
+        },
+    }
+    mock_config = MagicMock()
+    mock_config.list_apps.return_value = ["myapp"]
+    mock_config.get_app_profile.return_value = {"app_id": "123"}
+    with patch("asc.guard.Guard", return_value=mock_guard), \
+         patch("asc.config.Config", return_value=mock_config):
+        resp = client.get("/api/guard/status")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["enabled"] is True
+    assert "error" not in data or not data["error"]
+    assert "current_profile" in data
+    assert data["app_notes"]["123"] == "office"
+    assert list(data["bindings"]["machine"]) == ["SERIAL-FULL"]
+    assert list(data["bindings"]["ip"]) == ["1.2.3.4"]
+    assert list(data["bindings"]["credential"]) == ["KEY1"]
+    assert data["bindings"]["machine"]["SERIAL-FULL"]["profile_name"] == "myapp"
+    assert data["bindings"]["ip"]["1.2.3.4"]["profile_name"] == "myapp"
+    assert data["bindings"]["credential"]["KEY1"]["profile_name"] == "myapp"
+    assert data["bindings"]["credential"]["KEY1"]["issuer_id"] == "ISS1"
+    env = data["current_environment"]
+    assert env["machine"]["fingerprint"] == "SERIAL-FULL"
+    assert env["machine"]["bound"] is True
+    assert env["machine"]["app_id"] == "123"
+    assert env["machine"]["profile_name"] == "myapp"
+    assert env["machine"]["note"] == "office"
+    assert env["ip"]["address"] == "1.2.3.4"
+    assert env["ip"]["available"] is True
+    assert env["ip"]["bound"] is True
+    assert env["ip"]["profile_name"] == "myapp"
+
+
 def test_guard_note_api_updates_app_note(client):
     from unittest.mock import patch, MagicMock
     mock_guard = MagicMock()

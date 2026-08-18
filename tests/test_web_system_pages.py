@@ -130,6 +130,10 @@ def test_guard_tab_restores_old_information_architecture() -> None:
     assert 't("guard.machine")' in src
     assert 't("guard.ip")' in src
     assert 't("guard.credential")' in src
+    assert 'appendValue(ensure(info), "credential"' in src
+    assert 'v-if="row.credential"' in src
+    assert 'v-if="row.machine"' in src
+    assert 'v-if="row.ip"' in src
     assert 't("guard.app_id")' in src
     assert 't("guard.manual_add")' in src
     assert 't("guard.save_note")' in src
