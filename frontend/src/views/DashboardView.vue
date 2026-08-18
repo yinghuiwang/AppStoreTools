@@ -106,6 +106,27 @@ function formatDuration(seconds: number) {
   return m >= 1 ? t("index.duration.hours_minutes", { h, m }) : t("index.duration.hours", { n: h });
 }
 
+function durationUnit(kind: "seconds" | "minutes" | "hours") {
+  return String(t(`index.duration.${kind}`, { n: "" })).trim();
+}
+
+function durationStat(seconds: number) {
+  const n = Math.max(0, Math.floor(seconds || 0));
+  if (n < 60) return { value: n, unit: durationUnit("seconds"), suffix: "" };
+  if (n < 3600) return { value: Math.floor(n / 60), unit: durationUnit("minutes"), suffix: "" };
+  const h = Math.floor(n / 3600);
+  const m = Math.floor((n % 3600) / 60);
+  return {
+    value: h,
+    unit: durationUnit("hours"),
+    suffix: m >= 1 ? String(t("index.duration.minutes", { n: m })) : "",
+  };
+}
+
+const savedStat = computed(() => durationStat(summary.value?.metrics.saved_seconds || 0));
+const failedStat = computed(() => durationStat(summary.value?.metrics.failed_seconds || 0));
+const successRate = computed(() => summary.value?.metrics.success_rate ?? null);
+
 function statusLabel(status: string) {
   const key = `index.status.${status}`;
   const label = t(key);
@@ -299,29 +320,52 @@ onUnmounted(() => {
 
     <div class="dash-top">
       <section v-if="loading && !summary" class="metrics-loading" :aria-label="t('index.summary_aria')">
-        <PageLoading size="block" />
+        <PageLoading size="page" />
       </section>
       <template v-else-if="summary">
         <section class="metrics" :aria-label="t('index.metrics_aria')">
           <article class="metric metric--accent">
-            <span>{{ t("index.metric_saved") }}</span>
-            <strong>{{ formatDuration(summary.metrics.saved_seconds) }}</strong>
-            <small>{{ t("index.metric_saved_hint") }}</small>
+            <t-statistic
+              :title='t("index.metric_saved")'
+              :value="savedStat.value"
+              :unit="savedStat.unit"
+              :suffix="savedStat.suffix"
+              :extra='t("index.metric_saved_hint")'
+              color="blue"
+              trend="increase"
+            />
           </article>
-          <article class="metric metric--ok">
-            <span>{{ t("index.metric_success") }}</span>
-            <strong>{{ summary.metrics.success_rate == null ? "—" : `${summary.metrics.success_rate}%` }}</strong>
-            <small>{{ t("index.metric_completed", { n: summary.metrics.completed_count }) }}</small>
+          <article class="metric metric--ok" :class="{ 'is-empty': successRate == null }">
+            <t-statistic
+              :title='t("index.metric_success")'
+              :value="successRate ?? 0"
+              :unit="successRate == null ? '' : '%'"
+              :extra='t("index.metric_completed", { n: summary.metrics.completed_count })'
+              color="green"
+              :trend="successRate == null ? undefined : 'increase'"
+              trend-placement="right"
+            >
+              <template v-if="successRate == null" #suffix>—</template>
+            </t-statistic>
           </article>
           <article class="metric metric--err">
-            <span>{{ t("index.metric_failed") }}</span>
-            <strong>{{ formatDuration(summary.metrics.failed_seconds) }}</strong>
-            <small>{{ t("index.metric_failed_hint") }}</small>
+            <t-statistic
+              :title='t("index.metric_failed")'
+              :value="failedStat.value"
+              :unit="failedStat.unit"
+              :suffix="failedStat.suffix"
+              :extra='t("index.metric_failed_hint")'
+              color="red"
+              trend="decrease"
+            />
           </article>
           <article class="metric metric--info">
-            <span>{{ t("index.metric_running") }}</span>
-            <strong>{{ summary.metrics.running_count }}</strong>
-            <small>{{ t("index.metric_running_hint") }}</small>
+            <t-statistic
+              :title='t("index.metric_running")'
+              :value="summary.metrics.running_count"
+              :extra='t("index.metric_running_hint")'
+              :color="'var(--info)'"
+            />
           </article>
         </section>
         <details class="estimate">
@@ -560,10 +604,30 @@ onUnmounted(() => {
 .metric--ok::before { background: var(--ok); }
 .metric--err::before { background: var(--err); }
 .metric--info::before { background: var(--info); }
-.metric strong {
-  font-size: 20px;
-  margin: 4px 0 2px;
+.metric :deep(.t-statistic) { width: 100%; }
+.metric :deep(.t-statistic-title) {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.3;
 }
+.metric :deep(.t-statistic-content) {
+  align-items: baseline;
+  margin: 4px 0 2px;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+.metric :deep(.t-statistic-content-unit),
+.metric :deep(.t-statistic-content-suffix) {
+  font-size: 13px;
+  font-weight: 500;
+}
+.metric :deep(.t-statistic-extra) {
+  color: var(--text-faint);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.metric.is-empty :deep(.t-statistic-content-value) { display: none; }
 .estimate {
   padding: 4px 2px 0;
   color: var(--text-muted);

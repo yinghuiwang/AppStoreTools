@@ -204,6 +204,17 @@ class TestWhatsNewVueTranslateAndUploadAction:
         assert 't("whats_new.translate_upload")' in vue
         assert 't("whats_new.upload_direct")' in vue
         assert '"/api/whats-new/run"' in vue
+        assert "LocaleSelectTabs" in vue
+        tags = (ROOT / "frontend" / "src" / "components" / "LocaleSelectTabs.vue").read_text(encoding="utf-8")
+        assert "t-checkbox-group" in tags
+        assert "t-checkbox" in tags
+        assert "check-all" in tags
+        assert "t-tag" not in tags
+        assert "t-check-tag" not in tags
+        assert "locale-code" in tags
+        assert "@click.stop" in tags
+        assert "onShowClick" in tags
+        assert "locales.include_upload" in tags
         assert "translate: true" in vue
         assert "enterRun(task_id" in vue
         assert "rail.openLogs(task_id)" in vue

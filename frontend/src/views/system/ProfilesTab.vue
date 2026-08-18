@@ -19,6 +19,16 @@ type Detail = {
   already_bound?: boolean;
 };
 
+type ImportCandidate = {
+  suggested_name?: string;
+  env_file_path?: string;
+  app_id?: string;
+  project_root?: string;
+  key_id?: string;
+  key_file?: string;
+  key_file_exists?: boolean;
+};
+
 const { t } = useI18n();
 const browse = useBrowse();
 const { refresh } = useProfile();
@@ -27,6 +37,12 @@ const details = ref<Record<string, Detail>>({});
 const defaultName = ref("");
 const canCreate = ref(true);
 const dialog = ref(false);
+const importOpen = ref(false);
+const importBusy = ref(false);
+const importError = ref("");
+const importCandidates = ref<ImportCandidate[]>([]);
+const importName = ref("");
+const importSetDefault = ref(true);
 const loading = ref(true);
 const loaded = ref(false);
 const editing = ref("");
@@ -140,14 +156,45 @@ async function setDefault(name: string) {
 }
 
 async function importLocal() {
-  const found = await httpJson<{ candidates: { suggested_name?: string }[] }>("/api/profiles/discover-local");
-  const name = found.candidates?.[0]?.suggested_name || "";
-  await httpJson("/api/profiles/import", {
-    method: "POST",
-    body: JSON.stringify({ name, set_default: true }),
-  });
-  await load();
-  await refresh();
+  importError.value = "";
+  const found = await httpJson<{ candidates: ImportCandidate[] }>("/api/profiles/discover-local");
+  const candidates = found.candidates || [];
+  if (!candidates.length) {
+    openCreate();
+    return;
+  }
+  importCandidates.value = candidates;
+  importName.value = candidates[0].suggested_name || "";
+  importSetDefault.value = true;
+  importOpen.value = true;
+}
+
+function skipImport() {
+  importOpen.value = false;
+  openCreate();
+}
+
+async function importCandidate(candidate: ImportCandidate) {
+  if (!candidate.key_file_exists || importBusy.value) return;
+  importError.value = "";
+  importBusy.value = true;
+  try {
+    const name = (importName.value || candidate.suggested_name || "").trim();
+    await httpJson("/api/profiles/import", {
+      method: "POST",
+      body: JSON.stringify({
+        name: name || undefined,
+        set_default: importSetDefault.value,
+      }),
+    });
+    importOpen.value = false;
+    await load();
+    await refresh();
+  } catch {
+    importError.value = t("profiles.import_failed");
+  } finally {
+    importBusy.value = false;
+  }
 }
 
 onMounted(() => { void load(); });
@@ -158,9 +205,9 @@ onMounted(() => { void load(); });
     <div class="card">
       <div class="toolbar">
         <t-button theme="primary" :disabled="!canCreate" :title="canCreate ? t('profiles.add_title') : t('profiles.cannot_create')" @click="openCreate">{{ t("profiles.add") }}</t-button>
-        <t-button @click="importLocal">{{ t("profiles.import_confirm") }}</t-button>
+        <t-button :disabled="!canCreate" @click="importLocal">{{ t("profiles.import_confirm") }}</t-button>
       </div>
-      <PageLoading v-if="loading && !loaded" size="block" />
+      <PageLoading v-if="loading && !loaded" size="page" />
       <p v-else-if="!rows.length" class="empty-state">
         {{ t("profiles.empty") }}
         <span class="empty-hint">{{ t("profiles.empty_hint") }}</span>
@@ -220,6 +267,55 @@ onMounted(() => { void load(); });
       <t-button theme="primary" @click="save">{{ t("common.save") }}</t-button>
     </template>
   </t-dialog>
+  <t-dialog v-model:visible="importOpen" :header="t('profiles.import_title')" width="520px" placement="center">
+    <div class="dialog-form">
+      <p class="import-hint">{{ t("profiles.import_hint") }}</p>
+      <article v-for="item in importCandidates" :key="item.env_file_path || item.suggested_name" class="import-card">
+        <header class="import-head">
+          <span class="name mono">{{ item.suggested_name }}</span>
+          <span class="badge">{{ t("profiles.import_local") }}</span>
+        </header>
+        <dl class="profile-meta">
+          <div class="meta-item">
+            <dt>App ID</dt>
+            <dd class="mono">{{ item.app_id || "—" }}</dd>
+          </div>
+          <div class="meta-item">
+            <dt>{{ t("profiles.import_project") }}</dt>
+            <dd class="mono">{{ item.project_root || "—" }}</dd>
+          </div>
+          <div class="meta-item">
+            <dt>Key ID</dt>
+            <dd class="mono">{{ item.key_id || "—" }}</dd>
+          </div>
+          <div class="meta-item">
+            <dt>{{ t("profiles.key_file") }}</dt>
+            <dd class="mono" :class="{ missing: !item.key_file_exists }">{{ item.key_file || "—" }}</dd>
+          </div>
+        </dl>
+        <t-alert v-if="!item.key_file_exists" theme="error" :title="t('profiles.import_missing_key')" />
+        <label class="field">
+          <span>{{ t("profiles.name") }}</span>
+          <input v-model="importName" class="field-input" :placeholder="item.suggested_name" />
+        </label>
+        <label class="check">
+          <input v-model="importSetDefault" type="checkbox" />
+          {{ t("profiles.import_set_default") }}
+        </label>
+        <t-button
+          theme="primary"
+          :disabled="!item.key_file_exists || importBusy"
+          :loading="importBusy"
+          @click="importCandidate(item)"
+        >{{ importBusy ? t("profiles.importing") : t("profiles.import_confirm") }}</t-button>
+      </article>
+      <t-alert v-if="importError" theme="error" :title="importError" />
+    </div>
+    <template #footer>
+      <t-button @click="skipImport">{{ t("profiles.import_skip") }}</t-button>
+      <t-button @click="importOpen = false">{{ t("common.cancel") }}</t-button>
+    </template>
+  </t-dialog>
 </template>
 
 <style scoped>
@@ -228,6 +324,19 @@ onMounted(() => { void load(); });
   flex-direction: column;
   gap: 12px;
 }
+.import-hint { margin: 0; color: var(--text-muted); font-size: 13px; }
+.import-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.import-head { display: flex; align-items: center; gap: 8px; }
+.check { display: flex; gap: 8px; align-items: center; }
+.missing { color: var(--err); }
 .profiles-page {
   align-self: stretch;
   flex: 1 1 auto;

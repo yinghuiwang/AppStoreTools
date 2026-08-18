@@ -210,7 +210,7 @@ onMounted(() => {
         <h2>{{ t("guard.title") }}</h2>
         <t-button @click="openAdd">{{ t("guard.manual_add") }}</t-button>
       </div>
-      <PageLoading v-if="loading && !loaded" size="block" />
+      <PageLoading v-if="loading && !loaded" size="page" />
       <p v-else-if="!guard" class="err">{{ t("guard.load_failed") }}</p>
       <template v-else>
         <div class="status-row">

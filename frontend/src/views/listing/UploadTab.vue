@@ -8,6 +8,7 @@ import TaskRunBar from "@/components/TaskRunBar.vue";
 import { useBrowse } from "@/composables/useBrowse";
 import { hydrateListingForm } from "@/composables/useFormMemory";
 import { rememberFormPath } from "@/composables/useFormPaths";
+import { useListingScope } from "@/composables/useListingScope";
 import { useProfile } from "@/composables/useProfile";
 import { useRightRail } from "@/composables/useRightRail";
 import { useTaskLog } from "@/composables/useTaskLog";
@@ -17,6 +18,7 @@ const { t } = useI18n();
 const route = useRoute();
 const browse = useBrowse();
 const { snapshot } = useProfile();
+const scope = useListingScope();
 const rail = useRightRail();
 const { setActiveTask } = useTaskLog();
 const { listingTab } = useListingTab();
@@ -37,6 +39,7 @@ watch([csvPath, shotsDir], ([csv, shots]) => {
   rememberFormPath("listing.screenshots_dir", shots);
 }, { immediate: true });
 const checkMsg = ref("");
+const checkDetail = ref<{ version?: string; state?: string } | null>(null);
 const alert = ref("");
 const checkingEnv = ref(false);
 
@@ -54,8 +57,13 @@ async function checkEnv() {
   alert.value = "";
   checkingEnv.value = true;
   try {
-    const data = await httpJson<{ ok?: boolean; message?: string }>("/api/metadata/check", { method: "POST" });
+    const data = await httpJson<{
+      ok?: boolean;
+      message?: string;
+      detail?: { version?: string; state?: string };
+    }>("/api/metadata/check", { method: "POST" });
     checkMsg.value = data.message || "";
+    checkDetail.value = data.detail || null;
     if (data.ok === false && data.message) alert.value = data.message;
   } catch (err) {
     if (err instanceof ApiError && err.status === 400) alert.value = apiErrorMessage(err);
@@ -67,6 +75,19 @@ async function checkEnv() {
 
 async function run() {
   alert.value = "";
+  if (scope.loaded.value && scope.dirty.value) {
+    alert.value = t("metadata.wb_dirty_block");
+    return;
+  }
+  if (
+    scope.loaded.value
+    && (includeMetadata.value || includeScreenshots.value)
+    && !scope.hasMetadataSelection()
+    && !scope.hasScreenshotSelection()
+  ) {
+    alert.value = t("metadata.wb_empty_selection");
+    return;
+  }
   try {
     const body = new URLSearchParams();
     body.set("csv_path", csvPath.value);
@@ -75,6 +96,9 @@ async function run() {
     body.set("include_screenshots", includeScreenshots.value ? "true" : "");
     body.set("dry_run", dryRun.value ? "true" : "");
     body.set("verbose", verbose.value ? "true" : "");
+    body.set("locales_json", scope.localesJson());
+    body.set("fields_by_locale_json", scope.fieldsByLocaleJson());
+    body.set("screenshot_scopes_json", scope.screenshotScopesJson());
     const { task_id } = await httpForm<{ task_id: string }>("/api/metadata/run", body);
     enterRun(task_id);
     rail.openLogs(task_id);
@@ -138,6 +162,9 @@ onMounted(() => {
         <t-button theme="primary" :disabled="empty" @click="run">{{ t("common.submit") }}</t-button>
       </div>
       <p v-if="checkMsg">{{ checkMsg }}</p>
+      <p v-if="checkDetail?.version" class="muted">
+        {{ checkDetail.version }}<span v-if="checkDetail.state"> · {{ checkDetail.state }}</span>
+      </p>
     </div>
     <TaskRunBar v-if="isRun && taskId" :task-id="taskId" @back="backToForm" />
   </div>
@@ -147,4 +174,5 @@ onMounted(() => {
 .card { display: flex; flex-direction: column; gap: 10px; }
 .check { display: flex; gap: 8px; align-items: center; }
 .lbl { display: block; font-size: 12px; color: var(--text-muted); }
+.muted { color: var(--text-muted); font-size: 12px; }
 </style>

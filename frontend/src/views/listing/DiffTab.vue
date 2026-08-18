@@ -6,6 +6,7 @@ import PageLoading from "@/components/PageLoading.vue";
 import { hydrateListingForm } from "@/composables/useFormMemory";
 import { rememberFormPath } from "@/composables/useFormPaths";
 import { useImageViewer } from "@/composables/useImageViewer";
+import { useListingScope } from "@/composables/useListingScope";
 import { useProfile } from "@/composables/useProfile";
 import { useRightRail } from "@/composables/useRightRail";
 import { useTaskLog } from "@/composables/useTaskLog";
@@ -19,6 +20,7 @@ type Version = { versionString?: string; appStoreState?: string };
 
 const { t } = useI18n();
 const { snapshot } = useProfile();
+const scope = useListingScope();
 const viewer = useImageViewer();
 const rail = useRightRail();
 const { listingTab } = useListingTab();
@@ -37,7 +39,7 @@ watch([csvPath, shotsDir], ([csv, shots]) => {
 const mtime = ref<number | null>(null);
 const version = ref<Version | null>(null);
 const locales = ref<LocaleDiff[]>([]);
-const filter = ref<"all" | "diff">("all");
+const filter = ref<"all" | "diff" | "local" | "asc">("all");
 const selected = ref<Record<string, string[]>>({});
 const selectedScopes = ref<Record<string, boolean>>({});
 const alert = ref<{ level: string; message: string } | null>(null);
@@ -47,12 +49,27 @@ const pullLog = channelOf(pullTaskId);
 const loading = ref(false);
 const loaded = ref(false);
 
-const visible = computed(() => {
-  if (filter.value === "all") return locales.value;
-  return locales.value.filter((loc) =>
-    loc.fields.some((f) => f.status !== "equal") || loc.screenshots.length,
-  );
-});
+function fieldVisible(field: FieldDiff): boolean {
+  if (filter.value === "all") return true;
+  if (filter.value === "diff") return field.status !== "equal";
+  if (filter.value === "local") return field.status === "local_only";
+  if (filter.value === "asc") return field.status === "asc_only";
+  return true;
+}
+
+const visible = computed(() =>
+  locales.value.filter((loc) => loc.fields.some(fieldVisible) || loc.screenshots.length > 0),
+);
+
+function guardDirty(): boolean {
+  if (!scope.dirty.value) return false;
+  window.alert(t("metadata.diff_dirty_block"));
+  return true;
+}
+
+function selectDiffsOnly() {
+  scope.selectDiffsOnly(locales.value);
+}
 
 function scopeKey(locale: string, dtype: string) {
   return `${locale}::${dtype}`;
@@ -83,6 +100,7 @@ function openLocal(group: Shot[], start: number) {
 }
 
 async function load() {
+  if (guardDirty()) return;
   alert.value = null;
   conflict.value = false;
   loading.value = true;
@@ -122,6 +140,7 @@ async function load() {
 }
 
 async function pullText() {
+  if (guardDirty()) return;
   const selections = Object.entries(selected.value)
     .map(([locale, fields]) => ({ locale, fields }))
     .filter((row) => row.fields.length);
@@ -151,6 +170,7 @@ async function pullText() {
 }
 
 async function pullShots() {
+  if (guardDirty()) return;
   const scopes = Object.entries(selectedScopes.value)
     .filter(([, on]) => on)
     .map(([key]) => {
@@ -206,13 +226,16 @@ onMounted(() => { void load(); });
           :disabled="loading && !loaded"
           @click="load"
         >{{ t("metadata.diff_load") }}</t-button>
-        <t-button @click="filter = 'all'">{{ t("metadata.diff_filter_all") }}</t-button>
-        <t-button @click="filter = 'diff'">{{ t("metadata.diff_filter_diff") }}</t-button>
+        <t-button :class="{ on: filter === 'all' }" @click="filter = 'all'">{{ t("metadata.diff_filter_all") }}</t-button>
+        <t-button :class="{ on: filter === 'diff' }" @click="filter = 'diff'">{{ t("metadata.diff_filter_diff") }}</t-button>
+        <t-button :class="{ on: filter === 'local' }" @click="filter = 'local'">{{ t("metadata.diff_filter_local") }}</t-button>
+        <t-button :class="{ on: filter === 'asc' }" @click="filter = 'asc'">{{ t("metadata.diff_filter_asc") }}</t-button>
+        <t-button @click="selectDiffsOnly">{{ t("metadata.diff_select_diffs") }}</t-button>
         <t-button theme="primary" @click="pullText">{{ t("metadata.diff_pull") }}</t-button>
         <t-button @click="pullShots">{{ t("metadata.diff_shots_pull") }}</t-button>
       </div>
     </div>
-    <PageLoading v-if="loading && !loaded" size="block" />
+    <PageLoading v-if="loading && !loaded" size="page" />
     <p v-else-if="!locales.length" class="empty-state">{{ t("metadata.diff_empty") }}</p>
     <section v-for="loc in visible" :key="loc.locale" class="card">
       <h3>{{ loc.locale }}</h3>
@@ -227,7 +250,7 @@ onMounted(() => { void load(); });
           </tr>
         </thead>
         <tbody>
-          <tr v-for="field in loc.fields" :key="field.field" v-show="filter === 'all' || field.status !== 'equal'">
+          <tr v-for="field in loc.fields" :key="field.field" v-show="fieldVisible(field)">
             <td>
               <input
                 type="checkbox"
@@ -273,4 +296,5 @@ th, td { border-bottom: 1px solid var(--border); padding: 6px; vertical-align: t
 .cols img { width: 72px; height: 128px; object-fit: cover; margin: 4px; border-radius: 6px; cursor: zoom-in; border: 1px solid var(--border); }
 .check { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
 .shot-block { margin-top: 10px; }
+.field-row :deep(.t-button.on) { color: var(--accent); border-color: rgba(143, 245, 210, 0.28); }
 </style>

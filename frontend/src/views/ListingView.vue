@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onActivated, onMounted, provide, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
+import { useListingScope } from "@/composables/useListingScope";
 import {
   DEFAULT_LISTING_TAB,
   LISTING_TABS,
@@ -12,8 +14,10 @@ import UploadTab from "./listing/UploadTab.vue";
 
 defineOptions({ name: "ListingView" });
 
+const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
+const scope = useListingScope();
 const reloadTick = ref(0);
 provide("listingReload", reloadTick);
 const { listingTab, setListingTab } = useListingTab();
@@ -25,6 +29,10 @@ const tab = computed({
     return LISTING_TABS.has(listingTab.value) ? listingTab.value : DEFAULT_LISTING_TAB;
   },
   set(value: string) {
+    if (value === "diff" && scope.dirty.value) {
+      window.alert(t("metadata.diff_dirty_block"));
+      return;
+    }
     const next = LISTING_TABS.has(value) ? value : DEFAULT_LISTING_TAB;
     setListingTab(next);
     void router.replace({ query: { ...route.query, tab: next } });

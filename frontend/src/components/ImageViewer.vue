@@ -50,6 +50,17 @@ function onMove(event: PointerEvent) {
 
 function onUp() { dragging = false; }
 
+function download() {
+  const item = current.value;
+  if (!item?.src) return;
+  const link = document.createElement("a");
+  link.href = item.src;
+  link.download = item.title || "screenshot";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
 onMounted(() => window.addEventListener("keydown", onKey));
 onUnmounted(() => window.removeEventListener("keydown", onKey));
 </script>
@@ -65,6 +76,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKey));
         <button type="button" @click="transform.flipX = !transform.flipX">↔</button>
         <button type="button" @click="transform.flipY = !transform.flipY">↕</button>
         <button type="button" @click="resetTransform">reset</button>
+        <button type="button" @click="download">{{ $t("metadata.shots_lightbox_download") }}</button>
         <button type="button" @click="prev">←</button>
         <button type="button" @click="next">→</button>
         <button type="button" @click="close">{{ $t("metadata.shots_lightbox_close") }}</button>

@@ -170,6 +170,11 @@ def test_profiles_tab_uses_full_width_wrapping_cards() -> None:
     assert "<t-dialog" in src
     assert src.find("profiles-page") < src.find("<t-dialog")
     assert "dialog-form" in src
+    assert "importCandidates" in src
+    assert "profiles.import_hint" in src
+    assert "profiles.import_skip" in src
+    assert "importSetDefault" in src
+    assert "candidates[0]" not in src or "importName.value = candidates[0]" in src
 
 
 def test_retry_paths_map_legacy_system_tabs() -> None:

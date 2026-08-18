@@ -104,6 +104,9 @@ def test_task_log_panel_binds_active_task() -> None:
     assert 'data-log-task-id' in src
     assert "logTaskId" in src
     assert "setActiveTask" in src or "subscribe(" in src
+    assert "errorsOnly" in src
+    assert "drawer.errors_only" in src
+    assert "visibleLines" in src
 
 
 def test_dashboard_log_buttons_open_logs() -> None:

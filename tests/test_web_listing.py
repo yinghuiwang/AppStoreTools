@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 
@@ -743,12 +744,15 @@ def test_listing_screenshots_replace_rejects_new_name_traversal(client, tmp_path
     assert not (shots / "evil.png").exists()
 
 
-def test_upload_tab_has_scope_without_locale_checkboxes():
-    """Upload tab only chooses metadata/screenshot scope; locales come from CSV + shot dirs."""
+def test_upload_tab_forwards_workbench_scope_without_own_checkboxes():
+    """Upload tab forwards Local/Diff checkboxes; it does not host its own locale grid."""
     src = Path("frontend/src/views/listing/UploadTab.vue").read_text(encoding="utf-8")
-    assert "fields_by_locale_json" not in src
-    assert "screenshot_scopes_json" not in src
-    assert "locales_json" not in src
+    assert "useListingScope" in src
+    assert "locales_json" in src
+    assert "fields_by_locale_json" in src
+    assert "screenshot_scopes_json" in src
+    assert "metadata.wb_dirty_block" in src
+    assert "metadata.wb_empty_selection" in src
     assert "selectedLocales" not in src
     assert "toggleLocale" not in src
     assert "toggleAll" not in src
@@ -762,6 +766,17 @@ def test_upload_tab_has_scope_without_locale_checkboxes():
     assert "includeMetadata" in src
     assert "includeScreenshots" in src
     assert "metadata.scope" in src
+
+
+def test_listing_scope_composable_matches_old_payloads():
+    src = Path("frontend/src/composables/useListingScope.ts").read_text(encoding="utf-8")
+    assert "localesJson" in src
+    assert "fieldsByLocaleJson" in src
+    assert "screenshotScopesJson" in src
+    assert "selectDiffsOnly" in src
+    assert "local_only" in src
+    assert "hasMetadataSelection" in src
+    assert "hasScreenshotSelection" in src
 
 
 def test_listing_view_tabs_start_with_upload():
@@ -796,6 +811,20 @@ def test_listing_local_tab_has_screenshot_workbench():
     assert ':icon="AddIcon"' not in src
     assert "<template #icon>" in src
     assert 'shape="square"' in src
+    assert "useListingScope" in src
+    assert "openAddShot(current.locale, '')" in src
+    assert "selectAllLocales" in src
+    assert "LocaleSelectTabs" in src
+    tags = Path("frontend/src/components/LocaleSelectTabs.vue").read_text(encoding="utf-8")
+    assert "t-checkbox-group" in tags
+    assert "t-checkbox" in tags
+    assert "check-all" in tags
+    assert "t-tag" not in tags
+    assert "t-check-tag" not in tags
+    assert "locale-code" in tags
+    assert "@click.stop" in tags
+    assert "selectAllField" in src
+    assert "setShotSelected" in src
 
 
 def test_listing_screenshots_add_requires_profile(client, tmp_path):
@@ -1011,6 +1040,11 @@ def test_listing_diff_tab_ui():
     assert "metadata.diff_shots_confirm" in src
     assert "skipNotify" in src
     assert "openLogs" in src
+    assert "useListingScope" in src
+    assert "selectDiffsOnly" in src
+    assert "diff_filter_local" in src
+    assert "diff_filter_asc" in src
+    assert "diff_select_diffs" in src
 
 
 def test_listing_diff_includes_asc_screenshots(client, tmp_path):

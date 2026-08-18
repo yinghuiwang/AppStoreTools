@@ -41,20 +41,31 @@ function clearBootChrome(root: HTMLElement) {
   root.classList.remove("spa-boot");
 }
 
+function bootLogo(): HTMLImageElement {
+  const logo = document.createElement("img");
+  logo.className = "spa-boot__logo";
+  logo.src = "/static/logo.svg";
+  logo.alt = "";
+  logo.width = 56;
+  logo.height = 56;
+  return logo;
+}
+
 function renderBootLoading(root: HTMLElement) {
   if (spaMounted) return;
   root.textContent = "";
   root.className = "spa-boot";
   const wrap = document.createElement("div");
-  wrap.className = "spa-boot__row";
+  wrap.className = "spa-boot__stack";
   wrap.setAttribute("role", "status");
   wrap.setAttribute("aria-busy", "true");
   const icon = document.createElement("span");
   icon.className = "spa-boot__spinner";
   icon.setAttribute("aria-hidden", "true");
   const label = document.createElement("span");
+  label.className = "spa-boot__text";
   label.textContent = String(i18n.global.t("spa.booting"));
-  wrap.append(icon, label);
+  wrap.append(bootLogo(), icon, label);
   root.append(wrap);
 }
 
@@ -62,6 +73,8 @@ function renderBootFailed(root: HTMLElement, retry: () => void) {
   if (spaMounted) return;
   root.textContent = "";
   root.className = "spa-boot";
+  const wrap = document.createElement("div");
+  wrap.className = "spa-boot__stack";
   const p = document.createElement("p");
   p.className = "spa-boot__msg";
   p.textContent = String(i18n.global.t("spa.boot_failed"));
@@ -70,7 +83,8 @@ function renderBootFailed(root: HTMLElement, retry: () => void) {
   btn.className = "spa-boot__retry";
   btn.textContent = String(i18n.global.t("spa.retry"));
   btn.onclick = () => void retry();
-  root.append(p, btn);
+  wrap.append(bootLogo(), p, btn);
+  root.append(wrap);
 }
 
 async function boot() {

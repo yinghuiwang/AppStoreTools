@@ -260,6 +260,16 @@ def test_urls_locales_i18n_keys():
     assert t("api.urls_locales_required", lang="en") == "Select at least one target locale"
     assert "selected" in t("urls.locales_selected", lang="en", selected=2, total=5)
     assert "已选" in t("urls.locales_selected", lang="zh", selected=2, total=5)
+    assert t("locales.include_upload", lang="zh") == "纳入本次上传"
+    assert t("locales.include_upload", lang="en") == "Include in this upload"
+    assert "勾选框" in t("urls.locales_hint", lang="zh")
+    assert "提交" in t("urls.locales_hint", lang="zh")
+    assert "再次点击" not in t("urls.locales_hint", lang="zh")
+    assert "checkbox" in t("urls.locales_hint", lang="en").lower()
+    assert "submit" in t("urls.locales_hint", lang="en").lower()
+    assert "click the current tag again" not in t("urls.locales_hint", lang="en").lower()
+    assert "en-US" in t("urls.locale_apply_hint", lang="en", locale="en-US")
+    assert "en-US" in t("urls.locale_apply_hint", lang="zh", locale="en-US")
 
 
 def test_build_phase_progress_i18n_keys():

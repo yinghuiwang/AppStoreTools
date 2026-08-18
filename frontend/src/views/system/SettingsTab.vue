@@ -169,13 +169,13 @@ onMounted(async () => {
 
 <template>
   <div class="page-stack">
+    <PageLoading v-if="loading && !loaded" size="page" />
     <div class="card">
       <div class="toolbar">
         <h2>{{ t("settings.llm_title") }}</h2>
         <t-button :disabled="loading" @click="openCreate">{{ t("settings.add_config") }}</t-button>
       </div>
-      <PageLoading v-if="loading && !loaded" size="block" />
-      <template v-else>
+      <template v-if="loaded">
       <div v-if="showForm" class="form-box">
         <p>{{ isEditing ? t("settings.edit_config") : t("settings.new_config") }}</p>
         <label class="field">
@@ -212,8 +212,7 @@ onMounted(async () => {
         <h2>{{ t("settings.webhook_title") }}</h2>
         <t-button theme="primary" :disabled="loading" @click="saveWebhook">{{ t("common.save") }}</t-button>
       </div>
-      <PageLoading v-if="loading && !loaded" size="block" />
-      <template v-else>
+      <template v-if="loaded">
       <p v-if="webhookError" class="err">{{ webhookError }}</p>
       <label class="check"><input v-model="webhook.enabled" type="checkbox" /> {{ t("settings.webhook_enable") }}</label>
       <div class="split">

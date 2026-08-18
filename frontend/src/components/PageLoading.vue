@@ -7,7 +7,7 @@ const props = withDefaults(
   defineProps<{
     /** Override default `common.loading` label. */
     text?: string;
-    /** page: reserved for rare full-region placeholders; prefer block/inline in business UI. */
+    /** page: viewport-centered overlay; prefer block/inline in business UI. */
     size?: "page" | "block" | "inline";
   }>(),
   { size: "block" },
@@ -15,20 +15,36 @@ const props = withDefaults(
 
 const { t } = useI18n();
 const label = computed(() => props.text || t("common.loading"));
-const iconSize = computed(() => (props.size === "inline" ? "14px" : "18px"));
+const iconSize = computed(() => {
+  if (props.size === "inline") return "14px";
+  if (props.size === "page") return "22px";
+  return "18px";
+});
+const logoSrc = "/static/logo.svg";
 </script>
 
 <template>
-  <div
-    class="page-loading"
-    :class="`is-${size}`"
-    role="status"
-    :aria-busy="true"
-    :aria-label="label"
-  >
-    <LoadingIcon class="page-loading__icon" :size="iconSize" />
-    <span class="page-loading__text">{{ label }}</span>
-  </div>
+  <!-- Teleport page overlay to body so .shell-main overflow cannot trap `fixed`. -->
+  <Teleport to="body" :disabled="size !== 'page'">
+    <div
+      class="page-loading"
+      :class="`is-${size}`"
+      role="status"
+      :aria-busy="true"
+      :aria-label="label"
+    >
+      <img
+        v-if="size === 'page'"
+        class="page-loading__logo"
+        :src="logoSrc"
+        alt=""
+        width="56"
+        height="56"
+      />
+      <LoadingIcon class="page-loading__icon" :size="iconSize" />
+      <span class="page-loading__text">{{ label }}</span>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -42,9 +58,25 @@ const iconSize = computed(() => (props.size === "inline" ? "14px" : "18px"));
 }
 
 .page-loading.is-page {
+  position: fixed;
+  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   justify-content: center;
-  min-height: 72px;
-  padding: 16px 8px;
+  gap: 16px;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text-muted);
 }
 
 .page-loading.is-block {
@@ -58,9 +90,22 @@ const iconSize = computed(() => (props.size === "inline" ? "14px" : "18px"));
   font-size: 12px;
 }
 
+.page-loading__logo {
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  box-shadow:
+    0 0 0 1px var(--border),
+    0 10px 36px var(--accent-glow);
+}
+
 .page-loading__icon {
   color: var(--accent-dim);
   animation: page-loading-spin 0.85s linear infinite;
+}
+
+.page-loading.is-page .page-loading__text {
+  letter-spacing: 0.02em;
 }
 
 .page-loading__text {

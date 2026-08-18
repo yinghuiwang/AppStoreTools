@@ -9,18 +9,21 @@ import { useBrowse } from "@/composables/useBrowse";
 import { hydrateListingForm } from "@/composables/useFormMemory";
 import { rememberFormPath } from "@/composables/useFormPaths";
 import { useImageViewer } from "@/composables/useImageViewer";
+import { LISTING_FIELDS, useListingScope } from "@/composables/useListingScope";
 import { useProfile } from "@/composables/useProfile";
+import LocaleSelectTabs from "@/components/LocaleSelectTabs.vue";
 import LocalePicker from "./LocalePicker.vue";
 
 type Shot = { file_name: string; order: number; thumb_url: string; local_path: string; remote_id: string };
 type LocaleRow = { locale: string; fields: Record<string, string>; screenshots: Record<string, Shot[]> };
 type ShotPick = { kind: "add"; locale: string; displayType: string } | { kind: "replace"; path: string };
 
-const FIELDS = ["name", "subtitle", "description", "keywords", "supportUrl", "marketingUrl", "privacyPolicyUrl"];
+const FIELDS = LISTING_FIELDS;
 
 const { t } = useI18n();
 const browse = useBrowse();
 const viewer = useImageViewer();
+const scope = useListingScope();
 const { snapshot } = useProfile();
 const reloadTick = inject<Ref<number>>("listingReload", ref(0));
 const listing = hydrateListingForm(snapshot.value?.current_profile || "", {
@@ -43,6 +46,25 @@ const loading = ref(false);
 const loaded = ref(false);
 const empty = computed(() => (snapshot.value?.current_profile || "") === "");
 const current = computed(() => locales.value.find((row) => row.locale === active.value) || locales.value[0]);
+const localeCodes = computed(() => locales.value.map((row) => row.locale));
+const selectedCodes = computed(() => localeCodes.value.filter((code) => scope.isLocaleSelected(code)));
+
+function syncSelected(next: string[]) {
+  const set = new Set(next);
+  const all = localeCodes.value;
+  if (next.length === all.length && all.every((code) => set.has(code))) {
+    scope.selectAllLocales(true);
+    return;
+  }
+  if (next.length === 0) {
+    scope.selectAllLocales(false);
+    return;
+  }
+  for (const code of all) {
+    const on = set.has(code);
+    if (scope.isLocaleSelected(code) !== on) scope.setLocaleSelected(code, on);
+  }
+}
 const shotFileInput = ref<HTMLInputElement | null>(null);
 const shotPick = ref<ShotPick | null>(null);
 
@@ -57,6 +79,7 @@ async function load() {
     );
     locales.value = data.snapshot?.locales || [];
     mtime.value = data.mtime;
+    scope.hydrateFromLocal(locales.value);
     if (!active.value || !locales.value.some((row) => row.locale === active.value)) {
       active.value = locales.value[0]?.locale || "";
     }
@@ -82,6 +105,7 @@ async function save() {
       }),
     });
     mtime.value = data.mtime;
+    scope.clearDirty();
   } catch (err) {
     if (err instanceof ApiError && err.status === 409) {
       conflict.value = true;
@@ -165,6 +189,21 @@ function onShotFileChange(e: Event) {
   else void replaceShot(pick.path, file);
 }
 
+function shotNames(group: Shot[]): string[] {
+  return group.map((item) => item.file_name);
+}
+
+function dtypeLabel(dtype: string): string {
+  return dtype === "UNKNOWN" ? t("metadata.shots_unknown_type") : dtype;
+}
+
+watch(
+  () => snapshot.value?.current_profile,
+  (name, prev) => {
+    if (prev !== undefined && name !== prev) scope.reset();
+  },
+);
+
 onMounted(() => { if (!empty.value) void load(); });
 watch(reloadTick, () => { if (!empty.value) void load(); });
 </script>
@@ -202,28 +241,54 @@ watch(reloadTick, () => { if (!empty.value) void load(); });
         >{{ t("metadata.load_preview") }}</t-button>
         <t-button theme="primary" :disabled="empty" @click="save">{{ t("metadata.save_csv") }}</t-button>
         <t-button @click="pickerOpen = true">{{ t("metadata.locales_btn") }}</t-button>
+        <span v-if="scope.dirty.value" class="unsaved">{{ t("metadata.unsaved") }}</span>
       </div>
     </div>
-    <PageLoading v-if="loading && !loaded" size="block" />
+    <PageLoading v-if="loading && !loaded" size="page" />
     <p v-else-if="!locales.length" class="empty-state">{{ t("metadata.wb_empty") }}</p>
     <div v-else class="workbench">
-      <aside>
-        <button
-          v-for="row in locales"
-          :key="row.locale"
-          type="button"
-          :class="{ on: row.locale === current?.locale }"
-          @click="active = row.locale"
-        >{{ row.locale }}</button>
-      </aside>
+      <LocaleSelectTabs
+        v-model="active"
+        :locales="localeCodes"
+        :selected="selectedCodes"
+        @update:selected="syncSelected"
+      >
       <div v-if="current" class="card editors">
-        <label v-for="field in FIELDS" :key="field" class="field">
-          <span>{{ t(`metadata.field_${field}`) }}</span>
-          <textarea v-if="field === 'description'" v-model="current.fields[field]" rows="6" class="field-input" />
-          <input v-else v-model="current.fields[field]" class="field-input" />
+        <div class="col-select">
+          <span class="lbl">{{ t("metadata.col_upload") }}</span>
+          <label v-for="field in FIELDS" :key="`col-${field}`" class="check">
+            <input
+              type="checkbox"
+              :checked="scope.allFieldsSelected(field)"
+              @change="scope.selectAllField(field, ($event.target as HTMLInputElement).checked)"
+            />
+            {{ t(`metadata.field_${field}`) }}
+          </label>
+        </div>
+        <label v-for="field in FIELDS" :key="field" class="field field-with-check">
+          <span>
+            <input
+              type="checkbox"
+              :checked="scope.isFieldSelected(current.locale, field)"
+              @change="scope.setFieldSelected(current.locale, field, ($event.target as HTMLInputElement).checked)"
+            />
+            {{ t(`metadata.field_${field}`) }}
+          </span>
+          <textarea
+            v-if="field === 'description'"
+            v-model="current.fields[field]"
+            rows="6"
+            class="field-input"
+            @input="scope.markDirty()"
+          />
+          <input
+            v-else
+            v-model="current.fields[field]"
+            class="field-input"
+            @input="scope.markDirty()"
+          />
         </label>
         <h3>{{ t("metadata.shots_section") }}</h3>
-        <p v-if="!Object.keys(current.screenshots || {}).length" class="muted">{{ t("metadata.shots_empty") }}</p>
         <input
           ref="shotFileInput"
           class="file-hidden"
@@ -232,9 +297,23 @@ watch(reloadTick, () => { if (!empty.value) void load(); });
           tabindex="-1"
           @change="onShotFileChange"
         />
+        <div v-if="!Object.keys(current.screenshots || {}).length" class="empty-shots">
+          <p class="muted">{{ t("metadata.shots_empty") }}</p>
+          <t-button size="small" @click="openAddShot(current.locale, '')">
+            <template #icon><AddIcon /></template>
+            {{ t("metadata.shots_add") }}
+          </t-button>
+        </div>
         <div v-for="(group, dtype) in current.screenshots" :key="dtype" class="shots">
           <div class="shot-head">
-            <strong>{{ dtype }}</strong>
+            <label class="check">
+              <input
+                type="checkbox"
+                :checked="scope.groupAllSelected(current.locale, String(dtype), shotNames(group))"
+                @change="scope.setGroupSelected(current.locale, String(dtype), shotNames(group), ($event.target as HTMLInputElement).checked)"
+              />
+              <strong>{{ dtypeLabel(String(dtype)) }}</strong>
+            </label>
             <t-button size="small" @click="openAddShot(current.locale, String(dtype))">
               <template #icon><AddIcon /></template>
               {{ t("metadata.shots_add") }}
@@ -242,7 +321,16 @@ watch(reloadTick, () => { if (!empty.value) void load(); });
           </div>
           <div class="thumbs">
             <figure v-for="(item, idx) in group" :key="item.local_path || item.file_name" class="thumb">
-              <img :src="item.thumb_url" :alt="item.file_name" @click="openShots(group, idx)" />
+              <div class="thumb-frame">
+                <img :src="item.thumb_url" :alt="item.file_name" @click="openShots(group, idx)" />
+                <input
+                  type="checkbox"
+                  class="thumb-check"
+                  :checked="scope.isShotSelected(current.locale, String(dtype), item.file_name)"
+                  @change="scope.setShotSelected(current.locale, String(dtype), item.file_name, ($event.target as HTMLInputElement).checked)"
+                  @click.stop
+                />
+              </div>
               <figcaption :title="item.file_name">{{ item.file_name }}</figcaption>
               <div class="thumb-actions">
                 <t-button
@@ -272,6 +360,7 @@ watch(reloadTick, () => { if (!empty.value) void load(); });
           </div>
         </div>
       </div>
+      </LocaleSelectTabs>
     </div>
   </div>
   <LocalePicker v-model:open="pickerOpen" />
@@ -279,20 +368,25 @@ watch(reloadTick, () => { if (!empty.value) void load(); });
 
 <style scoped>
 .workbench {
-  display: grid;
-  grid-template-columns: 180px 1fr;
-  gap: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   flex: 1 1 auto;
-  align-items: stretch;
+  min-width: 0;
 }
-aside { display: flex; flex-direction: column; gap: 4px; }
-aside button { text-align: left; background: var(--surface); color: var(--text-muted); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
-aside button.on { color: var(--accent); border-color: var(--accent-dim); }
 .editors { position: relative; display: flex; flex-direction: column; gap: 10px; }
+.unsaved { color: var(--accent); font-size: 12px; }
+.col-select { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+.field-with-check span { display: flex; align-items: center; gap: 8px; }
+.check { display: flex; gap: 8px; align-items: center; }
+.lbl { font-size: 12px; color: var(--text-muted); }
 .muted { color: var(--text-muted); }
+.empty-shots { display: flex; align-items: center; gap: 12px; }
 .thumbs { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
 .thumb { margin: 0; width: 148px; display: flex; flex-direction: column; gap: 6px; }
+.thumb-frame { position: relative; }
 .thumb img { width: 148px; height: 254px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); cursor: zoom-in; display: block; }
+.thumb-check { position: absolute; top: 6px; left: 6px; }
 figcaption { font-size: 11px; color: var(--text-muted); word-break: break-all; line-height: 1.3; }
 .thumb-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
 .thumb-actions :deep(.t-button) { margin: 0; width: 100%; }
@@ -310,5 +404,4 @@ figcaption { font-size: 11px; color: var(--text-muted); word-break: break-all; l
   pointer-events: none;
 }
 .shot-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 8px 0; }
-@media (max-width: 1100px) { .workbench { grid-template-columns: 1fr; } }
 </style>

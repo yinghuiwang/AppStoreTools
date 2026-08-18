@@ -124,7 +124,13 @@ export function parseBuildStored(data: Record<string, unknown> | null): Partial<
     signing: asText(data.signing) || undefined,
     certificate: asText(data.certificate) || undefined,
     provisioning_profile: asText(data.provisioning_profile) || undefined,
-    reuse_archive: reuse === undefined ? undefined : reuse === "reuse" || reuse === true ? "reuse" : "",
+    reuse_archive: reuse === undefined
+      ? undefined
+      : reuse === "reuse" || reuse === true
+        ? "reuse"
+        : reuse === "rebuild"
+          ? "rebuild"
+          : "",
     ipa_path: asText(data.ipa_path) || undefined,
     verbose: !!data.verbose,
     dry_run: !!data.dry_run,
@@ -140,7 +146,11 @@ export function buildFormPayload(fields: BuildFormMemory): Record<string, unknow
     signing: fields.signing,
     certificate: fields.certificate,
     provisioning_profile: fields.provisioning_profile,
-    reuse_archive: fields.reuse_archive === "reuse" || fields.reuse_archive === "true" ? "reuse" : fields.reuse_archive || "",
+    reuse_archive: fields.reuse_archive === "reuse" || fields.reuse_archive === "true"
+      ? "reuse"
+      : fields.reuse_archive === "rebuild"
+        ? "rebuild"
+        : "",
     ipa_path: fields.ipa_path,
     verbose: fields.verbose,
     dry_run: fields.dry_run,

@@ -18,6 +18,11 @@ def test_build_view_restores_env_scan_sidebar():
     assert "build.cert_candidates" in src
     assert "build.profile_candidates" in src
     assert "build.archive_reuse" in src
+    assert 'value="reuse"' in src
+    assert 'value="rebuild"' in src
+    assert "build.reuse_auto" in src
+    assert "build.reuse_rebuild" in src
+    assert 'reuseArchive.value ? "true"' not in src
     assert "bundle_id_selected" in src
     assert "archive_match" in src
     assert "version_info" in src

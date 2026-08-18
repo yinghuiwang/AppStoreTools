@@ -29,7 +29,9 @@ def test_whats_new_avoids_duplicate_check_spinners():
 
 def test_whats_new_translate_mode_is_workflow_block_not_under_check():
     src = _read("views/WhatsNewView.vue")
-    template = src.split("<template>", 1)[1].split("</template>", 1)[0]
+    start = src.find("<template>")
+    end = src.rfind("</template>")
+    template = src[start:end]
     check_pos = template.find('class="field-row check-row"')
     mode_pos = template.find('class="mode-block"')
     translate_pos = template.find('v-model="translateMode"')
@@ -58,14 +60,17 @@ def test_iap_check_and_scan_use_single_indicator_each():
     assert ':loading="checking && !!checkMsg"' in src
     assert ':loading="scanning"' in src
     assert 'PageLoading v-if="scanning"' not in src
+    assert ".png,.jpg,.jpeg" in src
 
 
 def test_listing_tabs_block_first_load_without_button_spinner():
     local = _read("views/listing/LocalTab.vue")
     diff = _read("views/listing/DiffTab.vue")
     assert 'PageLoading v-if="loading && !loaded"' in local
+    assert 'size="page"' in local
     assert ':loading="loading && loaded"' in local
     assert 'PageLoading v-if="loading && !loaded"' in diff
+    assert 'size="page"' in diff
     assert ':loading="loading && loaded"' in diff
 
 
@@ -86,6 +91,7 @@ def test_dashboard_refresh_uses_status_text_not_second_spinner():
     src = _read("views/DashboardView.vue")
     assert src.count("<PageLoading") == 1
     assert 'v-if="loading && !summary"' in src
+    assert 'size="page"' in src
     assert "dashboard.refreshing" not in src
     assert "PageLoading v-if=\"refreshing\"" not in src
     assert 'size="inline"' not in src
@@ -102,13 +108,31 @@ def test_build_refresh_prefers_button_after_first_scan():
     assert "if (scannedOnce.value) return" in src
 
 
+def test_page_loading_page_size_is_viewport_centered_with_logo():
+    src = _read("components/PageLoading.vue")
+    assert 'size === \'page\'' in src or 'size === "page"' in src
+    assert "/static/logo.svg" in src
+    assert "LoadingIcon" in src
+    assert "common.loading" in src
+    assert "Teleport" in src
+    assert "position: fixed" in src
+    assert "inset: 0" in src
+    assert "justify-content: center" in src
+    assert "align-items: center" in src
+    assert "flex-direction: column" in src
+    assert "page-loading__logo" in src
+
+
 def test_spa_boot_is_pre_mount_only():
     main = _read("main.ts")
     router = _read("router/index.ts")
+    tokens = _read("styles/tokens.css")
     assert "renderBootLoading" in main
     assert "spa.booting" in main
     assert "clearBootChrome" in main
     assert "spaMounted" in main
+    assert "/static/logo.svg" in main
+    assert "spa-boot__stack" in main
     assert "app.mount" in main
     mount_at = main.find("app.mount")
     assert mount_at != -1
@@ -117,6 +141,13 @@ def test_spa_boot_is_pre_mount_only():
     assert "spa-boot" not in router
     assert "PageLoading" not in _read("layouts/AppShell.vue")
     assert "PageLoading" not in _read("App.vue")
+    assert "spa-boot__logo" in tokens
+    boot = tokens[tokens.find(".spa-boot {") : tokens.find(".spa-boot__stack")]
+    assert "position: fixed" in boot
+    assert "inset: 0" in boot
+    assert "flex-direction: column" in boot
+    assert "justify-content: center" in boot
+    assert "#app.spa-boot" in tokens
 
 
 def test_system_pages_do_not_cover_existing_content_on_refresh():
@@ -125,12 +156,15 @@ def test_system_pages_do_not_cover_existing_content_on_refresh():
     settings = _read("views/system/SettingsTab.vue")
     update = _read("views/system/UpdateTab.vue")
     assert 'PageLoading v-if="loading && !loaded"' in profiles
+    assert 'size="page"' in profiles
     assert 'PageLoading v-if="loading"' not in profiles.replace(
         'PageLoading v-if="loading && !loaded"', ""
     )
     assert 'PageLoading v-if="loading && !loaded"' in guard
+    assert 'size="page"' in guard
     assert 'PageLoading v-if="loading && !loaded"' in settings
-    assert settings.count('PageLoading v-if="loading && !loaded"') == 2
+    assert settings.count('PageLoading v-if="loading && !loaded"') == 1
+    assert 'size="page"' in settings
     assert 'PageLoading v-if="versionsLoading && !versions.length"' in update
     assert 'PageLoading v-if="branchesLoading && !branches.length"' in update
     assert 'PageLoading v-if="versionsLoading"' not in update.replace(

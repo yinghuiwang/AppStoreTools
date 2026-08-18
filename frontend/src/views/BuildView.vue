@@ -83,7 +83,7 @@ const certificate = ref("");
 const profileName = ref("");
 const verbose = ref(false);
 const dryRun = ref(false);
-const reuseArchive = ref(false);
+const reuseArchive = ref("");
 const appProfile = computed(() => snapshot.value?.current_profile || "");
 
 function restoreBuildMemory() {
@@ -96,7 +96,7 @@ function restoreBuildMemory() {
   if (saved.signing) signing.value = saved.signing;
   if (saved.certificate) certificate.value = saved.certificate;
   if (saved.provisioning_profile) profileName.value = saved.provisioning_profile;
-  if (saved.reuse_archive !== undefined) reuseArchive.value = saved.reuse_archive === "reuse";
+  if (saved.reuse_archive !== undefined) reuseArchive.value = saved.reuse_archive;
   if (saved.ipa_path) ipaPath.value = saved.ipa_path;
   verbose.value = !!saved.verbose;
   dryRun.value = !!saved.dry_run;
@@ -113,7 +113,7 @@ function saveBuildMemory() {
       signing: signing.value,
       certificate: certificate.value,
       provisioning_profile: profileName.value,
-      reuse_archive: reuseArchive.value ? "reuse" : "",
+      reuse_archive: reuseArchive.value,
       ipa_path: ipaPath.value,
       verbose: verbose.value,
       dry_run: dryRun.value,
@@ -209,7 +209,7 @@ async function run() {
     body.set("certificate", certificate.value);
     body.set("provisioning_profile", profileName.value);
     body.set("dry_run", dryRun.value ? "true" : "");
-    body.set("reuse_archive", reuseArchive.value ? "true" : "");
+    body.set("reuse_archive", reuseArchive.value);
     const { task_id } = await httpForm<{ task_id: string }>("/api/build/run", body);
     enterRun(task_id, { runMode: mode.value });
     rail.openLogs(task_id);
@@ -311,7 +311,12 @@ onMounted(() => {
         </label>
         <label class="check"><input v-model="verbose" type="checkbox" /> {{ t("build.verbose") }}</label>
         <label class="check"><input v-model="dryRun" type="checkbox" /> {{ t("build.dry_run") }}</label>
-        <label v-if="mode !== 'deploy'" class="check"><input v-model="reuseArchive" type="checkbox" /> {{ t("build.reuse_reuse") }}</label>
+        <div v-if="mode !== 'deploy'" class="reuse">
+          <span class="lbl">{{ t("build.archive_reuse") }}</span>
+          <label class="check"><input v-model="reuseArchive" type="radio" value="" /> {{ t("build.reuse_auto") }}</label>
+          <label class="check"><input v-model="reuseArchive" type="radio" value="reuse" /> {{ t("build.reuse_reuse") }}</label>
+          <label class="check"><input v-model="reuseArchive" type="radio" value="rebuild" /> {{ t("build.reuse_rebuild") }}</label>
+        </div>
         <t-button theme="primary" :disabled="empty || optionsLoading" @click="run">{{ t("common.submit") }}</t-button>
       </div>
 
@@ -429,6 +434,8 @@ onMounted(() => {
 h1 { margin: 0; }
 .muted { color: var(--text-muted); font-size: 12px; }
 .check { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
+.reuse { display: flex; flex-direction: column; gap: 2px; }
+.lbl { font-size: 12px; color: var(--text-muted); }
 .card { display: flex; flex-direction: column; gap: 12px; flex: 1 1 auto; }
 
 .build-layout {

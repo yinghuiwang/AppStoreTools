@@ -1,45 +1,43 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onActivated, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { ApiError, apiErrorMessage, httpForm, httpJson } from "@/api/http";
+import { ApiError, apiErrorMessage, httpForm } from "@/api/http";
+import LocaleSelectTabs from "@/components/LocaleSelectTabs.vue";
 import PageLoading from "@/components/PageLoading.vue";
 import TaskRunBar from "@/components/TaskRunBar.vue";
+import { useAppLocales } from "@/composables/useAppLocales";
 import { useProfile } from "@/composables/useProfile";
 import { useRightRail } from "@/composables/useRightRail";
 import { useTaskPagePhase } from "@/composables/useTaskPagePhase";
 
-type Check = { ok: boolean; message: string; detail?: { locales?: string[] } };
-
 const { t } = useI18n();
 const { snapshot } = useProfile();
 const rail = useRightRail();
+const { check, checking, ensure, refresh } = useAppLocales("urls");
 defineOptions({ name: "UrlsView" });
 
 const { isForm, isRun, taskId, enterRun, backToForm } = useTaskPagePhase("urls");
 const empty = computed(() => (snapshot.value?.current_profile || "") === "");
 const alert = ref("");
-const check = ref<Check | null>(null);
-const checking = ref(false);
 const field = ref("supportUrl");
 const url = ref("");
 const locales = ref<string[]>([]);
+const activeLocale = ref("");
 const dryRun = ref(false);
 const verbose = ref(false);
 
-async function loadCheck() {
-  checking.value = true;
-  try {
-    check.value = await httpJson<Check>("/api/urls/check");
-    if (check.value.detail?.locales?.length && !locales.value.length) {
-      locales.value = [...check.value.detail.locales];
-    }
-  } finally {
-    checking.value = false;
+function syncSelectedLocales() {
+  const available = check.value?.detail?.locales || [];
+  if (available.length && !locales.value.length) {
+    locales.value = [...available];
+  }
+  if (!activeLocale.value || !available.includes(activeLocale.value)) {
+    activeLocale.value = available[0] || "";
   }
 }
 
-function toggle(code: string, on: boolean) {
-  locales.value = on ? Array.from(new Set([...locales.value, code])) : locales.value.filter((item) => item !== code);
+async function loadCheck() {
+  await refresh();
 }
 
 async function run() {
@@ -61,7 +59,14 @@ async function run() {
   }
 }
 
-onMounted(() => { if (!check.value) void loadCheck(); });
+watch(check, syncSelectedLocales, { immediate: true });
+
+onMounted(() => {
+  ensure();
+});
+onActivated(() => {
+  ensure();
+});
 </script>
 
 <template>
@@ -92,14 +97,16 @@ onMounted(() => { if (!check.value) void loadCheck(); });
         </select>
       </label>
       <label class="field"><span>{{ t("urls.address") }}</span><input v-model="url" class="field-input" /></label>
-      <div>
-        <span class="lbl">{{ t("urls.locales") }}</span>
-        <p class="muted">{{ t("urls.locales_hint") }}</p>
-        <label v-for="code in check?.detail?.locales || []" :key="code" class="check">
-          <input type="checkbox" :checked="locales.includes(code)" @change="toggle(code, ($event.target as HTMLInputElement).checked)" />
-          {{ code }}
-        </label>
-      </div>
+      <LocaleSelectTabs
+        v-model="activeLocale"
+        v-model:selected="locales"
+        :locales="check?.detail?.locales || []"
+        :hint="t('urls.locales_hint')"
+      >
+        <template #default="{ locale }">
+          <p class="muted">{{ t("urls.locale_apply_hint", { locale }) }}</p>
+        </template>
+      </LocaleSelectTabs>
       <label class="check"><input v-model="dryRun" type="checkbox" /> {{ t("common.dry_run") }}</label>
       <label class="check"><input v-model="verbose" type="checkbox" /> {{ t("build.verbose") }}</label>
       <t-button theme="primary" :disabled="empty" @click="run">{{ t("urls.submit") }}</t-button>
@@ -113,5 +120,4 @@ h1 { margin: 0; }
 .muted { color: var(--text-muted); font-size: 13px; }
 .card { display: flex; flex-direction: column; gap: 10px; }
 .check { display: flex; gap: 8px; align-items: center; }
-.lbl { display: block; font-size: 12px; color: var(--text-muted); }
 </style>

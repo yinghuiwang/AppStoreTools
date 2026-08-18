@@ -135,7 +135,7 @@ function previewPath(path: string) {
 }
 
 async function pickPath(id: string) {
-  const path = await browse.pick({ mode: "file", ext: ".png", initialPath: paths.value[id] });
+  const path = await browse.pick({ mode: "file", ext: ".png,.jpg,.jpeg", initialPath: paths.value[id] });
   if (path) paths.value[id] = path;
 }
 

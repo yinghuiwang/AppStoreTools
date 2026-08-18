@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { MessagePlugin } from "tdesign-vue-next";
 import PageLoading from "@/components/PageLoading.vue";
@@ -20,10 +20,15 @@ const {
   clearLocal,
 } = useTaskLog();
 const scroller = ref<HTMLElement | null>(null);
+const errorsOnly = ref(false);
 
 function isErrorLine(message: string): boolean {
-  return /error/i.test(message);
+  return /\b(error|failed|failure|fatal|exception|traceback)\b|错误|失败|异常/i.test(message);
 }
+
+const visibleLines = computed(() => (
+  errorsOnly.value ? lines.value.filter((line) => isErrorLine(line.message)) : lines.value
+));
 
 function canCancel() {
   return !["done", "error", "canceled"].includes(status.value);
@@ -31,7 +36,7 @@ function canCancel() {
 
 async function copyLogs() {
   try {
-    await navigator.clipboard.writeText(lines.value.map((l) => l.message).join("\n"));
+    await navigator.clipboard.writeText(visibleLines.value.map((l) => l.message).join("\n"));
     MessagePlugin.success(t("drawer.copied"));
   } catch {
     MessagePlugin.error(t("drawer.copy_failed"));
@@ -76,6 +81,9 @@ onMounted(() => {
       <div v-if="logTaskId" class="tools">
         <button type="button" @click="copyLogs">{{ t("drawer.copy") }}</button>
         <button type="button" @click="clearLocal()">{{ t("drawer.clear") }}</button>
+        <button type="button" :class="{ on: errorsOnly }" @click="errorsOnly = !errorsOnly">
+          {{ t("drawer.errors_only") }}
+        </button>
         <button type="button" :class="{ on: follow }" @click="follow = !follow">
           {{ t("drawer.follow") }}
         </button>
@@ -93,7 +101,7 @@ onMounted(() => {
     />
     <pre v-else ref="scroller" class="stream mono">
       <div
-        v-for="line in lines"
+        v-for="line in visibleLines"
         :key="line.seq"
         class="line"
         :class="{ err: isErrorLine(line.message) }"

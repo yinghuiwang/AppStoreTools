@@ -250,9 +250,25 @@ def test_urls_set_passes_selected_locales(tmp_path, monkeypatch):
 
 def test_urls_page_has_locale_checkbox_ui():
     src = Path("frontend/src/views/UrlsView.vue").read_text(encoding="utf-8")
+    tags = Path("frontend/src/components/LocaleSelectTabs.vue").read_text(encoding="utf-8")
     assert "check?.detail?.locales" in src
-    assert 'type="checkbox"' in src
-    assert "urls.locales" in src
+    assert "LocaleSelectTabs" in src
+    assert "t-checkbox-group" in tags
+    assert "t-checkbox" in tags
+    assert "check-all" in tags
+    assert "localeOptions" in tags
+    assert "t-tag" not in tags
+    assert "t-check-tag" not in tags
+    assert "locale-code" in tags
+    assert "@click.stop" in tags
+    assert "onShowClick" in tags
+    assert "onGroupChange" in tags
+    assert "t-tabs" not in tags
+    assert "t-tab-panel" not in tags
+    assert "urls.locales" in tags
+    assert "urls.select_all" in tags
+    assert "urls.deselect_all" in tags
+    assert "locales.include_upload" in tags
     assert 'id="locales-input"' not in src
     assert "localesText" not in src
 
