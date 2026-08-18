@@ -314,7 +314,7 @@ onMounted(() => {
               <div v-if="row.app_id" class="note-row">
                 <span class="k">{{ t("guard.note") }}</span>
                 <div class="field-row">
-                  <input v-model="row.note" class="field-input" :placeholder="t('guard.note')" />
+                  <t-input v-model="row.note" :placeholder="t('guard.note')" />
                   <t-button size="small" :loading="savingNote === row.app_id" @click="saveNote(row)">
                     {{ savingNote === row.app_id ? t("guard.saving") : t("guard.save_note") }}
                   </t-button>
@@ -323,7 +323,7 @@ onMounted(() => {
             </article>
           </div>
         </section>
-        <p v-else class="empty-state">{{ t("guard.empty") }}</p>
+        <t-empty v-else :description="t('guard.empty')" />
 
         <div class="help">
           <p>{{ t("guard.help1") }}</p>
@@ -340,29 +340,29 @@ onMounted(() => {
     <div class="dialog-form">
         <label class="field">
           <span>{{ t("guard.machine") }}</span>
-          <input
+          <t-input
             v-model="addForm.fingerprint"
-            class="field-input mono"
+            class="mono"
             :placeholder="t('guard.fingerprint_placeholder')"
           />
         </label>
         <label class="field">
           <span>{{ t("guard.local_app") }}</span>
-          <select v-model="addForm.profile" class="field-input">
-            <option value="">{{ t("guard.select_app") }}</option>
-            <option v-for="name in availableProfiles" :key="name" :value="name">{{ name }}</option>
-          </select>
+          <t-select v-model="addForm.profile" :placeholder="t('guard.select_app')">
+            <t-option value="" :label="t('guard.select_app')" />
+            <t-option v-for="name in availableProfiles" :key="name" :value="name" :label="name" />
+          </t-select>
         </label>
         <p v-if="!profiles.length" class="hint warn">{{ t("guard.no_profiles") }}</p>
         <p v-else-if="!availableProfiles.length" class="hint warn">{{ t("guard.all_apps_bound") }}</p>
         <p v-else-if="addForm.profile" class="hint">{{ t("guard.credentials_from_profile") }}</p>
         <label class="field">
           <span>{{ t("guard.ip_optional") }}</span>
-          <input v-model="addForm.ip" class="field-input mono" placeholder="1.2.3.4" />
+          <t-input v-model="addForm.ip" class="mono" placeholder="1.2.3.4" />
         </label>
         <label class="field">
           <span>{{ t("guard.note_optional") }}</span>
-          <input v-model="addForm.note" class="field-input" />
+          <t-input v-model="addForm.note" />
         </label>
         <p v-if="addError" class="err">{{ addError }}</p>
       </div>

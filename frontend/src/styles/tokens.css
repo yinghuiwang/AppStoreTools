@@ -153,10 +153,10 @@ a:hover {
 }
 
 .field-input,
-.card input[type="text"],
-.card input[type="password"],
-.card input[type="url"],
-.card textarea,
+.card input[type="text"]:not(.t-input__inner),
+.card input[type="password"]:not(.t-input__inner),
+.card input[type="url"]:not(.t-input__inner),
+.card textarea:not(.t-textarea__inner),
 .card select {
   width: 100%;
   box-sizing: border-box;
@@ -169,10 +169,20 @@ a:hover {
 }
 
 .field-row .field-input,
-.field-row > input {
+.field-row > input,
+.field-row > .t-input__wrap,
+.field-row > .t-select__wrap,
+.field-row > .t-textarea {
   flex: 1;
   min-width: 0;
   width: auto;
+}
+
+.field > .t-input__wrap,
+.field > .t-select__wrap,
+.field > .t-textarea,
+.field .t-textarea {
+  width: 100%;
 }
 
 .empty-state {

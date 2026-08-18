@@ -70,16 +70,16 @@ onUnmounted(() => window.removeEventListener("keydown", onKey));
     <div class="toolbar">
       <span>{{ current?.title }} ({{ index + 1 }}/{{ items.length }})</span>
       <div>
-        <button type="button" @click="transform.scale += 0.2">+</button>
-        <button type="button" @click="transform.scale = Math.max(0.2, transform.scale - 0.2)">−</button>
-        <button type="button" @click="transform.rotate += 90">⟳</button>
-        <button type="button" @click="transform.flipX = !transform.flipX">↔</button>
-        <button type="button" @click="transform.flipY = !transform.flipY">↕</button>
-        <button type="button" @click="resetTransform">reset</button>
-        <button type="button" @click="download">{{ $t("metadata.shots_lightbox_download") }}</button>
-        <button type="button" @click="prev">←</button>
-        <button type="button" @click="next">→</button>
-        <button type="button" @click="close">{{ $t("metadata.shots_lightbox_close") }}</button>
+        <t-button size="small" @click="transform.scale += 0.2">+</t-button>
+        <t-button size="small" @click="transform.scale = Math.max(0.2, transform.scale - 0.2)">−</t-button>
+        <t-button size="small" @click="transform.rotate += 90">⟳</t-button>
+        <t-button size="small" @click="transform.flipX = !transform.flipX">↔</t-button>
+        <t-button size="small" @click="transform.flipY = !transform.flipY">↕</t-button>
+        <t-button size="small" @click="resetTransform">reset</t-button>
+        <t-button size="small" @click="download">{{ $t("metadata.shots_lightbox_download") }}</t-button>
+        <t-button size="small" @click="prev">←</t-button>
+        <t-button size="small" @click="next">→</t-button>
+        <t-button size="small" @click="close">{{ $t("metadata.shots_lightbox_close") }}</t-button>
       </div>
     </div>
     <img
@@ -115,13 +115,8 @@ onUnmounted(() => window.removeEventListener("keydown", onKey));
   color: var(--text);
   z-index: 1;
 }
-.toolbar button {
+.toolbar :deep(.t-button) {
   margin-left: 6px;
-  background: var(--overlay);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 4px 8px;
 }
 img {
   max-width: 88vw;

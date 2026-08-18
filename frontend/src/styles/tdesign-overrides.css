@@ -100,6 +100,14 @@ html.dark .t-select-input {
   background-color: var(--raised);
 }
 
+/* Native .card input borders must not paint onto TDesign's inner field.
+   Those extra left/right borders show up as vertical rules inside .t-input. */
+.t-input__inner {
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
 html.dark .t-notification,
 html.dark .t-message {
   background: var(--overlay);
@@ -200,4 +208,60 @@ html.dark .t-chat__text .other__error {
 html.dark .t-chat__actions .t-button,
 html.dark .t-chat-actionbar .t-button {
   color: var(--text-muted);
+}
+
+html.dark .t-table,
+html.dark .t-table__content,
+html.dark .t-table__header,
+html.dark .t-table__th-cell-inner {
+  background: var(--surface);
+  color: var(--text);
+}
+
+html.dark .t-table th {
+  color: var(--text-faint);
+  background: var(--surface);
+}
+
+html.dark .t-table td {
+  color: var(--text-muted);
+}
+
+html.dark .t-table--striped tbody tr:nth-of-type(odd) td,
+html.dark .t-table tbody tr:hover td {
+  background: var(--overlay);
+}
+
+html.dark .t-empty,
+html.dark .t-empty__description {
+  color: var(--text-muted);
+}
+
+html.dark .t-progress__bar {
+  background: var(--raised);
+}
+
+html.dark .t-tag {
+  border-color: var(--border);
+}
+
+html.dark .t-radio-group .t-radio-button.t-is-checked {
+  background: var(--accent);
+  color: #0a0a0c;
+  border-color: transparent;
+}
+
+html.dark .t-select__wrap,
+html.dark .t-select-option {
+  background: var(--overlay);
+}
+
+html.dark .t-select__dropdown,
+html.dark .t-popup__content {
+  background: var(--overlay);
+  border-color: var(--border);
+}
+
+html.dark .t-popconfirm {
+  background: var(--overlay);
 }

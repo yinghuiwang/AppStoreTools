@@ -180,18 +180,18 @@ onMounted(async () => {
         <p>{{ isEditing ? t("settings.edit_config") : t("settings.new_config") }}</p>
         <label class="field">
           <span>{{ t("settings.config_name") }}</span>
-          <input v-model="llmForm.name" class="field-input" :disabled="isEditing" :placeholder="t('settings.config_name_ph')" />
+          <t-input v-model="llmForm.name" :disabled="isEditing" :placeholder="t('settings.config_name_ph')" />
         </label>
-        <label class="field"><span>Base URL</span><input v-model="llmForm.base_url" class="field-input" /></label>
-        <label class="field"><span>API Key</span><input v-model="llmForm.api_key" type="password" class="field-input" placeholder="sk-..." /></label>
-        <label class="field"><span>Model</span><input v-model="llmForm.model" class="field-input" /></label>
+        <label class="field"><span>Base URL</span><t-input v-model="llmForm.base_url" /></label>
+        <label class="field"><span>API Key</span><t-input v-model="llmForm.api_key" type="password" placeholder="sk-..." /></label>
+        <label class="field"><span>Model</span><t-input v-model="llmForm.model" /></label>
         <p v-if="llmError" class="err">{{ llmError }}</p>
         <div class="field-row">
           <t-button theme="primary" @click="saveLlm">{{ t("common.save") }}</t-button>
           <t-button @click="showForm = false">{{ t("common.cancel") }}</t-button>
         </div>
       </div>
-      <p v-if="!Object.keys(configs).length" class="empty-state">{{ t("settings.empty_configs") }}</p>
+      <t-empty v-if="!Object.keys(configs).length" :description="t('settings.empty_configs')" />
       <div v-for="(cfg, name) in configs" :key="name" class="llm-row">
         <div>
           <strong>{{ name }}</strong>
@@ -214,40 +214,39 @@ onMounted(async () => {
       </div>
       <template v-if="loaded">
       <p v-if="webhookError" class="err">{{ webhookError }}</p>
-      <label class="check"><input v-model="webhook.enabled" type="checkbox" /> {{ t("settings.webhook_enable") }}</label>
+      <t-checkbox v-model="webhook.enabled">{{ t("settings.webhook_enable") }}</t-checkbox>
       <div class="split">
         <div>
           <h3>{{ t("settings.webhook_tasks") }}</h3>
-          <label v-for="[id, key] in kinds" :key="id" class="check">
-            <input
-              type="checkbox"
-              :checked="webhook.notify_kinds.includes(id)"
-              @change="toggle('notify_kinds', id, ($event.target as HTMLInputElement).checked)"
-            />
+          <t-checkbox
+            v-for="[id, key] in kinds"
+            :key="id"
+            :checked="webhook.notify_kinds.includes(id)"
+            @change="(on: boolean) => toggle('notify_kinds', id, on)"
+          >
             {{ t(key) }}
-          </label>
+          </t-checkbox>
         </div>
         <div>
           <h3>{{ t("settings.webhook_status") }}</h3>
-          <label v-for="[id, key] in statuses" :key="id" class="check">
-            <input
-              type="checkbox"
-              :checked="webhook.notify_statuses.includes(id)"
-              @change="toggle('notify_statuses', id, ($event.target as HTMLInputElement).checked)"
-            />
+          <t-checkbox
+            v-for="[id, key] in statuses"
+            :key="id"
+            :checked="webhook.notify_statuses.includes(id)"
+            @change="(on: boolean) => toggle('notify_statuses', id, on)"
+          >
             {{ t(key) }}
-          </label>
+          </t-checkbox>
         </div>
       </div>
       <div v-for="[id, key] in providers" :key="id" class="provider">
-        <label class="check">
-          <input v-model="webhook.providers[id].enabled" type="checkbox" />
+        <t-checkbox v-model="webhook.providers[id].enabled">
           {{ t(key) }}
-        </label>
-        <label class="field"><span>URL</span><input v-model="webhook.providers[id].url" class="field-input" /></label>
+        </t-checkbox>
+        <label class="field"><span>URL</span><t-input v-model="webhook.providers[id].url" /></label>
         <label class="field">
           <span>{{ t("settings.secret_ph") }}</span>
-          <input v-model="webhook.providers[id].secret" type="password" class="field-input" :placeholder="webhook.providers[id].has_secret ? t('settings.secret_kept') : ''" />
+          <t-input v-model="webhook.providers[id].secret" type="password" :placeholder="webhook.providers[id].has_secret ? t('settings.secret_kept') : ''" />
         </label>
         <t-button size="small" @click="testProvider(id)">{{ t("settings.save_test") }}</t-button>
       </div>
@@ -268,7 +267,7 @@ h2, h3 { margin: 0 0 8px; font-size: 13px; letter-spacing: 0.08em; text-transfor
 .muted { color: var(--text-muted); font-size: 12px; }
 .err { color: var(--err); }
 .badge { margin-left: 8px; font-size: 10px; color: var(--accent); }
-.check { display: flex; gap: 8px; align-items: center; font-size: 13px; margin: 4px 0; }
+.split :deep(.t-checkbox) { display: flex; margin: 4px 0; }
 .split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 12px 0; }
 .results { color: var(--text-muted); font-size: 12px; }
 @media (max-width: 1100px) { .split, .llm-row { grid-template-columns: 1fr; flex-direction: column; } }

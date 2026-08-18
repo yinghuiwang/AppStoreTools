@@ -25,13 +25,13 @@ function onClosed(visible: boolean) {
     <PageLoading v-if="loading" size="block" />
     <ul v-else class="list">
       <li v-for="entry in entries" :key="entry.path">
-        <button type="button" @click="enter(entry)">
+        <t-button variant="text" block @click="enter(entry)">
           <span class="kind">{{ entry.is_dir ? "dir" : "file" }}</span>
           {{ entry.name }}
-        </button>
+        </t-button>
       </li>
     </ul>
-    <p v-if="!loading && !entries.length && !error" class="empty">{{ t("filebrowser.empty") }}</p>
+    <t-empty v-if="!loading && !entries.length && !error" :description="t('filebrowser.empty')" />
     <template #footer>
       <t-button @click="cancel()">{{ t("filebrowser.cancel") }}</t-button>
       <t-button
@@ -69,18 +69,13 @@ function onClosed(visible: boolean) {
   border-radius: 8px;
 }
 
-.list button {
-  display: flex;
+.list :deep(.t-button) {
+  justify-content: flex-start;
   width: 100%;
   gap: 10px;
-  align-items: center;
-  background: transparent;
-  border: 0;
   border-bottom: 1px solid var(--border);
-  color: var(--text);
+  border-radius: 0;
   padding: 8px 10px;
-  text-align: left;
-  cursor: pointer;
 }
 
 .kind {

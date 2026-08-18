@@ -258,64 +258,66 @@ onMounted(() => {
     <div v-if="isForm" class="build-layout" :class="{ 'has-scan': showScanSidebar }">
       <div class="card build-form">
         <label class="field"><span>{{ t("build.mode") }}</span>
-          <select v-model="mode" class="field-input">
-            <option value="full">{{ t("build.mode_full") }}</option>
-            <option value="build">{{ t("build.mode_build") }}</option>
-            <option value="deploy">{{ t("build.mode_upload") }}</option>
-          </select>
+          <t-select v-model="mode">
+            <t-option value="full" :label="t('build.mode_full')" />
+            <t-option value="build" :label="t('build.mode_build')" />
+            <t-option value="deploy" :label="t('build.mode_upload')" />
+          </t-select>
         </label>
         <label v-if="mode !== 'deploy'" class="field"><span>{{ t("build.project_field") }}</span>
           <div class="field-row">
-            <input v-model="project" class="field-input" :placeholder="t('build.auto_detect')" />
+            <t-input v-model="project" :placeholder="t('build.auto_detect')" />
             <t-button @click="pickProject">{{ t("filebrowser.browse") }}</t-button>
           </div>
         </label>
         <label v-if="mode !== 'deploy'" class="field"><span>{{ t("build.scheme") }}</span>
-          <select v-model="scheme" class="field-input">
-            <option value="">{{ t("build.auto_detect") }}</option>
-            <option v-for="name in options.schemes || []" :key="name" :value="name">{{ name }}</option>
-          </select>
+          <t-select v-model="scheme" :placeholder="t('build.auto_detect')" clearable>
+            <t-option value="" :label="t('build.auto_detect')" />
+            <t-option v-for="name in options.schemes || []" :key="name" :value="name" :label="name" />
+          </t-select>
         </label>
         <label class="field"><span>{{ t("build.platform") }}</span>
-          <select v-model="destination" class="field-input">
-            <option value="testflight">TestFlight</option>
-            <option value="appstore">App Store</option>
-          </select>
+          <t-select v-model="destination">
+            <t-option value="testflight" label="TestFlight" />
+            <t-option value="appstore" label="App Store" />
+          </t-select>
         </label>
         <label v-if="mode !== 'deploy'" class="field"><span>{{ t("build.signing") }}</span>
-          <select v-model="signing" class="field-input">
-            <option value="auto">{{ t("build.signing_auto") }}</option>
-            <option value="manual">{{ t("build.signing_manual") }}</option>
-          </select>
+          <t-select v-model="signing">
+            <t-option value="auto" :label="t('build.signing_auto')" />
+            <t-option value="manual" :label="t('build.signing_manual')" />
+          </t-select>
         </label>
         <template v-if="mode !== 'deploy' && signing === 'manual'">
           <p class="muted">{{ t("build.signing_manual_hint") }}</p>
           <label class="field"><span>{{ t("build.certificate") }}</span>
-            <select v-model="certificate" class="field-input">
-              <option value="">{{ t("build.auto_detect") }}</option>
-              <option v-for="cert in options.certificates || []" :key="cert.sha1" :value="cert.name">{{ cert.name }}</option>
-            </select>
+            <t-select v-model="certificate" :placeholder="t('build.auto_detect')" clearable>
+              <t-option value="" :label="t('build.auto_detect')" />
+              <t-option v-for="cert in options.certificates || []" :key="cert.sha1" :value="cert.name" :label="cert.name" />
+            </t-select>
           </label>
           <label class="field"><span>{{ t("build.profile") }}</span>
-            <select v-model="profileName" class="field-input">
-              <option value="">{{ t("build.auto_detect") }}</option>
-              <option v-for="item in options.profiles || []" :key="item.path" :value="item.path">{{ item.name }}</option>
-            </select>
+            <t-select v-model="profileName" :placeholder="t('build.auto_detect')" clearable>
+              <t-option value="" :label="t('build.auto_detect')" />
+              <t-option v-for="item in options.profiles || []" :key="item.path" :value="item.path" :label="item.name" />
+            </t-select>
           </label>
         </template>
         <label v-if="mode === 'deploy'" class="field"><span>{{ t("build.ipa_path") }}</span>
           <div class="field-row">
-            <input v-model="ipaPath" class="field-input" />
+            <t-input v-model="ipaPath" />
             <t-button @click="pickIpa">{{ t("filebrowser.browse") }}</t-button>
           </div>
         </label>
-        <label class="check"><input v-model="verbose" type="checkbox" /> {{ t("build.verbose") }}</label>
-        <label class="check"><input v-model="dryRun" type="checkbox" /> {{ t("build.dry_run") }}</label>
+        <t-checkbox v-model="verbose">{{ t("build.verbose") }}</t-checkbox>
+        <t-checkbox v-model="dryRun">{{ t("build.dry_run") }}</t-checkbox>
         <div v-if="mode !== 'deploy'" class="reuse">
           <span class="lbl">{{ t("build.archive_reuse") }}</span>
-          <label class="check"><input v-model="reuseArchive" type="radio" value="" /> {{ t("build.reuse_auto") }}</label>
-          <label class="check"><input v-model="reuseArchive" type="radio" value="reuse" /> {{ t("build.reuse_reuse") }}</label>
-          <label class="check"><input v-model="reuseArchive" type="radio" value="rebuild" /> {{ t("build.reuse_rebuild") }}</label>
+          <t-radio-group v-model="reuseArchive">
+            <t-radio value="">{{ t("build.reuse_auto") }}</t-radio>
+            <t-radio value="reuse">{{ t("build.reuse_reuse") }}</t-radio>
+            <t-radio value="rebuild">{{ t("build.reuse_rebuild") }}</t-radio>
+          </t-radio-group>
         </div>
         <t-button theme="primary" :disabled="empty || optionsLoading" @click="run">{{ t("common.submit") }}</t-button>
       </div>
@@ -433,8 +435,7 @@ onMounted(() => {
 <style scoped>
 h1 { margin: 0; }
 .muted { color: var(--text-muted); font-size: 12px; }
-.check { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
-.reuse { display: flex; flex-direction: column; gap: 2px; }
+.reuse { display: flex; flex-direction: column; gap: 8px; }
 .lbl { font-size: 12px; color: var(--text-muted); }
 .card { display: flex; flex-direction: column; gap: 12px; flex: 1 1 auto; }
 

@@ -90,13 +90,13 @@ onActivated(() => {
       </div>
       <label class="field">
         <span>{{ t("urls.choose_type") }}</span>
-        <select v-model="field" class="field-input">
-          <option value="supportUrl">{{ t("urls.support") }}</option>
-          <option value="marketingUrl">{{ t("urls.marketing") }}</option>
-          <option value="privacyPolicyUrl">{{ t("urls.privacy") }}</option>
-        </select>
+        <t-select v-model="field">
+          <t-option value="supportUrl" :label="t('urls.support')" />
+          <t-option value="marketingUrl" :label="t('urls.marketing')" />
+          <t-option value="privacyPolicyUrl" :label="t('urls.privacy')" />
+        </t-select>
       </label>
-      <label class="field"><span>{{ t("urls.address") }}</span><input v-model="url" class="field-input" /></label>
+      <label class="field"><span>{{ t("urls.address") }}</span><t-input v-model="url" /></label>
       <LocaleSelectTabs
         v-model="activeLocale"
         v-model:selected="locales"
@@ -107,8 +107,8 @@ onActivated(() => {
           <p class="muted">{{ t("urls.locale_apply_hint", { locale }) }}</p>
         </template>
       </LocaleSelectTabs>
-      <label class="check"><input v-model="dryRun" type="checkbox" /> {{ t("common.dry_run") }}</label>
-      <label class="check"><input v-model="verbose" type="checkbox" /> {{ t("build.verbose") }}</label>
+      <t-checkbox v-model="dryRun">{{ t("common.dry_run") }}</t-checkbox>
+      <t-checkbox v-model="verbose">{{ t("build.verbose") }}</t-checkbox>
       <t-button theme="primary" :disabled="empty" @click="run">{{ t("urls.submit") }}</t-button>
     </div>
     <TaskRunBar v-if="isRun && taskId" :task-id="taskId" @back="backToForm" />
@@ -119,5 +119,4 @@ onActivated(() => {
 h1 { margin: 0; }
 .muted { color: var(--text-muted); font-size: 13px; }
 .card { display: flex; flex-direction: column; gap: 10px; }
-.check { display: flex; gap: 8px; align-items: center; }
 </style>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, onActivated, onMounted, ref, watch, type Ref } from "vue";
 import { useI18n } from "vue-i18n";
+import { DialogPlugin, MessagePlugin } from "tdesign-vue-next";
 import { ApiError, apiErrorMessage, httpJson } from "@/api/http";
 import PageLoading from "@/components/PageLoading.vue";
 import { hydrateListingForm } from "@/composables/useFormMemory";
@@ -61,9 +62,21 @@ const visible = computed(() =>
   locales.value.filter((loc) => loc.fields.some(fieldVisible) || loc.screenshots.length > 0),
 );
 
+const diffColumns = computed(() => [
+  { colKey: "check", title: "", width: 48 },
+  { colKey: "field", title: t("metadata.diff_col_field") },
+  { colKey: "status", title: t("metadata.diff_status_changed") },
+  { colKey: "local", title: t("metadata.diff_local") },
+  { colKey: "asc", title: t("metadata.diff_asc") },
+]);
+
+function visibleFields(loc: LocaleDiff) {
+  return loc.fields.filter(fieldVisible);
+}
+
 function guardDirty(): boolean {
   if (!scope.dirty.value) return false;
-  window.alert(t("metadata.diff_dirty_block"));
+  MessagePlugin.warning(t("metadata.diff_dirty_block"));
   return true;
 }
 
@@ -181,7 +194,17 @@ async function pullShots() {
     alert.value = { level: "warning", message: t("metadata.diff_shots_no_selection") };
     return;
   }
-  if (!window.confirm(t("metadata.diff_shots_confirm", { count: scopes.length }))) return;
+  const confirmed = await new Promise<boolean>((resolve) => {
+    const dia = DialogPlugin.confirm({
+      body: t("metadata.diff_shots_confirm", { count: scopes.length }),
+      onConfirm: () => {
+        resolve(true);
+        dia.hide();
+      },
+      onClose: () => resolve(false),
+    });
+  });
+  if (!confirmed) return;
   const { task_id } = await httpJson<{ task_id: string }>("/api/listing/pull/screenshots", {
     method: "POST",
     body: JSON.stringify({ screenshots_dir: shotsDir.value, scopes }),
@@ -226,52 +249,39 @@ onMounted(() => { void load(); });
           :disabled="loading && !loaded"
           @click="load"
         >{{ t("metadata.diff_load") }}</t-button>
-        <t-button :class="{ on: filter === 'all' }" @click="filter = 'all'">{{ t("metadata.diff_filter_all") }}</t-button>
-        <t-button :class="{ on: filter === 'diff' }" @click="filter = 'diff'">{{ t("metadata.diff_filter_diff") }}</t-button>
-        <t-button :class="{ on: filter === 'local' }" @click="filter = 'local'">{{ t("metadata.diff_filter_local") }}</t-button>
-        <t-button :class="{ on: filter === 'asc' }" @click="filter = 'asc'">{{ t("metadata.diff_filter_asc") }}</t-button>
+        <t-radio-group v-model="filter" variant="default-filled" size="small">
+          <t-radio-button value="all">{{ t("metadata.diff_filter_all") }}</t-radio-button>
+          <t-radio-button value="diff">{{ t("metadata.diff_filter_diff") }}</t-radio-button>
+          <t-radio-button value="local">{{ t("metadata.diff_filter_local") }}</t-radio-button>
+          <t-radio-button value="asc">{{ t("metadata.diff_filter_asc") }}</t-radio-button>
+        </t-radio-group>
         <t-button @click="selectDiffsOnly">{{ t("metadata.diff_select_diffs") }}</t-button>
         <t-button theme="primary" @click="pullText">{{ t("metadata.diff_pull") }}</t-button>
         <t-button @click="pullShots">{{ t("metadata.diff_shots_pull") }}</t-button>
       </div>
     </div>
     <PageLoading v-if="loading && !loaded" size="page" />
-    <p v-else-if="!locales.length" class="empty-state">{{ t("metadata.diff_empty") }}</p>
+    <t-empty v-else-if="!locales.length" :description="t('metadata.diff_empty')" />
     <section v-for="loc in visible" :key="loc.locale" class="card">
       <h3>{{ loc.locale }}</h3>
-      <table>
-        <thead>
-          <tr>
-            <th></th>
-            <th>{{ t("metadata.diff_col_field") }}</th>
-            <th>{{ t("metadata.diff_status_changed") }}</th>
-            <th>{{ t("metadata.diff_local") }}</th>
-            <th>{{ t("metadata.diff_asc") }}</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="field in loc.fields" :key="field.field" v-show="fieldVisible(field)">
-            <td>
-              <input
-                type="checkbox"
-                :checked="(selected[loc.locale] || []).includes(field.field)"
-                @change="toggleField(loc.locale, field.field, ($event.target as HTMLInputElement).checked)"
-              />
-            </td>
-            <td>{{ t(`metadata.field_${field.field}`) }}</td>
-            <td>{{ t(`metadata.diff_status_${field.status}`) }}</td>
-            <td class="mono">{{ field.local }}</td>
-            <td class="mono">{{ field.asc }}</td>
-          </tr>
-        </tbody>
-      </table>
+      <t-table :data="visibleFields(loc)" :columns="diffColumns" row-key="field" size="small">
+        <template #check="{ row }">
+          <t-checkbox
+            :checked="(selected[loc.locale] || []).includes(row.field)"
+            @change="(on: boolean) => toggleField(loc.locale, row.field, on)"
+          />
+        </template>
+        <template #field="{ row }">{{ t(`metadata.field_${row.field}`) }}</template>
+        <template #status="{ row }">{{ t(`metadata.diff_status_${row.status}`) }}</template>
+        <template #local="{ row }"><span class="mono">{{ row.local }}</span></template>
+        <template #asc="{ row }"><span class="mono">{{ row.asc }}</span></template>
+      </t-table>
       <h4>{{ t("metadata.diff_shots_heading") }}</h4>
       <p class="muted">{{ t("metadata.diff_shots_note") }}</p>
       <div v-for="shot in loc.screenshots" :key="shot.display_type" class="shot-block">
-        <label class="check">
-          <input v-model="selectedScopes[scopeKey(loc.locale, shot.display_type)]" type="checkbox" />
+        <t-checkbox v-model="selectedScopes[scopeKey(loc.locale, shot.display_type)]">
           {{ shot.display_type }}
-        </label>
+        </t-checkbox>
         <div class="cols">
           <div>
             <strong>{{ t("metadata.diff_local") }}</strong>
@@ -289,12 +299,8 @@ onMounted(() => { void load(); });
 
 <style scoped>
 h3, h4 { margin: 0 0 8px; }
-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-th, td { border-bottom: 1px solid var(--border); padding: 6px; vertical-align: top; }
 .muted { color: var(--text-muted); font-size: 12px; }
 .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .cols img { width: 72px; height: 128px; object-fit: cover; margin: 4px; border-radius: 6px; cursor: zoom-in; border: 1px solid var(--border); }
-.check { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
 .shot-block { margin-top: 10px; }
-.field-row :deep(.t-button.on) { color: var(--accent); border-color: rgba(143, 245, 210, 0.28); }
 </style>

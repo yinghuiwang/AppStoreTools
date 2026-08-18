@@ -75,25 +75,23 @@ onMounted(() => {
       <p v-if="progress.msg || progress.pct" class="progress mono">
         {{ progress.pct }}% {{ progress.msg }}
       </p>
-      <div v-if="progress.pct" class="bar">
-        <i :style="{ width: `${Math.min(100, progress.pct)}%` }" />
-      </div>
+      <t-progress v-if="progress.pct" :percentage="Math.min(100, progress.pct)" :label="false" size="small" />
       <div v-if="logTaskId" class="tools">
-        <button type="button" @click="copyLogs">{{ t("drawer.copy") }}</button>
-        <button type="button" @click="clearLocal()">{{ t("drawer.clear") }}</button>
-        <button type="button" :class="{ on: errorsOnly }" @click="errorsOnly = !errorsOnly">
+        <t-button size="small" @click="copyLogs">{{ t("drawer.copy") }}</t-button>
+        <t-button size="small" @click="clearLocal()">{{ t("drawer.clear") }}</t-button>
+        <t-button size="small" :variant="errorsOnly ? 'base' : 'outline'" :theme="errorsOnly ? 'primary' : 'default'" @click="errorsOnly = !errorsOnly">
           {{ t("drawer.errors_only") }}
-        </button>
-        <button type="button" :class="{ on: follow }" @click="follow = !follow">
+        </t-button>
+        <t-button size="small" :variant="follow ? 'base' : 'outline'" :theme="follow ? 'primary' : 'default'" @click="follow = !follow">
           {{ t("drawer.follow") }}
-        </button>
-        <button v-if="canCancel()" type="button" @click="cancel()">{{ t("index.cancel") }}</button>
-        <button v-if="status === 'error'" type="button" class="explain" @click="explain">
+        </t-button>
+        <t-button v-if="canCancel()" size="small" @click="cancel()">{{ t("index.cancel") }}</t-button>
+        <t-button v-if="status === 'error'" size="small" theme="primary" variant="outline" @click="explain">
           {{ t("drawer.explain_with_agent") }}
-        </button>
+        </t-button>
       </div>
     </header>
-    <div v-if="!logTaskId" class="empty">{{ t("rail.logs.empty") }}</div>
+    <t-empty v-if="!logTaskId" :description="t('rail.logs.empty')" />
     <PageLoading
       v-else-if="!lines.length && (connection === 'connecting' || connection === 'reconnecting')"
       size="block"
@@ -165,18 +163,8 @@ onMounted(() => {
   font-size: 11px;
 }
 
-.bar {
+.head :deep(.t-progress) {
   margin-top: 6px;
-  height: 3px;
-  background: var(--raised);
-  border-radius: 99px;
-  overflow: hidden;
-}
-
-.bar i {
-  display: block;
-  height: 100%;
-  background: linear-gradient(90deg, var(--accent-dim), var(--accent));
 }
 
 .tools {
@@ -184,28 +172,6 @@ onMounted(() => {
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 10px;
-}
-
-.tools button {
-  background: var(--raised);
-  border: 1px solid var(--border);
-  color: var(--text-muted);
-  font-size: 11px;
-  padding: 4px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.tools button.on,
-.tools button.explain {
-  color: var(--accent);
-  border-color: rgba(143, 245, 210, 0.28);
-}
-
-.empty {
-  padding: 24px 18px;
-  color: var(--text-muted);
-  font-size: 13px;
 }
 
 .stream {

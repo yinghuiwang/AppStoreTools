@@ -200,18 +200,18 @@ onActivated(() => {
     </div>
     <div v-if="isForm" class="card">
       <div class="mode-block">
-        <label class="check"><input v-model="translateMode" type="checkbox" /> {{ t("whats_new.translate_mode") }}</label>
+        <t-checkbox v-model="translateMode">{{ t("whats_new.translate_mode") }}</t-checkbox>
         <label v-if="translateMode" class="field">
           <span>{{ t("whats_new.source_lang") }}</span>
-          <select v-model="sourceLocale" class="field-input">
-            <option value="auto">{{ t("whats_new.auto_detect") }}</option>
-            <option v-for="code in check?.detail?.locales || []" :key="code" :value="code">{{ code }}</option>
-          </select>
+          <t-select v-model="sourceLocale">
+            <t-option value="auto" :label="t('whats_new.auto_detect')" />
+            <t-option v-for="code in check?.detail?.locales || []" :key="code" :value="code" :label="code" />
+          </t-select>
         </label>
       </div>
       <label v-if="translateMode" class="field">
         <span>{{ t("whats_new.text") }}</span>
-        <textarea v-model="text" rows="8" class="field-input" :placeholder="t('whats_new.placeholder')" />
+        <t-textarea v-model="text" :autosize="{ minRows: 8, maxRows: 14 }" :placeholder="t('whats_new.placeholder')" />
       </label>
       <LocaleSelectTabs
         v-if="!translateMode"
@@ -222,18 +222,17 @@ onActivated(() => {
         <template #default="{ locale }">
           <label class="field">
             <span>{{ t("whats_new.text") }}</span>
-            <textarea
+            <t-textarea
               :value="texts[locale] || ''"
-              rows="8"
-              class="field-input"
+              :autosize="{ minRows: 8, maxRows: 14 }"
               :placeholder="sharedPlaceholder"
-              @input="setLocaleText(locale, ($event.target as HTMLTextAreaElement).value)"
+              @change="(value) => setLocaleText(locale, String(value ?? ''))"
             />
           </label>
         </template>
       </LocaleSelectTabs>
-      <label class="check"><input v-model="dryRun" type="checkbox" /> {{ t("common.dry_run") }}</label>
-      <label class="check"><input v-model="verbose" type="checkbox" /> {{ t("build.verbose") }}</label>
+      <t-checkbox v-model="dryRun">{{ t("common.dry_run") }}</t-checkbox>
+      <t-checkbox v-model="verbose">{{ t("build.verbose") }}</t-checkbox>
       <div class="field-row">
         <t-button v-if="translateMode" :disabled="empty" @click="previewTranslate">{{ t("whats_new.preview_translate") }}</t-button>
         <t-button v-if="translateMode" theme="primary" :disabled="empty" @click="runTranslateAndUpload">{{ t("whats_new.translate_upload") }}</t-button>
@@ -253,7 +252,7 @@ onActivated(() => {
         <template #default="{ locale }">
           <label class="field">
             <span>{{ locale }}</span>
-            <textarea v-model="translations[locale]" rows="4" class="field-input" />
+            <t-textarea v-model="translations[locale]" :autosize="{ minRows: 4, maxRows: 10 }" />
           </label>
         </template>
       </LocaleSelectTabs>
@@ -274,7 +273,7 @@ onActivated(() => {
             <template #default="{ locale }">
               <label class="field">
                 <span>{{ locale }}</span>
-                <textarea v-model="translations[locale]" rows="4" class="field-input" />
+                <t-textarea v-model="translations[locale]" :autosize="{ minRows: 4, maxRows: 10 }" />
               </label>
             </template>
           </LocaleSelectTabs>
@@ -289,7 +288,6 @@ onActivated(() => {
 h1, h2 { margin: 0 0 8px; }
 .muted { color: var(--text-muted); font-size: 12px; }
 .card { display: flex; flex-direction: column; gap: 10px; }
-.check { display: flex; gap: 8px; align-items: center; }
 .mode-block {
   display: flex;
   flex-direction: column;

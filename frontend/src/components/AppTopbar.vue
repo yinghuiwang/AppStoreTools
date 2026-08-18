@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed } from "vue";
 import { useRoute } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { MessagePlugin } from "tdesign-vue-next";
@@ -9,7 +9,6 @@ import { useProfile } from "@/composables/useProfile";
 const { t, locale } = useI18n();
 const route = useRoute();
 const { snapshot, switchProfile } = useProfile();
-const selectEl = ref<HTMLSelectElement | null>(null);
 
 const TITLE_KEYS: Array<{ test: (path: string) => boolean; key: string }> = [
   { test: (p) => p === "/", key: "nav.dashboard" },
@@ -35,20 +34,18 @@ const access = computed(() => snapshot.value?.profile_access ?? {});
 const hasMachine = computed(() => Boolean(snapshot.value?.has_machine_profile));
 const lang = computed(() => (locale.value === "zh" ? "zh" : "en"));
 
-async function onProfileChange(event: Event) {
-  const el = event.target as HTMLSelectElement;
-  const name = el.value;
-  const previous = snapshot.value?.current_profile ?? "";
+async function onProfileChange(name: unknown) {
+  const next = String(name ?? "");
+  if (!next || next === currentName.value) return;
   try {
-    await switchProfile(name);
+    await switchProfile(next);
   } catch (err) {
     MessagePlugin.error(err instanceof Error ? err.message : String(err));
-    el.value = previous;
-    if (selectEl.value) selectEl.value.value = previous;
   }
 }
 
-async function setLang(code: "zh" | "en") {
+async function setLang(code: unknown) {
+  if (code !== "zh" && code !== "en") return;
   try {
     await httpForm("/api/settings/lang", new URLSearchParams({ lang: code }));
     locale.value = code;
@@ -70,26 +67,24 @@ async function setLang(code: "zh" | "en") {
       <router-link v-if="!hasMachine" class="new-profile" to="/profiles">
         {{ t("nav.new_profile") }}
       </router-link>
-      <select
-        ref="selectEl"
+      <t-select
         class="profile-select"
         :value="currentName"
+        :placeholder="t('nav.select_app')"
         @change="onProfileChange"
       >
-        <option value="" disabled>{{ t("nav.select_app") }}</option>
-        <option
+        <t-option
           v-for="name in profiles"
           :key="name"
           :value="name"
+          :label="name + (access[name]?.enabled === false ? t('nav.other_machine') : '')"
           :disabled="access[name]?.enabled === false"
-        >
-          {{ name }}{{ access[name]?.enabled === false ? t("nav.other_machine") : "" }}
-        </option>
-      </select>
-      <div class="lang" role="group">
-        <button type="button" :class="{ on: lang === 'zh' }" @click="setLang('zh')">zh</button>
-        <button type="button" :class="{ on: lang === 'en' }" @click="setLang('en')">en</button>
-      </div>
+        />
+      </t-select>
+      <t-radio-group :value="lang" size="small" variant="default-filled" @change="setLang">
+        <t-radio-button value="zh">zh</t-radio-button>
+        <t-radio-button value="en">en</t-radio-button>
+      </t-radio-group>
     </div>
   </header>
 </template>
@@ -143,33 +138,5 @@ async function setLang(code: "zh" | "en") {
 .profile-select {
   min-width: 160px;
   max-width: 240px;
-  height: 32px;
-  padding: 0 10px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--raised);
-  color: var(--text);
-}
-
-.lang {
-  display: flex;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  overflow: hidden;
-}
-
-.lang button {
-  background: transparent;
-  border: 0;
-  color: var(--text-muted);
-  padding: 6px 10px;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 650;
-}
-
-.lang button.on {
-  color: #0a0a0c;
-  background: linear-gradient(135deg, var(--accent-dim), var(--accent));
 }
 </style>

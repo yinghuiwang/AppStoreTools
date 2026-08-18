@@ -2,6 +2,7 @@
 import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
+import { MessagePlugin } from "tdesign-vue-next";
 import { httpJson } from "@/api/http";
 import { mapRetryPath } from "@/api/types";
 import PageLoading from "@/components/PageLoading.vue";
@@ -133,6 +134,29 @@ function statusLabel(status: string) {
   return label === key ? status || "--" : label;
 }
 
+function statusTheme(status: string): "success" | "danger" | "warning" | "primary" | "default" {
+  if (status === "done") return "success";
+  if (status === "error") return "danger";
+  if (status === "canceled") return "warning";
+  if (status === "running" || status === "pending") return "primary";
+  return "default";
+}
+
+const historyColumns = computed(() => [
+  { colKey: "task", title: t("index.col_task") },
+  { colKey: "status", title: t("index.col_status"), width: 120 },
+  { colKey: "profile", title: t("index.col_app"), width: 140 },
+  { colKey: "started", title: t("index.col_started"), width: 150 },
+  { colKey: "duration", title: t("index.col_duration"), width: 130 },
+  { colKey: "actions", title: t("index.col_actions"), width: 240 },
+]);
+
+function historyRowClass({ row }: { row: Task }) {
+  if (row.status === "error") return "is-error";
+  if (row.status === "running" || row.status === "pending") return "is-running";
+  return "";
+}
+
 function startedAt(value?: string) {
   return String(value || "").slice(0, 16).replace("T", " ") || "--";
 }
@@ -196,13 +220,12 @@ async function load() {
 }
 
 async function cancel(id: string) {
-  if (!window.confirm(t("dashboard.confirm_cancel"))) return;
   cancellingIds.value = [...cancellingIds.value, id];
   try {
     await httpJson(`/api/task/${encodeURIComponent(id)}/cancel`, { method: "POST" });
     await load();
   } catch {
-    window.alert(t("dashboard.cancel_failed"));
+    MessagePlugin.error(t("dashboard.cancel_failed"));
   } finally {
     cancellingIds.value = cancellingIds.value.filter((item) => item !== id);
   }
@@ -271,49 +294,46 @@ onUnmounted(() => {
       <section class="filters" :aria-label="t('index.filter_aria')">
         <fieldset>
           <legend>{{ t("index.range") }}</legend>
-          <div class="seg">
-            <button
+          <t-radio-group v-model="range" variant="default-filled" size="small">
+            <t-radio-button
               v-for="item in (['7d', '30d', '90d'] as const)"
               :key="item"
-              type="button"
-              :class="{ on: range === item }"
-              :aria-pressed="range === item"
-              @click="range = item"
+              :value="item"
             >
               {{ t(`index.range_${item}`) }}
-            </button>
-          </div>
+            </t-radio-button>
+          </t-radio-group>
         </fieldset>
         <label>
           <span>App</span>
-          <select v-model="profileFilter" class="field-input">
-            <option value="">{{ t("index.all_apps") }}</option>
-            <option v-for="name in snapshot?.profiles || []" :key="name" :value="name">{{ name }}</option>
-          </select>
+          <t-select v-model="profileFilter" class="filter-select" clearable :placeholder="t('index.all_apps')">
+            <t-option value="" :label='t("index.all_apps")' />
+            <t-option v-for="name in snapshot?.profiles || []" :key="name" :value="name" :label="name" />
+          </t-select>
         </label>
         <label>
           <span>{{ t("index.status") }}</span>
-          <select v-model="statusFilter" class="field-input">
-            <option value="">{{ t("index.all_statuses") }}</option>
-            <option value="pending">{{ t("index.status.pending") }}</option>
-            <option value="running">{{ t("index.status.running") }}</option>
-            <option value="done">{{ t("index.status.done") }}</option>
-            <option value="error">{{ t("index.status.error") }}</option>
-            <option value="canceled">{{ t("index.status.canceled") }}</option>
-          </select>
+          <t-select v-model="statusFilter" class="filter-select" clearable :placeholder="t('index.all_statuses')">
+            <t-option value="" :label='t("index.all_statuses")' />
+            <t-option value="pending" :label="t('index.status.pending')" />
+            <t-option value="running" :label="t('index.status.running')" />
+            <t-option value="done" :label="t('index.status.done')" />
+            <t-option value="error" :label="t('index.status.error')" />
+            <t-option value="canceled" :label="t('index.status.canceled')" />
+          </t-select>
         </label>
         <label>
           <span>{{ t("index.kind") }}</span>
-          <select v-model="kind" class="field-input">
-            <option value="">{{ t("index.all_kinds") }}</option>
-            <option value="metadata">{{ t("index.kind_metadata") }}</option>
-            <option value="build">{{ t("index.kind_build") }}</option>
-            <option value="whats-new">{{ t("index.kind_whats_new") }}</option>
-            <option value="iap">{{ t("index.kind_iap") }}</option>
-            <option value="iap-review-screenshots">{{ t("index.kind_iap_review") }}</option>
-            <option value="urls">{{ t("index.kind_urls") }}</option>
-            <option value="update">{{ t("index.kind_update") }}</option>
-          </select>
+          <t-select v-model="kind" class="filter-select" clearable :placeholder="t('index.all_kinds')">
+            <t-option value="" :label='t("index.all_kinds")' />
+            <t-option value="metadata" :label="t('index.kind_metadata')" />
+            <t-option value="build" :label="t('index.kind_build')" />
+            <t-option value="whats-new" :label="t('index.kind_whats_new')" />
+            <t-option value="iap" :label="t('index.kind_iap')" />
+            <t-option value="iap-review-screenshots" :label="t('index.kind_iap_review')" />
+            <t-option value="urls" :label="t('index.kind_urls')" />
+            <t-option value="update" :label="t('index.kind_update')" />
+          </t-select>
         </label>
       </section>
     </header>
@@ -394,28 +414,26 @@ onUnmounted(() => {
                   <strong>{{ task.title || t("dashboard.unnamed_task") }}</strong>
                   <span>{{ task.profile || t("index.no_profile") }}</span>
                 </div>
-                <div
-                  class="bar"
-                  role="progressbar"
+                <t-progress
+                  :percentage="task.progress?.pct || 0"
+                  :label="false"
+                  size="small"
                   :aria-label="t('index.progress_aria', { title: task.title || t('dashboard.unnamed_task') })"
-                  aria-valuemin="0"
-                  aria-valuemax="100"
-                  :aria-valuenow="task.progress?.pct || 0"
-                >
-                  <span :style="{ width: `${task.progress?.pct || 0}%` }" />
-                </div>
+                />
                 <small>{{ task.progress?.msg || (task.status === "pending" ? t("index.waiting") : t("index.executing")) }}</small>
               </div>
               <div class="run-actions">
                 <t-button size="small" @click="rail.openLogs(task.id)">{{ t("index.log") }}</t-button>
-                <t-button size="small" :disabled="isCancelling(task)" @click="cancel(task.id)">
-                  {{ isCancelling(task) ? t("dashboard.canceling") : t("index.cancel") }}
-                </t-button>
+                <t-popconfirm :content="t('dashboard.confirm_cancel')" @confirm="cancel(task.id)">
+                  <t-button size="small" :disabled="isCancelling(task)">
+                    {{ isCancelling(task) ? t("dashboard.canceling") : t("index.cancel") }}
+                  </t-button>
+                </t-popconfirm>
               </div>
             </article>
-            <p v-if="!running.length" class="empty-state">{{ t("index.empty_running") }}</p>
+            <t-empty v-if="!running.length" :description="t('index.empty_running')" />
           </template>
-          <p v-else-if="!loading" class="empty-state">{{ refreshError || t("index.empty_running") }}</p>
+          <t-empty v-else-if="!loading" :description="refreshError || t('index.empty_running')" />
         </div>
       </section>
 
@@ -454,59 +472,48 @@ onUnmounted(() => {
         <span>{{ t("index.recent_n", { n: historyTasks.length }) }}</span>
       </div>
       <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th scope="col">{{ t("index.col_task") }}</th>
-              <th scope="col">{{ t("index.col_status") }}</th>
-              <th scope="col">{{ t("index.col_app") }}</th>
-              <th scope="col">{{ t("index.col_started") }}</th>
-              <th scope="col">{{ t("index.col_duration") }}</th>
-              <th scope="col">{{ t("index.col_actions") }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="row in historyTasks"
-              :key="row.id"
-              :class="{
-                'is-error': row.status === 'error',
-                'is-running': row.status === 'running' || row.status === 'pending',
-              }"
-            >
-              <td>
-                <strong>{{ row.title || t("dashboard.unnamed_task") }}</strong>
-                <small>{{ row.kind }}</small>
-              </td>
-              <td>
-                <span class="status" :class="`is-${row.status}`">{{ statusLabel(row.status) }}</span>
-              </td>
-              <td class="mono">{{ row.profile || "--" }}</td>
-              <td class="mono">{{ startedAt(row.created_at) }}</td>
-              <td class="mono">{{ row.duration_label || formatDuration(row.duration_seconds || 0) }}</td>
-              <td class="actions">
-                <t-button size="small" @click="rail.openLogs(row.id)">{{ t("index.log") }}</t-button>
-                <t-button
-                  v-if="row.status === 'error'"
-                  size="small"
-                  @click="rail.openAgent({ taskId: row.id, autoAnalyze: true })"
-                >
-                  {{ t("drawer.explain_with_agent") }}
-                </t-button>
-                <t-button
-                  v-if="row.status === 'error' && retryTo(row.retry_path)"
-                  size="small"
-                  @click="router.push(retryTo(row.retry_path))"
-                >
-                  {{ t("index.retry") }}
-                </t-button>
-              </td>
-            </tr>
-            <tr v-if="!historyTasks.length">
-              <td colspan="6" class="empty-state">{{ t("index.empty_history") }}</td>
-            </tr>
-          </tbody>
-        </table>
+        <t-table
+          :data="historyTasks"
+          :columns="historyColumns"
+          row-key="id"
+          size="small"
+          :row-class-name="historyRowClass"
+        >
+          <template #task="{ row }">
+            <strong>{{ row.title || t("dashboard.unnamed_task") }}</strong>
+            <small>{{ row.kind }}</small>
+          </template>
+          <template #status="{ row }">
+            <t-tag :theme="statusTheme(row.status)" variant="light" size="small">{{ statusLabel(row.status) }}</t-tag>
+          </template>
+          <template #profile="{ row }"><span class="mono">{{ row.profile || "--" }}</span></template>
+          <template #started="{ row }"><span class="mono">{{ startedAt(row.created_at) }}</span></template>
+          <template #duration="{ row }">
+            <span class="mono">{{ row.duration_label || formatDuration(row.duration_seconds || 0) }}</span>
+          </template>
+          <template #actions="{ row }">
+            <div class="actions">
+              <t-button size="small" @click="rail.openLogs(row.id)">{{ t("index.log") }}</t-button>
+              <t-button
+                v-if="row.status === 'error'"
+                size="small"
+                @click="rail.openAgent({ taskId: row.id, autoAnalyze: true })"
+              >
+                {{ t("drawer.explain_with_agent") }}
+              </t-button>
+              <t-button
+                v-if="row.status === 'error' && retryTo(row.retry_path)"
+                size="small"
+                @click="router.push(retryTo(row.retry_path))"
+              >
+                {{ t("index.retry") }}
+              </t-button>
+            </div>
+          </template>
+          <template #empty>
+            <t-empty :description="t('index.empty_history')" />
+          </template>
+        </t-table>
       </div>
     </section>
   </div>
@@ -563,19 +570,9 @@ onUnmounted(() => {
   text-transform: uppercase;
   margin-bottom: 4px;
 }
-.filters .field-input {
+.filters .filter-select {
   width: 140px;
-  padding: 6px 8px;
 }
-.seg { display: flex; gap: 4px; }
-.seg button {
-  background: var(--raised);
-  color: var(--text-muted);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 5px 9px;
-}
-.seg button.on { color: #0a0a0c; background: var(--accent); border-color: transparent; }
 .dash-top {
   display: flex;
   flex-direction: column;
@@ -714,19 +711,7 @@ onUnmounted(() => {
 .run-main small { color: var(--text-muted); font-size: 12px; }
 .run-main small { display: block; margin-top: 4px; }
 .run-actions { display: flex; gap: 6px; flex-shrink: 0; }
-.bar {
-  height: 4px;
-  background: var(--raised);
-  border-radius: 99px;
-  margin-top: 6px;
-  overflow: hidden;
-}
-.bar span { display: block; height: 100%; background: var(--info); }
-.running .empty-state,
-.quick .empty-state {
-  margin: 0;
-  padding: 12px 4px;
-}
+.run-main :deep(.t-progress) { margin-top: 6px; }
 .quick { padding: 10px 0 8px; }
 .quick .section-head { padding: 0 12px; }
 .quick-link {
@@ -766,51 +751,12 @@ onUnmounted(() => {
 .history {
   flex: 1 1 auto;
 }
-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  text-align: left;
-  color: var(--text-faint);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  padding: 6px 8px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-}
-td {
-  padding: 8px;
-  border-bottom: 1px solid var(--border);
-  color: var(--text-muted);
-  vertical-align: middle;
-}
-td strong,
-td small { display: block; }
-td strong { color: var(--text); font-weight: 500; }
-td small { margin-top: 2px; color: var(--text-faint); font-size: 11px; }
-td.empty-state { padding: 16px 8px; }
-tr.is-error td { background: color-mix(in srgb, var(--err) 8%, transparent); }
-tr.is-running td { background: color-mix(in srgb, var(--info) 7%, transparent); }
-.status { display: inline-flex; align-items: center; gap: 6px; }
-.status::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--text-faint);
-}
-.status.is-done { color: var(--ok); }
-.status.is-done::before { background: var(--ok); }
-.status.is-error { color: var(--err); }
-.status.is-error::before { background: var(--err); }
-.status.is-running { color: var(--info); }
-.status.is-running::before { background: var(--info); animation: dash-pulse 1.4s ease-in-out infinite; }
-.status.is-pending { color: var(--accent); }
-.status.is-pending::before { background: var(--accent); }
-.status.is-canceled { color: var(--text-muted); }
+.table-wrap :deep(strong),
+.table-wrap :deep(small) { display: block; }
+.table-wrap :deep(strong) { color: var(--text); font-weight: 500; }
+.table-wrap :deep(small) { margin-top: 2px; color: var(--text-faint); font-size: 11px; }
+.table-wrap :deep(tr.is-error td) { background: color-mix(in srgb, var(--err) 8%, transparent); }
+.table-wrap :deep(tr.is-running td) { background: color-mix(in srgb, var(--info) 7%, transparent); }
 .actions {
   display: flex;
   flex-wrap: wrap;

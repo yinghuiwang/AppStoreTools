@@ -137,7 +137,6 @@ async function replaceShot(path: string, file: File) {
 }
 
 async function deleteShot(path: string) {
-  if (!window.confirm(t("metadata.shots_confirm_delete"))) return;
   await httpJson("/api/listing/screenshots/delete", {
     method: "POST",
     body: JSON.stringify({ root: shotsDir.value, path }),
@@ -222,14 +221,14 @@ watch(reloadTick, () => { if (!empty.value) void load(); });
       <div class="field">
         <ExampleHelp kind="csv" :label="t('metadata.csv_path')" />
         <div class="field-row">
-          <input v-model="csvPath" class="field-input" />
+          <t-input v-model="csvPath" />
           <t-button @click="browse.pick({ mode: 'file', ext: '.csv', initialPath: csvPath }).then((p) => { if (p) csvPath = p; })">{{ t("filebrowser.browse") }}</t-button>
         </div>
       </div>
       <div class="field">
         <ExampleHelp kind="shots" :label="t('metadata.shots_dir')" />
         <div class="field-row">
-          <input v-model="shotsDir" class="field-input" />
+          <t-input v-model="shotsDir" />
           <t-button @click="browse.pick({ mode: 'dir', initialPath: shotsDir }).then((p) => { if (p) shotsDir = p; })">{{ t("filebrowser.browse") }}</t-button>
         </div>
       </div>
@@ -245,7 +244,7 @@ watch(reloadTick, () => { if (!empty.value) void load(); });
       </div>
     </div>
     <PageLoading v-if="loading && !loaded" size="page" />
-    <p v-else-if="!locales.length" class="empty-state">{{ t("metadata.wb_empty") }}</p>
+    <t-empty v-else-if="!locales.length" :description="t('metadata.wb_empty')" />
     <div v-else class="workbench">
       <LocaleSelectTabs
         v-model="active"
@@ -256,36 +255,34 @@ watch(reloadTick, () => { if (!empty.value) void load(); });
       <div v-if="current" class="card editors">
         <div class="col-select">
           <span class="lbl">{{ t("metadata.col_upload") }}</span>
-          <label v-for="field in FIELDS" :key="`col-${field}`" class="check">
-            <input
-              type="checkbox"
-              :checked="scope.allFieldsSelected(field)"
-              @change="scope.selectAllField(field, ($event.target as HTMLInputElement).checked)"
-            />
+          <t-checkbox
+            v-for="field in FIELDS"
+            :key="`col-${field}`"
+            :checked="scope.allFieldsSelected(field)"
+            @change="(on: boolean) => scope.selectAllField(field, on)"
+          >
             {{ t(`metadata.field_${field}`) }}
-          </label>
+          </t-checkbox>
         </div>
         <label v-for="field in FIELDS" :key="field" class="field field-with-check">
           <span>
-            <input
-              type="checkbox"
+            <t-checkbox
               :checked="scope.isFieldSelected(current.locale, field)"
-              @change="scope.setFieldSelected(current.locale, field, ($event.target as HTMLInputElement).checked)"
-            />
-            {{ t(`metadata.field_${field}`) }}
+              @change="(on: boolean) => scope.setFieldSelected(current.locale, field, on)"
+            >
+              {{ t(`metadata.field_${field}`) }}
+            </t-checkbox>
           </span>
-          <textarea
+          <t-textarea
             v-if="field === 'description'"
             v-model="current.fields[field]"
-            rows="6"
-            class="field-input"
-            @input="scope.markDirty()"
+            :autosize="{ minRows: 6, maxRows: 12 }"
+            @change="scope.markDirty()"
           />
-          <input
+          <t-input
             v-else
             v-model="current.fields[field]"
-            class="field-input"
-            @input="scope.markDirty()"
+            @change="scope.markDirty()"
           />
         </label>
         <h3>{{ t("metadata.shots_section") }}</h3>
@@ -306,14 +303,12 @@ watch(reloadTick, () => { if (!empty.value) void load(); });
         </div>
         <div v-for="(group, dtype) in current.screenshots" :key="dtype" class="shots">
           <div class="shot-head">
-            <label class="check">
-              <input
-                type="checkbox"
-                :checked="scope.groupAllSelected(current.locale, String(dtype), shotNames(group))"
-                @change="scope.setGroupSelected(current.locale, String(dtype), shotNames(group), ($event.target as HTMLInputElement).checked)"
-              />
+            <t-checkbox
+              :checked="scope.groupAllSelected(current.locale, String(dtype), shotNames(group))"
+              @change="(on: boolean) => scope.setGroupSelected(current.locale, String(dtype), shotNames(group), on)"
+            >
               <strong>{{ dtypeLabel(String(dtype)) }}</strong>
-            </label>
+            </t-checkbox>
             <t-button size="small" @click="openAddShot(current.locale, String(dtype))">
               <template #icon><AddIcon /></template>
               {{ t("metadata.shots_add") }}
@@ -323,11 +318,10 @@ watch(reloadTick, () => { if (!empty.value) void load(); });
             <figure v-for="(item, idx) in group" :key="item.local_path || item.file_name" class="thumb">
               <div class="thumb-frame">
                 <img :src="item.thumb_url" :alt="item.file_name" @click="openShots(group, idx)" />
-                <input
-                  type="checkbox"
+                <t-checkbox
                   class="thumb-check"
                   :checked="scope.isShotSelected(current.locale, String(dtype), item.file_name)"
-                  @change="scope.setShotSelected(current.locale, String(dtype), item.file_name, ($event.target as HTMLInputElement).checked)"
+                  @change="(on: boolean) => scope.setShotSelected(current.locale, String(dtype), item.file_name, on)"
                   @click.stop
                 />
               </div>
@@ -354,7 +348,9 @@ watch(reloadTick, () => { if (!empty.value) void load(); });
                   <template #icon><ChevronDownIcon /></template>
                 </t-button>
                 <t-button size="small" @click="openReplaceShot(item.local_path)">{{ t("metadata.shots_replace") }}</t-button>
-                <t-button size="small" theme="danger" variant="outline" @click="deleteShot(item.local_path)">{{ t("metadata.shots_delete") }}</t-button>
+                <t-popconfirm :content="t('metadata.shots_confirm_delete')" @confirm="deleteShot(item.local_path)">
+                  <t-button size="small" theme="danger" variant="outline">{{ t("metadata.shots_delete") }}</t-button>
+                </t-popconfirm>
               </div>
             </figure>
           </div>
@@ -378,7 +374,6 @@ watch(reloadTick, () => { if (!empty.value) void load(); });
 .unsaved { color: var(--accent); font-size: 12px; }
 .col-select { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
 .field-with-check span { display: flex; align-items: center; gap: 8px; }
-.check { display: flex; gap: 8px; align-items: center; }
 .lbl { font-size: 12px; color: var(--text-muted); }
 .muted { color: var(--text-muted); }
 .empty-shots { display: flex; align-items: center; gap: 12px; }
@@ -387,6 +382,8 @@ watch(reloadTick, () => { if (!empty.value) void load(); });
 .thumb-frame { position: relative; }
 .thumb img { width: 148px; height: 254px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); cursor: zoom-in; display: block; }
 .thumb-check { position: absolute; top: 6px; left: 6px; }
+.thumb-check :deep(.t-checkbox__input),
+.thumb-check :deep(.t-checkbox__former) { background: var(--overlay); }
 figcaption { font-size: 11px; color: var(--text-muted); word-break: break-all; line-height: 1.3; }
 .thumb-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
 .thumb-actions :deep(.t-button) { margin: 0; width: 100%; }

@@ -67,7 +67,7 @@ onMounted(() => { void load(); });
     <p class="hint">{{ t("metadata.locales_hint") }}</p>
     <p v-if="!presenceAvailable" class="hint">{{ t("metadata.locales_presence_unavailable") }}</p>
     <div class="field-row">
-      <input v-model="query" class="field-input" :placeholder="t('metadata.locales_search')" />
+      <t-input v-model="query" :placeholder="t('metadata.locales_search')" />
       <t-button
         :loading="loading && rows.length > 0"
         :disabled="loading && !rows.length"

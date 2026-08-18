@@ -171,15 +171,15 @@ onMounted(() => { if (!checkMsg.value) void check(); });
         <div class="field">
           <ExampleHelp kind="iap" :label="t('iap.file')" />
           <div class="field-row">
-            <input v-model="iapFile" class="field-input" />
+            <t-input v-model="iapFile" />
             <t-button @click="browse.pick({ mode: 'file', ext: '.json', initialPath: iapFile }).then((p) => { if (p) iapFile = p; })">{{ t("filebrowser.browse") }}</t-button>
           </div>
         </div>
         <PageLoading v-if="checking && !checkMsg" size="inline" />
         <p v-else-if="checkMsg">{{ checkMsg }}</p>
-        <label class="check"><input v-model="dryRun" type="checkbox" /> {{ t("iap.dry_run") }}</label>
-        <label class="check"><input v-model="updateExisting" type="checkbox" /> {{ t("iap.update_existing") }}</label>
-        <label class="check"><input v-model="verbose" type="checkbox" /> {{ t("build.verbose") }}</label>
+        <t-checkbox v-model="dryRun">{{ t("iap.dry_run") }}</t-checkbox>
+        <t-checkbox v-model="updateExisting">{{ t("iap.update_existing") }}</t-checkbox>
+        <t-checkbox v-model="verbose">{{ t("build.verbose") }}</t-checkbox>
         <div class="field-row">
           <t-button
             :disabled="empty || (checking && !checkMsg)"
@@ -202,13 +202,13 @@ onMounted(() => { if (!checkMsg.value) void check(); });
             <div class="muted">{{ item.kind === "subscription" ? t("iap.kind_sub") : "IAP" }} · {{ item.productId }}</div>
           </div>
           <div class="field-row">
-            <input v-model="paths[item.id]" class="field-input" />
+            <t-input v-model="paths[item.id]" />
             <t-button size="small" @click="pickPath(item.id)">{{ t("filebrowser.browse") }}</t-button>
             <img v-if="paths[item.id]" class="thumb" :src="`/api/listing/thumb?path=${encodeURIComponent(paths[item.id])}&root=${encodeURIComponent(paths[item.id].replace(/[/\\\\][^/\\\\]+$/, '') || '.')}`" alt="" @click="previewPath(paths[item.id])" />
           </div>
         </div>
-        <label class="check"><input v-model="reviewDry" type="checkbox" /> {{ t("iap.preview") }}</label>
-        <label class="check"><input v-model="reviewVerbose" type="checkbox" /> {{ t("build.verbose") }}</label>
+        <t-checkbox v-model="reviewDry">{{ t("iap.preview") }}</t-checkbox>
+        <t-checkbox v-model="reviewVerbose">{{ t("build.verbose") }}</t-checkbox>
         <t-button theme="primary" :disabled="empty || !targets.length" @click="uploadShots">{{ t("iap.upload_shots") }}</t-button>
       </div>
     </template>
@@ -219,7 +219,6 @@ onMounted(() => { if (!checkMsg.value) void check(); });
 <style scoped>
 h1, h2 { margin: 0 0 8px; }
 .card { display: flex; flex-direction: column; gap: 10px; }
-.check { display: flex; gap: 8px; align-items: center; }
 .muted { color: var(--text-muted); font-size: 12px; }
 .shot-row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); }
 .thumb { width: 48px; height: 48px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); }

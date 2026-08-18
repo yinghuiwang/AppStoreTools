@@ -120,6 +120,11 @@ async function ack() {
   pending.value = null;
 }
 
+function onAdvancedChange(value: unknown) {
+  if (value === "branch") void loadBranches();
+  else void loadVersions();
+}
+
 onMounted(() => {
   lastBootId = snapshot.value?.boot_id || "";
   void handshake();
@@ -174,18 +179,18 @@ onMounted(() => {
     </div>
     <div class="card">
       <h2>{{ t("update.advanced") }}</h2>
-      <div class="seg">
-        <button type="button" :class="{ on: advanced === 'specific' }" @click="advanced = 'specific'; loadVersions()">{{ t("update.pin_version") }}</button>
-        <button type="button" :class="{ on: advanced === 'branch' }" @click="advanced = 'branch'; loadBranches()">{{ t("update.pin_branch") }}</button>
-      </div>
+      <t-radio-group v-model="advanced" class="seg" variant="default-filled" @change="onAdvancedChange">
+        <t-radio-button value="specific">{{ t("update.pin_version") }}</t-radio-button>
+        <t-radio-button value="branch">{{ t("update.pin_branch") }}</t-radio-button>
+      </t-radio-group>
       <div v-show="advanced === 'specific'" class="form-stack">
         <PageLoading v-if="versionsLoading && !versions.length" size="inline" />
         <label class="field">
           <span>{{ t("update.version_label") }}</span>
-          <select v-if="versions.length" v-model="selectedVersion" class="field-input">
-            <option v-for="ver in versions" :key="ver" :value="ver">{{ ver }}</option>
-          </select>
-          <input v-else v-model="selectedVersion" class="field-input" :placeholder="t('update.version_ph')" />
+          <t-select v-if="versions.length" v-model="selectedVersion">
+            <t-option v-for="ver in versions" :key="ver" :value="ver" :label="ver" />
+          </t-select>
+          <t-input v-else v-model="selectedVersion" :placeholder="t('update.version_ph')" />
         </label>
         <p v-if="versionError" class="muted">{{ versionError }}</p>
         <t-button theme="primary" :disabled="versionsLoading" @click="run(selectedVersion, '')">{{ t("update.install_version") }}</t-button>
@@ -194,15 +199,15 @@ onMounted(() => {
         <PageLoading v-if="branchesLoading && !branches.length" size="inline" />
         <label class="field">
           <span>{{ t("update.branch_label") }}</span>
-          <select v-if="branches.length" v-model="selectedBranch" class="field-input">
-            <option v-for="br in branches" :key="br" :value="br">{{ br }}</option>
-          </select>
-          <input v-else v-model="selectedBranch" class="field-input" :placeholder="t('update.branch_ph')" />
+          <t-select v-if="branches.length" v-model="selectedBranch">
+            <t-option v-for="br in branches" :key="br" :value="br" :label="br" />
+          </t-select>
+          <t-input v-else v-model="selectedBranch" :placeholder="t('update.branch_ph')" />
         </label>
         <p v-if="branchError" class="muted">{{ branchError }}</p>
         <t-button theme="primary" :disabled="branchesLoading" @click="run('', selectedBranch)">{{ t("update.install_branch") }}</t-button>
       </div>
-      <label class="check"><input v-model="verbose" type="checkbox" /> {{ t("build.verbose") }}</label>
+      <t-checkbox v-model="verbose">{{ t("build.verbose") }}</t-checkbox>
       <p class="muted">{{ t("update.note") }}</p>
     </div>
   </div>
@@ -213,10 +218,8 @@ onMounted(() => {
 .toolbar { display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; }
 .muted { color: var(--text-muted); font-size: 13px; }
 h2 { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
-.seg { display: flex; gap: 6px; margin: 12px 0; }
-.seg button { flex: 1; background: var(--raised); color: var(--text-muted); border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
-.seg button.on { color: #0a0a0c; background: linear-gradient(135deg, var(--accent-dim), var(--accent)); border-color: transparent; }
-.check { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.seg { display: flex; margin: 12px 0; width: 100%; }
+.seg :deep(.t-radio-button) { flex: 1; }
 .form-stack { display: flex; flex-direction: column; gap: 12px; }
 .version-block { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
 .version-row { display: flex; flex-direction: column; gap: 4px; }

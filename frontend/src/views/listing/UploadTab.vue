@@ -139,24 +139,24 @@ onMounted(() => {
       <div class="field">
         <ExampleHelp kind="csv" :label="t('metadata.csv_path')" />
         <div class="field-row">
-          <input v-model="csvPath" class="field-input" />
+          <t-input v-model="csvPath" />
           <t-button @click="pickCsv">{{ t("filebrowser.browse") }}</t-button>
         </div>
       </div>
       <div class="field">
         <ExampleHelp kind="shots" :label="t('metadata.shots_dir')" />
         <div class="field-row">
-          <input v-model="shotsDir" class="field-input" />
+          <t-input v-model="shotsDir" />
           <t-button @click="pickShots">{{ t("filebrowser.browse") }}</t-button>
         </div>
       </div>
       <div>
         <span class="lbl">{{ t("metadata.scope") }}</span>
-        <label class="check"><input v-model="includeMetadata" type="checkbox" /> {{ t("metadata.scope_metadata") }}</label>
-        <label class="check"><input v-model="includeScreenshots" type="checkbox" /> {{ t("metadata.scope_screenshots") }}</label>
+        <t-checkbox v-model="includeMetadata">{{ t("metadata.scope_metadata") }}</t-checkbox>
+        <t-checkbox v-model="includeScreenshots">{{ t("metadata.scope_screenshots") }}</t-checkbox>
       </div>
-      <label class="check"><input v-model="dryRun" type="checkbox" /> {{ t("common.dry_run") }}</label>
-      <label class="check"><input v-model="verbose" type="checkbox" /> {{ t("build.verbose") }}</label>
+      <t-checkbox v-model="dryRun">{{ t("common.dry_run") }}</t-checkbox>
+      <t-checkbox v-model="verbose">{{ t("build.verbose") }}</t-checkbox>
       <div class="field-row">
         <t-button :disabled="empty" :loading="checkingEnv" @click="checkEnv">{{ t("common.check_env") }}</t-button>
         <t-button theme="primary" :disabled="empty" @click="run">{{ t("common.submit") }}</t-button>
@@ -172,7 +172,6 @@ onMounted(() => {
 
 <style scoped>
 .card { display: flex; flex-direction: column; gap: 10px; }
-.check { display: flex; gap: 8px; align-items: center; }
 .lbl { display: block; font-size: 12px; color: var(--text-muted); }
 .muted { color: var(--text-muted); font-size: 12px; }
 </style>

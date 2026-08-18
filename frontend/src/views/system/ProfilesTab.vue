@@ -144,7 +144,6 @@ async function save() {
 }
 
 async function remove(name: string) {
-  if (!window.confirm(t("profiles.confirm_delete", { name }))) return;
   await httpJson(`/api/profiles/${encodeURIComponent(name)}`, { method: "DELETE" });
   await load();
   await refresh();
@@ -208,10 +207,12 @@ onMounted(() => { void load(); });
         <t-button :disabled="!canCreate" @click="importLocal">{{ t("profiles.import_confirm") }}</t-button>
       </div>
       <PageLoading v-if="loading && !loaded" size="page" />
-      <p v-else-if="!rows.length" class="empty-state">
-        {{ t("profiles.empty") }}
-        <span class="empty-hint">{{ t("profiles.empty_hint") }}</span>
-      </p>
+      <t-empty v-else-if="!rows.length" :description="t('profiles.empty')">
+        <template #description>
+          <p>{{ t("profiles.empty") }}</p>
+          <span class="empty-hint">{{ t("profiles.empty_hint") }}</span>
+        </template>
+      </t-empty>
       <div v-else class="profile-list">
         <article v-for="row in rows" :key="row.name" class="profile-card">
           <header class="profile-head">
@@ -221,7 +222,9 @@ onMounted(() => { void load(); });
           <div class="actions">
             <t-button size="small" @click="openEdit(row.name)">{{ t("common.edit") }}</t-button>
             <t-button v-if="!row.isDefault" size="small" @click="setDefault(row.name)">{{ t("common.set_default") }}</t-button>
-            <t-button size="small" @click="remove(row.name)">{{ t("common.delete") }}</t-button>
+            <t-popconfirm :content="t('profiles.confirm_delete', { name: row.name })" @confirm="remove(row.name)">
+              <t-button size="small">{{ t("common.delete") }}</t-button>
+            </t-popconfirm>
           </div>
           <dl class="profile-meta">
             <div class="meta-item">
@@ -239,21 +242,21 @@ onMounted(() => { void load(); });
   </div>
   <t-dialog v-model:visible="dialog" :header="editing ? t('common.edit') : t('profiles.create')" width="520px" placement="center">
     <div class="dialog-form">
-      <label class="field"><span>{{ t("profiles.name") }}</span><input v-model="form.name" class="field-input" /></label>
-      <label class="field"><span>Issuer ID</span><input v-model="form.issuer_id" class="field-input" /></label>
-      <label class="field"><span>Key ID</span><input v-model="form.key_id" class="field-input" /></label>
-      <label class="field"><span>App ID</span><input v-model="form.app_id" class="field-input" /></label>
+      <label class="field"><span>{{ t("profiles.name") }}</span><t-input v-model="form.name" /></label>
+      <label class="field"><span>Issuer ID</span><t-input v-model="form.issuer_id" /></label>
+      <label class="field"><span>Key ID</span><t-input v-model="form.key_id" /></label>
+      <label class="field"><span>App ID</span><t-input v-model="form.app_id" /></label>
       <div class="field">
         <ExampleHelp kind="csv" :label="t('profiles.csv_optional')" />
         <div class="field-row">
-          <input v-model="form.csv" class="field-input" />
+          <t-input v-model="form.csv" />
           <t-button @click="pickCsv">{{ t("filebrowser.browse") }}</t-button>
         </div>
       </div>
       <div class="field">
         <ExampleHelp kind="shots" :label="t('profiles.shots_optional')" />
         <div class="field-row">
-          <input v-model="form.screenshots" class="field-input" />
+          <t-input v-model="form.screenshots" />
           <t-button @click="pickShots">{{ t("filebrowser.browse") }}</t-button>
         </div>
       </div>
@@ -296,12 +299,11 @@ onMounted(() => { void load(); });
         <t-alert v-if="!item.key_file_exists" theme="error" :title="t('profiles.import_missing_key')" />
         <label class="field">
           <span>{{ t("profiles.name") }}</span>
-          <input v-model="importName" class="field-input" :placeholder="item.suggested_name" />
+          <t-input v-model="importName" :placeholder="item.suggested_name" />
         </label>
-        <label class="check">
-          <input v-model="importSetDefault" type="checkbox" />
+        <t-checkbox v-model="importSetDefault">
           {{ t("profiles.import_set_default") }}
-        </label>
+        </t-checkbox>
         <t-button
           theme="primary"
           :disabled="!item.key_file_exists || importBusy"
@@ -335,7 +337,6 @@ onMounted(() => { void load(); });
   padding: 14px 16px;
 }
 .import-head { display: flex; align-items: center; gap: 8px; }
-.check { display: flex; gap: 8px; align-items: center; }
 .missing { color: var(--err); }
 .profiles-page {
   align-self: stretch;
