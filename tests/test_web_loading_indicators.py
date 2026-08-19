@@ -184,3 +184,16 @@ def test_system_pages_do_not_cover_existing_content_on_refresh():
     assert 'PageLoading v-if="versionsLoading"' not in update.replace(
         'PageLoading v-if="versionsLoading && !versions.length"', ""
     )
+
+
+def test_example_help_opens_in_dialog_not_inline_panel():
+    src = _read("components/ExampleHelp.vue")
+    assert "<t-dialog" in src
+    assert 'v-model:visible="open"' in src
+    assert 'attach="body"' in src
+    assert 'v-if="open"' not in src
+    assert "ex-help__panel" not in src
+    assert 't("common.close")' in src
+    assert "ex-help__footer" in src
+    assert "space-between" in src
+    assert "ex-help__q" in src

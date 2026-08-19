@@ -126,6 +126,9 @@ def test_language_switch_updates_locale_without_reload():
     assert "/api/settings/lang" in src
     assert "locale.value = code" in src
     assert "location.reload" not in src
+    assert 'class="lang-switch"' in src
+    assert ".topbar-right > .lang-switch" in src
+    assert "flex-wrap: nowrap" in src
 
 
 def test_homepage_feature_chrome_catalog():

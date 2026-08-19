@@ -141,6 +141,9 @@ def test_guard_tab_restores_old_information_architecture() -> None:
     assert 't("guard.save_note")' in src
     assert 't("guard.help1")' in src
     assert 't("guard.help2")' in src
+    assert "t('guard.help_btn')" in src
+    assert 'v-model:visible="helpOpen"' in src
+    assert 'class="help-q"' in src
     assert "asc guard enable/disable/unbind" in src
     assert src.find('t("guard.current_env")') < src.find('t("guard.bindings")')
     assert src.find('t("guard.bindings")') < src.find('t("guard.help1")')

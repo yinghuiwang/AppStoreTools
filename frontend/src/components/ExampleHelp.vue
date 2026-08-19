@@ -16,6 +16,12 @@ const hint = computed(() => {
   return t("iap.json_help");
 });
 
+const title = computed(() => {
+  if (props.kind === "csv") return t("common.csv_help_title");
+  if (props.kind === "shots") return t("common.shots_help_title");
+  return t("iap.json_title");
+});
+
 const downloadHref = computed(() => {
   if (props.kind === "csv") return "/api/examples/csv";
   if (props.kind === "shots") return "/api/examples/screenshots";
@@ -42,52 +48,56 @@ const downloadName = computed(() => (props.kind === "iap" ? "iap_packages_exampl
         :title="hint"
         :aria-label="hint"
         :aria-expanded="open"
-        @click="open = !open"
+        @click="open = true"
       >?</button>
     </div>
-    <div v-if="open" class="ex-help__panel">
-      <template v-if="kind === 'csv'">
-        <p class="ex-help__title">{{ t("common.csv_help_title") }}</p>
-        <p>{{ t("metadata.csv_help_utf8") }}</p>
-        <p>
-          <strong>{{ t("metadata.required_cols") }}</strong>
-          <code>locale</code> <code>name</code> <code>subtitle</code> <code>description</code> <code>keywords</code>
-        </p>
-        <p>
-          <strong>{{ t("metadata.optional_cols") }}</strong>
-          <code>supportUrl</code> <code>marketingUrl</code> <code>privacyPolicyUrl</code>
-        </p>
-        <p>
-          <strong>{{ t("metadata.locale_format") }}</strong>
-          <code>简体中文(zh-Hans)</code> {{ t("metadata.or") }} <code>en-US</code>
-        </p>
-        <p>{{ t("metadata.csv_zh_compat") }}</p>
-        <p class="ex-help__muted">{{ t("metadata.empty_skip") }}</p>
-      </template>
-      <template v-else-if="kind === 'shots'">
-        <p class="ex-help__title">{{ t("common.shots_help_title") }}</p>
-        <pre>screenshots/
+    <t-dialog
+      v-model:visible="open"
+      :header="title"
+      :width="kind === 'iap' ? '720px' : '560px'"
+      attach="body"
+      placement="center"
+    >
+      <div class="ex-help__body">
+        <template v-if="kind === 'csv'">
+          <p>{{ t("metadata.csv_help_utf8") }}</p>
+          <p>
+            <strong>{{ t("metadata.required_cols") }}</strong>
+            <code>locale</code> <code>name</code> <code>subtitle</code> <code>description</code> <code>keywords</code>
+          </p>
+          <p>
+            <strong>{{ t("metadata.optional_cols") }}</strong>
+            <code>supportUrl</code> <code>marketingUrl</code> <code>privacyPolicyUrl</code>
+          </p>
+          <p>
+            <strong>{{ t("metadata.locale_format") }}</strong>
+            <code>简体中文(zh-Hans)</code> {{ t("metadata.or") }} <code>en-US</code>
+          </p>
+          <p>{{ t("metadata.csv_zh_compat") }}</p>
+          <p class="ex-help__muted">{{ t("metadata.empty_skip") }}</p>
+        </template>
+        <template v-else-if="kind === 'shots'">
+          <pre>screenshots/
 ├── zh-Hans/     ← {{ t("metadata.locale_dir_hint") }}
 │   ├── 01_home.png
 │   └── 02_detail.png
 └── en-US/
     └── 01_home.png</pre>
-        <p>
-          <strong>{{ t("metadata.locale_dirs") }}</strong>
-          <code>zh-Hans</code>、<code>en-US</code>、<code>ja</code> {{ t("metadata.etc") }}
-        </p>
-        <p>
-          <strong>{{ t("metadata.image_format") }}</strong>{{ t("metadata.image_format_desc") }}
-        </p>
-        <p>
-          <strong>{{ t("metadata.device_type") }}</strong>{{ t("metadata.device_type_desc") }}
-        </p>
-      </template>
-      <template v-else>
-        <p class="ex-help__title">{{ t("iap.json_title") }}</p>
-        <p>{{ t("iap.help_top") }}</p>
-        <p><strong>{{ t("iap.help_consumable") }}</strong>{{ t("iap.help_consumable_body") }}</p>
-        <pre>{
+          <p>
+            <strong>{{ t("metadata.locale_dirs") }}</strong>
+            <code>zh-Hans</code>、<code>en-US</code>、<code>ja</code> {{ t("metadata.etc") }}
+          </p>
+          <p>
+            <strong>{{ t("metadata.image_format") }}</strong>{{ t("metadata.image_format_desc") }}
+          </p>
+          <p>
+            <strong>{{ t("metadata.device_type") }}</strong>{{ t("metadata.device_type_desc") }}
+          </p>
+        </template>
+        <template v-else>
+          <p>{{ t("iap.help_top") }}</p>
+          <p><strong>{{ t("iap.help_consumable") }}</strong>{{ t("iap.help_consumable_body") }}</p>
+          <pre>{
   "items": [
     {
       "productId": "com.example.app.coins.100",
@@ -103,8 +113,8 @@ const downloadName = computed(() => (props.kind === "iap" ? "iap_packages_exampl
     }
   ]
 }</pre>
-        <p><strong>{{ t("iap.help_sub") }}</strong>{{ t("iap.help_sub_body") }}</p>
-        <pre>{
+          <p><strong>{{ t("iap.help_sub") }}</strong>{{ t("iap.help_sub_body") }}</p>
+          <pre>{
   "subscriptionGroups": [
     {
       "referenceName": "Premium Membership",
@@ -124,10 +134,16 @@ const downloadName = computed(() => (props.kind === "iap" ? "iap_packages_exampl
     }
   ]
 }</pre>
-        <p class="ex-help__muted">{{ t("iap.help_review_path") }}</p>
+          <p class="ex-help__muted">{{ t("iap.help_review_path") }}</p>
+        </template>
+      </div>
+      <template #footer>
+        <div class="ex-help__footer">
+          <a class="ex-help__dl" :href="downloadHref" :download="downloadName">{{ downloadLabel }}</a>
+          <t-button theme="primary" @click="open = false">{{ t("common.close") }}</t-button>
+        </div>
       </template>
-      <a class="ex-help__dl" :href="downloadHref" :download="downloadName">{{ downloadLabel }}</a>
-    </div>
+    </t-dialog>
   </div>
 </template>
 
@@ -162,34 +178,24 @@ const downloadName = computed(() => (props.kind === "iap" ? "iap_packages_exampl
   border-color: var(--accent-dim);
 }
 
-.ex-help__panel {
-  margin: 6px 0 2px;
-  padding: 12px 14px;
-  border-radius: 8px;
-  background: var(--accent-glow);
-  border: 1px solid color-mix(in srgb, var(--accent-dim) 40%, var(--border));
-  font-size: 12px;
-  line-height: 1.55;
+.ex-help__body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  font-size: 12px;
+  line-height: 1.55;
   color: var(--text);
 }
 
-.ex-help__panel p {
+.ex-help__body p {
   margin: 0;
-}
-
-.ex-help__title {
-  font-weight: 600;
-  color: var(--accent);
 }
 
 .ex-help__muted {
   color: var(--text-faint);
 }
 
-.ex-help__panel code {
+.ex-help__body code {
   background: var(--raised);
   color: var(--accent);
   padding: 1px 6px;
@@ -197,7 +203,7 @@ const downloadName = computed(() => (props.kind === "iap" ? "iap_packages_exampl
   font-size: 11px;
 }
 
-.ex-help__panel pre {
+.ex-help__body pre {
   margin: 0;
   background: var(--raised);
   border-radius: 6px;
@@ -209,8 +215,19 @@ const downloadName = computed(() => (props.kind === "iap" ? "iap_packages_exampl
   font-family: "Fira Code", ui-monospace, monospace;
 }
 
+.ex-help__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex: 1;
+  width: 100%;
+}
+
 .ex-help__dl {
-  align-self: flex-start;
+  flex: 1 1 auto;
+  min-width: 0;
   font-weight: 500;
+  white-space: nowrap;
 }
 </style>

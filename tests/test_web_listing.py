@@ -766,6 +766,7 @@ def test_upload_tab_forwards_workbench_scope_without_own_checkboxes():
     assert "includeMetadata" in src
     assert "includeScreenshots" in src
     assert "metadata.scope" in src
+    assert 'class="field-row scope-row"' in src
 
 
 def test_listing_scope_composable_matches_old_payloads():

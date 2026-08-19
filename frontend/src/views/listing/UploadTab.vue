@@ -150,10 +150,12 @@ onMounted(() => {
           <t-button @click="pickShots">{{ t("filebrowser.browse") }}</t-button>
         </div>
       </div>
-      <div>
+      <div class="field">
         <span class="lbl">{{ t("metadata.scope") }}</span>
-        <t-checkbox v-model="includeMetadata">{{ t("metadata.scope_metadata") }}</t-checkbox>
-        <t-checkbox v-model="includeScreenshots">{{ t("metadata.scope_screenshots") }}</t-checkbox>
+        <div class="field-row scope-row">
+          <t-checkbox v-model="includeMetadata">{{ t("metadata.scope_metadata") }}</t-checkbox>
+          <t-checkbox v-model="includeScreenshots">{{ t("metadata.scope_screenshots") }}</t-checkbox>
+        </div>
       </div>
       <t-checkbox v-model="dryRun">{{ t("common.dry_run") }}</t-checkbox>
       <t-checkbox v-model="verbose">{{ t("build.verbose") }}</t-checkbox>
@@ -173,5 +175,7 @@ onMounted(() => {
 <style scoped>
 .card { display: flex; flex-direction: column; gap: 10px; }
 .lbl { display: block; font-size: 12px; color: var(--text-muted); }
+.scope-row { gap: 16px; }
+.scope-row :deep(.t-checkbox__label) { margin-left: 6px; }
 .muted { color: var(--text-muted); font-size: 12px; }
 </style>

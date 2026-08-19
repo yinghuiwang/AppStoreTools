@@ -81,7 +81,13 @@ async function setLang(code: unknown) {
           :disabled="access[name]?.enabled === false"
         />
       </t-select>
-      <t-radio-group :value="lang" size="small" variant="default-filled" @change="setLang">
+      <t-radio-group
+        class="lang-switch"
+        :value="lang"
+        size="small"
+        variant="default-filled"
+        @change="setLang"
+      >
         <t-radio-button value="zh">zh</t-radio-button>
         <t-radio-button value="en">en</t-radio-button>
       </t-radio-group>
@@ -138,5 +144,15 @@ async function setLang(code: unknown) {
 .profile-select {
   min-width: 160px;
   max-width: 240px;
+}
+
+.topbar-right > .lang-switch {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  width: max-content;
+}
+
+.lang-switch :deep(.t-radio-button) {
+  flex: 0 0 auto;
 }
 </style>

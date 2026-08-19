@@ -50,6 +50,7 @@ const guard = ref<GuardStatus | null>(null);
 const profiles = ref<string[]>([]);
 const details = ref<Record<string, { already_bound?: boolean }>>({});
 const addOpen = ref(false);
+const helpOpen = ref(false);
 const addSaving = ref(false);
 const addError = ref("");
 const addForm = reactive({ fingerprint: "", profile: "", ip: "", note: "" });
@@ -211,7 +212,16 @@ onMounted(() => {
   <div class="page-stack">
     <div class="card">
       <div class="toolbar">
-        <h2>{{ t("guard.title") }}</h2>
+        <h2>
+          {{ t("guard.title") }}
+          <button
+            type="button"
+            class="help-q"
+            :title="t('guard.help_btn')"
+            :aria-label="t('guard.help_btn')"
+            @click="helpOpen = true"
+          >?</button>
+        </h2>
         <t-button @click="openAdd">{{ t("guard.manual_add") }}</t-button>
       </div>
       <PageLoading v-if="loading && !loaded" size="page" />
@@ -328,17 +338,21 @@ onMounted(() => {
           </div>
         </section>
         <t-empty v-else :description="t('guard.empty')" />
-
-        <div class="help">
-          <p>{{ t("guard.help1") }}</p>
-          <p>
-            {{ t("guard.help2") }}
-            <code class="mono">asc guard enable/disable/unbind</code>
-          </p>
-        </div>
       </template>
     </div>
   </div>
+  <t-dialog v-model:visible="helpOpen" :header="t('guard.help_btn')" width="480px" attach="body" placement="center">
+    <div class="help">
+      <p>{{ t("guard.help1") }}</p>
+      <p>
+        {{ t("guard.help2") }}
+        <code class="mono">asc guard enable/disable/unbind</code>
+      </p>
+    </div>
+    <template #footer>
+      <t-button theme="primary" @click="helpOpen = false">{{ t("common.close") }}</t-button>
+    </template>
+  </t-dialog>
   <t-dialog v-model:visible="addOpen" :header="t('guard.manual_add_title')" width="480px" placement="center">
     <p class="hint">{{ t("guard.manual_add_desc") }}</p>
     <div class="dialog-form">
@@ -469,17 +483,30 @@ h2, h3 {
   flex-direction: column;
   gap: 8px;
 }
-.help {
-  margin-top: 4px;
-  padding-top: 14px;
-  border-top: 1px solid var(--border);
-}
-.help p { margin: 0 0 6px; color: var(--text-faint); font-size: 12px; }
+.help p { margin: 0 0 6px; color: var(--text); font-size: 13px; line-height: 1.55; }
 .help code {
   color: var(--accent);
   background: var(--raised);
   padding: 1px 6px;
   border-radius: 4px;
+}
+.help-q {
+  width: 16px;
+  height: 16px;
+  margin-left: 8px;
+  padding: 0;
+  vertical-align: middle;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+}
+.help-q:hover {
+  color: var(--accent);
+  border-color: var(--accent-dim);
 }
 @media (max-width: 1100px) {
   .detail-grid { grid-template-columns: 1fr; }

@@ -251,6 +251,10 @@ html.dark .t-radio-group .t-radio-button.t-is-checked {
   border-color: transparent;
 }
 
+html.dark .t-checkbox .t-checkbox__label {
+  padding-left: 8px;
+}
+
 html.dark .t-select__wrap,
 html.dark .t-select-option {
   background: var(--overlay);
