@@ -7,7 +7,7 @@ const props = withDefaults(
   defineProps<{
     /** Override default `common.loading` label. */
     text?: string;
-    /** page: viewport-centered overlay; prefer block/inline in business UI. */
+    /** page: in-route placeholder; stay in-tree so keep-alive hide also hides it. */
     size?: "page" | "block" | "inline";
   }>(),
   { size: "block" },
@@ -24,27 +24,24 @@ const logoSrc = "/static/logo.svg";
 </script>
 
 <template>
-  <!-- Teleport page overlay to body so .shell-main overflow cannot trap `fixed`. -->
-  <Teleport to="body" :disabled="size !== 'page'">
-    <div
-      class="page-loading"
-      :class="`is-${size}`"
-      role="status"
-      :aria-busy="true"
-      :aria-label="label"
-    >
-      <img
-        v-if="size === 'page'"
-        class="page-loading__logo"
-        :src="logoSrc"
-        alt=""
-        width="56"
-        height="56"
-      />
-      <LoadingIcon class="page-loading__icon" :size="iconSize" />
-      <span class="page-loading__text">{{ label }}</span>
-    </div>
-  </Teleport>
+  <div
+    class="page-loading"
+    :class="`is-${size}`"
+    role="status"
+    :aria-busy="true"
+    :aria-label="label"
+  >
+    <img
+      v-if="size === 'page'"
+      class="page-loading__logo"
+      :src="logoSrc"
+      alt=""
+      width="56"
+      height="56"
+    />
+    <LoadingIcon class="page-loading__icon" :size="iconSize" />
+    <span class="page-loading__text">{{ label }}</span>
+  </div>
 </template>
 
 <style scoped>
@@ -58,24 +55,16 @@ const logoSrc = "/static/logo.svg";
 }
 
 .page-loading.is-page {
-  position: fixed;
-  inset: 0;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  z-index: 90;
+  flex: 1 1 auto;
+  align-self: stretch;
+  min-height: min(52vh, 360px);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 16px;
-  width: 100vw;
-  height: 100vh;
-  height: 100dvh;
   margin: 0;
-  padding: 0;
-  background: var(--bg);
+  padding: 24px 0;
   color: var(--text-muted);
 }
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, onMounted, ref, watch, type Ref } from "vue";
+import { computed, inject, ref, watch, type Ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { AddIcon, ChevronDownIcon, ChevronUpIcon } from "tdesign-icons-vue-next";
 import { ApiError, apiErrorMessage, httpJson } from "@/api/http";
@@ -11,6 +11,7 @@ import { rememberFormPath } from "@/composables/useFormPaths";
 import { useImageViewer } from "@/composables/useImageViewer";
 import { LISTING_FIELDS, useListingScope } from "@/composables/useListingScope";
 import { useProfile } from "@/composables/useProfile";
+import { useListingTab } from "@/composables/useTaskPagePhase";
 import LocaleSelectTabs from "@/components/LocaleSelectTabs.vue";
 import LocalePicker from "./LocalePicker.vue";
 
@@ -25,6 +26,7 @@ const browse = useBrowse();
 const viewer = useImageViewer();
 const scope = useListingScope();
 const { snapshot } = useProfile();
+const { listingTab } = useListingTab();
 const reloadTick = inject<Ref<number>>("listingReload", ref(0));
 const listing = hydrateListingForm(snapshot.value?.current_profile || "", {
   csv: snapshot.value?.paths.csv || "data/appstore_info.csv",
@@ -203,7 +205,13 @@ watch(
   },
 );
 
-onMounted(() => { if (!empty.value) void load(); });
+watch(
+  listingTab,
+  (tab) => {
+    if (tab === "local" && !empty.value && !loaded.value) void load();
+  },
+  { immediate: true },
+);
 watch(reloadTick, () => { if (!empty.value) void load(); });
 </script>
 
@@ -243,7 +251,7 @@ watch(reloadTick, () => { if (!empty.value) void load(); });
         <span v-if="scope.dirty.value" class="unsaved">{{ t("metadata.unsaved") }}</span>
       </div>
     </div>
-    <PageLoading v-if="loading && !loaded" size="page" />
+    <PageLoading v-if="listingTab === 'local' && loading && !loaded" size="page" />
     <t-empty v-else-if="!locales.length" :description="t('metadata.wb_empty')" />
     <div v-else class="workbench">
       <LocaleSelectTabs

@@ -66,12 +66,24 @@ def test_iap_check_and_scan_use_single_indicator_each():
 def test_listing_tabs_block_first_load_without_button_spinner():
     local = _read("views/listing/LocalTab.vue")
     diff = _read("views/listing/DiffTab.vue")
-    assert 'PageLoading v-if="loading && !loaded"' in local
+    assert 'PageLoading v-if="listingTab === \'local\' && loading && !loaded"' in local
     assert 'size="page"' in local
     assert ':loading="loading && loaded"' in local
-    assert 'PageLoading v-if="loading && !loaded"' in diff
+    assert 'PageLoading v-if="listingTab === \'diff\' && loading && !loaded"' in diff
     assert 'size="page"' in diff
     assert ':loading="loading && loaded"' in diff
+
+
+def test_listing_hidden_tabs_do_not_fetch_until_selected():
+    local = _read("views/listing/LocalTab.vue")
+    diff = _read("views/listing/DiffTab.vue")
+    assert "useListingTab" in local
+    assert 'tab === "local"' in local
+    assert "onMounted(() => { if (!empty.value) void load(); })" not in local
+    assert "useListingTab" in diff
+    assert 'tab !== "diff"' in diff
+    assert "!loaded.value && !loading.value" in diff
+    assert "onMounted(() => { void load(); })" not in diff
 
 
 def test_locale_picker_refresh_uses_button_only_when_rows_exist():
@@ -108,19 +120,21 @@ def test_build_refresh_prefers_button_after_first_scan():
     assert "if (scannedOnce.value) return" in src
 
 
-def test_page_loading_page_size_is_viewport_centered_with_logo():
+def test_page_loading_stays_in_route_so_leave_hides_it():
     src = _read("components/PageLoading.vue")
     assert 'size === \'page\'' in src or 'size === "page"' in src
     assert "/static/logo.svg" in src
     assert "LoadingIcon" in src
     assert "common.loading" in src
-    assert "Teleport" in src
-    assert "position: fixed" in src
-    assert "inset: 0" in src
+    assert "Teleport" not in src
+    assert "position: fixed" not in src
+    assert "position: absolute" not in src
+    assert "100vw" not in src
     assert "justify-content: center" in src
     assert "align-items: center" in src
     assert "flex-direction: column" in src
     assert "page-loading__logo" in src
+    assert "keep-alive" in src.lower() or "in-route" in src or "in-tree" in src
 
 
 def test_spa_boot_is_pre_mount_only():

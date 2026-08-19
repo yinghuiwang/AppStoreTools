@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, onActivated, onMounted, ref, watch, type Ref } from "vue";
+import { computed, inject, onActivated, ref, watch, type Ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { DialogPlugin, MessagePlugin } from "tdesign-vue-next";
 import { ApiError, apiErrorMessage, httpJson } from "@/api/http";
@@ -224,14 +224,14 @@ watch(
 );
 
 watch(listingTab, (tab) => {
-  if (tab === "diff" && pullTaskId.value) setActiveTask(pullTaskId.value);
-});
+  if (tab !== "diff") return;
+  if (pullTaskId.value) setActiveTask(pullTaskId.value);
+  if (!loaded.value && !loading.value) void load();
+}, { immediate: true });
 
 onActivated(() => {
   if (listingTab.value === "diff" && pullTaskId.value) setActiveTask(pullTaskId.value);
 });
-
-onMounted(() => { void load(); });
 </script>
 
 <template>
@@ -260,7 +260,7 @@ onMounted(() => { void load(); });
         <t-button @click="pullShots">{{ t("metadata.diff_shots_pull") }}</t-button>
       </div>
     </div>
-    <PageLoading v-if="loading && !loaded" size="page" />
+    <PageLoading v-if="listingTab === 'diff' && loading && !loaded" size="page" />
     <t-empty v-else-if="!locales.length" :description="t('metadata.diff_empty')" />
     <section v-for="loc in visible" :key="loc.locale" class="card">
       <h3>{{ loc.locale }}</h3>
