@@ -1072,8 +1072,8 @@ def test_task_stream_invalid_last_event_id_falls_back_to_after(client, monkeypat
     )
 
     assert calls == [("task-2", 4)]
-    assert "id: 5\nevent: log\ndata: resumed" in response.text
-    assert response.text.count("data: resumed") == 1
+    assert 'id: 5\nevent: log\ndata: {"message": "resumed", "level": "info"}' in response.text
+    assert response.text.count('"message": "resumed"') == 1
 
 
 def test_task_stream_preserves_progress_heartbeat_and_error_event_names(client, monkeypatch):
@@ -1159,7 +1159,7 @@ def test_task_stream_reports_task_disappearing_after_stream_starts(client, monke
 
     assert response.status_code == 200
     assert calls == [("vanishing-task", 0), ("vanishing-task", 1)]
-    assert "id: 1\nevent: log\ndata: started\n\n" in response.text
+    assert "id: 1\nevent: log\ndata: {\"message\": \"started\", \"level\": \"info\"}\n\n" in response.text
     assert "event: error_event\ndata: task not found\n\n" in response.text
 
 

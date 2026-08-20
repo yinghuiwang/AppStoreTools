@@ -555,14 +555,20 @@ def test_generic_error_warning_and_application_events_passthrough():
     callback = reporter.make_raw_log_callback("web-infrastructure", "poll")
 
     callback("warning: polling is slow")
+    callback("warning: polling failed")
     callback("error: polling failed")
     callback.application("✅ locale=en-US updated")
     callback.finish(failed=True)
 
     messages = [event.message for event in sink.events]
     assert "warning: polling is slow" in messages
+    assert "warning: polling failed" in messages
     assert "error: polling failed" in messages
     assert "✅ locale=en-US updated" in messages
+    warning_event = next(event for event in sink.events if event.message == "warning: polling failed")
+    error_event = next(event for event in sink.events if event.message == "error: polling failed")
+    assert warning_event.level == "warning"
+    assert error_event.level == "error"
 
 
 @pytest.mark.parametrize(

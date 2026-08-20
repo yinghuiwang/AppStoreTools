@@ -19,7 +19,7 @@ _ERROR_RAW_LOG_RE = re.compile(
     r"|错误|失败|异常",
     re.IGNORECASE,
 )
-_WARNING_RAW_LOG_RE = re.compile(r"\bwarning\b|警告", re.IGNORECASE)
+_WARNING_RAW_LOG_RE = re.compile(r"⚠️|\bWARN(?:ING)?\b|警告", re.IGNORECASE)
 _ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 _WARNING_PREFIX_RE = re.compile(r"^\s*(?:warning|警告)\s*[:：-]?\s*", re.IGNORECASE)
 _XCODE_CATEGORY_PATTERNS = (
@@ -63,6 +63,31 @@ TaskEventType = Literal[
     "raw",
 ]
 TaskLogLevel = Literal["debug", "info", "warning", "error"]
+_DISPLAY_LEVELS = {"debug", "info", "warning", "error"}
+
+
+def _level_from_text(message: str) -> TaskLogLevel:
+    """Infer a log level from message text. Warning markers always win."""
+    normalized = _ANSI_RE.sub("", message or "")
+    if _WARNING_RAW_LOG_RE.search(normalized):
+        return "warning"
+    if _ERROR_RAW_LOG_RE.search(normalized):
+        return "error"
+    return "info"
+
+
+def classify_log_level(message: str, structured: str | None = None) -> TaskLogLevel:
+    """Resolve a UI log level from structured metadata, then text.
+
+    Lines that look like warnings (``WARNING`` / ``WARN`` / ``警告`` / ``⚠️``)
+    stay warning even if they also mention failure, so they are not painted red.
+    """
+    text_level = _level_from_text(message)
+    if text_level == "warning":
+        return "warning"
+    if structured in _DISPLAY_LEVELS:
+        return "info" if structured == "debug" else structured
+    return text_level
 
 
 @dataclass(frozen=True)
@@ -169,7 +194,8 @@ class _GenericRawLogPolicy:
         emitted: list[TaskLogEvent] = []
         normalized = _ANSI_RE.sub("", event.message)
         category = self._category(normalized)
-        if _ERROR_RAW_LOG_RE.search(normalized):
+        text_level = _level_from_text(normalized)
+        if text_level == "error":
             for previous in prior:
                 self._append_visible(
                     emitted,
@@ -180,8 +206,11 @@ class _GenericRawLogPolicy:
                 replace(event, event_type="error", level="error"),
             )
             self._pending_after = 10
-        elif _WARNING_RAW_LOG_RE.search(normalized):
-            self._append_visible(emitted, event)
+        elif text_level == "warning":
+            self._append_visible(
+                emitted,
+                replace(event, level="warning"),
+            )
         elif self._pending_after:
             self._pending_after -= 1
             self._append_visible(
@@ -388,8 +417,9 @@ class _RawContextPolicy:
         self._tail.append(event)
         emitted: list[TaskLogEvent] = []
         normalized = _ANSI_RE.sub("", event.message)
+        text_level = _level_from_text(normalized)
 
-        if _ERROR_RAW_LOG_RE.search(normalized):
+        if text_level == "error":
             self._stats[event.phase].errors += 1
             for previous in prior:
                 context = replace(previous, event_type="context", level="info")
@@ -400,7 +430,7 @@ class _RawContextPolicy:
                 replace(event, event_type="error", level="error"),
             )
             self._pending_after = 10
-        elif _WARNING_RAW_LOG_RE.search(normalized):
+        elif text_level == "warning":
             self._stats[event.phase].warnings += 1
             warning = self._record_warning(event)
             if self._pending_after:
@@ -1087,6 +1117,8 @@ class TaskReporter:
             event_level = level
         else:
             event_level = "info"
+        if event_level in {"info", "debug"} and _level_from_text(message) == "warning":
+            event_level = "warning"
         event_type: TaskEventType = "error" if event_level == "error" else "operation"
         self.emit(
             TaskLogEvent(

@@ -1,5 +1,6 @@
 import { computed, reactive, ref, toValue, type MaybeRefOrGetter } from "vue";
 import { httpJson } from "@/api/http";
+import { parseLogEventData } from "@/utils/logLevel";
 
 type TaskProgress = {
   pct: number;
@@ -10,7 +11,7 @@ type TaskProgress = {
   phase_total: number;
 };
 
-type LogLine = { seq: number; message: string };
+type LogLine = { seq: number; message: string; level?: string };
 type Connection = "idle" | "connecting" | "live" | "reconnecting" | "closed";
 
 type Channel = {
@@ -124,7 +125,8 @@ function openEventSource(taskId: string, after: number) {
     ch.connection = "live";
     const seq = Number((event as MessageEvent).lastEventId || ch.lastSeq);
     ch.lastSeq = Number.isFinite(seq) ? seq : ch.lastSeq;
-    ch.lines = [...ch.lines, { seq: ch.lastSeq, message: (event as MessageEvent).data }];
+    const parsed = parseLogEventData((event as MessageEvent).data);
+    ch.lines = [...ch.lines, { seq: ch.lastSeq, message: parsed.message, level: parsed.level }];
   });
   source.addEventListener("progress", (event) => {
     if (runtime.get(taskId)?.source !== source) return;
@@ -153,7 +155,11 @@ function openEventSource(taskId: string, after: number) {
   source.addEventListener("error_event", (event) => {
     if (runtime.get(taskId)?.source !== source) return;
     ch.status = "error";
-    ch.lines = [...ch.lines, { seq: ch.lastSeq, message: (event as MessageEvent).data }];
+    ch.lines = [...ch.lines, {
+      seq: ch.lastSeq,
+      message: (event as MessageEvent).data,
+      level: "error",
+    }];
     ch.connection = "closed";
     closeSource(taskId);
   });

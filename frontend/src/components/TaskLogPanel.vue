@@ -5,6 +5,7 @@ import { MessagePlugin } from "tdesign-vue-next";
 import PageLoading from "@/components/PageLoading.vue";
 import { useRightRail } from "@/composables/useRightRail";
 import { useTaskLog } from "@/composables/useTaskLog";
+import { classifyLogLevel } from "@/utils/logLevel";
 
 const { t } = useI18n();
 const rail = useRightRail();
@@ -22,12 +23,14 @@ const {
 const scroller = ref<HTMLElement | null>(null);
 const errorsOnly = ref(false);
 
-function isErrorLine(message: string): boolean {
-  return /\b(error|failed|failure|fatal|exception|traceback)\b|错误|失败|异常/i.test(message);
+function lineLevel(line: { message: string; level?: string }) {
+  return classifyLogLevel(line.message, line.level);
 }
 
 const visibleLines = computed(() => (
-  errorsOnly.value ? lines.value.filter((line) => isErrorLine(line.message)) : lines.value
+  errorsOnly.value
+    ? lines.value.filter((line) => lineLevel(line) === "error")
+    : lines.value
 ));
 
 function canCancel() {
@@ -102,7 +105,11 @@ onMounted(() => {
         v-for="line in visibleLines"
         :key="line.seq"
         class="line"
-        :class="{ err: isErrorLine(line.message) }"
+        :class="{
+          err: lineLevel(line) === 'error',
+          warn: lineLevel(line) === 'warning',
+        }"
+        :data-level="lineLevel(line)"
       >{{ line.message }}</div>
     </pre>
   </div>
@@ -188,5 +195,9 @@ onMounted(() => {
 
 .line.err {
   color: var(--err);
+}
+
+.line.warn {
+  color: var(--warn);
 }
 </style>

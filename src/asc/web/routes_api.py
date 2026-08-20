@@ -988,6 +988,7 @@ def build_options(
 import asyncio as _asyncio
 from fastapi.responses import StreamingResponse as _StreamingResponse
 from asc.web.sse import format_sse_event as _fmt_sse
+from asc.web.sse import format_task_log_sse as _fmt_task_log
 
 
 @router.get("/task/{task_id}/stream")
@@ -1021,7 +1022,11 @@ async def task_stream(
         while True:
             current = snapshot["task"]
             for log in snapshot["logs"]:
-                yield _fmt_sse("log", log["message"], event_id=log["seq"])
+                yield _fmt_task_log(
+                    log["message"],
+                    event_id=log["seq"],
+                    level=log.get("level"),
+                )
                 sent = log["seq"]
             # Emit progress event if changed
             progress = current.get("progress")

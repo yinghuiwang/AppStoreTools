@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import io
+import json
 import queue
 import sys
 from contextlib import contextmanager
 from typing import Generator
+
+from asc.reporting import classify_log_level
 
 
 def format_sse_data(data: str, event_id: int | str | None = None) -> str:
@@ -27,6 +30,23 @@ def format_sse_event(event: str, data: str, event_id: int | str | None = None) -
     normalized = str(data).replace("\r\n", "\n").replace("\r", "\n")
     data_block = "".join(f"data: {line}\n" for line in normalized.split("\n"))
     return f"{prefix}event: {event}\n{data_block}\n"
+
+
+def format_task_log_sse(
+    message: str,
+    event_id: int | str | None = None,
+    *,
+    level: str | None = None,
+) -> str:
+    """Format a structured task-log SSE frame with an explicit level."""
+    payload = json.dumps(
+        {
+            "message": str(message),
+            "level": classify_log_level(str(message), level),
+        },
+        ensure_ascii=False,
+    )
+    return format_sse_event("log", payload, event_id=event_id)
 
 
 class _QueueWriter(io.TextIOBase):

@@ -3,7 +3,7 @@ from __future__ import annotations
 import io
 import sys
 from unittest.mock import MagicMock
-from asc.web.sse import capture_stdout_to_queue, format_sse_event
+from asc.web.sse import capture_stdout_to_queue, format_sse_event, format_task_log_sse
 
 
 def test_format_sse_event_log():
@@ -68,3 +68,20 @@ def test_capture_stdout_restores_on_exit():
     with capture_stdout_to_queue(q):
         pass
     assert sys.stdout is original
+
+
+def test_format_task_log_sse_includes_structured_level():
+    result = format_task_log_sse("hello world", event_id=3)
+    assert result == (
+        'id: 3\nevent: log\ndata: {"message": "hello world", "level": "info"}\n\n'
+    )
+
+
+def test_format_task_log_sse_keeps_warning_out_of_error():
+    warning = format_task_log_sse("⚠️  翻译失败: timeout")
+    error = format_task_log_sse("❌ locale=ja metadata failed: denied")
+    assert '"level": "warning"' in warning
+    assert '"level": "error"' not in warning
+    assert "翻译失败" in warning
+    assert '"level": "error"' in error
+    assert '"level": "warning"' not in error
