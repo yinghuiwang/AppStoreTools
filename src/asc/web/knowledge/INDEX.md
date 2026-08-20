@@ -8,7 +8,7 @@ Search by topic id or keywords. Do not treat this as Apple's full documentation.
 | topic | file | use when |
 | --- | --- | --- |
 | locales | locales.md | language, locale, region, CSV folder, zh-Hans, en-US, 50 languages |
-| listing | listing.md | name, subtitle, keywords 字数, description, promotional text, URLs, 30/100/4000 |
+| listing | listing.md | name, subtitle, keywords 字数, description, promotional text, URLs, 30/100/4000, web wizard |
 | screenshots | screenshots.md | screenshot size, preview, DISPLAY_TYPE, iPhone 6.9, iPad 13 |
 | iap | iap.md | IAP 类型, CONSUMABLE, subscription, groupLevel, price, review screenshot |
 | version | version.md | what's new, whatsNew, editable version, submit review, phased release |

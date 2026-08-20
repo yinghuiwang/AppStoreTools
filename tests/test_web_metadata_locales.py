@@ -257,7 +257,7 @@ def test_locale_picker_stays_usable_when_presence_fails():
 
 
 def test_locale_button_uses_catalog():
-    src = Path("frontend/src/views/listing/LocalTab.vue").read_text(encoding="utf-8")
+    src = Path("frontend/src/views/listing/PreviewStep.vue").read_text(encoding="utf-8")
     assert 'from "@/components/LocalePicker.vue"' in src
     assert "metadata.locales_btn" in src
     assert t("metadata.locales_btn", lang="zh") == "语言码"

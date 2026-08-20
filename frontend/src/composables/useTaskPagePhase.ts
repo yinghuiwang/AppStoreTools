@@ -20,8 +20,19 @@ export const TASK_KEEP_ALIVE_NAMES: string[] = [
   "IapView",
 ];
 
-export const LISTING_TABS = new Set(["upload", "local", "diff"]);
-export const DEFAULT_LISTING_TAB = "upload";
+export const LISTING_STEPS = new Set<string>(["create", "preview", "upload"]);
+export const DEFAULT_LISTING_STEP = "create";
+
+/** @deprecated old tab query values; ListingView maps these onto LISTING_STEPS. */
+export const LISTING_TABS = LISTING_STEPS;
+export const DEFAULT_LISTING_TAB = DEFAULT_LISTING_STEP;
+
+function normalizeListingStep(raw: string): string {
+  if (raw === "local") return "preview";
+  if (raw === "diff" || raw === "upload") return "upload";
+  if (LISTING_STEPS.has(raw)) return raw;
+  return DEFAULT_LISTING_STEP;
+}
 
 const STORAGE_KEY = "asc.taskPages";
 
@@ -65,7 +76,7 @@ const pages: Record<TaskPageId, PageBucket> = {
   "listing-upload": makeBucket(),
 };
 
-const listingTab = ref(DEFAULT_LISTING_TAB);
+const listingStep = ref(DEFAULT_LISTING_STEP);
 let boundProfile: string | undefined;
 let storedProfile: string | undefined;
 let didHydrate = false;
@@ -90,15 +101,13 @@ function serialize(): StoredState {
   }
   return {
     profile: boundProfile ?? "",
-    listingTab: listingTab.value,
+    listingTab: listingStep.value,
     pages: storedPages,
   };
 }
 
 function applyStored(stored: StoredState) {
-  listingTab.value = LISTING_TABS.has(stored.listingTab)
-    ? stored.listingTab
-    : DEFAULT_LISTING_TAB;
+  listingStep.value = normalizeListingStep(stored.listingTab || "");
   for (const id of TASK_PAGE_IDS) {
     const row = stored.pages?.[id];
     pages[id].phase.value = row?.phase === "run" ? "run" : "form";
@@ -108,7 +117,7 @@ function applyStored(stored: StoredState) {
 }
 
 function clearPages() {
-  listingTab.value = DEFAULT_LISTING_TAB;
+  listingStep.value = DEFAULT_LISTING_STEP;
   for (const id of TASK_PAGE_IDS) {
     pages[id].phase.value = "form";
     pages[id].taskId.value = "";
@@ -170,11 +179,11 @@ export function useListingTab() {
   hydrate();
 
   function setListingTab(value: string) {
-    listingTab.value = LISTING_TABS.has(value) ? value : DEFAULT_LISTING_TAB;
+    listingStep.value = normalizeListingStep(value);
     persist();
   }
 
-  return { listingTab, setListingTab };
+  return { listingTab: listingStep, listingStep, setListingTab, setListingStep: setListingTab };
 }
 
 /** Module-level form/run switch keyed by page. Survives view unmount. */

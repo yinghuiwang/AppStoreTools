@@ -262,8 +262,8 @@ def test_page_modules_grow_and_main_column_scrolls() -> None:
     shell = (FRONTEND / "layouts" / "AppShell.vue").read_text(encoding="utf-8")
     tokens = (FRONTEND / "styles" / "tokens.css").read_text(encoding="utf-8")
     listing = (FRONTEND / "views" / "ListingView.vue").read_text(encoding="utf-8")
-    local = (FRONTEND / "views" / "listing" / "LocalTab.vue").read_text(encoding="utf-8")
-    diff = (FRONTEND / "views" / "listing" / "DiffTab.vue").read_text(encoding="utf-8")
+    create = (FRONTEND / "views" / "listing" / "CreateStep.vue").read_text(encoding="utf-8")
+    preview = (FRONTEND / "views" / "listing" / "PreviewStep.vue").read_text(encoding="utf-8")
     build = (FRONTEND / "views" / "BuildView.vue").read_text(encoding="utf-8")
     run = (FRONTEND / "components" / "TaskRunBar.vue").read_text(encoding="utf-8")
     logs = (FRONTEND / "components" / "TaskLogPanel.vue").read_text(encoding="utf-8")
@@ -275,10 +275,11 @@ def test_page_modules_grow_and_main_column_scrolls() -> None:
     assert ".page-stack > :last-child.card" in tokens
     assert ":is(button, .t-button)" in tokens
     assert "flex: 0 0 auto" in tokens
-    assert "listing-tabs" in listing
-    assert "overflow: visible" in listing
-    assert "overflow: auto" not in local
-    assert "overflow: auto" not in diff
+    assert "listing-wizard" in listing
+    assert "<t-steps" in listing
+    assert "overflow: visible" in create
+    assert "overflow: auto" not in create
+    assert "overflow: auto" not in preview
     assert "overflow: auto" not in build
     assert "align-items: stretch" in build
     assert "flex: 1 1 auto" in run

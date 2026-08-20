@@ -4,8 +4,9 @@ import { ref, watch, type Ref } from "vue";
 export const METADATA_FORM_KEY_PREFIX = "asc_metadata_form_";
 export const BUILD_FORM_KEY_PREFIX = "asc_build_form_";
 export const IAP_FORM_KEY_PREFIX = "asc_iap_form_";
-/** sessionStorage draft of an unsaved store pull, keyed by profile + iapFile. */
 export const IAP_DRAFT_KEY_PREFIX = "asc_iap_draft_";
+/** sessionStorage draft of unsaved listing copy, keyed by profile + csv path. */
+export const LISTING_DRAFT_KEY_PREFIX = "asc_listing_draft_";
 
 export type ListingFormMemory = {
   csv_path: string;
@@ -14,6 +15,13 @@ export type ListingFormMemory = {
   include_screenshots: boolean;
   dry_run: boolean;
   verbose: boolean;
+  auto_translate?: boolean;
+};
+
+export type ListingDraftMemory = {
+  csv_path: string;
+  snapshot: unknown;
+  store_draft: boolean;
 };
 
 export type BuildFormMemory = {
@@ -51,6 +59,7 @@ type ListingBucket = {
   include_screenshots: Ref<boolean>;
   dry_run: Ref<boolean>;
   verbose: Ref<boolean>;
+  auto_translate: Ref<boolean>;
 };
 
 function getLocal(): Pick<Storage, "getItem" | "setItem"> | null {
@@ -105,8 +114,31 @@ function getSession(): Pick<Storage, "getItem" | "setItem" | "removeItem"> | nul
   return null;
 }
 
+export function listingDraftKey(profile: string, csvPath: string): string {
+  return `${LISTING_DRAFT_KEY_PREFIX}${profile || ""}:${csvPath || ""}`;
+}
+
 export function iapDraftKey(profile: string, iapFile: string): string {
   return `${IAP_DRAFT_KEY_PREFIX}${profile || ""}:${iapFile || ""}`;
+}
+
+export function parseListingDraft(data: Record<string, unknown> | null): Partial<ListingDraftMemory> | null {
+  if (!data) return null;
+  const snapshot = data.snapshot;
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return null;
+  return {
+    csv_path: asText(data.csv_path) || undefined,
+    snapshot,
+    store_draft: data.store_draft !== false,
+  };
+}
+
+export function listingDraftPayload(fields: ListingDraftMemory): Record<string, unknown> {
+  return {
+    csv_path: fields.csv_path,
+    snapshot: fields.snapshot,
+    store_draft: fields.store_draft !== false,
+  };
 }
 
 export function readIapDraft(key: string): Record<string, unknown> | null {
@@ -159,6 +191,7 @@ export function applyListingStored(
   next.include_screenshots = data.include_screenshots !== false;
   next.dry_run = !!data.dry_run;
   if (data.verbose !== undefined) next.verbose = !!data.verbose;
+  if (data.auto_translate !== undefined) next.auto_translate = !!data.auto_translate;
   return next;
 }
 
@@ -170,6 +203,7 @@ export function listingFormPayload(fields: ListingFormMemory): Record<string, un
     include_screenshots: fields.include_screenshots,
     dry_run: fields.dry_run,
     verbose: fields.verbose,
+    auto_translate: fields.auto_translate !== false,
   };
 }
 
@@ -265,6 +299,7 @@ const listing: ListingBucket = {
   include_screenshots: ref(true),
   dry_run: ref(false),
   verbose: ref(false),
+  auto_translate: ref(true),
 };
 
 let listingProfile: string | undefined;
@@ -279,6 +314,7 @@ function listingSnapshot(): ListingFormMemory {
     include_screenshots: listing.include_screenshots.value,
     dry_run: listing.dry_run.value,
     verbose: listing.verbose.value,
+    auto_translate: listing.auto_translate.value,
   };
 }
 
@@ -301,6 +337,7 @@ function ensureListingWatch() {
       listing.include_screenshots,
       listing.dry_run,
       listing.verbose,
+      listing.auto_translate,
     ],
     persistListing,
     { flush: "sync" },
@@ -322,6 +359,7 @@ export function hydrateListingForm(
     listing.include_screenshots.value = true;
     listing.dry_run.value = false;
     listing.verbose.value = false;
+    listing.auto_translate.value = true;
     const applied = applyListingStored(stored, listingSnapshot());
     listing.csv_path.value = applied.csv_path;
     listing.screenshots_dir.value = applied.screenshots_dir;
@@ -329,6 +367,7 @@ export function hydrateListingForm(
     listing.include_screenshots.value = applied.include_screenshots;
     listing.dry_run.value = applied.dry_run;
     listing.verbose.value = applied.verbose;
+    listing.auto_translate.value = applied.auto_translate !== false;
     listingHydrating = false;
   }
   ensureListingWatch();
@@ -345,4 +384,5 @@ export function resetFormMemory() {
   listing.include_screenshots.value = true;
   listing.dry_run.value = false;
   listing.verbose.value = false;
+  listing.auto_translate.value = true;
 }

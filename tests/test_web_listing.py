@@ -423,14 +423,19 @@ def test_listing_local_save_requires_profile(client, tmp_path):
     assert r.json()["ok"] is False
 
 
-def test_listing_local_missing_csv_returns_400(client, tmp_path):
+def test_listing_local_missing_csv_returns_empty_snapshot(client, tmp_path):
     missing = tmp_path / "does-not-exist.csv"
     r = client.get(
         "/api/listing/local",
         params={"csv_path": str(missing)},
         cookies={"asc_profile": "test"},
     )
-    assert r.status_code == 400
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is True
+    assert data["exists"] is False
+    assert data["hasContent"] is False
+    assert data["snapshot"]["locales"] == []
 
 
 # ---------- /api/listing/local screenshots merge + thumb + edit endpoints ----------
@@ -744,29 +749,24 @@ def test_listing_screenshots_replace_rejects_new_name_traversal(client, tmp_path
     assert not (shots / "evil.png").exists()
 
 
-def test_upload_tab_forwards_workbench_scope_without_own_checkboxes():
-    """Upload tab forwards Local/Diff checkboxes; it does not host its own locale grid."""
-    src = Path("frontend/src/views/listing/UploadTab.vue").read_text(encoding="utf-8")
+def test_upload_step_forwards_workbench_scope():
+    """Upload step reuses useListingScope checkboxes and the metadata run payload."""
+    src = Path("frontend/src/views/listing/UploadStep.vue").read_text(encoding="utf-8")
     assert "useListingScope" in src
     assert "locales_json" in src
     assert "fields_by_locale_json" in src
     assert "screenshot_scopes_json" in src
-    assert "metadata.wb_dirty_block" in src
     assert "metadata.wb_empty_selection" in src
     assert "selectedLocales" not in src
     assert "toggleLocale" not in src
     assert "toggleAll" not in src
-    assert "toggleField" not in src
-    assert "toggleScope" not in src
     assert "APP_IPHONE" not in src
-    assert "metadata.field_name" not in src
-    assert "metadata.upload_locales" not in src
-    assert "metadata.upload_locales_all" not in src
-    assert "metadata.upload_no_locales" not in src
     assert "includeMetadata" in src
     assert "includeScreenshots" in src
     assert "metadata.scope" in src
     assert 'class="field-row scope-row"' in src
+    assert "review-screenshots" not in src
+    assert "accordion" not in src.lower()
 
 
 def test_listing_scope_composable_matches_old_payloads():
@@ -780,52 +780,82 @@ def test_listing_scope_composable_matches_old_payloads():
     assert "hasScreenshotSelection" in src
 
 
-def test_listing_view_tabs_start_with_upload():
-    src = Path("frontend/src/views/ListingView.vue").read_text(encoding="utf-8")
-    upload = src.index('value="upload"')
-    local = src.index('value="local"')
-    diff = src.index('value="diff"')
-    assert upload < local < diff
-    assert "listing-tabs" in src
-    assert "overflow: visible" in src
-    assert "DEFAULT_LISTING_TAB" in src
-    assert "useListingTab" in src
-    assert 'route.query.tab || "local"' not in src
-    phase = Path("frontend/src/composables/useTaskPagePhase.ts").read_text(encoding="utf-8")
-    assert 'DEFAULT_LISTING_TAB = "upload"' in phase
+def test_listing_wizard_views_exist():
+    root = Path("frontend/src")
+    src = (root / "views/ListingView.vue").read_text(encoding="utf-8")
+    assert "listing-wizard" in src
+    assert "<t-steps" in src
+    assert "t-step-item" in src
+    assert 'v-model:current="current"' in src
+    assert "listing.step.create" in src
+    assert "listing.step.preview" in src
+    assert "listing.step.upload" in src
+    assert "CreateStep" in src
+    assert "PreviewStep" in src
+    assert "UploadStep" in src
+    assert "useListingWorkflow" in src
+    assert "appliedTick" in src
+    assert 'tab === "local"' in src
+    assert 'tab === "diff" || tab === "upload"' in src
+    assert "LocalTab" not in src
+    assert "DiffTab" not in src
+    assert "UploadTab" not in src
+    phase = (root / "composables/useTaskPagePhase.ts").read_text(encoding="utf-8")
+    assert 'DEFAULT_LISTING_STEP = "create"' in phase
+    assert '"create"' in phase and '"preview"' in phase and '"upload"' in phase
+    create = (root / "views/listing/CreateStep.vue").read_text(encoding="utf-8")
+    tab_values = [
+        m.group(1)
+        for m in re.finditer(r'<t-tab-panel[^>]*\bvalue="([^"]+)"', create)
+    ]
+    assert tab_values == ["csv", "asc", "blank", "agent"]
+    assert "write: false" in create
+    assert "infer" not in create.lower()
+    assert 'destroy-on-hide="false"' in create
+    assert "ExampleHelp" in create
+    assert 'kind="csv"' in create
+    assert 'kind="shots"' in create
+    assert "listing.csv_path_help" in create
+    assert "metadata.csv_path" in create
+    assert "metadata.shots_dir" in create
+    preview = (root / "views/listing/PreviewStep.vue").read_text(encoding="utf-8")
+    upload = (root / "views/listing/UploadStep.vue").read_text(encoding="utf-8")
+    assert "ExampleHelp" not in preview
+    assert "ExampleHelp" not in upload
+    assert "filebrowser.browse" not in preview
+    assert "filebrowser.browse" not in upload
+    assert "setCsvPath" not in preview
+    assert "setCsvPath" not in upload
+    assert "setScreenshotsDir" not in upload
+    assert "openExistingCsv" not in preview
+    assert "workflow.csvPath.value" in upload
+    assert "workflow.screenshotsDir.value" in upload
 
 
-def test_listing_local_tab_has_screenshot_workbench():
-    src = Path("frontend/src/views/listing/LocalTab.vue").read_text(encoding="utf-8")
+def test_listing_preview_has_screenshot_workbench():
+    src = Path("frontend/src/views/listing/PreviewStep.vue").read_text(encoding="utf-8")
+    dialog = Path("frontend/src/views/listing/ListingEditorDialog.vue").read_text(encoding="utf-8")
     assert "/api/listing/screenshots/add" in src
     assert "/api/listing/screenshots/replace" in src
     assert "/api/listing/screenshots/delete" in src
     assert "/api/listing/screenshots/reorder" in src
+    assert "ListingEditorDialog" in src
     assert "LocalePicker" in src
-    assert "metadata.save_csv" in src
     assert "file-hidden" in src
     assert "openAddShot" in src
     assert "openReplaceShot" in src
     assert src.count('type="file"') == 1
     assert "未选择任何文件" not in src
-    assert 'class="add"' not in src
-    assert ':icon="AddIcon"' not in src
     assert "<template #icon>" in src
     assert 'shape="square"' in src
-    assert "useListingScope" in src
-    assert "openAddShot(current.locale, '')" in src
-    assert "selectAllLocales" in src
-    assert "LocaleSelectTabs" in src
-    tags = Path("frontend/src/components/LocaleSelectTabs.vue").read_text(encoding="utf-8")
-    assert "t-checkbox-group" in tags
-    assert "t-checkbox" in tags
-    assert "check-all" in tags
-    assert "t-tag" not in tags
-    assert "t-check-tag" not in tags
-    assert "locale-code" in tags
-    assert "@click.stop" in tags
-    assert "selectAllField" in src
-    assert "setShotSelected" in src
+    assert "openAddShot(entry.row.locale, '')" in src
+    assert "useListingScope" not in src
+    assert "ensureCompare" in src
+    assert "onMounted(() => { void workflow.ensureCompare" not in src
+    assert "/api/listing/screenshots/" not in dialog
+    assert "status=\"warning\"" in dialog or ':status="statusFor' in dialog
+    assert "width=\"820px\"" in dialog
+    assert "listing.agent_seed_edit" in dialog
 
 
 def test_listing_screenshots_add_requires_profile(client, tmp_path):
@@ -1032,20 +1062,21 @@ def test_listing_pull_text_conflict_returns_409(client, tmp_path):
     assert r.json()["ok"] is False
 
 
-def test_listing_diff_tab_ui():
-    src = Path("frontend/src/views/listing/DiffTab.vue").read_text(encoding="utf-8")
-    assert "/api/listing/diff" in src
-    assert "/api/listing/pull/text" in src
-    assert "/api/listing/pull/screenshots" in src
-    assert "/api/listing/asc-thumb" in src
-    assert "metadata.diff_shots_confirm" in src
-    assert "skipNotify" in src
-    assert "openLogs" in src
-    assert "useListingScope" in src
-    assert "selectDiffsOnly" in src
-    assert "diff_filter_local" in src
-    assert "diff_filter_asc" in src
-    assert "diff_select_diffs" in src
+def test_listing_compare_and_overwrite_live_in_wizard():
+    preview = Path("frontend/src/views/listing/PreviewStep.vue").read_text(encoding="utf-8")
+    upload = Path("frontend/src/views/listing/UploadStep.vue").read_text(encoding="utf-8")
+    dialog = Path("frontend/src/views/listing/ListingEditorDialog.vue").read_text(encoding="utf-8")
+    workflow = Path("frontend/src/composables/useListingWorkflow.ts").read_text(encoding="utf-8")
+    assert "/api/listing/compare" in workflow
+    assert "/api/listing/diff" not in preview
+    assert "/api/listing/diff" not in upload
+    assert "/api/listing/pull/text" in preview
+    assert "write: false" in preview
+    assert "write: false" in dialog
+    assert "listing.overwrite_store" in dialog
+    assert "listing.compare.button" in preview
+    assert "listing.compare.button" in upload
+    assert "useListingScope" in upload
 
 
 def test_listing_diff_includes_asc_screenshots(client, tmp_path):
@@ -1180,3 +1211,136 @@ def test_listing_blocking_routes_offload_event_loop():
     screenshot_pull_src = inspect.getsource(routes_listing.listing_pull_screenshots)
     assert "to_thread" in screenshot_pull_src
     assert "_start_listing_pull_screenshots_task" in screenshot_pull_src
+    assert inspect.iscoroutinefunction(routes_listing.listing_compare)
+    assert inspect.iscoroutinefunction(routes_listing.listing_translate)
+    compare_src = inspect.getsource(routes_listing.listing_compare)
+    assert "to_thread" in compare_src
+    starter = inspect.getsource(routes_listing._start_listing_compare_task)
+    assert "start_background_task" in starter
+    assert 'kind="listing-compare"' in starter
+    assert "reporter.set_phases" in starter
+    translate_src = inspect.getsource(routes_listing.listing_translate)
+    assert "to_thread" in translate_src
+
+
+def test_listing_pull_text_write_false_keeps_csv(client, tmp_path):
+    p = tmp_path / "app.csv"
+    original = "locale,name,subtitle\nen-US,Local,KeepMe\n"
+    p.write_text(original, encoding="utf-8-sig")
+    before = p.read_bytes()
+    mock_api = _mock_asc_api_for_text()
+
+    with patch("asc.web.routes_listing.Config", return_value=MagicMock()), \
+         patch("asc.web.routes_listing.make_api_from_config", return_value=(mock_api, "app123")):
+        r = client.post(
+            "/api/listing/pull/text",
+            cookies={"asc_profile": "test"},
+            json={"csv_path": str(p), "write": False},
+        )
+
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is True
+    assert data["written"] is False
+    assert p.read_bytes() == before
+    locales = {row["locale"]: row for row in data["snapshot"]["locales"]}
+    assert locales["en-US"]["fields"]["name"] == "ASC Name"
+    assert locales["en-US"]["fields"]["subtitle"] == "ASC Sub"
+
+
+def test_listing_translate_returns_in_request(client):
+    mock_config = MagicMock()
+    mock_config.llm_api_key = "sk-test"
+    mock_config.llm_base_url = "https://example.com"
+    mock_config.llm_model = "gpt"
+    translator = MagicMock()
+    translator.translate_fields.return_value = {
+        "locale": "zh-Hans",
+        "name": "金币",
+        "subtitle": "副标题",
+        "keywords": "金币,游戏",
+        "description": "立即获得金币。",
+    }
+    with patch("asc.web.routes_listing.Config", return_value=mock_config), patch(
+        "asc.web.routes_listing.make_listing_translator", return_value=translator
+    ):
+        resp = client.post(
+            "/api/listing/translate",
+            cookies={"asc_profile": "test"},
+            json={
+                "source_locale": "en-US",
+                "mode": "translate",
+                "fields": [
+                    {
+                        "locale": "zh-Hans",
+                        "name": "Coins",
+                        "subtitle": "Tagline",
+                        "keywords": "coins,game",
+                        "description": "Get coins.",
+                    }
+                ],
+            },
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "task_id" not in data
+    assert data["translations"][0]["name"] == "金币"
+    translator.translate_fields.assert_called_once()
+    kwargs = translator.translate_fields.call_args.kwargs
+    assert kwargs["mode"] == "translate"
+    assert kwargs["target_locale"] == "zh-Hans"
+
+
+def test_listing_translate_without_llm_key_returns_400(client):
+    mock_config = MagicMock()
+    mock_config.llm_api_key = ""
+    with patch("asc.web.routes_listing.Config", return_value=mock_config):
+        resp = client.post(
+            "/api/listing/translate",
+            cookies={"asc_profile": "test"},
+            json={
+                "source_locale": "en-US",
+                "fields": [{"locale": "zh-Hans", "name": "Coins", "description": "x"}],
+            },
+        )
+    assert resp.status_code == 400
+    assert "api_key" in json.dumps(resp.json())
+
+
+def test_listing_compare_is_async_task(client, tmp_path):
+    from asc.web import routes_listing
+
+    p = tmp_path / "app.csv"
+    p.write_text("locale,name\nen-US,Local Name\n", encoding="utf-8-sig")
+    mock_api = _mock_asc_api_for_text()
+
+    with patch("asc.web.routes_listing.Config", return_value=MagicMock()), \
+         patch("asc.web.routes_listing.make_api_from_config", return_value=(mock_api, "app123")):
+        resp = client.post(
+            "/api/listing/compare",
+            cookies={"asc_profile": "test"},
+            json={"csv_path": str(p)},
+        )
+        assert resp.status_code == 200
+        task_id = resp.json()["task_id"]
+        task = None
+        for _ in range(100):
+            task = routes_listing.task_store.get(task_id)
+            if task and task["status"] in {TaskStatus.DONE, TaskStatus.ERROR, TaskStatus.CANCELED}:
+                break
+            time.sleep(0.02)
+
+    assert task is not None
+    assert task["status"] == TaskStatus.DONE
+    assert task["kind"] == "listing-compare"
+    result = task["result"]
+    assert result["ok"] is True
+    by_locale = {row["locale"]: row for row in result["locales"]}
+    assert by_locale["en-US"]["status"] == "changed"
+    assert by_locale["en-US"]["missingScreenshots"] is True
+    progress = task.get("progress") or {}
+    assert progress.get("phase") == "done"
+    assert int(progress.get("pct") or 0) == 100
+    raw_logs = task.get("logs") or []
+    texts = [row["message"] if isinstance(row, dict) else str(row) for row in raw_logs]
+    assert "核对完成" in "\n".join(texts)

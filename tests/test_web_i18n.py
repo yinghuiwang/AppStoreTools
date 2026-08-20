@@ -120,6 +120,18 @@ def test_nav_catalog_english_and_chinese():
     assert t("nav.group.listing", lang="zh") == "上架"
     assert t("listing.tab.upload", lang="zh") == "上传"
     assert t("listing.tab.local", lang="zh") == "本地工作台"
+    assert t("listing.step.create", lang="zh") == "创建"
+    assert t("listing.step.preview", lang="zh") == "预览"
+    assert t("listing.step.upload", lang="zh") == "上传"
+    assert t("listing.tab.csv", lang="zh") == "打开 CSV"
+    assert "data/appstore_info.csv" in t("listing.csv_path_help", lang="zh")
+    assert "data/screenshots" in t("listing.csv_path_help", lang="zh")
+    assert "data/appstore_info.csv" in t("listing.csv_path_help", lang="en")
+    assert "data/appstore_info.csv" in t("metadata.csv_path_meaning", lang="zh")
+    assert "data/screenshots" in t("metadata.shots_path_meaning", lang="zh")
+    assert "data/appstore_info.csv" in t("metadata.csv_path_meaning", lang="en")
+    assert t("listing.agent_seed_create", lang="zh").startswith("请根据我提供的产品说明")
+    assert "csv_set_fields" in t("listing.agent_seed_edit", lang="en")
 
 
 def test_language_switch_updates_locale_without_reload():
@@ -327,6 +339,10 @@ def test_agent_attach_i18n_keys():
 def test_iap_editor_list_dialog_i18n_keys():
     load_catalog.cache_clear()
     assert t("iap.json_path_help", lang="zh")
+    assert "data/iap_packages.json" in t("iap.json_path_help", lang="zh")
+    assert "data/iap_packages.json" in t("iap.json_path_help", lang="en")
+    assert "data/iap_packages.json" in t("iap.json_path_meaning", lang="zh")
+    assert "data/iap_packages.json" in t("iap.json_path_meaning", lang="en")
     assert t("iap.open_and_edit", lang="zh") == "打开并去编辑"
     assert t("iap.open_and_edit", lang="en") == "Open and edit"
     assert t("iap.dialog_ok", lang="zh") == "确定"
@@ -387,3 +403,6 @@ def test_iap_editor_list_dialog_i18n_keys():
     zh_iap = [k for k in zh if str(k).startswith("iap.")]
     en_iap = [k for k in en if str(k).startswith("iap.")]
     assert zh_iap == en_iap
+    zh_listing = [k for k in zh if str(k).startswith("listing.")]
+    en_listing = [k for k in en if str(k).startswith("listing.")]
+    assert zh_listing == en_listing

@@ -37,6 +37,7 @@ TASK_KIND_LABELS = {
     "urls": "URL 更新",
     "update": "工具更新",
     "listing-pull-screenshots": "拉取截图",
+    "listing-compare": "商品页商店核对",
 }
 
 
@@ -50,7 +51,8 @@ TASK_KIND_RETRY_PATHS = {
     "iap-review-screenshots": "/iap",
     "urls": "/urls",
     "update": "/update",
-    "listing-pull-screenshots": "/metadata",
+    "listing-pull-screenshots": "/listing",
+    "listing-compare": "/listing",
 }
 
 

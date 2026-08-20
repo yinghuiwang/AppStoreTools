@@ -42,10 +42,13 @@ def test_task_route_views_declare_keep_alive_names():
 
 def test_listing_tab_is_module_scoped():
     listing = (SRC / "views/ListingView.vue").read_text(encoding="utf-8")
-    assert "useListingTab" in listing
-    assert "onActivated" in listing
+    assert "useListingWorkflow" in listing
+    assert "listing-wizard" in listing
+    assert "query.step" in listing
     phase = (SRC / "composables/useTaskPagePhase.ts").read_text(encoding="utf-8")
     assert "export function useListingTab" in phase
+    assert 'DEFAULT_LISTING_STEP = "create"' in phase
+    assert "LISTING_STEPS" in phase
 
 
 def test_profile_switch_resets_task_pages():
@@ -95,7 +98,7 @@ bindTaskPageProfile('app-a');
 const first = useTaskPagePhase('build');
 first.enterRun('task-1', { runMode: 'full' });
 const { setListingTab } = useListingTab();
-setListingTab('diff');
+setListingTab('preview');
 
 const afterUnmount = useTaskPagePhase('build');
 if (afterUnmount.phase.value !== 'run') throw new Error('phase lost after unmount');
@@ -109,14 +112,14 @@ if (other.phase.value !== 'form' || other.taskId.value) {
 }
 
 const listing = useListingTab();
-if (listing.listingTab.value !== 'diff') throw new Error('listing tab lost after unmount');
+if (listing.listingTab.value !== 'preview') throw new Error('listing step lost after unmount');
 
 bindTaskPageProfile('app-b');
 if (afterUnmount.phase.value !== 'form' || afterUnmount.taskId.value !== '') {
   throw new Error('switching profile must reset phase/taskId');
 }
-if (listing.listingTab.value !== 'upload') {
-  throw new Error('switching profile must reset listing tab');
+if (listing.listingTab.value !== 'create') {
+  throw new Error('switching profile must reset listing step');
 }
 
 console.log('ok');

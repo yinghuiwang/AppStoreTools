@@ -95,27 +95,29 @@ def test_iap_wizard_keeps_stepper_during_upload():
     assert 'v-if="isForm"' not in wizard
 
 
-def test_listing_tabs_block_first_load_without_button_spinner():
-    local = _read("views/listing/LocalTab.vue")
-    diff = _read("views/listing/DiffTab.vue")
-    assert 'PageLoading v-if="listingTab === \'local\' && loading && !loaded"' in local
-    assert 'size="page"' in local
-    assert ':loading="loading && loaded"' in local
-    assert 'PageLoading v-if="listingTab === \'diff\' && loading && !loaded"' in diff
-    assert 'size="page"' in diff
-    assert ':loading="loading && loaded"' in diff
+def test_listing_compare_uses_inline_progress_without_page_swap():
+    wizard = _read("views/ListingView.vue")
+    preview = _read("views/listing/PreviewStep.vue")
+    upload = _read("views/listing/UploadStep.vue")
+    assert "t-step-item" in wizard
+    assert "PageLoading" not in wizard
+    assert 'PageLoading size="inline"' in preview
+    assert "compare-progress" in preview
+    assert "listing.compare.elapsed" in preview
+    assert "ensureCompare" not in wizard
+    assert "ensureCompare" not in _read("views/listing/CreateStep.vue")
+    assert "useTaskPagePhase" in upload
+    assert 'v-if="isRun && taskId"' in upload
 
 
-def test_listing_hidden_tabs_do_not_fetch_until_selected():
-    local = _read("views/listing/LocalTab.vue")
-    diff = _read("views/listing/DiffTab.vue")
-    assert "useListingTab" in local
-    assert 'tab === "local"' in local
-    assert "onMounted(() => { if (!empty.value) void load(); })" not in local
-    assert "useListingTab" in diff
-    assert 'tab !== "diff"' in diff
-    assert "!loaded.value && !loading.value" in diff
-    assert "onMounted(() => { void load(); })" not in diff
+def test_listing_preview_does_not_compare_on_mount():
+    preview = _read("views/listing/PreviewStep.vue")
+    upload = _read("views/listing/UploadStep.vue")
+    assert "void catalog.load()" in preview
+    assert "onMounted(() => { void workflow.ensureCompare" not in preview
+    assert "ensureCompare({ force" in preview
+    mounted = upload.split("onMounted", 1)[1].split("}", 1)[0]
+    assert "ensureCompare" not in mounted
 
 
 def test_locale_picker_refresh_uses_button_only_when_rows_exist():
@@ -229,3 +231,6 @@ def test_example_help_opens_in_dialog_not_inline_panel():
     assert "ex-help__footer" in src
     assert "space-between" in src
     assert "ex-help__q" in src
+    assert "metadata.csv_path_meaning" in src
+    assert "metadata.shots_path_meaning" in src
+    assert "iap.json_path_meaning" in src

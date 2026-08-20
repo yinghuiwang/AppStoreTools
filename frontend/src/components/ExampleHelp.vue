@@ -60,6 +60,7 @@ const downloadName = computed(() => (props.kind === "iap" ? "iap_packages_exampl
     >
       <div class="ex-help__body">
         <template v-if="kind === 'csv'">
+          <p>{{ t("metadata.csv_path_meaning") }}</p>
           <p>{{ t("metadata.csv_help_utf8") }}</p>
           <p>
             <strong>{{ t("metadata.required_cols") }}</strong>
@@ -77,6 +78,7 @@ const downloadName = computed(() => (props.kind === "iap" ? "iap_packages_exampl
           <p class="ex-help__muted">{{ t("metadata.empty_skip") }}</p>
         </template>
         <template v-else-if="kind === 'shots'">
+          <p>{{ t("metadata.shots_path_meaning") }}</p>
           <pre>screenshots/
 ├── zh-Hans/     ← {{ t("metadata.locale_dir_hint") }}
 │   ├── 01_home.png
@@ -95,6 +97,7 @@ const downloadName = computed(() => (props.kind === "iap" ? "iap_packages_exampl
           </p>
         </template>
         <template v-else>
+          <p>{{ t("iap.json_path_meaning") }}</p>
           <p>{{ t("iap.help_top") }}</p>
           <p><strong>{{ t("iap.help_consumable") }}</strong>{{ t("iap.help_consumable_body") }}</p>
           <pre>{

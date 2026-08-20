@@ -25,7 +25,7 @@ from asc.listing.local import (
     rename_screenshot,
     save_local_csv,
 )
-from asc.listing.models import FIELD_NAMES
+from asc.listing.models import FIELD_NAMES, ListingSnapshot, LocaleListing
 from asc.web.agent_knowledge import get_topic, search_notes
 from asc.web.agent_redact import redact_obj, redact_text
 from asc.web.agent_workspace import (
@@ -1171,11 +1171,19 @@ def _apply_one_mutation(ctx: AgentToolContext, mutation: Any) -> None:
 
 def _apply_csv_set_fields(mutation: dict, resolved: Path) -> None:
     mtime = resolved.stat().st_mtime if resolved.exists() else None
-    snapshot = load_local_text_snapshot(str(resolved))
+    if resolved.exists():
+        snapshot = load_local_text_snapshot(str(resolved))
+    else:
+        snapshot = ListingSnapshot(source="local", locales=[])
     locale = str(mutation.get("locale") or "").strip()
     listing = next((item for item in snapshot.locales if item.locale == locale), None)
     if listing is None:
-        raise _ApplyStepError(f"locale {locale!r} not found")
+        listing = LocaleListing(
+            locale=locale,
+            fields={name: "" for name in FIELD_NAMES},
+            screenshots={},
+        )
+        snapshot.locales.append(listing)
     before = mutation.get("before")
     if isinstance(before, dict):
         for field, expected in before.items():

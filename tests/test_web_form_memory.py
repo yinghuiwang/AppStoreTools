@@ -19,23 +19,26 @@ def test_form_memory_reuses_pre_vue_storage_keys():
     assert 'BUILD_FORM_KEY_PREFIX = "asc_build_form_"' in src
     assert 'IAP_FORM_KEY_PREFIX = "asc_iap_form_"' in src
     assert 'IAP_DRAFT_KEY_PREFIX = "asc_iap_draft_"' in src
+    assert 'LISTING_DRAFT_KEY_PREFIX = "asc_listing_draft_"' in src
     assert "localStorage" in src
     assert "sessionStorage" in src
     assert "iapDraftKey" in src
+    assert "listingDraftKey" in src
     assert "pinia" not in src.lower()
     assert "defineStore" not in src
 
 
 def test_listing_build_iap_views_wire_form_memory():
-    upload = (SRC / "views/listing/UploadTab.vue").read_text(encoding="utf-8")
-    local = (SRC / "views/listing/LocalTab.vue").read_text(encoding="utf-8")
-    diff = (SRC / "views/listing/DiffTab.vue").read_text(encoding="utf-8")
+    listing = (SRC / "views/ListingView.vue").read_text(encoding="utf-8")
+    listing_workflow = (SRC / "composables/useListingWorkflow.ts").read_text(encoding="utf-8")
     build = (SRC / "views/BuildView.vue").read_text(encoding="utf-8")
     iap = (SRC / "views/IapView.vue").read_text(encoding="utf-8")
     workflow = (SRC / "composables/useIapWorkflow.ts").read_text(encoding="utf-8")
-    assert "hydrateListingForm" in upload
-    assert "hydrateListingForm" in local
-    assert "hydrateListingForm" in diff
+    assert "useListingWorkflow" in listing
+    assert "METADATA_FORM_KEY_PREFIX" in listing_workflow
+    assert "listingDraftKey" in listing_workflow
+    assert "persistMemory" in listing_workflow
+    assert "storeDraft" in listing_workflow
     assert "BUILD_FORM_KEY_PREFIX" in build
     assert "restoreBuildMemory" in build
     assert "saveBuildMemory" in build

@@ -12,7 +12,7 @@ PAGES = (
     FRONTEND / "views/BuildView.vue",
     FRONTEND / "views/WhatsNewView.vue",
     FRONTEND / "views/UrlsView.vue",
-    FRONTEND / "views/listing/UploadTab.vue",
+    FRONTEND / "views/listing/UploadStep.vue",
 )
 
 
@@ -63,9 +63,24 @@ def test_iap_wizard_does_not_swap_whole_page_for_run():
     assert "TaskRunBar" not in wizard
 
 
+def test_listing_wizard_does_not_swap_whole_page_for_run():
+    wizard = (FRONTEND / "views/ListingView.vue").read_text(encoding="utf-8")
+    upload = (FRONTEND / "views/listing/UploadStep.vue").read_text(encoding="utf-8")
+    assert "<t-steps" in wizard
+    assert "t-step-item" in wizard
+    assert 'v-model:current="current"' in wizard
+    assert "listing-wizard" in wizard
+    assert "useTaskPagePhase" in upload
+    assert re.search(r"enterRun\(\s*task_id", upload)
+    assert 'v-if="isRun && taskId"' in upload
+    assert "TaskRunBar" in upload
+    assert "TaskRunBar" not in wizard
+
+
 def test_deep_links_prefill_form_without_entering_run():
     build = (FRONTEND / "views/BuildView.vue").read_text(encoding="utf-8")
-    upload = (FRONTEND / "views/listing/UploadTab.vue").read_text(encoding="utf-8")
+    upload = (FRONTEND / "views/listing/UploadStep.vue").read_text(encoding="utf-8")
+    wizard = (FRONTEND / "views/ListingView.vue").read_text(encoding="utf-8")
     assert 'route.query.action === "build-upload"' in build
     assert "enterRun" not in _on_mounted_source(build)
     assert "route.query.action" in upload
@@ -74,6 +89,8 @@ def test_deep_links_prefill_form_without_entering_run():
     assert 'action === "all"' in mounted
     assert 'action === "metadata"' in mounted
     assert 'action === "screenshots"' in mounted
+    assert 'tab === "local"' in wizard
+    assert 'tab === "diff" || tab === "upload"' in wizard
 
 
 def test_task_run_bar_offers_back_to_form():

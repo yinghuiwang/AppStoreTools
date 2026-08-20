@@ -117,9 +117,9 @@ def test_dashboard_log_buttons_open_logs() -> None:
 
 
 def test_diff_and_whats_new_watch_own_channel() -> None:
-    diff = _read("views/listing/DiffTab.vue")
+    preview = _read("views/listing/PreviewStep.vue")
     whats = _read("views/WhatsNewView.vue")
-    assert "channelOf" in diff
+    assert "channelOf" in preview
     assert "channelOf" in whats
-    assert "watch([status, logTaskId]" not in diff
+    assert "watch([status, logTaskId]" not in preview
     assert "watch([status, logTaskId]" not in whats

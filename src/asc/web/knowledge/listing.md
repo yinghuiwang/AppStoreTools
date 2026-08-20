@@ -65,4 +65,6 @@ Not in CSV: promotional text, What’s New (use `whats-new` / web What’s New),
 - Requires ToS + privacy + subscription URLs in the description legal block — useful for Guideline 3.1.2, not a listed ASC field limit.
 - Separator rule (` - ` vs `: `) is a team convention, not Apple.
 
-`app-store-changelog` skill does not state the 4000 What’s New cap — official is **4000**.
+## Web 向导
+
+三步：创建 → 预览 → 上传（`?step=create|preview|upload`）。旧 `?tab=local` 进预览，`?tab=diff|upload` 进上传。CSV / 截图路径只在创建步选择（标签旁 `?` 打开格式说明）；预览/上传只读沿用。商店拉取 `write:false` 只进内存。预览弹窗只改 7 个 CSV 字段；截图在语言卡片下立刻写盘。`csv_set_fields` 可追加 locale。`/api/listing/translate` 用商品页字数，不用 IAP 2–30/45。

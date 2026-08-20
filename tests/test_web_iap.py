@@ -564,6 +564,10 @@ def test_wizard_views_exist():
     assert "iap.tab.asc" in create
     assert "iap.tab.blank" in create
     assert "iap.tab.agent" in create
+    assert "ExampleHelp" in create
+    assert 'kind="iap"' in create
+    assert "iap.json_path_help" in create
+    assert "iap.file" in create
     assert 'destroy-on-hide="false"' in create
     assert "accordion" not in create.lower()
     assert "source-card" not in create

@@ -29,6 +29,39 @@ def _pending_csv_plan(tmp_path):
     return csv_path, tasks, agents, ctx, proposed["plan_id"]
 
 
+def test_csv_set_fields_appends_missing_locale(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    csv_path = tmp_path / "app.csv"
+    csv_path.write_text("locale,name,keywords\nzh-Hans,旧名,oldkeywords\n", encoding="utf-8")
+    tasks = TaskStore(tmp_path / "tasks.db")
+    agents = AgentStore(tmp_path / "agent.db")
+    replay = {"kind": "metadata", "profile": "myapp", "verbose": False, "params": {"csv_path": str(csv_path)}}
+    task_id = tasks.create("metadata", profile="myapp", replay=replay)
+    session = agents.get_or_create_session(task_id, "myapp")
+    ctx = AgentToolContext(tasks, agents, task_id, tmp_path, turn_seq=1, session_id=session["id"])
+    proposed = execute_model_tool(ctx, "propose_fix", {
+        "summary": "add ja locale",
+        "mutations": [{
+            "op": "csv_set_fields",
+            "path": str(csv_path),
+            "locale": "ja",
+            "fields": {"name": "アプリ"},
+        }],
+        "manual_steps": [],
+    })
+    assert proposed["ok"] is True
+    agents.promote_drafts(ctx.session_id, 1)
+    result = apply_fix(ctx, proposed["plan_id"])
+    assert result["ok"] is True
+    text = csv_path.read_text(encoding="utf-8")
+    assert "ja" in text
+    assert "アプリ" in text
+    assert "zh-Hans" in text
+    assert "oldkeywords" in text
+    tasks.close()
+    agents.close()
+
+
 def test_apply_fix_updates_csv_when_pending(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     csv_path, tasks, agents, ctx, plan_id = _pending_csv_plan(tmp_path)

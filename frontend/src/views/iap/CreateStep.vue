@@ -2,6 +2,7 @@
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { ApiError, apiErrorMessage, httpJson } from "@/api/http";
+import ExampleHelp from "@/components/ExampleHelp.vue";
 import { useBrowse } from "@/composables/useBrowse";
 import { useIapWorkflow, type IapGroup, type IapItem, type IapSnapshot } from "@/composables/useIapWorkflow";
 import { useRightRail } from "@/composables/useRightRail";
@@ -203,7 +204,7 @@ function openAgent() {
         <div class="tab-body">
           <p class="muted">{{ t("iap.json_path_help") }}</p>
           <div class="field">
-            <span>{{ t("iap.file") }}</span>
+            <ExampleHelp kind="iap" :label="t('iap.file')" />
             <div class="field-row">
               <t-input v-model="jsonPath" />
               <t-button :loading="opening" @click="browseJson">{{ t("filebrowser.browse") }}</t-button>

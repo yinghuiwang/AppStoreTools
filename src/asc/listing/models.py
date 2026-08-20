@@ -6,6 +6,27 @@ FIELD_NAMES = (
     "description", "keywords", "supportUrl", "marketingUrl",
 )
 
+NAME_MIN = 2
+NAME_MAX = 30
+SUBTITLE_MAX = 30
+KEYWORDS_MAX = 100
+DESCRIPTION_MAX = 4000
+TEXT_FIELDS = ("name", "subtitle", "keywords", "description")
+
+
+def empty_fields() -> dict[str, str]:
+    return {name: "" for name in FIELD_NAMES}
+
+
+def empty_locale(locale: str) -> LocaleListing:
+    return LocaleListing(locale=locale, fields=empty_fields(), screenshots={})
+
+
+def snapshot_has_content(snapshot: ListingSnapshot | None) -> bool:
+    if snapshot is None:
+        return False
+    return any(True for _ in snapshot.locales)
+
 @dataclass
 class ScreenshotItem:
     file_name: str
