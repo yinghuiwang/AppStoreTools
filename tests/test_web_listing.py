@@ -797,6 +797,17 @@ def test_listing_wizard_views_exist():
     assert "appliedTick" in src
     assert 'tab === "local"' in src
     assert 'tab === "diff" || tab === "upload"' in src
+    assert 'hasContent.value ? "preview"' not in src
+    assert "didDefault" not in src
+    assert 'step.value = "preview"' not in src
+    mounted = re.search(r"onMounted\(async \(\) => \{.*?\}\);", src, re.S)
+    assert mounted, "ListingView onMounted missing"
+    assert "hasContent" not in mounted.group(0)
+    applied = re.search(r"watch\(appliedTick, \(\) => \{.*?\}\);", src, re.S)
+    assert applied, "ListingView appliedTick watcher missing"
+    assert "workflow.reload()" in applied.group(0)
+    assert "hasContent" not in applied.group(0)
+    assert "preview" not in applied.group(0)
     assert "LocalTab" not in src
     assert "DiffTab" not in src
     assert "UploadTab" not in src
@@ -818,6 +829,10 @@ def test_listing_wizard_views_exist():
     assert "listing.csv_path_help" in create
     assert "metadata.csv_path" in create
     assert "metadata.shots_dir" in create
+    assert 'emit("next")' not in create
+    assert "listing.skip_to_preview" in create
+    assert "listing.file_opened" in create
+    assert "listing.draft_applied" in create
     preview = (root / "views/listing/PreviewStep.vue").read_text(encoding="utf-8")
     upload = (root / "views/listing/UploadStep.vue").read_text(encoding="utf-8")
     assert "ExampleHelp" not in preview

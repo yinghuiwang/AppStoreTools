@@ -19,7 +19,6 @@ const router = useRouter();
 const workflow = useIapWorkflow();
 const { appliedTick } = useAgent();
 const uploadRef = ref<{ start: () => Promise<void> } | null>(null);
-const didDefault = ref(false);
 
 const step = computed<StepId>({
   get() {
@@ -62,18 +61,11 @@ async function ensureLoaded() {
 
 onMounted(async () => {
   await ensureLoaded();
-  const raw = String(route.query.step || "");
-  if (!STEPS.includes(raw as StepId) && !didDefault.value) {
-    didDefault.value = true;
-    step.value = workflow.hasContent.value ? "edit" : "create";
-  }
 });
 
 watch(appliedTick, () => {
   if (workflow.emptyProfile.value) return;
-  void workflow.reload().then(() => {
-    if (step.value === "create" && workflow.hasContent.value) step.value = "edit";
-  });
+  void workflow.reload();
 });
 
 watch(

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import { MessagePlugin } from "tdesign-vue-next";
 import { ApiError, apiErrorMessage, httpJson } from "@/api/http";
 import ExampleHelp from "@/components/ExampleHelp.vue";
 import { useBrowse } from "@/composables/useBrowse";
@@ -136,7 +137,7 @@ function applyInfer() {
     }
   }
   workflow.applySnapshot(snap, { dirty: true, storeDraft: false });
-  emit("next");
+  MessagePlugin.success(t("iap.draft_applied"));
 }
 
 async function pullAsc() {
@@ -154,7 +155,7 @@ async function pullAsc() {
       }),
     });
     workflow.applySnapshot(data.snapshot, { dirty: true, storeDraft: true });
-    emit("next");
+    MessagePlugin.success(t("iap.draft_applied"));
   } catch (err) {
     inferError.value = err instanceof ApiError ? apiErrorMessage(err) : String(err);
   } finally {
@@ -169,6 +170,7 @@ async function browseJson() {
   workflow.setIapFile(path);
   await workflow.load(path);
   opening.value = false;
+  if (!workflow.alert.value) MessagePlugin.success(t("iap.file_opened"));
 }
 
 async function openRemembered() {
@@ -178,12 +180,12 @@ async function openRemembered() {
   workflow.setIapFile(path);
   await workflow.load(path);
   opening.value = false;
-  emit("next");
+  if (!workflow.alert.value) MessagePlugin.success(t("iap.file_opened"));
 }
 
 function blank() {
   workflow.applySnapshot(workflow.emptySnapshot(), { dirty: true, storeDraft: false });
-  emit("next");
+  MessagePlugin.success(t("iap.draft_applied"));
 }
 
 function openAgent() {

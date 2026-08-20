@@ -19,7 +19,6 @@ const router = useRouter();
 const workflow = useListingWorkflow();
 const { appliedTick } = useAgent();
 const uploadRef = ref<{ start: () => Promise<void> } | null>(null);
-const didDefault = ref(false);
 
 function mapLegacyQuery(): StepId | "" {
   const action = String(route.query.action || "");
@@ -77,21 +76,13 @@ onMounted(async () => {
   const raw = String(route.query.step || "");
   const mapped = mapLegacyQuery();
   if (mapped && !STEPS.includes(raw as StepId)) {
-    didDefault.value = true;
     step.value = mapped;
-    return;
-  }
-  if (!STEPS.includes(raw as StepId) && !didDefault.value) {
-    didDefault.value = true;
-    step.value = workflow.hasContent.value ? "preview" : "create";
   }
 });
 
 watch(appliedTick, () => {
   if (workflow.emptyProfile.value) return;
-  void workflow.reload().then(() => {
-    if (step.value === "create" && workflow.hasContent.value) step.value = "preview";
-  });
+  void workflow.reload();
 });
 
 watch(

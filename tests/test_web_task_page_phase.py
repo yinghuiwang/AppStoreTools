@@ -91,6 +91,10 @@ def test_deep_links_prefill_form_without_entering_run():
     assert 'action === "screenshots"' in mounted
     assert 'tab === "local"' in wizard
     assert 'tab === "diff" || tab === "upload"' in wizard
+    assert 'hasContent.value ? "preview"' not in wizard
+    assert 'DEFAULT_LISTING_STEP = "create"' in (
+        FRONTEND / "composables/useTaskPagePhase.ts"
+    ).read_text(encoding="utf-8")
 
 
 def test_task_run_bar_offers_back_to_form():

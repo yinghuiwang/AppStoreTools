@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import { MessagePlugin } from "tdesign-vue-next";
 import { ApiError, apiErrorMessage, httpJson } from "@/api/http";
 import ExampleHelp from "@/components/ExampleHelp.vue";
 import LocalePicker from "@/components/LocalePicker.vue";
@@ -60,6 +61,7 @@ async function browseCsv() {
   workflow.setCsvPath(path);
   await workflow.load(path);
   opening.value = false;
+  if (!workflow.alert.value) MessagePlugin.success(t("listing.file_opened"));
 }
 
 async function browseShots() {
@@ -74,7 +76,7 @@ async function openRemembered() {
   workflow.setCsvPath(path);
   await workflow.load(path);
   opening.value = false;
-  emit("next");
+  if (!workflow.alert.value) MessagePlugin.success(t("listing.file_opened"));
 }
 
 async function pullAsc() {
@@ -91,7 +93,7 @@ async function pullAsc() {
       }),
     });
     workflow.applySnapshot(data.snapshot, { dirty: true, storeDraft: true });
-    emit("next");
+    MessagePlugin.success(t("listing.draft_applied"));
   } catch (err) {
     error.value = err instanceof ApiError ? apiErrorMessage(err) : String(err);
   } finally {
@@ -105,7 +107,7 @@ function blank() {
     { locales: codes.map((locale) => workflow.blankLocale(locale)) },
     { dirty: true, storeDraft: false },
   );
-  emit("next");
+  MessagePlugin.success(t("listing.draft_applied"));
 }
 
 function openAgent() {

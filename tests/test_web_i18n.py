@@ -128,6 +128,10 @@ def test_nav_catalog_english_and_chinese():
     assert t("listing.desc_empty", lang="zh") == "暂无描述"
     assert t("listing.desc_empty", lang="en") == "No description"
     assert t("listing.tab.csv", lang="zh") == "打开 CSV"
+    assert t("listing.file_opened", lang="zh") == "文件已打开"
+    assert t("listing.file_opened", lang="en") == "File opened"
+    assert t("listing.draft_applied", lang="zh") == "草稿已应用"
+    assert t("listing.draft_applied", lang="en") == "Draft applied"
     assert "data/appstore_info.csv" in t("listing.csv_path_help", lang="zh")
     assert "data/screenshots" in t("listing.csv_path_help", lang="zh")
     assert "data/appstore_info.csv" in t("listing.csv_path_help", lang="en")
@@ -349,6 +353,10 @@ def test_iap_editor_list_dialog_i18n_keys():
     assert "data/iap_packages.json" in t("iap.json_path_meaning", lang="en")
     assert t("iap.open_and_edit", lang="zh") == "打开并去编辑"
     assert t("iap.open_and_edit", lang="en") == "Open and edit"
+    assert t("iap.file_opened", lang="zh") == "文件已打开"
+    assert t("iap.file_opened", lang="en") == "File opened"
+    assert t("iap.draft_applied", lang="zh") == "草稿已应用"
+    assert t("iap.draft_applied", lang="en") == "Draft applied"
     assert t("iap.dialog_ok", lang="zh") == "确定"
     assert t("iap.dialog_ok", lang="en") == "OK"
     assert t("iap.section_items", lang="zh") == "一次性 IAP"

@@ -537,6 +537,18 @@ def test_wizard_views_exist():
     assert "EditStep" in iap
     assert "UploadStep" in iap
     assert "useIapWorkflow" in iap
+    assert "appliedTick" in iap
+    assert 'hasContent.value ? "edit"' not in iap
+    assert "didDefault" not in iap
+    assert 'step.value = "edit"' not in iap
+    mounted = re.search(r"onMounted\(async \(\) => \{.*?\}\);", iap, re.S)
+    assert mounted, "IapView onMounted missing"
+    assert "hasContent" not in mounted.group(0)
+    applied = re.search(r"watch\(appliedTick, \(\) => \{.*?\}\);", iap, re.S)
+    assert applied, "IapView appliedTick watcher missing"
+    assert "workflow.reload()" in applied.group(0)
+    assert "hasContent" not in applied.group(0)
+    assert "edit" not in applied.group(0)
     assert "ensureCompare" not in iap
     assert "/api/iap/compare" not in iap
     assert "/api/iap/plan" not in iap
@@ -551,6 +563,10 @@ def test_wizard_views_exist():
     assert "jsonPath" in create
     assert "openRemembered" in create
     assert "setIapFile" in create
+    assert 'emit("next")' not in create
+    assert "iap.skip_to_edit" in create
+    assert "iap.file_opened" in create
+    assert "iap.draft_applied" in create
     assert "<t-tabs" in create
     assert "t-tab-panel" in create
     assert 'v-model="source"' in create
