@@ -46,3 +46,50 @@ def test_build_view_restores_env_scan_sidebar():
     # Old Jinja form posted the .mobileprovision path, not the display Name.
     assert ':value="item.path"' in src
     assert ':value="item.name"' not in src
+
+    # Scheme / certificate / profile: empty state is "Please select", not Auto-detect.
+    assert 'v-model="scheme" :placeholder="t(\'common.please_select\')"' in src
+    assert 'v-model="certificate"' in src
+    assert 'v-model="profileName"' in src
+    assert ":placeholder=\"t('common.please_select')\"" in src
+    assert "<t-option value=\"\" :label=\"t('build.auto_detect')\" />" not in src
+    # Project path input still hints that empty means auto-detect.
+    assert 'v-model="project" :placeholder="t(\'build.auto_detect\')"' in src
+
+    # Start build/upload stays clickable; missing required fields toast on click.
+    assert ':disabled="empty || optionsLoading"' not in src
+    assert ':disabled="empty"' not in src
+    assert "MessagePlugin" in src
+    assert "nav.select_app" in src
+    assert "build.need_ipa" in src
+    assert "build.need_certificate" in src
+    assert "build.need_profile" in src
+    run = src.split("async function run()", 1)[1].split("\n}\n", 1)[0]
+    assert "if (!scheme" not in run
+    assert "if (!project" not in run
+    assert 'mode.value === "deploy"' in run
+    assert "ipaPath" in run
+    assert 'signing.value === "manual"' in run
+    assert "build.need_certificate" in run
+    assert "build.need_profile" in run
+    # Click-to-validate required selects/inputs get TDesign error status; scheme stays optional.
+    assert "fieldErrors" in src
+    assert "fieldStatus('certificate')" in src
+    assert "fieldStatus('profile')" in src
+    assert "fieldStatus('ipa')" in src
+    assert "fieldErrors.certificate" in src
+    assert "fieldErrors.profile" in src
+    assert "fieldErrors.ipa" in src
+    assert ':tips="fieldErrors.certificate || undefined"' in src
+    assert ':tips="fieldErrors.profile || undefined"' in src
+    assert ':tips="fieldErrors.ipa || undefined"' in src
+    overrides = (ROOT / "frontend" / "src" / "styles" / "tdesign-overrides.css").read_text(encoding="utf-8")
+    tips = overrides.split(".t-input__wrap > .t-input__tips", 1)[1].split("}", 1)[0]
+    assert ".t-select-input > .t-input__tips" in overrides
+    assert "position: static" in tips
+    assert "position: absolute" not in tips
+    assert "overflow: visible" in overrides
+    scheme = src.split('v-model="scheme"', 1)[1].split("</t-select>", 1)[0]
+    assert ":status" not in scheme
+    assert "fieldStatus('scheme')" not in src
+    assert "fieldErrors.scheme" not in src

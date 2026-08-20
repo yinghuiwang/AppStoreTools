@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute } from "vue-router";
+import { MessagePlugin } from "tdesign-vue-next";
 import { ApiError, apiErrorMessage, httpForm, httpJson } from "@/api/http";
 import TaskRunBar from "@/components/TaskRunBar.vue";
 import { LISTING_FIELDS, useListingScope } from "@/composables/useListingScope";
@@ -67,17 +68,26 @@ async function refreshStore() {
 
 async function start() {
   alert.value = "";
-  if (workflow.dirty.value || workflow.storeDraft.value) {
-    const saved = await workflow.save();
-    if (!saved) return;
-  }
-  if (
+  const missing: string[] = [];
+  if (workflow.emptyProfile.value) missing.push(t("nav.select_app"));
+  if (!workflow.includeMetadata.value && !workflow.includeScreenshots.value) {
+    missing.push(t("metadata.need_scope"));
+  } else if (
     (workflow.includeMetadata.value || workflow.includeScreenshots.value)
     && !scope.hasMetadataSelection()
     && !scope.hasScreenshotSelection()
   ) {
-    alert.value = t("metadata.wb_empty_selection");
+    missing.push(t("metadata.wb_empty_selection"));
+  }
+  if (missing.length) {
+    const text = missing.join("；");
+    alert.value = text;
+    MessagePlugin.warning(text);
     return;
+  }
+  if (workflow.dirty.value || workflow.storeDraft.value) {
+    const saved = await workflow.save();
+    if (!saved) return;
   }
   try {
     const body = new URLSearchParams();

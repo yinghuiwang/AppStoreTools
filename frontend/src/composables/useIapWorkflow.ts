@@ -1,4 +1,4 @@
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { ApiError, apiErrorMessage, httpJson } from "@/api/http";
 import {
   IAP_FORM_KEY_PREFIX,
@@ -485,6 +485,11 @@ function setIapFile(path: string) {
   persistMemory();
 }
 
+const fieldErrors = ref({ file: "" });
+watch(iapFile, (value) => {
+  if (String(value || "").trim() && fieldErrors.value.file) fieldErrors.value.file = "";
+});
+
 export function useIapWorkflow() {
   const { snapshot: profileSnap } = useProfile();
   const profile = computed(() => profileSnap.value?.current_profile || "");
@@ -492,6 +497,7 @@ export function useIapWorkflow() {
 
   return {
     iapFile,
+    fieldErrors,
     snapshot,
     mtime,
     dirty,

@@ -524,6 +524,67 @@ def test_build_run_api_passes_interactive_release_options(client):
         assert kwargs["dry_run"] is True
 
 
+def test_build_run_rejects_manual_signing_without_certificate(client):
+    from unittest.mock import patch
+    from asc.web.i18n import t
+
+    with patch("asc.web.routes_api._start_build_task") as mock_start:
+        resp = client.post(
+            "/api/build/run",
+            cookies={"asc_profile": "myapp", "asc_lang": "zh"},
+            data={
+                "mode": "full",
+                "project": "/tmp/MyApp.xcworkspace",
+                "signing": "manual",
+                "certificate": "",
+                "provisioning_profile": "/tmp/acme.mobileprovision",
+            },
+        )
+    assert resp.status_code == 400
+    assert resp.json()["error"] == t("build.need_certificate", lang="zh")
+    mock_start.assert_not_called()
+
+
+def test_build_run_rejects_manual_signing_without_profile(client):
+    from unittest.mock import patch
+    from asc.web.i18n import t
+
+    with patch("asc.web.routes_api._start_build_task") as mock_start:
+        resp = client.post(
+            "/api/build/run",
+            cookies={"asc_profile": "myapp", "asc_lang": "en"},
+            data={
+                "mode": "full",
+                "project": "/tmp/MyApp.xcworkspace",
+                "signing": "manual",
+                "certificate": "Apple Distribution: ACME",
+                "provisioning_profile": "  ",
+            },
+        )
+    assert resp.status_code == 400
+    assert resp.json()["error"] == t("build.need_profile", lang="en")
+    mock_start.assert_not_called()
+
+
+def test_build_run_allows_auto_signing_without_certificate(client):
+    from unittest.mock import patch
+
+    with patch("asc.web.routes_api._start_build_task", return_value="task-1") as mock_start:
+        resp = client.post(
+            "/api/build/run",
+            cookies={"asc_profile": "myapp"},
+            data={
+                "mode": "full",
+                "project": "/tmp/MyApp.xcworkspace",
+                "signing": "auto",
+                "certificate": "",
+                "provisioning_profile": "",
+            },
+        )
+    assert resp.status_code == 200
+    mock_start.assert_called_once()
+
+
 def test_build_run_rejects_cwd_sentinel_without_project(client):
     from unittest.mock import MagicMock, patch
 

@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute } from "vue-router";
+import { MessagePlugin } from "tdesign-vue-next";
 import { ApiError, apiErrorMessage, httpForm, httpJson } from "@/api/http";
 import BuildStageProgress from "@/components/BuildStageProgress.vue";
 import PageLoading from "@/components/PageLoading.vue";
@@ -85,6 +86,15 @@ const verbose = ref(false);
 const dryRun = ref(false);
 const reuseArchive = ref("");
 const appProfile = computed(() => snapshot.value?.current_profile || "");
+const fieldErrors = ref({ certificate: "", profile: "", ipa: "" });
+
+function fieldStatus(key: keyof typeof fieldErrors.value): "error" | undefined {
+  return fieldErrors.value[key] ? "error" : undefined;
+}
+
+function clearFieldError(key: keyof typeof fieldErrors.value) {
+  if (fieldErrors.value[key]) fieldErrors.value[key] = "";
+}
 
 function restoreBuildMemory() {
   const saved = parseBuildStored(readFormMemory(formMemoryKey(BUILD_FORM_KEY_PREFIX, appProfile.value)));
@@ -195,8 +205,38 @@ async function pickIpa() {
   if (path) ipaPath.value = path;
 }
 
+function showMissing(items: string[]): boolean {
+  const list = items.filter(Boolean);
+  if (!list.length) return false;
+  const text = list.join("；");
+  alert.value = text;
+  MessagePlugin.warning(text);
+  return true;
+}
+
 async function run() {
   alert.value = "";
+  fieldErrors.value = { certificate: "", profile: "", ipa: "" };
+  const missing: string[] = [];
+  if (empty.value) missing.push(t("nav.select_app"));
+  if (mode.value === "deploy" && !ipaPath.value.trim()) {
+    const msg = t("build.need_ipa");
+    fieldErrors.value.ipa = msg;
+    missing.push(msg);
+  }
+  if (mode.value !== "deploy" && signing.value === "manual") {
+    if (!certificate.value.trim()) {
+      const msg = t("build.need_certificate");
+      fieldErrors.value.certificate = msg;
+      missing.push(msg);
+    }
+    if (!profileName.value.trim()) {
+      const msg = t("build.need_profile");
+      fieldErrors.value.profile = msg;
+      missing.push(msg);
+    }
+  }
+  if (showMissing(missing)) return;
   try {
     const body = new URLSearchParams();
     body.set("mode", mode.value);
@@ -228,12 +268,28 @@ function profileMeta(item: ProfileRow): string {
 }
 
 watch(mode, (next) => {
+  if (next !== "deploy") clearFieldError("ipa");
   if (next === "deploy") {
     scanStatus.value = "idle";
     scanMessage.value = t("build.scan_waiting");
   } else {
     void loadOptions();
   }
+});
+watch(signing, (next) => {
+  if (next !== "manual") {
+    clearFieldError("certificate");
+    clearFieldError("profile");
+  }
+});
+watch(certificate, (value) => {
+  if (value.trim()) clearFieldError("certificate");
+});
+watch(profileName, (value) => {
+  if (value.trim()) clearFieldError("profile");
+});
+watch(ipaPath, (value) => {
+  if (value.trim()) clearFieldError("ipa");
 });
 watch([scheme, signing, certificate], () => {
   if (mode.value === "deploy") return;
@@ -271,8 +327,7 @@ onMounted(() => {
           </div>
         </label>
         <label v-if="mode !== 'deploy'" class="field"><span>{{ t("build.scheme") }}</span>
-          <t-select v-model="scheme" :placeholder="t('build.auto_detect')" clearable>
-            <t-option value="" :label="t('build.auto_detect')" />
+          <t-select v-model="scheme" :placeholder="t('common.please_select')" clearable>
             <t-option v-for="name in options.schemes || []" :key="name" :value="name" :label="name" />
           </t-select>
         </label>
@@ -291,21 +346,35 @@ onMounted(() => {
         <template v-if="mode !== 'deploy' && signing === 'manual'">
           <p class="muted">{{ t("build.signing_manual_hint") }}</p>
           <label class="field"><span>{{ t("build.certificate") }}</span>
-            <t-select v-model="certificate" :placeholder="t('build.auto_detect')" clearable>
-              <t-option value="" :label="t('build.auto_detect')" />
+            <t-select
+              v-model="certificate"
+              :placeholder="t('common.please_select')"
+              :status="fieldStatus('certificate')"
+              :tips="fieldErrors.certificate || undefined"
+              clearable
+            >
               <t-option v-for="cert in options.certificates || []" :key="cert.sha1" :value="cert.name" :label="cert.name" />
             </t-select>
           </label>
           <label class="field"><span>{{ t("build.profile") }}</span>
-            <t-select v-model="profileName" :placeholder="t('build.auto_detect')" clearable>
-              <t-option value="" :label="t('build.auto_detect')" />
+            <t-select
+              v-model="profileName"
+              :placeholder="t('common.please_select')"
+              :status="fieldStatus('profile')"
+              :tips="fieldErrors.profile || undefined"
+              clearable
+            >
               <t-option v-for="item in options.profiles || []" :key="item.path" :value="item.path" :label="item.name" />
             </t-select>
           </label>
         </template>
         <label v-if="mode === 'deploy'" class="field"><span>{{ t("build.ipa_path") }}</span>
           <div class="field-row">
-            <t-input v-model="ipaPath" />
+            <t-input
+              v-model="ipaPath"
+              :status="fieldStatus('ipa')"
+              :tips="fieldErrors.ipa || undefined"
+            />
             <t-button @click="pickIpa">{{ t("filebrowser.browse") }}</t-button>
           </div>
         </label>
@@ -319,7 +388,7 @@ onMounted(() => {
             <t-radio value="rebuild">{{ t("build.reuse_rebuild") }}</t-radio>
           </t-radio-group>
         </div>
-        <t-button theme="primary" :disabled="empty || optionsLoading" @click="run">{{ t("common.submit") }}</t-button>
+        <t-button theme="primary" @click="run">{{ t("common.submit") }}</t-button>
       </div>
 
       <aside v-if="showScanSidebar" class="card build-scan" aria-live="polite">
@@ -435,6 +504,7 @@ onMounted(() => {
 <style scoped>
 h1 { margin: 0; }
 .muted { color: var(--text-muted); font-size: 12px; }
+.field-row { align-items: flex-start; }
 .reuse { display: flex; flex-direction: column; gap: 8px; }
 .lbl { font-size: 12px; color: var(--text-muted); }
 .card { display: flex; flex-direction: column; gap: 12px; flex: 1 1 auto; }

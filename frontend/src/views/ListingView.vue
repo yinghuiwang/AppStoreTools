@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
+import { MessagePlugin } from "tdesign-vue-next";
 import { useAgent } from "@/composables/useAgent";
 import { useListingWorkflow } from "@/composables/useListingWorkflow";
 import CreateStep from "./listing/CreateStep.vue";
@@ -121,6 +122,10 @@ function skip() {
 }
 
 async function startUpload() {
+  if (workflow.emptyProfile.value) {
+    MessagePlugin.warning(t("nav.select_app"));
+    return;
+  }
   if (workflow.dirty.value || workflow.storeDraft.value) {
     const saved = await workflow.save();
     if (!saved) return;
@@ -174,7 +179,7 @@ async function startUpload() {
       <t-button v-if="step !== 'create'" variant="outline" @click="prev">{{ t("listing.prev") }}</t-button>
       <t-button v-if="step !== 'upload'" variant="outline" @click="skip">{{ t("listing.skip") }}</t-button>
       <t-button v-if="step !== 'upload'" theme="primary" :disabled="workflow.emptyProfile.value" @click="next">{{ t("listing.next") }}</t-button>
-      <t-button v-else theme="primary" :disabled="workflow.emptyProfile.value" @click="startUpload">
+      <t-button v-else theme="primary" @click="startUpload">
         {{ workflow.dryRun.value ? t("listing.preview_run") : t("listing.start_upload") }}
       </t-button>
     </div>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import { MessagePlugin } from "tdesign-vue-next";
 import { httpForm, httpJson } from "@/api/http";
 import TaskRunBar from "@/components/TaskRunBar.vue";
 import { useBrowse } from "@/composables/useBrowse";
@@ -36,6 +37,7 @@ const scanning = ref(false);
 const reviewDry = ref(false);
 const reviewVerbose = ref(false);
 const stillMissing = ref(false);
+const pathErrors = ref<Record<string, string>>({});
 
 const counts = computed(() => ({
   create: items.value.filter((i) => i.action === "create").length,
@@ -68,6 +70,17 @@ async function openExistingJson() {
 }
 
 async function start() {
+  const missing: string[] = [];
+  if (workflow.emptyProfile.value) missing.push(t("nav.select_app"));
+  if (!(workflow.iapFile.value || "").trim()) {
+    const msg = t("iap.need_file");
+    workflow.fieldErrors.value.file = msg;
+    missing.push(msg);
+  }
+  if (missing.length) {
+    MessagePlugin.warning(missing.join("；"));
+    return;
+  }
   if (workflow.dirty.value || workflow.storeDraft.value) {
     const saved = await workflow.save();
     if (!saved) return;
@@ -111,10 +124,21 @@ function previewPath(path: string) {
 
 async function pickPath(id: string) {
   const path = await browse.pick({ mode: "file", ext: ".png,.jpg,.jpeg", initialPath: paths.value[id] });
-  if (path) paths.value[id] = path;
+  if (path) {
+    paths.value[id] = path;
+    if (pathErrors.value[id]) {
+      const next = { ...pathErrors.value };
+      delete next[id];
+      pathErrors.value = next;
+    }
+  }
 }
 
 async function uploadShots() {
+  const missing: string[] = [];
+  pathErrors.value = {};
+  if (workflow.emptyProfile.value) missing.push(t("nav.select_app"));
+  if (!targets.value.length) missing.push(t("iap.no_missing"));
   const payload = targets.value
     .filter((item) => (paths.value[item.id] || "").trim())
     .map((item) => ({
@@ -123,6 +147,19 @@ async function uploadShots() {
       productId: item.productId,
       path: paths.value[item.id],
     }));
+  if (targets.value.length && !payload.length) {
+    const msg = t("iap.pick_path");
+    const next: Record<string, string> = {};
+    for (const item of targets.value) {
+      if (!(paths.value[item.id] || "").trim()) next[item.id] = msg;
+    }
+    pathErrors.value = next;
+    missing.push(msg);
+  }
+  if (missing.length) {
+    MessagePlugin.warning(missing.join("；"));
+    return;
+  }
   const { task_id } = await httpJson<{ task_id: string }>("/api/iap/review-screenshots/upload", {
     method: "POST",
     body: JSON.stringify({ items: payload, dryRun: reviewDry.value, verbose: reviewVerbose.value }),
@@ -134,6 +171,20 @@ async function uploadShots() {
 function onBack() {
   backToForm();
 }
+
+watch(paths, (next) => {
+  const ids = Object.keys(pathErrors.value);
+  if (!ids.length) return;
+  const remaining: Record<string, string> = { ...pathErrors.value };
+  let changed = false;
+  for (const id of ids) {
+    if ((next[id] || "").trim()) {
+      delete remaining[id];
+      changed = true;
+    }
+  }
+  if (changed) pathErrors.value = remaining;
+}, { deep: true });
 
 function toggleShots() {
   shotsOpen.value = !shotsOpen.value;
@@ -198,7 +249,11 @@ defineExpose({ start });
             <div class="muted">{{ item.kind === "subscription" ? t("iap.kind_sub") : "IAP" }}</div>
           </div>
           <div class="field-row">
-            <t-input v-model="paths[item.id]" />
+            <t-input
+              v-model="paths[item.id]"
+              :status="pathErrors[item.id] ? 'error' : undefined"
+              :tips="pathErrors[item.id] || undefined"
+            />
             <t-button size="small" @click="pickPath(item.id)">{{ t("filebrowser.browse") }}</t-button>
             <img
               v-if="paths[item.id]"
@@ -213,7 +268,7 @@ defineExpose({ start });
           <t-checkbox v-model="reviewDry">{{ t("iap.preview") }}</t-checkbox>
           <t-checkbox v-model="reviewVerbose">{{ t("build.verbose") }}</t-checkbox>
         </t-space>
-        <t-button theme="primary" :disabled="workflow.emptyProfile.value || !targets.length" @click="uploadShots">{{ t("iap.upload_shots") }}</t-button>
+        <t-button theme="primary" @click="uploadShots">{{ t("iap.upload_shots") }}</t-button>
       </div>
     </div>
     <TaskRunBar v-if="isRun && taskId" :task-id="taskId" @back="onBack" />
@@ -226,7 +281,7 @@ defineExpose({ start });
 .card { display: flex; flex-direction: column; gap: 10px; }
 .empty-row { display: flex; flex-direction: row; align-items: center; gap: 8px; margin: 0; font-size: 13px; }
 .muted { color: var(--text-muted); font-size: 12px; }
-.field-row { display: flex; gap: 8px; align-items: center; }
+.field-row { display: flex; gap: 8px; align-items: flex-start; }
 .check-opts {
   width: fit-content;
   max-width: 100%;

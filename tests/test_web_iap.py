@@ -688,6 +688,19 @@ def test_wizard_views_exist():
     assert "iap.store_draft_banner" in (root / "views/IapView.vue").read_text(encoding="utf-8")
     assert "iap.save_to_json" in (root / "views/IapView.vue").read_text(encoding="utf-8")
     assert "iap.discard_draft" in (root / "views/IapView.vue").read_text(encoding="utf-8")
+    assert ':disabled="workflow.emptyProfile.value" @click="startUpload"' not in iap
+    assert '@click="startUpload"' in iap
+    assert "MessagePlugin" in iap
+    assert "nav.select_app" in iap
+    assert "iap.need_file" in iap
+    assert "fieldErrors" in (root / "composables/useIapWorkflow.ts").read_text(encoding="utf-8")
+    assert ':status="workflow.fieldErrors.value.file ? \'error\' : undefined"' in create
+    assert ':disabled="workflow.emptyProfile.value || !targets.length"' not in upload
+    assert "iap.pick_path" in upload
+    assert "iap.no_missing" in upload
+    assert "MessagePlugin" in upload
+    assert "pathErrors" in upload
+    assert ":status=\"pathErrors[item.id] ? 'error' : undefined\"" in upload
     assert "write: false" in dialog
     memory = (root / "composables/useFormMemory.ts").read_text(encoding="utf-8")
     assert 'IAP_DRAFT_KEY_PREFIX = "asc_iap_draft_"' in memory

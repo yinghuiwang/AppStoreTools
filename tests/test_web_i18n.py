@@ -56,6 +56,20 @@ def test_t_interpolation_and_fallback(monkeypatch):
     assert t("nav.dashboard", lang="en") == "Dashboard"
     assert t("missing.key.that.does.not.exist", lang="zh") == "missing.key.that.does.not.exist"
     assert "1.2.3" in t("update.current_version", lang="en", version="1.2.3")
+    assert t("common.please_select", lang="zh") == "请选择"
+    assert t("common.please_select", lang="en") == "Please select"
+    assert t("nav.select_app", lang="zh") == "请选择 App"
+    assert t("nav.select_app", lang="en") == "Select an app"
+    assert t("build.need_ipa", lang="zh") == "请选择 IPA 路径"
+    assert t("build.need_ipa", lang="en") == "Please select an IPA path"
+    assert t("build.need_certificate", lang="zh") == "请选择证书"
+    assert t("build.need_certificate", lang="en") == "Please select a certificate"
+    assert t("build.need_profile", lang="zh") == "请选择描述文件"
+    assert t("build.need_profile", lang="en") == "Please select a provisioning profile"
+    assert t("iap.need_file", lang="zh") == "请选择 IAP 配置文件"
+    assert t("iap.need_file", lang="en") == "Please select an IAP config file"
+    assert t("metadata.need_scope", lang="zh") == "请勾选元数据或截图"
+    assert t("metadata.need_scope", lang="en") == "Please select metadata or screenshots"
 
 
 def test_html_lang_mapping():

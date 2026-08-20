@@ -208,7 +208,11 @@ function openAgent() {
           <div class="field">
             <ExampleHelp kind="iap" :label="t('iap.file')" />
             <div class="field-row">
-              <t-input v-model="jsonPath" />
+              <t-input
+                v-model="jsonPath"
+                :status="workflow.fieldErrors.value.file ? 'error' : undefined"
+                :tips="workflow.fieldErrors.value.file || undefined"
+              />
               <t-button :loading="opening" @click="browseJson">{{ t("filebrowser.browse") }}</t-button>
             </div>
           </div>
@@ -314,7 +318,8 @@ function openAgent() {
 }
 .muted { color: var(--text-muted); font-size: 12px; }
 .err { color: var(--err); margin: 0; }
-.kind-row, .field-row { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+.kind-row { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+.field-row { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
 .help-pre { white-space: pre-wrap; font-size: 12px; margin: 8px 0 0; }
 .confirm { display: flex; flex-direction: column; gap: 16px; }
 .mod {

@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
+import { MessagePlugin } from "tdesign-vue-next";
 import { useAgent } from "@/composables/useAgent";
 import { useIapWorkflow } from "@/composables/useIapWorkflow";
 import CreateStep from "./iap/CreateStep.vue";
@@ -96,6 +97,17 @@ function skip() {
 }
 
 async function startUpload() {
+  const missing: string[] = [];
+  if (workflow.emptyProfile.value) missing.push(t("nav.select_app"));
+  if (!(workflow.iapFile.value || "").trim()) {
+    const msg = t("iap.need_file");
+    workflow.fieldErrors.value.file = msg;
+    missing.push(msg);
+  }
+  if (missing.length) {
+    MessagePlugin.warning(missing.join("；"));
+    return;
+  }
   if (workflow.dirty.value || workflow.storeDraft.value) {
     const saved = await workflow.save();
     if (!saved) return;
@@ -149,7 +161,7 @@ async function startUpload() {
       <t-button v-if="step !== 'create'" variant="outline" @click="prev">{{ t("iap.prev") }}</t-button>
       <t-button v-if="step !== 'upload'" variant="outline" @click="skip">{{ t("iap.skip") }}</t-button>
       <t-button v-if="step !== 'upload'" theme="primary" :disabled="workflow.emptyProfile.value" @click="next">{{ t("iap.next") }}</t-button>
-      <t-button v-else theme="primary" :disabled="workflow.emptyProfile.value" @click="startUpload">
+      <t-button v-else theme="primary" @click="startUpload">
         {{ workflow.dryRun.value ? t("iap.preview_run") : t("iap.start_upload") }}
       </t-button>
     </div>

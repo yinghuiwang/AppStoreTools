@@ -838,6 +838,17 @@ def build_run(
                 {"error": t("build.need_project", lang=lang)},
                 status_code=400,
             )
+        if signing == "manual":
+            if not certificate.strip():
+                return JSONResponse(
+                    {"error": t("build.need_certificate", lang=lang)},
+                    status_code=400,
+                )
+            if not provisioning_profile.strip():
+                return JSONResponse(
+                    {"error": t("build.need_profile", lang=lang)},
+                    status_code=400,
+                )
     task_id = _start_build_task(
         profile=profile,
         mode=mode,

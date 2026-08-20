@@ -845,6 +845,13 @@ def test_listing_wizard_views_exist():
     assert "openExistingCsv" not in preview
     assert "workflow.csvPath.value" in upload
     assert "workflow.screenshotsDir.value" in upload
+    assert ':disabled="workflow.emptyProfile.value" @click="startUpload"' not in src
+    assert '@click="startUpload"' in src
+    assert "MessagePlugin" in src
+    assert "nav.select_app" in src
+    assert "MessagePlugin" in upload
+    assert "metadata.need_scope" in upload
+    assert "metadata.wb_empty_selection" in upload
 
 
 def test_listing_preview_has_screenshot_workbench():

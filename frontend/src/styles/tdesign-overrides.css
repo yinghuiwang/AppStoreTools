@@ -95,9 +95,15 @@ html.dark .t-dialog__ctx .t-dialog {
 }
 
 html.dark .t-input,
-html.dark .t-textarea__inner,
-html.dark .t-select-input {
+html.dark .t-textarea__inner {
   background-color: var(--raised);
+}
+
+/* Keep the chrome on the field itself. Painting .t-select-input/.t-select__wrap
+   would cover in-flow error tips once they participate in layout. */
+html.dark .t-select-input,
+html.dark .t-select__wrap {
+  background-color: transparent;
 }
 
 /* Native .card input borders must not paint onto TDesign's inner field.
@@ -255,8 +261,26 @@ html.dark .t-checkbox .t-checkbox__label {
   padding-left: 8px;
 }
 
-html.dark .t-select__wrap {
-  background: var(--overlay);
+/* TDesign Input/Select tips are position:absolute so compact forms do not jump.
+   Standalone fields (no t-form-item) then overlap the next label/control.
+   Keep tips in normal flow so certificate, profile, IPA, and IAP errors push
+   following content down. Higher specificity beats on-demand component CSS. */
+.t-input__wrap,
+.t-select__wrap,
+.t-select-input {
+  overflow: visible;
+}
+
+.t-input__wrap > .t-input__tips,
+.t-select-input > .t-input__tips {
+  position: static;
+  display: block;
+  height: auto;
+  max-height: none;
+  margin-top: 4px;
+  line-height: var(--td-line-height-body-small, 1.5);
+  overflow: visible;
+  white-space: normal;
 }
 
 html.dark .t-select__dropdown,
