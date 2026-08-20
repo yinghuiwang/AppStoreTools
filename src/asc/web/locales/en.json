@@ -84,6 +84,8 @@
   "listing.col_name": "Name",
   "listing.col_subtitle": "Subtitle",
   "listing.col_keywords": "Keywords",
+  "listing.col_description": "Description",
+  "listing.desc_empty": "No description",
   "listing.col_status": "Status",
   "listing.overwrite_store": "Overwrite this locale from store",
   "listing.changed_hint": "These fields differ from the store:",

@@ -858,6 +858,18 @@ def test_listing_preview_has_screenshot_workbench():
     assert "listing.agent_seed_edit" in dialog
 
 
+def test_listing_preview_shows_full_description():
+    src = Path("frontend/src/views/listing/PreviewStep.vue").read_text(encoding="utf-8")
+    assert "listing.col_description" in src
+    assert "listing.desc_empty" in src
+    assert "descriptionText" in src
+    assert "fields.description" in src
+    assert "white-space: pre-wrap" in src
+    assert "desc-body" in src
+    assert "clip(entry.row.fields.description" not in src
+    assert "metadata.shots_section" in src
+
+
 def test_listing_screenshots_add_requires_profile(client, tmp_path):
     shots = tmp_path / "screenshots"
     shots.mkdir()

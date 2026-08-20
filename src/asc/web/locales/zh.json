@@ -84,6 +84,8 @@
   "listing.col_name": "名称",
   "listing.col_subtitle": "副标题",
   "listing.col_keywords": "关键词",
+  "listing.col_description": "描述",
+  "listing.desc_empty": "暂无描述",
   "listing.col_status": "状态",
   "listing.overwrite_store": "用商店覆盖此语言",
   "listing.changed_hint": "以下字段本地与商店不一致：",

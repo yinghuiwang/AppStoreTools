@@ -123,6 +123,10 @@ def test_nav_catalog_english_and_chinese():
     assert t("listing.step.create", lang="zh") == "创建"
     assert t("listing.step.preview", lang="zh") == "预览"
     assert t("listing.step.upload", lang="zh") == "上传"
+    assert t("listing.col_description", lang="zh") == "描述"
+    assert t("listing.col_description", lang="en") == "Description"
+    assert t("listing.desc_empty", lang="zh") == "暂无描述"
+    assert t("listing.desc_empty", lang="en") == "No description"
     assert t("listing.tab.csv", lang="zh") == "打开 CSV"
     assert "data/appstore_info.csv" in t("listing.csv_path_help", lang="zh")
     assert "data/screenshots" in t("listing.csv_path_help", lang="zh")

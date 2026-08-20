@@ -110,6 +110,10 @@ function hasShots(row: ListingLocale): boolean {
   return Object.values(row.screenshots || {}).some((group) => group.length > 0);
 }
 
+function descriptionText(row: ListingLocale): string {
+  return (row.fields.description || "").trim();
+}
+
 function isMissingShot(row: ListingLocale): boolean {
   if (hasShots(row)) return false;
   if (!workflow.compared.value) return true;
@@ -499,6 +503,12 @@ const editorPlan = computed(() => {
         </span>
       </div>
 
+      <div class="desc-block">
+        <h3>{{ t("listing.col_description") }}</h3>
+        <p v-if="descriptionText(entry.row)" class="desc-body">{{ descriptionText(entry.row) }}</p>
+        <p v-else class="muted desc-empty">{{ t("listing.desc_empty") }}</p>
+      </div>
+
       <h3>{{ t("metadata.shots_section") }}</h3>
       <div v-if="!Object.keys(entry.row.screenshots || {}).length" class="empty-shots">
         <p class="muted">{{ t("metadata.shots_empty") }}</p>
@@ -610,6 +620,21 @@ const editorPlan = computed(() => {
 .tree-actions, .row-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .locale-add { min-width: 220px; flex: 1; }
 .group-card { display: flex; flex-direction: column; gap: 10px; }
+.desc-block { display: flex; flex-direction: column; gap: 6px; }
+.group-card > h3,
+.desc-block h3 { margin: 0; font-size: 13px; }
+.desc-body {
+  margin: 0;
+  padding: 10px 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 13px;
+  line-height: 1.65;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.desc-empty { margin: 0; }
 .list-row {
   display: grid;
   grid-template-columns: minmax(120px, 1fr) minmax(100px, 1.2fr) minmax(80px, 1fr) minmax(80px, 1fr) minmax(90px, 0.8fr) minmax(160px, auto);
