@@ -12,6 +12,20 @@
 
 ---
 
+## Web 向导（创建 → 编辑 → 上传）
+
+在 Web UI 打开 **IAP**。这是一条可跳步的向导，不是上架页那种本地 / Diff / 上传三个 Tab：
+
+1. **创建**：五个来源 Tab（粘贴商品表 / 从商店导入 / 打开 JSON / 空白新建 / Agent 生成）。商品表会推断类型；**groupLevel 必须按组确认**（1 = 最高，同级 = 平级），不会静默填写。若上次选过的 JSON（或 Profile 默认路径）已有内容，创建步默认选中「打开 JSON」并填好路径，可直接去编辑；否则默认「粘贴商品表」。
+2. **编辑**：按订阅组（含嵌套订阅）和一次性 IAP 列出预览。新增 / 编辑在弹窗中改字段与本地化。添加语言会自动翻译展示名（2–30）和描述（≤45）。未配置 LLM 密钥时仍可添加空语言，并提示去设置。
+3. **上传**：只看发布清单（新建 / 更新 / 将跳过）。默认 create-only；打开「更新已存在的项目」后才会 PATCH。缺审核截图在同一步折叠补传。
+
+未保存的修改不阻止跳步；真正上传前若有未保存更改，会先保存。
+
+---
+
+---
+
 ## 步骤 1：创建 IAP JSON 文件
 
 JSON 顶层可以是一次性 IAP 数组，也可以是包含 `items`、`subscriptionGroups` 或两者的对象。
@@ -155,7 +169,7 @@ asc --app myapp iap-screenshots --dry-run
 asc --app myapp iap-screenshots --iap-file AppStore/data/iap_packages.json --no-prompt --yes
 ```
 
-在 Web UI 中，打开 **IAP 管理**，进入 **补审核截图**，点击 **扫描缺失**，为需要截图的产品选择 PNG、JPG 或 JPEG 文件，然后点击 **上传截图**。Web UI 中选择的路径只会作为本次上传请求的临时载荷发送，不会写回 `AppStore/data/iap_packages.json`。
+在 Web UI 中，留在 **上传** 步，展开 **补审核截图**，点击 **扫描缺失**，为需要截图的产品选择 PNG、JPG 或 JPEG 文件，然后点击 **上传截图**。Web UI 中选择的路径只会作为本次上传请求的临时载荷发送，不会写回 `AppStore/data/iap_packages.json`。
 
 ---
 

@@ -58,17 +58,20 @@ def _bind_web_task_store(task_store: TaskStore) -> Iterator[None]:
     no-op there. Tests pass a temp store; ``start_background_task`` is mocked
     so starter ``run()`` closures never execute against the restored global.
     """
-    from asc.web import routes_api, routes_listing
+    from asc.web import routes_api, routes_iap, routes_listing
 
     with _STORE_LOCK:
         prev_api = routes_api._task_store
+        prev_iap = routes_iap._task_store
         prev_listing = routes_listing.task_store
         routes_api._task_store = task_store
+        routes_iap._task_store = task_store
         routes_listing.task_store = task_store
         try:
             yield
         finally:
             routes_api._task_store = prev_api
+            routes_iap._task_store = prev_iap
             routes_listing.task_store = prev_listing
 
 
@@ -110,7 +113,7 @@ def _rerun_build(replay: dict[str, Any]) -> str:
 
 
 def _rerun_iap(replay: dict[str, Any]) -> str:
-    from asc.web.routes_api import _start_iap_task
+    from asc.web.routes_iap import _start_iap_task
 
     params = _params(replay)
     return _start_iap_task(
@@ -124,7 +127,7 @@ def _rerun_iap(replay: dict[str, Any]) -> str:
 
 def _rerun_iap_review_screenshots(replay: dict[str, Any]) -> str:
     from asc.commands.iap_review_screenshots import ReviewScreenshotUploadItem
-    from asc.web.routes_api import _start_iap_review_screenshots_task
+    from asc.web.routes_iap import _start_iap_review_screenshots_task
 
     params = _params(replay)
     items: list[ReviewScreenshotUploadItem] = []

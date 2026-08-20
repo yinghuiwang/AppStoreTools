@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -222,7 +223,7 @@ def test_iap_check_missing_file_localized(client, monkeypatch):
     mock_config.iap_path = "missing-iap.json"
     client.cookies.set(COOKIE_NAME, "en")
     client.cookies.set("asc_profile", "testapp")
-    with patch("asc.web.routes_api.Config", return_value=mock_config), \
+    with patch("asc.web.routes_iap.Config", return_value=mock_config), \
          patch("pathlib.Path.exists", return_value=False):
         resp = client.post("/api/iap/check")
     assert resp.status_code == 200
@@ -321,3 +322,68 @@ def test_agent_attach_i18n_keys():
     assert t("agent.new_session", lang="en") == "New session"
     assert t("agent.session_empty", lang="en") == "No sessions yet"
     assert t("agent.untitled_session", lang="en") == "New chat"
+
+
+def test_iap_editor_list_dialog_i18n_keys():
+    load_catalog.cache_clear()
+    assert t("iap.json_path_help", lang="zh")
+    assert t("iap.open_and_edit", lang="zh") == "打开并去编辑"
+    assert t("iap.open_and_edit", lang="en") == "Open and edit"
+    assert t("iap.dialog_ok", lang="zh") == "确定"
+    assert t("iap.dialog_ok", lang="en") == "OK"
+    assert t("iap.section_items", lang="zh") == "一次性 IAP"
+    assert t("iap.col_status", lang="en") == "Status"
+    assert t("iap.confirm_delete", lang="zh").startswith("确定删除")
+    assert t("iap.status.missing-shot", lang="zh") == "缺审核截图"
+    assert t("iap.status.missing-shot", lang="en") == "Missing review screenshot"
+    assert t("iap.status.local-only", lang="zh") == "未上架"
+    assert t("iap.status.local-only", lang="en") == "Not on store"
+    assert t("iap.filter.local", lang="zh") == "未上架"
+    assert t("iap.filter.local", lang="en") == "Not on store"
+    assert t("iap.filter.changed", lang="zh") == "与商店不一致"
+    assert t("iap.filter.changed", lang="en") == "Differs from store"
+    assert t("iap.filter.shot", lang="zh") == "缺审核截图"
+    assert t("iap.filter.shot", lang="en") == "Missing review screenshot"
+    assert t("iap.filter.empty_local", lang="zh")
+    assert t("iap.filter.empty_changed", lang="en")
+    assert t("iap.filter.empty_shot", lang="zh")
+    assert t("iap.compare.phase_local", lang="zh") == "读取本地 JSON"
+    assert t("iap.compare.phase_iap", lang="en") == "Fetching one-time IAPs"
+    assert t("iap.compare.elapsed", lang="zh", s=12) == "12s"
+    assert t("iap.compare.button", lang="zh") == "核对商店"
+    assert t("iap.compare.button", lang="en") == "Check store"
+    assert t("iap.compare.refresh", lang="zh") == "从商店刷新状态"
+    assert t("iap.filter.need_compare", lang="zh") == "尚未核对商店"
+    assert t("iap.filter.need_compare", lang="en") == "Store not checked yet"
+    assert t("iap.step.create", lang="zh") == "创建"
+    assert t("iap.step.create", lang="en") == "Create"
+    assert t("iap.step.edit", lang="zh") == "编辑"
+    assert t("iap.step.edit", lang="en") == "Edit"
+    assert t("iap.step.upload", lang="zh") == "上传"
+    assert t("iap.step.upload", lang="en") == "Upload"
+    assert t("iap.tab.table", lang="zh") == "粘贴商品表"
+    assert t("iap.tab.asc", lang="zh") == "从商店导入"
+    assert t("iap.tab.json", lang="zh") == "打开 JSON"
+    assert t("iap.tab.blank", lang="zh") == "空白新建"
+    assert t("iap.tab.agent", lang="zh") == "Agent 生成"
+    assert t("iap.tab.table", lang="en") == "Paste table"
+    assert t("iap.tab.asc", lang="en") == "From store"
+    assert t("iap.tab.json", lang="en") == "Open JSON"
+    assert t("iap.add", lang="zh") == "添加"
+    assert t("iap.add", lang="en") == "Add"
+    assert t("iap.need_group_first", lang="zh") == "请先创建订阅组"
+    assert t("iap.need_group_first", lang="en").startswith("Create a subscription group")
+    assert t("iap.pick_group_title", lang="zh") == "选择订阅组"
+    assert t("iap.section_basics", lang="zh") == "基本信息"
+    assert t("iap.section_price", lang="en") == "Price"
+    assert t("iap.store_draft_banner", lang="zh") == "未写入文件的商店草稿"
+    assert t("iap.save_to_json", lang="zh") == "保存到 JSON"
+    assert t("iap.discard_draft", lang="zh") == "丢弃草稿"
+    assert t("iap.store_draft_banner", lang="en") == "Store draft not written to file"
+    assert t("iap.save_to_json", lang="en") == "Save to JSON"
+    assert t("iap.discard_draft", lang="en") == "Discard draft"
+    zh = json.loads((Path(__file__).resolve().parents[1] / "src/asc/web/locales/zh.json").read_text(encoding="utf-8"))
+    en = json.loads((Path(__file__).resolve().parents[1] / "src/asc/web/locales/en.json").read_text(encoding="utf-8"))
+    zh_iap = [k for k in zh if str(k).startswith("iap.")]
+    en_iap = [k for k in en if str(k).startswith("iap.")]
+    assert zh_iap == en_iap

@@ -13,7 +13,7 @@ import { LISTING_FIELDS, useListingScope } from "@/composables/useListingScope";
 import { useProfile } from "@/composables/useProfile";
 import { useListingTab } from "@/composables/useTaskPagePhase";
 import LocaleSelectTabs from "@/components/LocaleSelectTabs.vue";
-import LocalePicker from "./LocalePicker.vue";
+import LocalePicker from "@/components/LocalePicker.vue";
 
 type Shot = { file_name: string; order: number; thumb_url: string; local_path: string; remote_id: string };
 type LocaleRow = { locale: string; fields: Record<string, string>; screenshots: Record<string, Shot[]> };

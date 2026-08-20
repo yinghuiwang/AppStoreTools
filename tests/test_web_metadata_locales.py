@@ -231,28 +231,34 @@ I18N_KEYS = [
 
 
 def test_locale_picker_uses_catalog_then_presence():
-    src = Path("frontend/src/views/listing/LocalePicker.vue").read_text(encoding="utf-8")
-    catalog = src.index("/api/metadata/locales")
-    presence = src.index("/api/metadata/locales/presence")
+    catalog_src = Path("frontend/src/composables/useLocaleCatalog.ts").read_text(encoding="utf-8")
+    picker = Path("frontend/src/components/LocalePicker.vue").read_text(encoding="utf-8")
+    catalog = catalog_src.index("/api/metadata/locales")
+    presence = catalog_src.index("/api/metadata/locales/presence")
     assert catalog < presence
-    assert "presenceAvailable" in src
-    assert "navigator.clipboard.writeText" in src
-    assert "/api/listing/" not in src
-    assert "/api/metadata/run" not in src
+    assert "presenceAvailable" in catalog_src
+    assert "name_en" in catalog_src
+    assert "name_zh" in catalog_src
+    assert "useLocaleCatalog({ presence: true })" in picker
+    assert "navigator.clipboard.writeText" in picker
+    assert "/api/listing/" not in picker
+    assert "/api/metadata/run" not in picker
     for key in I18N_KEYS:
         assert t(key, lang="zh") != key
         assert t(key, lang="en") != key
 
 
 def test_locale_picker_stays_usable_when_presence_fails():
-    src = Path("frontend/src/views/listing/LocalePicker.vue").read_text(encoding="utf-8")
-    assert "presenceAvailable.value = false" in src
-    assert "t-dialog" in src
-    assert "metadata.locales_presence_unavailable" in src
+    catalog_src = Path("frontend/src/composables/useLocaleCatalog.ts").read_text(encoding="utf-8")
+    picker = Path("frontend/src/components/LocalePicker.vue").read_text(encoding="utf-8")
+    assert "presenceAvailable.value = false" in catalog_src
+    assert "t-dialog" in picker
+    assert "metadata.locales_presence_unavailable" in picker
 
 
 def test_locale_button_uses_catalog():
     src = Path("frontend/src/views/listing/LocalTab.vue").read_text(encoding="utf-8")
+    assert 'from "@/components/LocalePicker.vue"' in src
     assert "metadata.locales_btn" in src
     assert t("metadata.locales_btn", lang="zh") == "语言码"
     assert t("metadata.locales_btn", lang="en") == "Locale codes"

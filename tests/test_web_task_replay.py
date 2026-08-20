@@ -9,8 +9,10 @@ def _noop_start(*_args, **kwargs):
 
 def _patch_starters(monkeypatch, store: TaskStore) -> None:
     monkeypatch.setattr("asc.web.routes_api._task_store", store)
+    monkeypatch.setattr("asc.web.routes_iap._task_store", store)
     monkeypatch.setattr("asc.web.routes_listing.task_store", store)
     monkeypatch.setattr("asc.web.routes_api.start_background_task", _noop_start)
+    monkeypatch.setattr("asc.web.routes_iap.start_background_task", _noop_start)
     monkeypatch.setattr("asc.web.routes_listing.start_background_task", _noop_start)
     monkeypatch.setattr("asc.web.task_runner.start_background_task", _noop_start)
 
@@ -76,6 +78,7 @@ def test_remaining_starters_write_kind_specific_replay(tmp_path, monkeypatch):
         _patch_starters(monkeypatch, store)
         from asc.commands.iap_review_screenshots import ReviewScreenshotUploadItem
         from asc.web.routes_api import (
+            _start_iap_compare_task,
             _start_iap_review_screenshots_task,
             _start_iap_task,
             _start_urls_task,
@@ -87,6 +90,10 @@ def test_remaining_starters_write_kind_specific_replay(tmp_path, monkeypatch):
 
         iap_id = _start_iap_task("myapp", "data/iap_packages.json", True, False, False)
         assert store.get_replay(iap_id)["params"]["iap_file"] == "data/iap_packages.json"
+        compare_id = _start_iap_compare_task("myapp", "data/iap_packages.json", True)
+        assert store.get_replay(compare_id)["kind"] == "iap-compare"
+        assert store.get_replay(compare_id)["params"]["iap_file"] == "data/iap_packages.json"
+        assert store.get_replay(compare_id)["params"]["update_existing"] is True
         url_id = _start_urls_task(
             profile="myapp",
             field="supportUrl",

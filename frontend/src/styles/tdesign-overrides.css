@@ -255,15 +255,54 @@ html.dark .t-checkbox .t-checkbox__label {
   padding-left: 8px;
 }
 
-html.dark .t-select__wrap,
-html.dark .t-select-option {
+html.dark .t-select__wrap {
   background: var(--overlay);
 }
 
 html.dark .t-select__dropdown,
+html.dark .t-popup.t-select__dropdown,
 html.dark .t-popup__content {
   background: var(--overlay);
   border-color: var(--border);
+}
+
+/* Select options render in a body-teleported popup; scoped Vue CSS cannot reach them.
+   Official TDesign selected text uses --td-brand-color on --td-brand-color-light, which
+   reads as muted mint/blue on navy. Keep the same states, raise contrast. */
+html.dark .t-select__dropdown .t-select-option {
+  color: var(--text-muted);
+  background: transparent;
+  font-weight: 400;
+}
+
+html.dark .t-select__dropdown .t-select-option.t-is-hover,
+html.dark .t-select__dropdown .t-select-option.t-is-highlighted,
+html.dark .t-select__dropdown .t-select-option.t-select-option__hover,
+html.dark .t-select__dropdown .t-select-option.t-select-option--hover,
+html.dark .t-select__dropdown .t-select-option:not(.t-is-disabled):not(.t-is-selected):hover {
+  color: var(--text);
+  background-color: color-mix(in srgb, var(--text) 8%, var(--overlay));
+}
+
+html.dark .t-select__dropdown .t-select-option.t-is-selected:not(.t-is-disabled),
+html.dark .t-select-option.t-is-selected:not(.t-is-disabled) {
+  color: var(--text);
+  font-weight: 500;
+  background-color: var(--td-brand-color-2);
+}
+
+html.dark .t-select__dropdown .t-select-option.t-is-selected:not(.t-is-disabled) .t-checkbox__label,
+html.dark .t-select-option.t-is-selected:not(.t-is-disabled) .t-checkbox__label {
+  color: var(--text);
+}
+
+html.dark .t-select__dropdown .t-select-option.t-is-selected.t-is-hover:not(.t-is-disabled),
+html.dark .t-select__dropdown .t-select-option.t-is-selected.t-is-highlighted:not(.t-is-disabled),
+html.dark .t-select__dropdown .t-select-option.t-is-selected.t-select-option__hover:not(.t-is-disabled),
+html.dark .t-select__dropdown .t-select-option.t-is-selected.t-select-option--hover:not(.t-is-disabled),
+html.dark .t-is-selected.t-select-option__hover {
+  color: var(--text);
+  background-color: var(--td-brand-color-3);
 }
 
 html.dark .t-popconfirm {

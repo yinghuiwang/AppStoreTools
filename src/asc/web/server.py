@@ -76,10 +76,11 @@ def create_app() -> FastAPI:
         )
         return await call_next(request)
 
-    from asc.web import routes_api, routes_listing, routes_agent
+    from asc.web import routes_api, routes_listing, routes_agent, routes_iap
     app.include_router(routes_api.router, prefix="/api")
     app.include_router(routes_listing.router, prefix="/api/listing")
     app.include_router(routes_agent.router, prefix="/api/agent")
+    app.include_router(routes_iap.router, prefix="/api/iap")
 
     @app.get("/{full_path:path}")
     def spa_fallback(full_path: str):

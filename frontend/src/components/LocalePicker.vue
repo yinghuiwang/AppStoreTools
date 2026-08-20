@@ -1,19 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { httpJson } from "@/api/http";
 import PageLoading from "@/components/PageLoading.vue";
-
-type Row = { code: string; name_en: string; name_zh: string; present?: boolean };
+import { displayNameFor, useLocaleCatalog } from "@/composables/useLocaleCatalog";
 
 const open = defineModel<boolean>("open", { default: false });
 const { t, locale } = useI18n();
 const query = ref("");
-const loading = ref(false);
-const error = ref("");
-const rows = ref<Row[]>([]);
-const presenceAvailable = ref(false);
 const copied = ref("");
+const { rows, loading, error, presenceAvailable, load } = useLocaleCatalog({ presence: true });
 
 const filtered = computed(() => {
   const q = query.value.trim().toLowerCase();
@@ -23,32 +18,6 @@ const filtered = computed(() => {
   });
   return items.slice().sort((a, b) => a.code.localeCompare(b.code));
 });
-
-async function load() {
-  loading.value = true;
-  error.value = "";
-  presenceAvailable.value = false;
-  try {
-    const data = await httpJson<{ locales: Row[] }>("/api/metadata/locales");
-    rows.value = data.locales || [];
-    try {
-      const presence = await httpJson<{ codes: string[]; presenceAvailable: boolean }>(
-        "/api/metadata/locales/presence",
-      );
-      presenceAvailable.value = presence.presenceAvailable === true;
-      const codes = new Set(presence.codes || []);
-      if (presenceAvailable.value) {
-        rows.value = rows.value.map((row) => ({ ...row, present: codes.has(row.code) }));
-      }
-    } catch {
-      presenceAvailable.value = false;
-    }
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : t("metadata.locales_catalog_unavailable");
-  } finally {
-    loading.value = false;
-  }
-}
 
 async function copy(code: string) {
   try {
@@ -63,7 +32,14 @@ onMounted(() => { void load(); });
 </script>
 
 <template>
-  <t-dialog v-model:visible="open" :header="t('metadata.locales_title')" width="560px" :footer="false" placement="center">
+  <t-dialog
+    v-model:visible="open"
+    :header="t('metadata.locales_title')"
+    width="560px"
+    :footer="false"
+    placement="center"
+    attach="body"
+  >
     <p class="hint">{{ t("metadata.locales_hint") }}</p>
     <p v-if="!presenceAvailable" class="hint">{{ t("metadata.locales_presence_unavailable") }}</p>
     <div class="field-row">
@@ -79,7 +55,7 @@ onMounted(() => { void load(); });
     <ul v-else class="list">
       <li v-for="row in filtered" :key="row.code" @click="copy(row.code)">
         <strong class="mono">{{ row.code }}</strong>
-        <span>{{ locale.startsWith("zh") ? row.name_zh : row.name_en }}</span>
+        <span>{{ displayNameFor(row, locale) }}</span>
         <em v-if="presenceAvailable && row.present">{{ t("metadata.locales_present") }}</em>
         <em v-if="copied === row.code">{{ t("metadata.locales_copied") }}</em>
       </li>

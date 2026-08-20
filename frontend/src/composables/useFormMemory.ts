@@ -4,6 +4,8 @@ import { ref, watch, type Ref } from "vue";
 export const METADATA_FORM_KEY_PREFIX = "asc_metadata_form_";
 export const BUILD_FORM_KEY_PREFIX = "asc_build_form_";
 export const IAP_FORM_KEY_PREFIX = "asc_iap_form_";
+/** sessionStorage draft of an unsaved store pull, keyed by profile + iapFile. */
+export const IAP_DRAFT_KEY_PREFIX = "asc_iap_draft_";
 
 export type ListingFormMemory = {
   csv_path: string;
@@ -33,6 +35,13 @@ export type IapFormMemory = {
   dry_run: boolean;
   update_existing: boolean;
   verbose: boolean;
+  auto_translate?: boolean;
+};
+
+export type IapDraftMemory = {
+  iap_file: string;
+  snapshot: unknown;
+  store_draft: boolean;
 };
 
 type ListingBucket = {
@@ -79,6 +88,58 @@ export function writeFormMemory(key: string, data: Record<string, unknown>): voi
     store.setItem(key, JSON.stringify({ ...prev, ...data }));
   } catch {
     /* quota / private mode */
+  }
+}
+
+function getSession(): Pick<Storage, "getItem" | "setItem" | "removeItem"> | null {
+  try {
+    if (typeof sessionStorage !== "undefined") return sessionStorage;
+  } catch {
+    /* private mode */
+  }
+  try {
+    if (typeof localStorage !== "undefined") return localStorage;
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+export function iapDraftKey(profile: string, iapFile: string): string {
+  return `${IAP_DRAFT_KEY_PREFIX}${profile || ""}:${iapFile || ""}`;
+}
+
+export function readIapDraft(key: string): Record<string, unknown> | null {
+  const store = getSession();
+  if (!store) return null;
+  const raw = store.getItem(key);
+  if (!raw) return null;
+  try {
+    const data = JSON.parse(raw) as unknown;
+    if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+    return data as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+export function writeIapDraft(key: string, data: Record<string, unknown>): void {
+  const store = getSession();
+  if (!store) return;
+  try {
+    store.setItem(key, JSON.stringify(data));
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+export function clearIapDraft(key: string): void {
+  const store = getSession();
+  if (!store) return;
+  try {
+    store.removeItem(key);
+  } catch {
+    /* private mode */
   }
 }
 
@@ -164,6 +225,7 @@ export function parseIapStored(data: Record<string, unknown> | null): Partial<Ia
     dry_run: !!data.dry_run,
     update_existing: !!data.update_existing,
     verbose: data.verbose !== undefined ? !!data.verbose : undefined,
+    auto_translate: data.auto_translate !== undefined ? !!data.auto_translate : undefined,
   };
 }
 
@@ -173,6 +235,26 @@ export function iapFormPayload(fields: IapFormMemory): Record<string, unknown> {
     dry_run: fields.dry_run,
     update_existing: fields.update_existing,
     verbose: fields.verbose,
+    auto_translate: fields.auto_translate !== false,
+  };
+}
+
+export function parseIapDraft(data: Record<string, unknown> | null): Partial<IapDraftMemory> | null {
+  if (!data) return null;
+  const snapshot = data.snapshot;
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return null;
+  return {
+    iap_file: asText(data.iap_file) || undefined,
+    snapshot,
+    store_draft: data.store_draft !== false,
+  };
+}
+
+export function iapDraftPayload(fields: IapDraftMemory): Record<string, unknown> {
+  return {
+    iap_file: fields.iap_file,
+    snapshot: fields.snapshot,
+    store_draft: fields.store_draft !== false,
   };
 }
 

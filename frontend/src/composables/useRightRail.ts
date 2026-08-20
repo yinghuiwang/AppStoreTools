@@ -72,6 +72,8 @@ function hydrate() {
   }
 }
 
+const pendingSeedPrompt = ref("");
+
 export function useRightRail() {
   hydrate();
 
@@ -85,10 +87,11 @@ export function useRightRail() {
     });
   }
 
-  function openAgent(opts?: { taskId?: string; autoAnalyze?: boolean }) {
+  function openAgent(opts?: { taskId?: string; autoAnalyze?: boolean; seedPrompt?: string }) {
     tab.value = "agent";
     open.value = true;
     persistChrome();
+    if (opts?.seedPrompt) pendingSeedPrompt.value = opts.seedPrompt;
     if (opts?.taskId) {
       void import("@/composables/useAgent").then(({ useAgent }) => {
         useAgent().bindTask(opts.taskId!, { autoAnalyze: opts.autoAnalyze === true });
@@ -118,5 +121,6 @@ export function useRightRail() {
     collapse,
     setWidth,
     persistChrome,
+    pendingSeedPrompt,
   };
 }

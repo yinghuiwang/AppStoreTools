@@ -12,6 +12,20 @@
 
 ---
 
+## Web wizard (Create → Edit → Upload)
+
+Open **IAP** in the Web UI. This is a skippable wizard, not the listing Local / Diff / Upload tabs:
+
+1. **Create**: five source tabs (paste table / from store / open JSON / blank new / Agent). The table infers types; **groupLevel must be confirmed per group** (1 = highest, same level = crossgrade) and is never filled silently. If a remembered JSON (or the profile default path) already has content, Create selects the **Open JSON** tab with that path filled so you can skip to Edit; otherwise **Paste table**.
+2. **Edit**: a preview list of subscription groups (with nested subscriptions) and one-time IAP. Add / edit opens a dialog for fields and localizations. Adding a locale auto-translates the display name (2–30) and description (≤45). Without an LLM key, the locale row is still added empty and the UI points to Settings.
+3. **Upload**: a publish plan only (create / update / skip). Default is create-only; turn on “Update existing items” to PATCH. Missing review screenshots stay on this step.
+
+Unsaved edits do not block changing steps. A real upload saves first if the draft is dirty.
+
+---
+
+---
+
 ## Step 1: Create the IAP JSON file
 
 The tool reads either a top-level array of one-time IAP items or an object containing `items`, `subscriptionGroups`, or both.
@@ -152,7 +166,7 @@ Run non-interactively with paths from your IAP JSON file:
 asc --app myapp iap-screenshots --iap-file AppStore/data/iap_packages.json --no-prompt --yes
 ```
 
-In the Web UI, open **IAP 管理 / IAP Management**, go to **补审核截图**, click **扫描缺失**, choose PNG, JPG, or JPEG files for the products that need screenshots, then click **上传截图**. Paths selected in the Web UI are sent only with that upload request and are not written back to `AppStore/data/iap_packages.json`.
+In the Web UI, stay on the **Upload** step, expand **Fill review screenshots**, click **Scan missing**, choose PNG, JPG, or JPEG files, then click **Upload screenshots**. Paths selected in the Web UI are sent only with that upload request and are not written back to `AppStore/data/iap_packages.json`.
 
 ---
 

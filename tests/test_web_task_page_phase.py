@@ -10,7 +10,6 @@ FRONTEND = ROOT / "frontend" / "src"
 
 PAGES = (
     FRONTEND / "views/BuildView.vue",
-    FRONTEND / "views/IapView.vue",
     FRONTEND / "views/WhatsNewView.vue",
     FRONTEND / "views/UrlsView.vue",
     FRONTEND / "views/listing/UploadTab.vue",
@@ -49,6 +48,19 @@ def test_task_pages_form_and_run_are_exclusive():
         assert 'v-if="isForm"' in src, rel
         assert 'v-if="isRun && taskId"' in src, rel
         assert "enterRun" not in _on_mounted_source(src), rel
+
+
+def test_iap_wizard_does_not_swap_whole_page_for_run():
+    wizard = (FRONTEND / "views/IapView.vue").read_text(encoding="utf-8")
+    upload = (FRONTEND / "views/iap/UploadStep.vue").read_text(encoding="utf-8")
+    assert "<t-steps" in wizard
+    assert "t-step-item" in wizard
+    assert 'v-model:current="current"' in wizard
+    assert "useTaskPagePhase" in upload
+    assert re.search(r"enterRun\(\s*task_id", upload)
+    assert 'v-if="isRun && taskId"' in upload
+    assert "TaskRunBar" in upload
+    assert "TaskRunBar" not in wizard
 
 
 def test_deep_links_prefill_form_without_entering_run():

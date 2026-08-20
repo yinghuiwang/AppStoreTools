@@ -79,6 +79,10 @@ def isolated_web_task_guard(monkeypatch):
         "asc.web.routes_api.enforce_config_guard",
         MagicMock(),
     )
+    monkeypatch.setattr(
+        "asc.web.routes_iap.enforce_config_guard",
+        MagicMock(),
+    )
 
 
 def test_dashboard_api_filters_tasks_and_returns_savings(client, monkeypatch):
@@ -576,9 +580,9 @@ def test_iap_review_screenshots_scan_returns_targets_with_default_path(client, t
     ]
     scan_result.errors = []
 
-    with patch("asc.web.routes_api.Config") as mock_config_cls, \
-         patch("asc.web.routes_api.make_api_from_config", return_value=(MagicMock(), "app-1")), \
-         patch("asc.web.routes_api.scan_missing_review_screenshots", return_value=scan_result):
+    with patch("asc.web.routes_iap.Config") as mock_config_cls, \
+         patch("asc.web.routes_iap.make_api_from_config", return_value=(MagicMock(), "app-1")), \
+         patch("asc.web.routes_iap.scan_missing_review_screenshots", return_value=scan_result):
         mock_config_cls.return_value.iap_path = ""
         resp = client.post(
             "/api/iap/review-screenshots/scan",
@@ -596,8 +600,8 @@ def test_iap_review_screenshots_scan_returns_targets_with_default_path(client, t
 
 
 def test_iap_review_screenshots_scan_rejects_malformed_json(client):
-    with patch("asc.web.routes_api._scan_iap_review_screenshot_targets") as mock_scan, \
-         patch("asc.web.routes_api.scan_missing_review_screenshots") as mock_scan_helper:
+    with patch("asc.web.routes_iap._scan_iap_review_screenshot_targets") as mock_scan, \
+         patch("asc.web.routes_iap.scan_missing_review_screenshots") as mock_scan_helper:
         resp = client.post(
             "/api/iap/review-screenshots/scan",
             cookies={"asc_profile": "myapp"},
@@ -611,7 +615,7 @@ def test_iap_review_screenshots_scan_rejects_malformed_json(client):
 
 
 def test_iap_review_screenshots_scan_rejects_non_string_iap_file(client):
-    with patch("asc.web.routes_api._scan_iap_review_screenshot_targets") as mock_scan:
+    with patch("asc.web.routes_iap._scan_iap_review_screenshot_targets") as mock_scan:
         resp = client.post(
             "/api/iap/review-screenshots/scan",
             cookies={"asc_profile": "myapp"},
@@ -624,7 +628,7 @@ def test_iap_review_screenshots_scan_rejects_non_string_iap_file(client):
 
 
 def test_iap_review_screenshots_upload_starts_task_with_items(client):
-    with patch("asc.web.routes_api._start_iap_review_screenshots_task") as mock_start:
+    with patch("asc.web.routes_iap._start_iap_review_screenshots_task") as mock_start:
         mock_start.return_value = "fake-review-task-id"
         resp = client.post(
             "/api/iap/review-screenshots/upload",
@@ -654,7 +658,7 @@ def test_iap_review_screenshots_upload_starts_task_with_items(client):
 
 
 def test_iap_review_screenshots_upload_accepts_false_dry_run(client):
-    with patch("asc.web.routes_api._start_iap_review_screenshots_task") as mock_start:
+    with patch("asc.web.routes_iap._start_iap_review_screenshots_task") as mock_start:
         mock_start.return_value = "fake-review-task-id"
         resp = client.post(
             "/api/iap/review-screenshots/upload",
@@ -678,7 +682,7 @@ def test_iap_review_screenshots_upload_accepts_false_dry_run(client):
 
 
 def test_iap_review_screenshots_upload_rejects_non_boolean_dry_run(client):
-    with patch("asc.web.routes_api._start_iap_review_screenshots_task") as mock_start:
+    with patch("asc.web.routes_iap._start_iap_review_screenshots_task") as mock_start:
         resp = client.post(
             "/api/iap/review-screenshots/upload",
             cookies={"asc_profile": "myapp"},
@@ -701,7 +705,7 @@ def test_iap_review_screenshots_upload_rejects_non_boolean_dry_run(client):
 
 
 def test_iap_review_screenshots_upload_rejects_mixed_invalid_items(client):
-    with patch("asc.web.routes_api._start_iap_review_screenshots_task") as mock_start:
+    with patch("asc.web.routes_iap._start_iap_review_screenshots_task") as mock_start:
         resp = client.post(
             "/api/iap/review-screenshots/upload",
             cookies={"asc_profile": "myapp"},
@@ -728,7 +732,7 @@ def test_iap_review_screenshots_upload_rejects_mixed_invalid_items(client):
 
 
 def test_iap_review_screenshots_upload_rejects_unsupported_kind(client):
-    with patch("asc.web.routes_api._start_iap_review_screenshots_task") as mock_start:
+    with patch("asc.web.routes_iap._start_iap_review_screenshots_task") as mock_start:
         resp = client.post(
             "/api/iap/review-screenshots/upload",
             cookies={"asc_profile": "myapp"},
@@ -792,10 +796,10 @@ def test_iap_review_screenshots_task_rejects_stale_target_without_upload(tmp_pat
         ]
     )
 
-    with patch("asc.web.routes_api.Config"), \
-         patch("asc.web.routes_api.make_api_from_config", return_value=(MagicMock(), "app-1")), \
-         patch("asc.web.routes_api.scan_missing_review_screenshots", return_value=current_scan), \
-         patch("asc.web.routes_api.upload_review_screenshots") as mock_upload:
+    with patch("asc.web.routes_iap.Config"), \
+         patch("asc.web.routes_iap.make_api_from_config", return_value=(MagicMock(), "app-1")), \
+         patch("asc.web.routes_iap.scan_missing_review_screenshots", return_value=current_scan), \
+         patch("asc.web.routes_iap.upload_review_screenshots") as mock_upload:
         task_id = routes_api._start_iap_review_screenshots_task(
             profile="myapp",
             items=submitted,
@@ -2392,7 +2396,7 @@ def test_iap_check_api(client):
     from pathlib import Path
     mock_config = MagicMock()
     mock_config.iap_path = str(Path('data/iap_packages.json'))
-    with patch('asc.web.routes_api.Config', return_value=mock_config),          patch('pathlib.Path.exists', return_value=True),          patch('asc.web.routes_api._load_iap_config', return_value=([{'productId': 'com.test.item1'}], [])):
+    with patch('asc.web.routes_iap.Config', return_value=mock_config),          patch('pathlib.Path.exists', return_value=True),          patch('asc.web.routes_iap._load_iap_config', return_value=([{'productId': 'com.test.item1'}], [])):
         resp = client.post('/api/iap/check', cookies={'asc_profile': 'testapp'})
         assert resp.status_code == 200, f'Got {resp.status_code}'
         data = resp.json()
@@ -2404,7 +2408,7 @@ def test_iap_run_api_starts_task(client):
     from unittest.mock import patch, MagicMock
     mock_config = MagicMock()
     mock_config.iap_path = 'data/iap_packages.json'
-    with patch('asc.web.routes_api.Config', return_value=mock_config),          patch('asc.web.routes_api._task_store') as mock_store:
+    with patch('asc.web.routes_iap.Config', return_value=mock_config),          patch('asc.web.routes_iap._task_store') as mock_store:
         mock_store.create.return_value = 'fake-task-id'
         resp = client.post(
             '/api/iap/run',
@@ -2422,7 +2426,7 @@ def test_iap_check_missing_file(client):
     from pathlib import Path
     mock_config = MagicMock()
     mock_config.iap_path = 'nonexistent.json'
-    with patch('asc.web.routes_api.Config', return_value=mock_config),          patch('pathlib.Path.exists', return_value=False):
+    with patch('asc.web.routes_iap.Config', return_value=mock_config),          patch('pathlib.Path.exists', return_value=False):
         resp = client.post('/api/iap/check', cookies={'asc_profile': 'testapp'})
         assert resp.status_code == 200
         data = resp.json()

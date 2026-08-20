@@ -77,6 +77,15 @@ const {
   createSession,
 } = useAgent();
 const rail = useRightRail();
+watch(
+  () => rail.pendingSeedPrompt.value,
+  (text) => {
+    if (!text) return;
+    draft.value = text;
+    rail.pendingSeedPrompt.value = "";
+  },
+  { immediate: true },
+);
 const browse = useBrowse();
 const draft = ref("");
 const attachOpen = ref(false);

@@ -55,12 +55,44 @@ def test_whats_new_translate_mode_is_workflow_block_not_under_check():
 
 
 def test_iap_check_and_scan_use_single_indicator_each():
-    src = _read("views/IapView.vue")
-    assert 'PageLoading v-if="checking && !checkMsg"' in src
-    assert ':loading="checking && !!checkMsg"' in src
+    src = _read("views/iap/UploadStep.vue")
     assert ':loading="scanning"' in src
     assert 'PageLoading v-if="scanning"' not in src
     assert ".png,.jpg,.jpeg" in src
+    wizard = _read("views/IapView.vue")
+    assert "<t-steps" in wizard
+    assert "t-step-item" in wizard
+    assert 'v-model:current="current"' in wizard
+    assert "CreateStep" in wizard
+    assert "TaskRunBar" not in wizard
+    create = _read("views/iap/CreateStep.vue")
+    assert "jsonPath" in create
+    assert 'value="json"' in create
+    assert "<t-tabs" in create
+    assert "accordion" not in create.lower()
+    assert "source-card" not in create
+    edit = _read("views/iap/EditStep.vue")
+    assert "IapEditorDialog" in edit
+    assert "edit-layout" not in edit
+    assert "list-row" in edit
+    assert 'PageLoading size="inline"' in edit
+    assert "compare-progress" in edit
+    assert "iap.filter.checking" in edit
+    assert "!workflow.planLoading.value && listEmpty" in edit
+    assert 'class="empty-row card">{{ emptyFilterText }}' in edit
+    dialog = _read("views/iap/IapEditorDialog.vue")
+    assert "<t-dialog" in dialog
+    assert "iap.dialog_ok" in dialog
+
+
+def test_iap_wizard_keeps_stepper_during_upload():
+    wizard = _read("views/IapView.vue")
+    upload = _read("views/iap/UploadStep.vue")
+    assert "t-step-item" in wizard
+    assert "useTaskPagePhase" in upload
+    assert "enterRun" in upload
+    assert 'v-if="isRun && taskId"' in upload
+    assert 'v-if="isForm"' not in wizard
 
 
 def test_listing_tabs_block_first_load_without_button_spinner():
@@ -87,7 +119,7 @@ def test_listing_hidden_tabs_do_not_fetch_until_selected():
 
 
 def test_locale_picker_refresh_uses_button_only_when_rows_exist():
-    src = _read("views/listing/LocalePicker.vue")
+    src = _read("components/LocalePicker.vue")
     assert 'PageLoading v-if="loading && !rows.length"' in src
     assert ':loading="loading && rows.length > 0"' in src
     assert 'PageLoading v-if="loading && rows.length"' not in src

@@ -111,6 +111,13 @@ _JSON_POINTER_TERMINALS = frozenset(
         "reviewScreenshotPath",
         "screenshot",
         "screenshotPath",
+        "productId",
+        "groupLevel",
+        "subscriptionPeriod",
+        "inAppPurchaseType",
+        "referenceName",
+        "baseTerritory",
+        "note",
     }
 )
 _SCREENSHOT_ACTIONS = frozenset({"rename", "delete", "reorder"})

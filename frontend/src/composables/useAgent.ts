@@ -40,6 +40,7 @@ const sessionId = ref("");
 const boundTaskId = ref("");
 const pendingAutoAnalyze = ref(false);
 const pendingAttachments = ref<AgentAttachmentPayload[]>([]);
+const appliedTick = ref(0);
 const sessions = ref<AgentSessionSummary[]>([]);
 let engineApi: ChatEngineApi | null = null;
 let bindSeq = 0;
@@ -318,6 +319,7 @@ async function apply(planId: string, rerun: boolean): Promise<void> {
       error: payload.rerun_error ? String(payload.rerun_error) : undefined,
     });
     if (payload.new_task_id) rail.openLogs(payload.new_task_id);
+    appliedTick.value += 1;
   } catch (err) {
     if (err instanceof ApiError && err.status === 409) {
       writePlanPatch(planId, { status: "conflict" });
@@ -370,5 +372,6 @@ export function useAgent() {
     listSessions,
     openSession,
     createSession,
+    appliedTick,
   };
 }

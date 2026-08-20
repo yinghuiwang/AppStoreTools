@@ -18,7 +18,10 @@ def test_form_memory_reuses_pre_vue_storage_keys():
     assert 'METADATA_FORM_KEY_PREFIX = "asc_metadata_form_"' in src
     assert 'BUILD_FORM_KEY_PREFIX = "asc_build_form_"' in src
     assert 'IAP_FORM_KEY_PREFIX = "asc_iap_form_"' in src
+    assert 'IAP_DRAFT_KEY_PREFIX = "asc_iap_draft_"' in src
     assert "localStorage" in src
+    assert "sessionStorage" in src
+    assert "iapDraftKey" in src
     assert "pinia" not in src.lower()
     assert "defineStore" not in src
 
@@ -29,15 +32,26 @@ def test_listing_build_iap_views_wire_form_memory():
     diff = (SRC / "views/listing/DiffTab.vue").read_text(encoding="utf-8")
     build = (SRC / "views/BuildView.vue").read_text(encoding="utf-8")
     iap = (SRC / "views/IapView.vue").read_text(encoding="utf-8")
+    workflow = (SRC / "composables/useIapWorkflow.ts").read_text(encoding="utf-8")
     assert "hydrateListingForm" in upload
     assert "hydrateListingForm" in local
     assert "hydrateListingForm" in diff
     assert "BUILD_FORM_KEY_PREFIX" in build
     assert "restoreBuildMemory" in build
     assert "saveBuildMemory" in build
-    assert "IAP_FORM_KEY_PREFIX" in iap
-    assert "restoreIapMemory" in iap
-    assert "saveIapMemory" in iap
+    assert "useIapWorkflow" in iap
+    assert "IAP_FORM_KEY_PREFIX" in workflow
+    assert "IAP_DRAFT_KEY_PREFIX" in (SRC / "composables/useFormMemory.ts").read_text(encoding="utf-8")
+    assert "persistMemory" in workflow
+    assert "storeDraft" in workflow
+    assert "iapDraftKey" in workflow
+    create = (SRC / "views/iap/CreateStep.vue").read_text(encoding="utf-8")
+    assert "jsonPath" in create
+    assert "setIapFile" in create
+    assert "hasFile" in create
+    assert 'source.value = "json"' in create
+    assert 'v-model="source"' in create
+    assert 'destroy-on-hide="false"' in create
 
 
 def test_form_memory_roundtrip_uses_old_keys(tmp_path: Path):
@@ -195,6 +209,85 @@ const other = hydrateListingForm('otherapp', {
 if (other.csv_path.value !== 'data/appstore_info.csv') {
   throw new Error('other profile must not inherit myapp listing memory');
 }
+
+console.log('ok');
+""",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        ["node", str(runner)],
+        cwd=str(tmp_path),
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "ok" in result.stdout
+
+
+def test_iap_draft_storage_key_and_roundtrip(tmp_path: Path):
+    if not ESBUILD.exists():
+        pytest.skip("frontend esbuild is not installed")
+    bundled = tmp_path / "formMemory.mjs"
+    bundled_run = subprocess.run(
+        [
+            str(ESBUILD),
+            str(SRC / "composables/useFormMemory.ts"),
+            "--bundle",
+            "--platform=neutral",
+            "--format=esm",
+            f"--outfile={bundled}",
+        ],
+        cwd=str(FRONTEND),
+        capture_output=True,
+        text=True,
+    )
+    assert bundled_run.returncode == 0, bundled_run.stdout + bundled_run.stderr
+    runner = tmp_path / "run_draft.mjs"
+    runner.write_text(
+        """
+import {
+  IAP_DRAFT_KEY_PREFIX,
+  clearIapDraft,
+  iapDraftKey,
+  iapDraftPayload,
+  parseIapDraft,
+  readIapDraft,
+  writeIapDraft,
+} from './formMemory.mjs';
+
+const mem = new Map();
+globalThis.sessionStorage = {
+  getItem: (key) => (mem.has(key) ? mem.get(key) : null),
+  setItem: (key, value) => { mem.set(key, String(value)); },
+  removeItem: (key) => { mem.delete(key); },
+};
+
+const key = iapDraftKey('myapp', 'data/iap_packages.json');
+if (key !== 'asc_iap_draft_myapp:data/iap_packages.json') {
+  throw new Error('iap draft key drifted: ' + key);
+}
+if (!key.startsWith(IAP_DRAFT_KEY_PREFIX)) throw new Error('prefix missing');
+
+const snapshot = {
+  items: [{ productId: 'com.app.coins', inAppPurchaseType: 'CONSUMABLE' }],
+  subscriptionGroups: [],
+};
+writeIapDraft(key, iapDraftPayload({
+  iap_file: 'data/iap_packages.json',
+  snapshot,
+  store_draft: true,
+}));
+const stored = parseIapDraft(readIapDraft(key));
+if (stored.iap_file !== 'data/iap_packages.json') throw new Error('draft iap_file not restored');
+if (stored.store_draft !== true) throw new Error('store_draft not restored');
+if (stored.snapshot.items[0].productId !== 'com.app.coins') throw new Error('draft snapshot not restored');
+
+const other = iapDraftKey('otherapp', 'data/iap_packages.json');
+if (readIapDraft(other)) throw new Error('other profile must not see myapp draft');
+
+clearIapDraft(key);
+if (readIapDraft(key)) throw new Error('draft should clear');
 
 console.log('ok');
 """,

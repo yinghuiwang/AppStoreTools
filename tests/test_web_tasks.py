@@ -2025,12 +2025,17 @@ def test_task_kind_labels_include_translate_and_listing_pull():
 
     assert TASK_KIND_LABELS["whats-new-translate"] == "更新说明翻译"
     assert TASK_KIND_LABELS["listing-pull-screenshots"] == "拉取截图"
+    assert TASK_KIND_LABELS["iap-compare"] == "内购商店核对"
     assert TASK_KIND_RETRY_PATHS["whats-new-translate"] == "/whats-new"
     assert TASK_KIND_RETRY_PATHS["listing-pull-screenshots"] == "/metadata"
+    assert TASK_KIND_RETRY_PATHS["iap-compare"] == "/iap"
     store = TaskStore()
     translate_id = store.create("whats-new-translate")
     pull_id = store.create("listing-pull-screenshots")
+    compare_id = store.create("iap-compare")
     assert store.get(translate_id)["title"] == "更新说明翻译"
     assert store.get(translate_id)["retry_path"] == "/whats-new"
     assert store.get(pull_id)["title"] == "拉取截图"
     assert store.get(pull_id)["retry_path"] == "/metadata"
+    assert store.get(compare_id)["title"] == "内购商店核对"
+    assert store.get(compare_id)["retry_path"] == "/iap"
