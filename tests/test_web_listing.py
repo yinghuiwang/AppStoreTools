@@ -1102,6 +1102,8 @@ def test_listing_compare_and_overwrite_live_in_wizard():
     dialog = Path("frontend/src/views/listing/ListingEditorDialog.vue").read_text(encoding="utf-8")
     workflow = Path("frontend/src/composables/useListingWorkflow.ts").read_text(encoding="utf-8")
     assert "/api/listing/compare" in workflow
+    assert 'ref("data/appstore_info.csv")' not in workflow
+    assert 'ref("data/screenshots")' not in workflow
     assert "/api/listing/diff" not in preview
     assert "/api/listing/diff" not in upload
     assert "/api/listing/pull/text" in preview

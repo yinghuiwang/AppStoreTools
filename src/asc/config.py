@@ -60,8 +60,8 @@ class Config:
                 "app_id": os.getenv("APP_ID", ""),
             },
             "defaults": {
-                "screenshots": os.getenv("_ASC_SCREENSHOTS_PATH", "data/screenshots"),
-                "csv": os.getenv("_ASC_CSV_PATH", "data/appstore_info.csv"),
+                "screenshots": os.getenv("_ASC_SCREENSHOTS_PATH", ""),
+                "csv": os.getenv("_ASC_CSV_PATH", ""),
             },
         }
         # Store IAP path separately for commands that need it
@@ -143,11 +143,11 @@ class Config:
 
     @property
     def csv_path(self) -> str:
-        return self.get("csv", default="data/appstore_info.csv", section="defaults")
+        return self.get("csv", default="", section="defaults") or ""
 
     @property
     def screenshots_path(self) -> str:
-        return self.get("screenshots", default="data/screenshots", section="defaults")
+        return self.get("screenshots", default="", section="defaults") or ""
 
     @property
     def iap_path(self) -> Optional[str]:
@@ -341,23 +341,36 @@ class Config:
         key_id: str,
         key_file: str,
         app_id: str,
-        csv: str = "data/appstore_info.csv",
-        screenshots: str = "data/screenshots",
+        csv: Optional[str] = None,
+        screenshots: Optional[str] = None,
     ):
-        """Save a new app profile to global config"""
+        """Save a new app profile to global config.
+
+        CSV / screenshots paths are omitted when blank so new apps do not
+        inherit template paths that may not exist.
+        """
         profiles_dir = self._global_dir / "profiles"
         profiles_dir.mkdir(parents=True, exist_ok=True)
 
         profile_path = profiles_dir / f"{app_name}.toml"
-        content = toml.dumps({
+        payload: dict[str, Any] = {
             "credentials": {
                 "issuer_id": issuer_id,
                 "key_id": key_id,
                 "key_file": key_file,
                 "app_id": app_id,
             },
-            "defaults": {"csv": csv, "screenshots": screenshots},
-        })
+        }
+        defaults: dict[str, str] = {}
+        csv_value = (csv or "").strip()
+        screenshots_value = (screenshots or "").strip()
+        if csv_value:
+            defaults["csv"] = csv_value
+        if screenshots_value:
+            defaults["screenshots"] = screenshots_value
+        if defaults:
+            payload["defaults"] = defaults
+        content = toml.dumps(payload)
         profile_path.write_text(content)
         profile_path.chmod(0o600)
 
@@ -420,6 +433,6 @@ class Config:
             "key_id": creds.get("key_id", ""),
             "key_file": creds.get("key_file", ""),
             "app_id": creds.get("app_id", ""),
-            "csv": defaults.get("csv", "data/appstore_info.csv"),
-            "screenshots": defaults.get("screenshots", "data/screenshots"),
+            "csv": defaults.get("csv", "") or "",
+            "screenshots": defaults.get("screenshots", "") or "",
         }

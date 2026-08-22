@@ -876,6 +876,8 @@
   "iap.canceling_msg": "Canceling upload...",
   "iap.canceled_msg": "Upload canceled",
   "api.no_profile": "No profile selected",
+  "api.csv_path_required": "CSV path is empty. Choose a file on the listing create step.",
+  "api.screenshots_path_required": "Screenshots folder is empty. Choose a folder on the listing create step.",
   "api.no_editable_version": "No editable version",
   "api.no_editable_version_create": "No editable version. Create one in App Store Connect",
   "api.version_locales": "Version {version}, found {count} locales",

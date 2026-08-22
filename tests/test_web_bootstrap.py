@@ -45,8 +45,8 @@ def test_bootstrap_shape_without_cookie_or_machine_match():
     assert body["profiles"] == ["alpha", "beta"]
     assert body["has_machine_profile"] is False
     assert body["paths"] == {
-        "csv": "data/appstore_info.csv",
-        "screenshots": "data/screenshots",
+        "csv": "",
+        "screenshots": "",
         "iap": "data/iap_packages.json",
     }
     assert "i18n_catalog" not in body

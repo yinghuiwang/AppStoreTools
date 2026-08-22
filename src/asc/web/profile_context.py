@@ -26,8 +26,8 @@ def load_web_profile_state(cookie_profile: str | None) -> dict[str, Any]:
         screenshots_path = current_config.screenshots_path
         iap_path = current_config.iap_path or "data/iap_packages.json"
     else:
-        csv_path = "data/appstore_info.csv"
-        screenshots_path = "data/screenshots"
+        csv_path = ""
+        screenshots_path = ""
         iap_path = "data/iap_packages.json"
     return {
         "profiles": profiles,

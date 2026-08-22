@@ -1427,12 +1427,17 @@ def test_profile_create_api(client, tmp_path, monkeypatch):
             "issuer_id": "abc-123",
             "key_id": "KEYID123",
             "app_id": "1234567890",
-            "csv": "data/appstore_info.csv",
-            "screenshots": "data/screenshots",
         }, files={"key_file": ("AuthKey_KEYID123.p8", p8_content, "application/octet-stream")})
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
         mock_save.assert_called_once()
+        args = mock_save.call_args[0]
+        assert args[0] == "newapp"
+        assert args[1] == "abc-123"
+        csv_arg = mock_save.call_args[0][5] if len(mock_save.call_args[0]) > 5 else ""
+        shots_arg = mock_save.call_args[0][6] if len(mock_save.call_args[0]) > 6 else ""
+        assert not (csv_arg or "").strip()
+        assert not (shots_arg or "").strip()
 
 
 def test_profile_key_upload_uses_content_addressed_path(client, tmp_path, monkeypatch):

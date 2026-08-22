@@ -57,6 +57,57 @@ def test_get_app_profile_returns_dict(tmp_path):
     }
 
 
+def test_get_app_profile_missing_data_paths_are_empty(tmp_path):
+    profiles_dir = tmp_path / "profiles"
+    profiles_dir.mkdir(parents=True)
+    (profiles_dir / "myapp.toml").write_text(
+        '[credentials]\n'
+        'issuer_id = "ISS-1"\n'
+        'key_id = "KID-1"\n'
+        'key_file = "/keys/AuthKey.p8"\n'
+        'app_id = "12345"\n'
+    )
+
+    config = Config.__new__(Config)
+    config._global_dir = tmp_path
+    config._data = {}
+    config.app_name = None
+
+    result = config.get_app_profile("myapp")
+    assert result["csv"] == ""
+    assert result["screenshots"] == ""
+
+
+def test_save_app_profile_omits_blank_data_paths(tmp_path):
+    config = Config.__new__(Config)
+    config._global_dir = tmp_path
+    config._data = {}
+    config.app_name = None
+
+    config.save_app_profile("myapp", "ISS-1", "KID-1", "/keys/AuthKey.p8", "12345")
+
+    text = (tmp_path / "profiles" / "myapp.toml").read_text()
+    assert "csv" not in text
+    assert "screenshots" not in text
+    assert "[defaults]" not in text
+
+
+def test_save_app_profile_writes_provided_data_paths(tmp_path):
+    config = Config.__new__(Config)
+    config._global_dir = tmp_path
+    config._data = {}
+    config.app_name = None
+
+    config.save_app_profile(
+        "myapp", "ISS-1", "KID-1", "/keys/AuthKey.p8", "12345",
+        "custom.csv", "custom/shots",
+    )
+
+    text = (tmp_path / "profiles" / "myapp.toml").read_text()
+    assert 'csv = "custom.csv"' in text
+    assert 'screenshots = "custom/shots"' in text
+
+
 def test_get_app_profile_missing_returns_none(tmp_path):
     config = Config.__new__(Config)
     config._global_dir = tmp_path
@@ -262,6 +313,29 @@ def test_cmd_app_edit_can_rename_profile(tmp_path, monkeypatch):
     assert 'default_app = "newapp"' in (local_dir / "config.toml").read_text()
 
 
+def test_cmd_app_add_does_not_prompt_for_data_paths(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+    key_file = tmp_path / "AuthKey.p8"
+    key_file.write_text("key")
+    user_input = f"ISS-1\nKID-1\n{key_file}\n12345\n"
+
+    with patch("asc.commands.app_config.Config") as config_cls:
+        mock_cfg = MagicMock()
+        config_cls.return_value = mock_cfg
+        result = runner.invoke(app, ["app", "add", "newapp"], input=user_input)
+
+    assert result.exit_code == 0, result.output
+    assert "CSV" not in result.output
+    assert "Screenshots" not in result.output
+    mock_cfg.save_app_profile.assert_called_once()
+    args = mock_cfg.save_app_profile.call_args[0]
+    assert args[0] == "newapp"
+    assert args[1] == "ISS-1"
+    assert args[2] == "KID-1"
+    assert args[4] == "12345"
+    assert len(args) == 5
+
+
 def test_cmd_app_add_guard_violation_stops_before_copy_or_save(
     tmp_path, profile_guard
 ):
@@ -269,7 +343,7 @@ def test_cmd_app_add_guard_violation_stops_before_copy_or_save(
     key_file.write_text("key")
     profile_guard.is_enabled.return_value = True
     profile_guard.check_and_enforce.side_effect = GuardViolationError("绑定冲突")
-    user_input = f"ISS-NEW\nKEY-NEW\n{key_file}\n12345\n\n\n"
+    user_input = f"ISS-NEW\nKEY-NEW\n{key_file}\n12345\n"
 
     with patch("asc.commands.app_config.Config") as config_cls, \
          patch("asc.commands.app_config.shutil.copy2") as copy_key:

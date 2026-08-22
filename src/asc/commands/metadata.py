@@ -13,7 +13,7 @@ from asc.error_handler import get_action_hint
 from asc.guard import Guard, GuardViolationError
 from asc.progress import ProcessCanceled
 from asc.reporting import TaskReporter, make_cli_reporter
-from asc.utils import make_api_from_config, parse_csv, resolve_locale, resolve_app_profile
+from asc.utils import make_api_from_config, parse_csv, resolve_locale, resolve_app_profile, resolve_csv_path, resolve_screenshots_path
 from asc.i18n import t, HELP, ERRORS
 
 
@@ -464,34 +464,47 @@ def cmd_upload(
                 typer.echo(f"💡 {hint}", err=True)
             raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
-    csv_path = Path(csv or config.csv_path)
+    csv_value = resolve_csv_path(config, csv, required=False)
+    screenshots_value = resolve_screenshots_path(config, screenshots, required=False)
+    if not csv_value and not screenshots_value:
+        typer.echo("❌ 未配置 CSV 与截图路径。请使用 --csv / --screenshots，或运行 asc app edit。", err=True)
+        raise typer.Exit(1)
     try:
-        if csv_path.exists():
-            metadata_list = parse_csv(str(csv_path))
-            print(f"\n📄 从 CSV 读取了 {len(metadata_list)} 个语言的元数据")
-            _upload_metadata_core(
-                api,
-                app_id,
-                metadata_list,
-                dry_run=dry_run,
-                app_profile=app or "",
-                verbose=verbose,
-            )
+        if csv_value:
+            csv_path = Path(csv_value)
+            if csv_path.exists():
+                metadata_list = parse_csv(str(csv_path))
+                print(f"\n📄 从 CSV 读取了 {len(metadata_list)} 个语言的元数据")
+                _upload_metadata_core(
+                    api,
+                    app_id,
+                    metadata_list,
+                    dry_run=dry_run,
+                    app_profile=app or "",
+                    verbose=verbose,
+                )
+            else:
+                print(f"\n⚠️  CSV 文件不存在: {csv_path}")
+                print(f"💡 可使用 --csv 参数指定其他路径，或参考 'asc upload --help'")
         else:
-            print(f"\n⚠️  CSV 文件不存在: {csv_path}")
-            print(f"💡 可使用 --csv 参数指定其他路径，或参考 'asc upload --help'")
-        screenshots_path = Path(screenshots or config.screenshots_path)
-        if screenshots_path.exists():
-            _upload_screenshots_core(
-                api,
-                app_id,
-                str(screenshots_path),
-                display_type,
-                dry_run,
-                verbose=verbose,
-            )
+            print("\n⚠️  未配置 CSV 路径，跳过元数据上传。")
+            print("💡 使用 --csv 指定，或运行 asc app edit 填写。")
+        if screenshots_value:
+            screenshots_path = Path(screenshots_value)
+            if screenshots_path.exists():
+                _upload_screenshots_core(
+                    api,
+                    app_id,
+                    str(screenshots_path),
+                    display_type,
+                    dry_run,
+                    verbose=verbose,
+                )
+            else:
+                print(f"\n⚠️  截图目录不存在: {screenshots_path}")
         else:
-            print(f"\n⚠️  截图目录不存在: {screenshots_path}")
+            print("\n⚠️  未配置截图目录，跳过截图上传。")
+            print("💡 使用 --screenshots 指定，或运行 asc app edit 填写。")
     except RuntimeError:
         raise typer.Exit(1)
     print("\n" + "=" * 60)
@@ -543,7 +556,7 @@ def cmd_metadata(
                 typer.echo(f"💡 {hint}", err=True)
             raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
-    csv_path = Path(csv or config.csv_path)
+    csv_path = Path(resolve_csv_path(config, csv))
     if not csv_path.exists():
         typer.echo(f"❌ CSV 文件不存在: {csv_path}", err=True)
         typer.echo(f"💡 可使用 --csv 参数指定其他路径，或参考 'asc upload --help'", err=True)
@@ -604,7 +617,7 @@ def cmd_keywords(
                 typer.echo(f"💡 {hint}", err=True)
             raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
-    csv_path = Path(csv or config.csv_path)
+    csv_path = Path(resolve_csv_path(config, csv))
     if not csv_path.exists():
         typer.echo(f"❌ CSV 文件不存在: {csv_path}", err=True)
         typer.echo(f"💡 可使用 --csv 参数指定其他路径，或参考 'asc upload --help'", err=True)
@@ -660,7 +673,7 @@ def cmd_support_url(
                 typer.echo(f"💡 {hint}", err=True)
             raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
-    csv_path = Path(csv or config.csv_path)
+    csv_path = Path(resolve_csv_path(config, csv))
     if not csv_path.exists():
         typer.echo(f"❌ CSV 文件不存在: {csv_path}", err=True)
         typer.echo(f"💡 可使用 --csv 参数指定其他路径，或参考 'asc upload --help'", err=True)
@@ -722,7 +735,7 @@ def cmd_marketing_url(
                 typer.echo(f"💡 {hint}", err=True)
             raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
-    csv_path = Path(csv or config.csv_path)
+    csv_path = Path(resolve_csv_path(config, csv))
     if not csv_path.exists():
         typer.echo(f"❌ CSV 文件不存在: {csv_path}", err=True)
         typer.echo(f"💡 可使用 --csv 参数指定其他路径，或参考 'asc upload --help'", err=True)
@@ -784,7 +797,7 @@ def cmd_privacy_policy_url(
                 typer.echo(f"💡 {hint}", err=True)
             raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
-    csv_path = Path(csv or config.csv_path)
+    csv_path = Path(resolve_csv_path(config, csv))
     if not csv_path.exists():
         typer.echo(f"❌ CSV 文件不存在: {csv_path}", err=True)
         typer.echo(f"💡 可使用 --csv 参数指定其他路径，或参考 'asc upload --help'", err=True)

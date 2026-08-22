@@ -519,8 +519,8 @@ def metadata_locales_presence(request: Request):
 @router.post("/metadata/run")
 def metadata_run(
     request: Request,
-    csv_path: str = _Form("data/appstore_info.csv"),
-    screenshots_dir: str = _Form("data/screenshots"),
+    csv_path: str = _Form(""),
+    screenshots_dir: str = _Form(""),
     include_metadata: str = _Form(""),
     include_screenshots: str = _Form(""),
     dry_run: str = _Form(""),
@@ -627,6 +627,11 @@ def metadata_run(
 
     if include_screenshots_bool and scopes_explicit_empty:
         return JSONResponse({"error": "no screenshots selected"}, status_code=400)
+
+    if include_metadata_bool and not csv_path.strip():
+        return JSONResponse({"error": t("api.csv_path_required", lang=lang)}, status_code=400)
+    if include_screenshots_bool and not screenshots_dir.strip():
+        return JSONResponse({"error": t("api.screenshots_path_required", lang=lang)}, status_code=400)
 
     if include_metadata_bool and not include_screenshots_bool and (
         locale_list or fields_by_locale is not None
@@ -1184,8 +1189,8 @@ async def create_profile(
     issuer_id: str = _Form(...),
     key_id: str = _Form(...),
     app_id: str = _Form(...),
-    csv: str = _Form("data/appstore_info.csv"),
-    screenshots: str = _Form("data/screenshots"),
+    csv: str = _Form(""),
+    screenshots: str = _Form(""),
     key_file: _UploadFile = _File(...),
 ):
     import os
@@ -1291,8 +1296,8 @@ async def update_profile(
     issuer_id: str = _Form(...),
     key_id: str = _Form(...),
     app_id: str = _Form(...),
-    csv: str = _Form("data/appstore_info.csv"),
-    screenshots: str = _Form("data/screenshots"),
+    csv: str = _Form(""),
+    screenshots: str = _Form(""),
     key_file: _UploadFile = _File(None),
 ):
     import os

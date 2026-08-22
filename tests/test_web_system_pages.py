@@ -208,6 +208,9 @@ def test_profiles_tab_uses_full_width_wrapping_cards() -> None:
     assert "profiles.import_skip" in src
     assert "importSetDefault" in src
     assert "candidates[0]" not in src or "importName.value = candidates[0]" in src
+    assert 'csv: "data/appstore_info.csv"' not in src
+    assert 'screenshots: "data/screenshots"' not in src
+    assert 'v-if="editing"' in src
 
 
 def test_retry_paths_map_legacy_system_tabs() -> None:

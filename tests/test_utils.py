@@ -13,7 +13,9 @@ from asc.utils import (
     list_valid_profiles,
     md5_of_file,
     parse_csv,
+    resolve_csv_path,
     resolve_locale,
+    resolve_screenshots_path,
 )
 
 
@@ -495,3 +497,58 @@ def test_resolve_app_profile_falls_back_to_default_app(monkeypatch):
     result = resolve_app_profile(None, mock_config)
     assert result == "mydefault"
     mock_config.get_app_profile.assert_called_with("mydefault")
+
+
+def test_resolve_csv_path_prefers_cli_over_config():
+    config = MagicMock()
+    config.csv_path = "from-profile.csv"
+    config.app_name = "myapp"
+    assert resolve_csv_path(config, "from-cli.csv") == "from-cli.csv"
+
+
+def test_resolve_csv_path_uses_configured_when_cli_blank():
+    config = MagicMock()
+    config.csv_path = "from-profile.csv"
+    config.app_name = "myapp"
+    assert resolve_csv_path(config, None) == "from-profile.csv"
+    assert resolve_csv_path(config, "  ") == "from-profile.csv"
+
+
+def test_resolve_csv_path_errors_when_missing_and_non_interactive(monkeypatch):
+    import typer
+
+    monkeypatch.setattr("asc.utils.is_interactive", lambda: False)
+    config = MagicMock()
+    config.csv_path = ""
+    config.app_name = "myapp"
+    with pytest.raises(typer.Exit):
+        resolve_csv_path(config, None)
+
+
+def test_resolve_csv_path_prompts_and_persists(monkeypatch):
+    monkeypatch.setattr("asc.utils.is_interactive", lambda: True)
+    monkeypatch.setattr("asc.utils.typer.prompt", lambda *a, **k: "picked.csv")
+    config = MagicMock()
+    config.csv_path = ""
+    config.app_name = "myapp"
+    config._data = {}
+    config.get_app_profile.return_value = {
+        "issuer_id": "i",
+        "key_id": "k",
+        "key_file": "/k.p8",
+        "app_id": "1",
+        "csv": "",
+        "screenshots": "",
+    }
+    assert resolve_csv_path(config, None) == "picked.csv"
+    config.save_app_profile.assert_called_once_with(
+        "myapp", "i", "k", "/k.p8", "1", "picked.csv", None,
+    )
+
+
+def test_resolve_screenshots_path_optional_returns_empty_when_non_interactive(monkeypatch):
+    monkeypatch.setattr("asc.utils.is_interactive", lambda: False)
+    config = MagicMock()
+    config.screenshots_path = ""
+    config.app_name = "myapp"
+    assert resolve_screenshots_path(config, None, required=False) == ""

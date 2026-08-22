@@ -26,7 +26,7 @@ asc app list
 asc app add production-app
 ```
 
-按提示输入凭证和数据路径。Profile 会保存到 `~/.config/asc/profiles/production-app.toml`。
+按提示输入凭证即可。Profile 会保存到 `~/.config/asc/profiles/production-app.toml`。CSV 与截图路径可以等到上传时再填，或稍后用 `asc app edit` 设置。
 
 ---
 
@@ -125,7 +125,7 @@ signing = "auto"
 ## 常见问题
 
 **Q: 不同 App 能否使用不同的 CSV/截图路径？**
-可以。每个 Profile 存储自己的 `csv` 和 `screenshots` 路径。添加 Profile 时设置，或稍后用 `asc app edit` 修改。
+可以。每个 Profile 可以存储自己的 `csv` 和 `screenshots` 路径。添加 App 时不会询问；用 `asc app edit` 设置，或在上传时传 `--csv` / `--screenshots`，也可以在 Web 商品页创建步填写。
 
 **Q: 凭证存储在哪里？**
 Profile 在 `~/.config/asc/profiles/`（可读的 TOML 格式），API 密钥在 `~/.config/asc/keys/`（`.p8` 文件）。不要将这些提交到 git。

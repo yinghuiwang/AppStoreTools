@@ -26,7 +26,7 @@ Shows all configured app profiles with their locations.
 asc app add production-app
 ```
 
-Follow the prompts to enter credentials and data paths. The profile is saved to `~/.config/asc/profiles/production-app.toml`.
+Follow the prompts to enter credentials. The profile is saved to `~/.config/asc/profiles/production-app.toml`. CSV and screenshot paths can wait until you run upload, or you can set them later with `asc app edit`.
 
 ---
 
@@ -125,7 +125,7 @@ This takes precedence over global profiles for the current project.
 ## FAQ
 
 **Can I have different CSV/screenshots paths per app?**
-Yes. Each profile stores its own `csv` and `screenshots` paths. Set them when adding the profile or edit them later with `asc app edit`.
+Yes. Each profile can store its own `csv` and `screenshots` paths. They are not asked when adding an app; set them with `asc app edit`, pass `--csv` / `--screenshots` at upload time, or fill them on the Web listing create step.
 
 **Where are my credentials stored?**
 Profiles are in `~/.config/asc/profiles/` (readable TOML). API keys are in `~/.config/asc/keys/` (the `.p8` files). Never commit these to git.

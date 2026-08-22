@@ -52,8 +52,8 @@ const form = reactive({
   issuer_id: "",
   key_id: "",
   app_id: "",
-  csv: "data/appstore_info.csv",
-  screenshots: "data/screenshots",
+  csv: "",
+  screenshots: "",
 });
 
 const rows = computed(() =>
@@ -91,7 +91,7 @@ function openCreate() {
   editing.value = "";
   Object.assign(form, {
     name: "", issuer_id: "", key_id: "", app_id: "",
-    csv: "data/appstore_info.csv", screenshots: "data/screenshots",
+    csv: "", screenshots: "",
   });
   keyFile.value = null;
   dialog.value = true;
@@ -102,7 +102,7 @@ function openEdit(name: string) {
   editing.value = name;
   Object.assign(form, {
     name, issuer_id: d.issuer_id, key_id: d.key_id, app_id: d.app_id,
-    csv: d.csv || "data/appstore_info.csv", screenshots: d.screenshots || "data/screenshots",
+    csv: d.csv || "", screenshots: d.screenshots || "",
   });
   keyFile.value = null;
   dialog.value = true;
@@ -124,10 +124,12 @@ async function save() {
   body.set("issuer_id", form.issuer_id);
   body.set("key_id", form.key_id);
   body.set("app_id", form.app_id);
-  body.set("csv", form.csv);
-  body.set("screenshots", form.screenshots);
-  rememberFormPath("profile.csv", form.csv);
-  rememberFormPath("profile.screenshots", form.screenshots);
+  if (editing.value) {
+    body.set("csv", form.csv);
+    body.set("screenshots", form.screenshots);
+    rememberFormPath("profile.csv", form.csv);
+    rememberFormPath("profile.screenshots", form.screenshots);
+  }
   if (keyFile.value) body.set("key_file", keyFile.value);
   if (editing.value) {
     await httpJson(`/api/profiles/${encodeURIComponent(editing.value)}`, { method: "PUT", body });
@@ -246,14 +248,14 @@ onMounted(() => { void load(); });
       <label class="field"><span>Issuer ID</span><t-input v-model="form.issuer_id" /></label>
       <label class="field"><span>Key ID</span><t-input v-model="form.key_id" /></label>
       <label class="field"><span>App ID</span><t-input v-model="form.app_id" /></label>
-      <div class="field">
+      <div v-if="editing" class="field">
         <ExampleHelp kind="csv" :label="t('profiles.csv_optional')" />
         <div class="field-row">
           <t-input v-model="form.csv" />
           <t-button @click="pickCsv">{{ t("filebrowser.browse") }}</t-button>
         </div>
       </div>
-      <div class="field">
+      <div v-if="editing" class="field">
         <ExampleHelp kind="shots" :label="t('profiles.shots_optional')" />
         <div class="field-row">
           <t-input v-model="form.screenshots" />

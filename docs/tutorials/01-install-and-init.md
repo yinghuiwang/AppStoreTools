@@ -137,7 +137,7 @@ asc app import --path /path/to/MyProject --name myapp
 asc app add myapp
 ```
 
-Follow the prompts to enter Issuer ID, Key ID, .p8 path, App ID, and data paths.
+Follow the prompts to enter Issuer ID, Key ID, .p8 path, and App ID. CSV and screenshot paths are filled later, when you upload.
 
 Verify the profile was created:
 

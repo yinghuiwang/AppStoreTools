@@ -54,8 +54,10 @@ def cmd_app_add(
     \b
     The profile stores:
     - API credentials (Issuer ID, Key ID, key file path)
-    - Default paths for CSV and screenshots
     - App ID
+
+    CSV and screenshot paths are asked later, when you run metadata,
+    screenshots, or upload.
 
     \b
     Example:
@@ -76,14 +78,6 @@ def cmd_app_add(
         typer.echo(f"❌ {t(ERRORS['file_not_found_reenter']).format(path=key_path)}", err=True)
     app_id = typer.prompt("  App ID (numeric)")
 
-    typer.echo("\nEnter default data paths (press Enter to use defaults):")
-    csv_path = typer.prompt(
-        "  CSV metadata file path", default="data/appstore_info.csv"
-    )
-    screenshots_path = typer.prompt(
-        "  Screenshots directory", default="data/screenshots"
-    )
-
     _enforce_profile_guard_cli(app_id, name, key_id, issuer_id)
 
     global_keys_dir = Path.home() / ".config" / "asc" / "keys"
@@ -94,9 +88,7 @@ def cmd_app_add(
         typer.echo(f"  ✅ Key file copied to {dest_key}")
 
     config = Config()
-    config.save_app_profile(
-        name, issuer_id, key_id, str(dest_key), app_id, csv_path, screenshots_path
-    )
+    config.save_app_profile(name, issuer_id, key_id, str(dest_key), app_id)
     typer.echo(f"\n✅ App profile '{name}' saved.")
     typer.echo(f"   Use: asc --app {name} upload")
 
@@ -199,8 +191,8 @@ def cmd_app_show(
     typer.echo(f"  Key ID:           {profile['key_id']}")
     typer.echo(f"  Key file:         {profile['key_file']}")
     typer.echo(f"  App ID:           {profile['app_id']}")
-    typer.echo(f"  CSV path:         {profile['csv']}")
-    typer.echo(f"  Screenshots path: {profile['screenshots']}")
+    typer.echo(f"  CSV path:         {profile['csv'] or '(not set)'}")
+    typer.echo(f"  Screenshots path: {profile['screenshots'] or '(not set)'}")
 
 
 def cmd_app_edit(
@@ -244,8 +236,16 @@ def cmd_app_edit(
             break
         typer.echo(f"❌ {t(ERRORS['file_not_found_reenter']).format(path=key_path)}", err=True)
     app_id = typer.prompt("  App ID (numeric)", default=profile["app_id"])
-    csv_path = typer.prompt("  CSV metadata file path", default=profile["csv"])
-    screenshots_path = typer.prompt("  Screenshots directory", default=profile["screenshots"])
+    csv_path = typer.prompt(
+        "  CSV metadata file path",
+        default=profile["csv"] or "",
+        show_default=bool(profile["csv"]),
+    )
+    screenshots_path = typer.prompt(
+        "  Screenshots directory",
+        default=profile["screenshots"] or "",
+        show_default=bool(profile["screenshots"]),
+    )
 
     _enforce_profile_guard_cli(app_id, new_name, key_id, issuer_id)
 
@@ -446,8 +446,8 @@ def _do_import_from_env(
     """Import app profile from .env file.
 
     Parses the .env file at env_file_path, validates required fields,
-    copies the key file to ~/.config/asc/keys/, auto-detects csv and
-    screenshots paths, and saves the profile.
+    copies the key file to ~/.config/asc/keys/, and saves the profile.
+    CSV / screenshots paths are stored only when those files already exist.
 
     Args:
         env_file_path: Path to the .env file to import
@@ -524,10 +524,10 @@ def _do_import_from_env(
         shutil.copy2(key_path, dest_key)
         _echo(f"  ✅ 密钥文件已拷贝到 {dest_key}")
 
-    # 自动推断 csv 和 screenshots 路径（存绝对路径，避免 CWD 依赖）
+    # 仅在文件真实存在时写入 csv / screenshots，避免写死尚未准备的模板路径
     data_dir = project_root / "AppStore" / "data"
-    csv_path = str(project_root / "AppStore" / "data" / "appstore_info.csv")
-    screenshots_path = str(project_root / "AppStore" / "data" / "screenshots")
+    csv_path = ""
+    screenshots_path = ""
     if data_dir.exists():
         csv_files = sorted(data_dir.glob("*.csv"))
         if csv_files:
@@ -546,15 +546,17 @@ def _do_import_from_env(
         key_id,
         str(dest_key),
         app_id,
-        csv_path,
-        screenshots_path,
+        csv_path or None,
+        screenshots_path or None,
     )
     _echo(f"\n✅ App profile '{profile_name}' 已创建。")
     _echo(f"   Issuer ID:  {issuer_id}")
     _echo(f"   Key ID:     {key_id}")
     _echo(f"   App ID:     {app_id}")
-    _echo(f"   CSV:        {csv_path}")
-    _echo(f"   截图路径:   {screenshots_path}")
+    if csv_path:
+        _echo(f"   CSV:        {csv_path}")
+    if screenshots_path:
+        _echo(f"   截图路径:   {screenshots_path}")
 
     return profile_name
 
@@ -577,7 +579,8 @@ def cmd_app_import(
     KEY_FILE 若为纯文件名，会在 AppStore/Config/ 下查找并拷贝到全局
     ~/.config/asc/keys/（已存在则跳过）。
 
-    csv 和 screenshots 路径根据 AppStore/data/ 目录内容自动推断。
+    若 AppStore/data/ 下已有 CSV 或截图目录，会写入对应路径；否则留空，
+    等到 metadata / screenshots / upload 时再询问。
 
     \b
     Example:

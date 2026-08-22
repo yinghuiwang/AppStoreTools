@@ -137,7 +137,7 @@ asc app import --path /path/to/MyProject --name myapp
 asc app add myapp
 ```
 
-按提示依次输入 Issuer ID、Key ID、.p8 路径、App ID 和数据路径。
+按提示依次输入 Issuer ID、Key ID、.p8 路径和 App ID。CSV 与截图路径等到实际上传时再填写。
 
 验证 profile 已创建：
 

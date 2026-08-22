@@ -92,8 +92,8 @@ function hasContent(value: ListingSnapshot | null | undefined): boolean {
   return (value?.locales?.length || 0) > 0;
 }
 
-const csvPath = ref("data/appstore_info.csv");
-const screenshotsDir = ref("data/screenshots");
+const csvPath = ref("");
+const screenshotsDir = ref("");
 const snapshot = ref<ListingSnapshot>(emptySnapshot());
 const mtime = ref<number | null>(null);
 const dirty = ref(false);
@@ -291,10 +291,10 @@ function hydrate(profile: string, defaults: { csv: string; screenshots: string }
   hydrating = true;
   boundProfile = profile;
   const stored = readFormMemory(formMemoryKey(METADATA_FORM_KEY_PREFIX, profile));
-  csvPath.value = (typeof stored?.csv_path === "string" && stored.csv_path) || defaults.csv || "data/appstore_info.csv";
+  csvPath.value = (typeof stored?.csv_path === "string" && stored.csv_path) || defaults.csv || "";
   screenshotsDir.value = (typeof stored?.screenshots_dir === "string" && stored.screenshots_dir)
     || defaults.screenshots
-    || "data/screenshots";
+    || "";
   includeMetadata.value = stored?.include_metadata !== false;
   includeScreenshots.value = stored?.include_screenshots !== false;
   dryRun.value = !!stored?.dry_run;
@@ -313,7 +313,11 @@ async function load(path?: string) {
   alert.value = "";
   conflict.value = false;
   loading.value = true;
-  const file = (path || csvPath.value || "").trim() || "data/appstore_info.csv";
+  const file = (path || csvPath.value || "").trim();
+  if (!file) {
+    loading.value = false;
+    return;
+  }
   csvPath.value = file;
   rememberFormPath("listing.csv_path", file);
   rememberFormPath("listing.screenshots_dir", screenshotsDir.value);
@@ -438,8 +442,8 @@ export function useListingWorkflow() {
   const { snapshot: profileSnap } = useProfile();
   const profile = computed(() => profileSnap.value?.current_profile || "");
   hydrate(profile.value, {
-    csv: profileSnap.value?.paths.csv || "data/appstore_info.csv",
-    screenshots: profileSnap.value?.paths.screenshots || "data/screenshots",
+    csv: profileSnap.value?.paths.csv || "",
+    screenshots: profileSnap.value?.paths.screenshots || "",
   });
 
   return {

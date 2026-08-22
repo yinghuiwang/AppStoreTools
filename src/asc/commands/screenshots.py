@@ -18,7 +18,7 @@ from asc.error_handler import get_action_hint
 from asc.guard import Guard, GuardViolationError
 from asc.progress import ProcessCanceled
 from asc.reporting import TaskReporter, make_cli_reporter
-from asc.utils import make_api_from_config, resolve_app_profile, resolve_locale, md5_of_file
+from asc.utils import make_api_from_config, resolve_app_profile, resolve_locale, md5_of_file, resolve_screenshots_path
 from asc.i18n import t, ERRORS, HELP
 
 
@@ -588,7 +588,7 @@ def cmd_screenshots(
                 typer.echo(f"💡 {hint}", err=True)
             raise typer.Exit(1)
     api, app_id = make_api_from_config(config)
-    screenshots_dir = screenshots or config.screenshots_path
+    screenshots_dir = resolve_screenshots_path(config, screenshots)
     try:
         _upload_screenshots_core(
             api,

@@ -93,6 +93,99 @@ def is_interactive() -> bool:
     return sys.stdin.isatty()
 
 
+def _persist_profile_path(config: "Config", key: str, value: str) -> None:
+    """Write a prompted csv/screenshots path back to the current app profile."""
+    name = config.app_name
+    if not name or name.startswith("__"):
+        return
+    profile = config.get_app_profile(name)
+    if profile is None:
+        return
+    profile[key] = value
+    config.save_app_profile(
+        name,
+        profile["issuer_id"],
+        profile["key_id"],
+        profile["key_file"],
+        profile["app_id"],
+        profile.get("csv") or None,
+        profile.get("screenshots") or None,
+    )
+    defaults = config._data.setdefault("defaults", {})
+    if isinstance(defaults, dict):
+        defaults[key] = value
+
+
+def _resolve_data_path(
+    config: "Config",
+    *,
+    cli_value: Optional[str],
+    configured: Optional[str],
+    persist_key: str,
+    prompt_label: str,
+    missing_hint: str,
+    required: bool,
+) -> str:
+    """Return CLI or configured path; prompt in a TTY when both are empty."""
+    path = (cli_value or "").strip() or (configured or "").strip()
+    if path:
+        return path
+    if is_interactive():
+        if required:
+            path = typer.prompt(prompt_label).strip()
+        else:
+            path = typer.prompt(prompt_label, default="", show_default=False).strip()
+        if path:
+            _persist_profile_path(config, persist_key, path)
+            return path
+    if required:
+        typer.echo(f"❌ {missing_hint}", err=True)
+        raise typer.Exit(1)
+    return ""
+
+
+def resolve_csv_path(
+    config: "Config",
+    cli_value: Optional[str] = None,
+    *,
+    required: bool = True,
+) -> str:
+    """Resolve the metadata CSV path from CLI, profile, or an interactive prompt."""
+    from asc.i18n import t, ERRORS, HELP
+
+    app = config.app_name or "<profile>"
+    return _resolve_data_path(
+        config,
+        cli_value=cli_value,
+        configured=config.csv_path,
+        persist_key="csv",
+        prompt_label=t(HELP["csv_path_prompt"]),
+        missing_hint=t(ERRORS["csv_path_required"]).format(app=app),
+        required=required,
+    )
+
+
+def resolve_screenshots_path(
+    config: "Config",
+    cli_value: Optional[str] = None,
+    *,
+    required: bool = True,
+) -> str:
+    """Resolve the screenshots directory from CLI, profile, or an interactive prompt."""
+    from asc.i18n import t, ERRORS, HELP
+
+    app = config.app_name or "<profile>"
+    return _resolve_data_path(
+        config,
+        cli_value=cli_value,
+        configured=config.screenshots_path,
+        persist_key="screenshots",
+        prompt_label=t(HELP["screenshots_path_prompt"]),
+        missing_hint=t(ERRORS["screenshots_path_required"]).format(app=app),
+        required=required,
+    )
+
+
 def list_valid_profiles(config: "Config") -> list[tuple[str, dict]]:
     """Return list of (app_name, profile_data) tuples for profiles with complete credentials."""
     all_apps = config.list_apps()

@@ -876,6 +876,8 @@
   "iap.canceling_msg": "正在终止上传...",
   "iap.canceled_msg": "上传已终止",
   "api.no_profile": "未选择 App Profile",
+  "api.csv_path_required": "CSV 路径未填写。请在商品页创建步选择文件。",
+  "api.screenshots_path_required": "截图目录未填写。请在商品页创建步选择目录。",
   "api.no_editable_version": "无可编辑版本",
   "api.no_editable_version_create": "无可编辑版本，请在 App Store Connect 创建版本",
   "api.version_locales": "版本 {version}，找到 {count} 个语言",

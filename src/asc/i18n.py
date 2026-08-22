@@ -52,16 +52,24 @@ HELP = {
         'zh': '预览更改但不上传'
     },
     'csv_file': {
-        'en': 'CSV metadata file path [default: data/appstore_info.csv]',
-        'zh': 'CSV 元数据文件路径 [默认: data/appstore_info.csv]'
+        'en': 'CSV metadata file path (prompted if not configured)',
+        'zh': 'CSV 元数据文件路径（未配置时会询问）'
     },
     'csv_file_short': {
-        'en': 'CSV file path [default: data/appstore_info.csv]',
-        'zh': 'CSV 文件路径 [默认: data/appstore_info.csv]'
+        'en': 'CSV file path (prompted if not configured)',
+        'zh': 'CSV 文件路径（未配置时会询问）'
     },
     'screenshots_dir': {
-        'en': 'Screenshots directory path [default: data/screenshots]',
-        'zh': '截图目录路径 [默认: data/screenshots]'
+        'en': 'Screenshots directory path (prompted if not configured)',
+        'zh': '截图目录路径（未配置时会询问）'
+    },
+    'csv_path_prompt': {
+        'en': 'CSV metadata file path',
+        'zh': 'CSV 元数据文件路径',
+    },
+    'screenshots_path_prompt': {
+        'en': 'Screenshots directory',
+        'zh': '截图目录',
     },
     'display_type': {
         'en': 'Device type override (e.g. APP_IPHONE_67, APP_IPAD_PRO_129_EQ)',
@@ -388,6 +396,14 @@ ERRORS = {
     'csv_not_found': {
         'en': 'CSV file not found: {path}',
         'zh': 'CSV 文件不存在: {path}',
+    },
+    'csv_path_required': {
+        'en': 'CSV path is not configured. Pass --csv, or run "asc app edit {app}" to set it.',
+        'zh': '未配置 CSV 路径。请使用 --csv 指定，或运行 "asc app edit {app}" 填写。',
+    },
+    'screenshots_path_required': {
+        'en': 'Screenshots directory is not configured. Pass --screenshots, or run "asc app edit {app}" to set it.',
+        'zh': '未配置截图目录。请使用 --screenshots 指定，或运行 "asc app edit {app}" 填写。',
     },
     'iap_config_not_found': {
         'en': 'IAP config file not found: {path}',
