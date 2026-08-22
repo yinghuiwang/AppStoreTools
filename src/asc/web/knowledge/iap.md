@@ -1,6 +1,6 @@
 # IAP and subscriptions
 
-keywords: IAP 类型 CONSUMABLE NON_CONSUMABLE AUTO_RENEWABLE subscription groupLevel price localization review screenshot iap_packages.json 2-30 45
+keywords: IAP 类型 CONSUMABLE NON_CONSUMABLE AUTO_RENEWABLE subscription groupLevel price localization review screenshot iap_packages.json 2-30 45 iap-packages 10选项 infer 会员权益 积分权益
 
 ## Official types (4)
 
@@ -75,6 +75,36 @@ Price: `pricePointId` **or** `baseTerritory` + `baseAmount`. Territory must be 3
 - Review screenshot path is relative to the JSON file directory (`./iap_review/49_99.PNG`).
 - Missing review screenshot can warn; skill workflows may allow generating JSON first and adding PNG later.
 - Do not put Credits **subscriptions** (`_points_month_` / period in the ID) into `items[]`.
+
+## Web Agent workflow (`iap-packages` skill)
+
+This Agent does **not** run Ruby skill scripts (`infer_iap_products.rb`, `sync_iap_packages.rb`, `discover_iap_manifest.rb`). Prefer the create-step table infer UI, or edit `iap_packages.json` with `json_patch` / `propose_fix` **after** the user confirms.
+
+### Mode A — product table (preferred)
+
+Need at least `productId` + `name`. Also use price / points / category / displayName when given. Ignore empty rows.
+
+Infer:
+
+| Signal | Result |
+| --- | --- |
+| ID has `_week_` / `.week.` / `_year_` / `.year.` (or other period) | Auto-renewable subscription |
+| ID / name has `super` | Membership + Super tier |
+| Category `会员权益` + a period | Membership subscription |
+| Category `积分权益`, or coins/credits/pack, **and no** period | Consumable `items[]` |
+| ID has `_points_month_` | Credits **subscription** — not `items[]` |
+| Cannot tell | `unknown` — ask the user |
+
+Then, in order:
+
+1. Explain `groupLevel` (1 = highest; same level = crossgrade; upgrade immediate/prorated; downgrade next renewal). Batch-confirm **per subscription group**. Never silently write inferred levels. Consumables do not need `groupLevel`.
+2. Localization **10 options**, **one category per message**: subscription-group `name` → subscription `name`/`description` → consumable `name`/`description`. Limits: name 2–30; description ≤45. Do not stack all three in one reply.
+3. Show a draft (`propose_fix` / dry-run). **Do not write** `iap_packages.json` until groupLevel and localizations are confirmed.
+4. Review screenshots may come later: `./iap_review/{price}.PNG` (e.g. `49_99.PNG`). Missing files must not block JSON.
+
+### Mode B — `config.plist` / `.iap-sync.json`
+
+Outside this web Agent. Tell the user to run the `iap-packages` skill on the app repo. Do **not** guess plist paths or copy example manifests.
 
 ## Web wizard (create → edit → upload)
 

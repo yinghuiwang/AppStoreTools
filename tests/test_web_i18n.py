@@ -153,7 +153,13 @@ def test_nav_catalog_english_and_chinese():
     assert "data/screenshots" in t("metadata.shots_path_meaning", lang="zh")
     assert "data/appstore_info.csv" in t("metadata.csv_path_meaning", lang="en")
     assert t("listing.agent_seed_create", lang="zh").startswith("请根据我提供的产品说明")
+    assert "en-US" in t("listing.agent_seed_create", lang="zh")
+    assert "zh-Hans" in t("listing.agent_seed_create", lang="zh")
+    assert "en-US" in t("listing.agent_seed_create", lang="en")
     assert "csv_set_fields" in t("listing.agent_seed_edit", lang="en")
+    assert "groupLevel" in t("iap.agent_seed_create", lang="zh")
+    assert "10 个选项" in t("iap.agent_seed_create", lang="zh")
+    assert "10 options" in t("iap.agent_seed_create", lang="en")
 
 
 def test_language_switch_updates_locale_without_reload():

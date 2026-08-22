@@ -63,6 +63,17 @@ def test_search_knowledge_hits_required_queries():
     assert "4000" in str(whats)
     assert any(hit["topic"] == "version" for hit in whats["hits"])
 
+    listing_skill = search_notes("appstore-listing")
+    assert listing_skill["ok"] is True
+    assert any(hit["topic"] == "listing" for hit in listing_skill["hits"])
+    assert "en-US" in str(listing_skill)
+    assert "27" in str(listing_skill)
+
+    iap_skill = search_notes("groupLevel")
+    assert iap_skill["ok"] is True
+    assert any(hit["topic"] == "iap" for hit in iap_skill["hits"])
+    assert "crossgrade" in str(iap_skill).lower()
+
 
 def test_search_knowledge_ignores_project_root(tmp_path):
     empty = tmp_path / "empty-project"
@@ -78,6 +89,8 @@ def test_search_knowledge_ignores_project_root(tmp_path):
     got = execute_model_tool(ctx, "get_knowledge", {"topic": "listing"})
     assert got["ok"] is True
     assert "30" in got["content"]
+    assert "csv_set_fields" in got["content"]
+    assert "zh-Hans" in got["content"]
     store.close()
 
 
@@ -108,5 +121,24 @@ def test_system_prompt_requires_knowledge_first():
     assert "search_knowledge" in text
     assert "get_knowledge" in text
     assert "App Store Connect expert" in text
+    assert "appstore-listing" in text
+    assert "iap-packages" in text
+    assert "en-US and zh-Hans" in text
+    assert "groupLevel" in text
     assert "search_knowledge" in MODEL_TOOL_NAMES
     assert "get_knowledge" in MODEL_TOOL_NAMES
+
+
+def test_get_knowledge_includes_skill_workflows():
+    listing = get_topic("listing")
+    assert listing["ok"] is True
+    assert listing.get("truncated") is not True
+    assert "appstore-listing" in listing["content"]
+    assert "legal block" in listing["content"]
+
+    iap = get_topic("iap")
+    assert iap["ok"] is True
+    assert iap.get("truncated") is not True
+    assert "iap-packages" in iap["content"]
+    assert "one category per message" in iap["content"]
+    assert "infer_iap_products.rb" in iap["content"]

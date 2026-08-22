@@ -14,3 +14,5 @@
 - 现会解析 `upload.log` 中的 `UPLOAD FAILED` / `Failed to upload package`，抽出 `Validation failed ...` 后按失败处理；Spinner 同步显示失败。
 - 相关测试：`tests/test_build.py`、`tests/test_progress.py`。已重启 Web UI 使修复生效。
 - 已提交并推送 `97b8b28` 到 `github/feat/iap-workflow`：`fix(build): treat altool UPLOAD FAILED as a failed upload`。`operateLog.md` 未纳入提交。
+- Agent 强化（对照 SparkSkills `appstore-listing` / `iap-packages`）：知识库补上收集输入、先写 en-US+zh-Hans 再确认、groupLevel 分批确认、本地化 10 选且一次一类；系统提示与创建步种子提示同步；检索默认容量加大以免长笔记挤掉 What’s New。
+- 补充 Agent 工作流自动化测试 `tests/test_agent_skill_workflow.py`：用 ScriptedLLM 锁系统提示 / 知识库 / 种子文案，并走 get_knowledge → propose_fix 草稿（不写盘）。不覆盖真实模型是否遵守流程。

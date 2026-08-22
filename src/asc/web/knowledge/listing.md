@@ -1,6 +1,6 @@
 # Listing metadata
 
-keywords: listing metadata name subtitle keywords 字数 100 description promotional text what's new URL 30 100 170 4000 必填
+keywords: listing metadata name subtitle keywords 字数 100 description promotional text what's new URL 30 100 170 4000 必填 appstore-listing 27 90 separator 法律条款 en-US zh-Hans
 
 Character counts below are **Apple official** unless marked skill/tool. CJK counts as 1 character in the ASC UI (same as Latin). Always count the actual string.
 
@@ -48,6 +48,46 @@ Canonical columns (`FIELD_NAMES` / `CSV_HEADER_ALIASES`):
 Chinese aliases: 语言 / 应用名称 / 副标题 / 长描述|描述 / 关键词|关键字 / 技术支持网址|链接 / 营销网站|网址 / 隐私政策链接|网址|URL.
 
 Not in CSV: promotional text, What’s New (use `whats-new` / web What’s New), copyright, review notes.
+
+## Web Agent workflow (`appstore-listing` skill)
+
+Adapted for this tool: write `data/appstore_info.csv` with `csv_set_fields` / `propose_fix`. Do **not** create `AppStore/*.md` files or run the skill’s Python CSV script.
+
+### Collect first (ask if missing)
+
+| Input | Required |
+| --- | --- |
+| Full app name, e.g. `PopVid - AI Video Photo Editor` or `PopVid: AI Video Photo Editor` | Yes |
+| Terms of Service URL | Yes (description legal block) |
+| Privacy Policy URL | Yes |
+| Subscription Agreement URL | Yes |
+
+If the project has `AppConstants.swift` (or similar) with `termsOfService` / `privacyPolicy` / `subscriptionTerms`, read them and **confirm** before using.
+
+From the full name extract:
+- **Short name** (before `-` or `:`): never translate
+- **Separator** exactly as typed (` - ` or `: `): **same in every locale**
+- **Tagline** (after the separator): translate
+
+Per-locale name: `{Short name}{Separator}{Translated tagline}`
+
+### Pilot, then confirm
+
+1. Draft **only** `en-US` and `zh-Hans`.
+2. Recount every field (CJK = 1). Writing targets: name **≤27**, subtitle **≤27**, keywords **≤90**. Hard reject: **30 / 30 / 100**.
+3. Stop and ask the user to confirm tone and content.
+4. After an explicit OK, generate other locales **independently** (DE / TH / AR / VI often grow). Do not assume English lengths fit.
+
+Default skill set (16): `en-US`, `zh-Hans`, `zh-Hant`, `ja`, `ko`, `es-ES`, `es-MX`, `pt-PT`, `pt-BR`, `de-DE`, `fr-FR`, `th`, `vi`, `ar-SA`, `tr`, `it`. Official store has **50** — add more if the user asks.
+
+### Writing rules
+
+- Subtitle: one unique benefit; avoid generic “AI tool” / “Easy editor”.
+- Keywords: 10–12 terms, no space after commas; do not repeat words already in name/subtitle.
+- Description: **no Markdown** (`**bold**`, headings, `---`). Plain-text section titles + `- ` bullets are OK. Style target 400–600 words; official cap **4000**. Only real features — ask if the workflow is unclear. Do not claim “seconds” generation unless confirmed.
+- Pick **one** description structure per app (A feature-first / B story-first / C step-first / D social-proof / E contrast). Include hook, how-it-works (3 real steps), differentiation, Pro benefits, then the legal block.
+- Legal block (end of description, Guideline 3.1.2): auto-renew paragraph + Terms / Privacy / Subscription Agreement URLs.
+- `supportUrl`: a real support or legal page, not the App Store product URL. `privacyPolicyUrl`: privacy URL.
 
 ## Multi-language strategy
 

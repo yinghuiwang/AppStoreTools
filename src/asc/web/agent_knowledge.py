@@ -10,10 +10,10 @@ from asc.web.agent_redact import redact_text
 _PACKAGE = "asc.web.knowledge"
 _INDEX_NAME = "INDEX.md"
 _MAX_QUERY = 200
-_DEFAULT_SEARCH_CHARS = 4000
-_MAX_SEARCH_CHARS = 8000
-_DEFAULT_TOPIC_CHARS = 8000
-_MAX_TOPIC_CHARS = 12000
+_DEFAULT_SEARCH_CHARS = 8000
+_MAX_SEARCH_CHARS = 12000
+_DEFAULT_TOPIC_CHARS = 10000
+_MAX_TOPIC_CHARS = 14000
 _SNIPPET_RADIUS = 3
 _MAX_SNIPPETS = 8
 _SNIPPET_LINE_MAX = 240
@@ -37,6 +37,9 @@ _TOPIC_ALIASES: dict[str, str] = {
     "keywords": "listing",
     "subtitle": "listing",
     "description": "listing",
+    "appstore-listing": "listing",
+    "separator": "listing",
+    "legal": "listing",
     "screenshot": "screenshots",
     "screenshots": "screenshots",
     "preview": "screenshots",
@@ -44,6 +47,8 @@ _TOPIC_ALIASES: dict[str, str] = {
     "subscription": "iap",
     "subscriptions": "iap",
     "in-app": "iap",
+    "iap-packages": "iap",
+    "grouplevel": "iap",
     "whatsnew": "version",
     "what's new": "version",
     "whats new": "version",
@@ -62,6 +67,9 @@ _PHRASE_TOKENS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("whats-new", ("whatsnew", "version")),
     ("iap 类型", ("iap", "consumable", "subscription")),
     ("keywords 字数", ("keywords", "100", "listing")),
+    ("grouplevel", ("grouplevel", "iap", "crossgrade")),
+    ("10选项", ("iap", "localization", "grouplevel")),
+    ("appstore-listing", ("listing", "separator", "en-us")),
 )
 
 
