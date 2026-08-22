@@ -15,6 +15,7 @@ import typer
 import requests
 
 from asc.reporting import RawLogCallback, TaskReporter, make_cli_reporter
+from asc.web.daemon import get_status, schedule_restart, write_update_restart_marker
 
 GITHUB_API = "https://api.github.com/repos/yinghuiwang/AppStoreTools/releases/latest"
 INSTALL_URL = "https://github.com/yinghuiwang/AppStoreTools.git"
@@ -658,14 +659,41 @@ def cmd_update(
 ):
     """Check for updates and install the latest version from GitHub."""
     reporter = make_cli_reporter(verbose=verbose)
+    web_running = bool(get_status().get("running"))
     try:
-        _update_core(
+        outcome = _update_core(
             version=version,
             branch=branch,
             yes=yes,
             reporter=reporter,
             confirm=True,
             verbose=verbose,
+            defer_install=web_running,
         )
     except UpdateError:
         raise typer.Exit(1)
+    if not outcome.changed or not web_running:
+        return
+    write_update_restart_marker(
+        "cli-update",
+        installed=not outcome.deferred,
+        pending_install=bool(outcome.deferred),
+        install_ref=outcome.install_ref,
+        commit=outcome.commit,
+    )
+    restart_kwargs: dict = {"delay": 1.5, "task_id": "cli-update"}
+    if outcome.deferred and outcome.install_ref:
+        restart_kwargs.update(
+            install_ref=outcome.install_ref,
+            commit=outcome.commit,
+        )
+    info = schedule_restart(**restart_kwargs)
+    if info.get("status") == "scheduled":
+        reporter.log(
+            f"Web UI 将自动重启（{info.get('url', '')}）以加载新版本。"
+        )
+    else:
+        reporter.log(
+            f"⚠️  自动重启未安排：{info.get('message', info.get('status'))}",
+            level="warning",
+        )

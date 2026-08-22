@@ -5,6 +5,7 @@ import { httpForm, httpJson } from "@/api/http";
 import PageLoading from "@/components/PageLoading.vue";
 import { useProfile } from "@/composables/useProfile";
 import { useRightRail } from "@/composables/useRightRail";
+import { useUpdateRestart } from "@/composables/useUpdateRestart";
 
 type CheckResult = {
   ok: boolean;
@@ -25,11 +26,13 @@ type PostRestart = {
   pending: boolean;
   task_id: string | null;
   status: string | null;
+  result?: { restarted?: boolean; restarting?: boolean } | null;
 };
 
 const { t } = useI18n();
 const { snapshot, refresh } = useProfile();
 const rail = useRightRail();
+const { awaitingRestart, rememberBootId, watchAfterRun } = useUpdateRestart();
 const checking = ref(false);
 const checkResult = ref<CheckResult | null>(null);
 const versions = ref<string[]>([]);
@@ -46,6 +49,9 @@ const verbose = ref(false);
 let lastBootId = snapshot.value?.boot_id || "";
 
 const REPO_URL = "https://github.com/yinghuiwang/AppStoreTools";
+const restartFinished = computed(
+  () => Boolean(pending.value && (pending.value.status === "done" || pending.value.result?.restarted)),
+);
 
 const currentVersion = computed(
   () => checkResult.value?.detail?.current || snapshot.value?.version || "",
@@ -101,6 +107,8 @@ async function run(version = "", branch = "") {
   });
   const { task_id } = await httpForm<{ task_id: string }>("/api/update/run", body);
   rail.openLogs(task_id);
+  const state = await watchAfterRun(task_id, lastBootId);
+  awaitingRestart.value = state === "restarting";
 }
 
 async function handshake() {
@@ -127,6 +135,7 @@ function onAdvancedChange(value: unknown) {
 
 onMounted(() => {
   lastBootId = snapshot.value?.boot_id || "";
+  rememberBootId(lastBootId);
   void handshake();
   void check();
   void loadVersions();
@@ -136,12 +145,12 @@ onMounted(() => {
 <template>
   <div class="page-stack">
     <t-alert
-      v-if="pending"
-      theme="info"
-      :title="t('update.restarting')"
-      :message="t('update.restarting_hint')"
+      v-if="awaitingRestart || pending"
+      :theme="restartFinished ? 'success' : 'info'"
+      :title="restartFinished ? t('update.done') : t('update.restarting')"
+      :message="restartFinished ? t('update.restarted_hint') : t('update.restarting_hint')"
     >
-      <template #operation>
+      <template v-if="pending && restartFinished" #operation>
         <t-button size="small" @click="ack">{{ t("common.cancel") }}</t-button>
       </template>
     </t-alert>

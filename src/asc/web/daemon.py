@@ -177,7 +177,7 @@ def start_background(host: str, port: int) -> dict[str, Any]:
             stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
             cwd=os.getcwd(),
-            start_new_session=True,
+            preexec_fn=_detach_child,
             env=env,
         )
     except OSError as exc:
@@ -194,6 +194,17 @@ def start_background(host: str, port: int) -> dict[str, Any]:
         "url": url,
     }
     write_state(state)
+    if not wait_port_ready(host, port, timeout=8.0, pid=proc.pid):
+        if is_process_alive(proc.pid):
+            try:
+                _signal_pid(proc.pid, signal.SIGTERM)
+            except OSError:
+                pass
+        clear_state()
+        return {
+            "status": "error",
+            "message": f"Web UI 已拉起但端口 {host}:{port} 未就绪",
+        }
     return {
         "status": "started",
         "pid": proc.pid,
@@ -205,7 +216,7 @@ def start_background(host: str, port: int) -> dict[str, Any]:
 def _signal_pid(pid: int, sig: signal.Signals) -> None:
     """Send *sig* to *pid*, preferring the process group when *pid* is the leader.
 
-    Background Web UI processes are started with ``start_new_session=True``, so
+    Background Web UI processes call ``setsid`` via ``_detach_child``, so
     their PID equals the process-group ID. Only then is ``killpg`` safe; for a
     foreground server that shares the shell's process group we signal the PID
     alone so we do not tear down the user's terminal.
@@ -284,6 +295,31 @@ def _wait_port_free(host: str, port: int, timeout: float = 10.0) -> bool:
 
 
 wait_port_free = _wait_port_free
+
+
+def wait_port_ready(
+    host: str,
+    port: int,
+    timeout: float = 8.0,
+    *,
+    pid: int | None = None,
+) -> bool:
+    """Return True once *host*:*port* accepts connections (and *pid* still lives)."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if pid is not None and not is_process_alive(pid):
+            return False
+        if port_in_use(host, port):
+            return True
+        time.sleep(0.1)
+    return bool(pid is None or is_process_alive(pid)) and port_in_use(host, port)
+
+
+def _detach_child() -> None:
+    """New session + ignore hangup so a short-lived helper can spawn uvicorn."""
+    os.setsid()
+    signal.signal(signal.SIGHUP, signal.SIG_IGN)
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 
 def _append_update_task_log(task_id: str | None, message: str) -> None:

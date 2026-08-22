@@ -65,6 +65,7 @@ def test_start_background_starts_process(isolated_state):
     mock_proc.pid = 55555
 
     with patch.object(daemon, "get_status", return_value={"running": False}), \
+         patch.object(daemon, "wait_port_ready", return_value=True), \
          patch("asc.web.daemon.subprocess.Popen", return_value=mock_proc) as mock_popen:
         result = daemon.start_background("127.0.0.1", 9090)
 
@@ -72,11 +73,54 @@ def test_start_background_starts_process(isolated_state):
     assert result["pid"] == 55555
     assert result["url"] == "http://127.0.0.1:9090"
     mock_popen.assert_called_once()
+    assert mock_popen.call_args.kwargs.get("preexec_fn") is daemon._detach_child
     assert state_file.exists()
     saved = json.loads(state_file.read_text(encoding="utf-8"))
     assert saved["pid"] == 55555
     assert saved["port"] == 9090
     assert log_file.exists()
+
+
+def test_start_background_waits_until_port_accepts(isolated_state):
+    mock_proc = MagicMock()
+    mock_proc.pid = 55555
+
+    with patch.object(daemon, "get_status", return_value={"running": False}), \
+         patch.object(daemon, "wait_port_ready", return_value=True) as wait_ready, \
+         patch("asc.web.daemon.subprocess.Popen", return_value=mock_proc):
+        result = daemon.start_background("127.0.0.1", 9090)
+
+    assert result["status"] == "started"
+    wait_ready.assert_called_once()
+    assert wait_ready.call_args.args[0] == "127.0.0.1"
+    assert wait_ready.call_args.args[1] == 9090
+    assert wait_ready.call_args.kwargs.get("pid") == 55555
+
+
+def test_start_background_errors_if_child_dies_before_listen(isolated_state):
+    mock_proc = MagicMock()
+    mock_proc.pid = 55555
+
+    with patch.object(daemon, "get_status", return_value={"running": False}), \
+         patch.object(daemon, "wait_port_ready", return_value=False), \
+         patch("asc.web.daemon.subprocess.Popen", return_value=mock_proc):
+        result = daemon.start_background("127.0.0.1", 9090)
+
+    assert result["status"] == "error"
+    assert "就绪" in result["message"] or "ready" in result["message"].lower()
+
+
+def test_detach_child_ignores_sighup():
+    import signal as signal_mod
+
+    with patch("asc.web.daemon.os.setsid") as setsid, \
+         patch("asc.web.daemon.signal.signal") as sig:
+        daemon._detach_child()
+
+    setsid.assert_called_once()
+    assigned = {call.args[0]: call.args[1] for call in sig.call_args_list}
+    assert assigned[signal_mod.SIGHUP] == signal_mod.SIG_IGN
+    assert assigned[signal_mod.SIGINT] == signal_mod.SIG_IGN
 
 
 def test_stop_not_running(isolated_state):
@@ -190,6 +234,12 @@ def test_schedule_restart_registers_unmanaged_process(isolated_state):
     saved = json.loads(state_file.read_text(encoding="utf-8"))
     assert saved["pid"] == 321
     assert saved["port"] == 8080
+
+
+def test_wait_port_ready_false_when_pid_dies(isolated_state):
+    with patch.object(daemon, "is_process_alive", return_value=False), \
+         patch.object(daemon, "port_in_use", return_value=False):
+        assert daemon.wait_port_ready("127.0.0.1", 8080, timeout=0.3, pid=123) is False
 
 
 def test_wait_port_free_when_connect_fails(isolated_state):

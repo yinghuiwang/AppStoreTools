@@ -59,7 +59,8 @@ class TestCmdUpdateValidation:
 
         commit = "a" * 40
         runner = CliRunner()
-        with patch("asc.commands.update_cmd._resolve_git_ref_commit", return_value=commit), \
+        with patch("asc.commands.update_cmd.get_status", return_value={"running": False}), \
+                patch("asc.commands.update_cmd._resolve_git_ref_commit", return_value=commit), \
                 patch("asc.commands.update_cmd._install_git_ref") as install:
             result = runner.invoke(app, ["update", "--branch", "main"])
 
@@ -78,7 +79,8 @@ class TestCmdUpdateValidation:
 
         commit = "b" * 40
         runner = CliRunner()
-        with patch("asc.commands.update_cmd._all_versions_from_github", return_value=["0.1.5"]), \
+        with patch("asc.commands.update_cmd.get_status", return_value={"running": False}), \
+                patch("asc.commands.update_cmd._all_versions_from_github", return_value=["0.1.5"]), \
                 patch("asc.commands.update_cmd._resolve_git_ref_commit", return_value=commit), \
                 patch("asc.commands.update_cmd._install_git_ref") as install:
             result = runner.invoke(app, ["update", "--version", "0.1.5"])
@@ -90,6 +92,61 @@ class TestCmdUpdateValidation:
         assert install.call_args.args[0] == "v0.1.5"
         assert install.call_args.args[1] == commit
         assert install.call_args.kwargs.get("reporter") is not None
+
+
+class TestCmdUpdateRestartsWeb:
+    """CLI update must bounce a running Web UI so the site loads new code."""
+
+    def test_defers_install_and_schedules_restart_when_web_running(self):
+        from typer.testing import CliRunner
+        from asc.cli import app
+        from asc.commands.update_cmd import UpdateResult
+
+        commit = "c" * 40
+        outcome = UpdateResult(
+            changed=True,
+            deferred=True,
+            install_ref="main",
+            commit=commit,
+            message="Done.",
+        )
+        runner = CliRunner()
+        with patch("asc.commands.update_cmd.get_status", return_value={
+                "running": True, "pid": 99, "url": "http://127.0.0.1:8080",
+            }), \
+                patch("asc.commands.update_cmd._update_core", return_value=outcome) as core, \
+                patch("asc.commands.update_cmd.write_update_restart_marker") as marker, \
+                patch("asc.commands.update_cmd.schedule_restart") as restart:
+            restart.return_value = {
+                "status": "scheduled",
+                "delay": 1.5,
+                "url": "http://127.0.0.1:8080",
+            }
+            result = runner.invoke(app, ["update", "--branch", "main", "--yes"])
+
+        assert result.exit_code == 0, result.output
+        assert core.call_args.kwargs.get("defer_install") is True
+        marker.assert_called_once()
+        restart.assert_called_once()
+        assert restart.call_args.kwargs.get("install_ref") == "main"
+        assert restart.call_args.kwargs.get("commit") == commit
+        assert "自动重启" in result.output or "restart" in result.output.lower()
+
+    def test_installs_in_process_when_web_is_down(self):
+        from typer.testing import CliRunner
+        from asc.cli import app
+        from asc.commands.update_cmd import UpdateResult
+
+        outcome = UpdateResult(changed=True, deferred=False, install_ref="main")
+        runner = CliRunner()
+        with patch("asc.commands.update_cmd.get_status", return_value={"running": False}), \
+                patch("asc.commands.update_cmd._update_core", return_value=outcome) as core, \
+                patch("asc.commands.update_cmd.schedule_restart") as restart:
+            result = runner.invoke(app, ["update", "--branch", "main", "--yes"])
+
+        assert result.exit_code == 0, result.output
+        assert core.call_args.kwargs.get("defer_install") is False
+        restart.assert_not_called()
 
 
 class TestPipInstallStreaming:

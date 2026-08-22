@@ -1,4 +1,5 @@
 import { NotifyPlugin } from "tdesign-vue-next";
+import { startResumeWatch } from "@/composables/useUpdateRestart";
 
 export class ApiError extends Error {
   status: number;
@@ -63,8 +64,13 @@ export async function httpJson<T>(url: string, init: RequestInit & Extra = {}): 
   if (rest.body && !(rest.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  const res = await fetch(url, { ...rest, headers, credentials: "same-origin" });
-  return (await parse(res, skipNotify)) as T;
+  try {
+    const res = await fetch(url, { ...rest, headers, credentials: "same-origin" });
+    return (await parse(res, skipNotify)) as T;
+  } catch (err) {
+    if (err instanceof TypeError) startResumeWatch("disconnect");
+    throw err;
+  }
 }
 
 export async function httpForm<T>(
@@ -76,11 +82,16 @@ export async function httpForm<T>(
   if (body instanceof URLSearchParams) {
     headers.set("Content-Type", "application/x-www-form-urlencoded");
   }
-  const res = await fetch(url, {
-    method: "POST",
-    body,
-    headers,
-    credentials: "same-origin",
-  });
-  return (await parse(res, extra.skipNotify)) as T;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      body,
+      headers,
+      credentials: "same-origin",
+    });
+    return (await parse(res, extra.skipNotify)) as T;
+  } catch (err) {
+    if (err instanceof TypeError) startResumeWatch("disconnect");
+    throw err;
+  }
 }

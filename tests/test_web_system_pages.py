@@ -93,6 +93,24 @@ def test_system_sidebar_has_independent_links() -> None:
     assert 'labelKey: "nav.system"' not in src
 
 
+def test_update_tab_waits_for_new_boot_and_reloads() -> None:
+    """After install, UI must wait for the restarted process then reload the SPA."""
+    tab = (FRONTEND / "views" / "system" / "UpdateTab.vue").read_text(encoding="utf-8")
+    watcher = (FRONTEND / "composables" / "useUpdateRestart.ts").read_text(encoding="utf-8")
+    http = (FRONTEND / "api" / "http.ts").read_text(encoding="utf-8")
+    assert "useUpdateRestart" in tab
+    assert "watchAfterRun" in tab
+    assert "location.reload" in watcher
+    assert "/api/update/post-restart" in watcher
+    assert "/api/task/" in watcher and "/status" in watcher
+    assert "restarting" in watcher
+    assert "boot_id" in watcher
+    assert "startResumeWatch" in http
+    assert "TypeError" in http
+    assert "update.restarting" in tab
+    assert "awaitingRestart" in tab
+
+
 def test_update_tab_keeps_status_in_check_card() -> None:
     src = (FRONTEND / "views" / "system" / "UpdateTab.vue").read_text(encoding="utf-8")
     assert "checkResult.message" in src

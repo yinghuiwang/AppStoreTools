@@ -2,6 +2,7 @@ import { ref, type Ref } from "vue";
 import { httpJson } from "@/api/http";
 import type { Bootstrap } from "@/api/types";
 import { bindTaskPageProfile } from "@/composables/useTaskPagePhase";
+import { rememberBootId } from "@/composables/useUpdateRestart";
 
 const snapshot: Ref<Bootstrap | null> = ref(null);
 
@@ -9,6 +10,7 @@ export function useProfile() {
   async function refresh(): Promise<Bootstrap> {
     const data = await httpJson<Bootstrap>("/api/bootstrap");
     snapshot.value = data;
+    rememberBootId(data.boot_id);
     return data;
   }
 
