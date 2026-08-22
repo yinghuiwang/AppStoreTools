@@ -248,8 +248,11 @@ def test_profiles_tab_uses_full_width_wrapping_cards() -> None:
     assert 'class="import-card"' in top
     assert "profiles.import_hint" in top
     assert 't("profiles.import_confirm")' in top
+    assert 'class="import-card-footer"' in top
     assert top.find('class="import-card"') < top.find('t("profiles.import_confirm")')
-    assert top.find('t("profiles.import_confirm")') < top.find('t("profiles.name")')
+    assert top.find('t("profiles.name")') < top.find('class="import-card-footer"')
+    assert top.find('class="import-card-footer"') < top.find("importSetDefault")
+    assert top.find("importSetDefault") < top.find('t("profiles.import_confirm")')
     assert top.find('t("profiles.import_confirm")') < top.find('class="profile-import-footer"')
     form = panel[panel.find('class="profile-form"') :]
     assert 't("profiles.create")' in form

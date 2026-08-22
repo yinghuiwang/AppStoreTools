@@ -364,14 +364,6 @@ onActivated(() => {
       <div v-if="importOpen && !editing" class="profile-import">
         <p class="import-hint">{{ t("profiles.import_hint") }}</p>
         <article v-for="item in importCandidates" :key="item.env_file_path || item.suggested_name" class="import-card">
-          <div class="import-card-actions">
-            <t-button
-              theme="primary"
-              :disabled="!item.key_file_exists || importBusy"
-              :loading="importBusy"
-              @click="importCandidate(item)"
-            >{{ importBusy ? t("profiles.importing") : t("profiles.import_confirm") }}</t-button>
-          </div>
           <header class="import-head">
             <span class="name mono">{{ item.suggested_name }}</span>
             <span class="badge">{{ t("profiles.import_local") }}</span>
@@ -399,9 +391,17 @@ onActivated(() => {
             <span>{{ t("profiles.name") }}</span>
             <t-input v-model="importName" :placeholder="item.suggested_name" />
           </label>
-          <t-checkbox v-model="importSetDefault">
-            {{ t("profiles.import_set_default") }}
-          </t-checkbox>
+          <div class="import-card-footer">
+            <t-checkbox v-model="importSetDefault">
+              {{ t("profiles.import_set_default") }}
+            </t-checkbox>
+            <t-button
+              theme="primary"
+              :disabled="!item.key_file_exists || importBusy"
+              :loading="importBusy"
+              @click="importCandidate(item)"
+            >{{ importBusy ? t("profiles.importing") : t("profiles.import_confirm") }}</t-button>
+          </div>
         </article>
         <t-alert v-if="importError" theme="error" :title="importError" />
         <div class="profile-import-footer">
@@ -518,8 +518,7 @@ onActivated(() => {
   border-top: 1px solid var(--border);
 }
 .profile-form-actions :deep(.t-button + .t-button),
-.profile-import-footer :deep(.t-button + .t-button),
-.import-card-actions :deep(.t-button + .t-button) {
+.profile-import-footer :deep(.t-button + .t-button) {
   margin-left: 0;
 }
 .import-hint { margin: 0; color: var(--text-muted); font-size: 13px; }
@@ -544,9 +543,20 @@ onActivated(() => {
   gap: 10px;
   margin: 0;
 }
-.import-card-actions {
+.import-card-footer {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 12px;
+  flex-wrap: wrap;
+}
+.import-card-footer :deep(.t-checkbox) {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.import-card-footer :deep(.t-button) {
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 .missing { color: var(--err); }
 .profiles-page {
