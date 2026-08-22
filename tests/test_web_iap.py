@@ -561,7 +561,7 @@ def test_wizard_views_exist():
     assert 'const source = ref<Source>("table")' in create or "source = ref<Source>(\"table\")" in create
     assert "hasFile" in create
     assert "jsonPath" in create
-    assert "openRemembered" in create
+    assert "browseJson" in create
     assert "setIapFile" in create
     assert 'emit("next")' not in create
     assert "iap.skip_to_edit" in create

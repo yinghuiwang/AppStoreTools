@@ -206,6 +206,7 @@ class Spinner:
         cmd: list,
         output_callback: Optional[Callable[[str], None]] = None,
         cancel_event: Optional[threading.Event] = None,
+        inspect_log: Optional[Callable[[Path], Optional[str]]] = None,
     ) -> subprocess.CompletedProcess:
         start = time.monotonic()
         proc = None
@@ -281,6 +282,15 @@ class Spinner:
                 _emit_text(decoder.decode(chunk))
             _emit_text(decoder.decode(b"", final=True), final=True)
             returncode = proc.wait()
+            if inspect_log is not None and (returncode == 0):
+                try:
+                    if inspect_log(self.log_path):
+                        returncode = 1
+                except Exception:
+                    logging.getLogger("asc.web").exception(
+                        "log inspect failed path=%s",
+                        self.log_path,
+                    )
 
             elapsed = format_elapsed(time.monotonic() - start)
             canceled = cancel_event is not None and cancel_event.is_set()

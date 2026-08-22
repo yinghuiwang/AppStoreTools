@@ -173,16 +173,6 @@ async function browseJson() {
   if (!workflow.alert.value) MessagePlugin.success(t("iap.file_opened"));
 }
 
-async function openRemembered() {
-  const path = (workflow.iapFile.value || "").trim();
-  if (!path) return;
-  opening.value = true;
-  workflow.setIapFile(path);
-  await workflow.load(path);
-  opening.value = false;
-  if (!workflow.alert.value) MessagePlugin.success(t("iap.file_opened"));
-}
-
 function blank() {
   workflow.applySnapshot(workflow.emptySnapshot(), { dirty: true, storeDraft: false });
   MessagePlugin.success(t("iap.draft_applied"));
@@ -216,9 +206,6 @@ function openAgent() {
               <t-button :loading="opening" @click="browseJson">{{ t("filebrowser.browse") }}</t-button>
             </div>
           </div>
-          <t-button theme="primary" :loading="opening" :disabled="!jsonPath.trim()" @click="openRemembered">
-            {{ t("iap.open_and_edit") }}
-          </t-button>
         </div>
       </t-tab-panel>
       <t-tab-panel :label="t('iap.tab.table')" value="table" :destroy-on-hide="false">

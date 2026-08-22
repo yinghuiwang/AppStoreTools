@@ -69,16 +69,6 @@ async function browseShots() {
   if (path) workflow.setScreenshotsDir(path);
 }
 
-async function openRemembered() {
-  const path = (workflow.csvPath.value || "").trim();
-  if (!path) return;
-  opening.value = true;
-  workflow.setCsvPath(path);
-  await workflow.load(path);
-  opening.value = false;
-  if (!workflow.alert.value) MessagePlugin.success(t("listing.file_opened"));
-}
-
 async function pullAsc() {
   pulling.value = true;
   error.value = "";
@@ -141,9 +131,6 @@ function openAgent() {
               <t-button @click="browseShots">{{ t("filebrowser.browse") }}</t-button>
             </div>
           </div>
-          <t-button theme="primary" :loading="opening" :disabled="!csvPath.trim()" @click="openRemembered">
-            {{ t("listing.open_and_preview") }}
-          </t-button>
         </div>
       </t-tab-panel>
       <t-tab-panel :label="t('listing.tab.asc')" value="asc" :destroy-on-hide="false">

@@ -213,7 +213,7 @@ class _FakeSpinner:
         self.on_log_line = on_log_line
         _FakeSpinner.last_on_log_line = on_log_line
 
-    def run(self, cmd, output_callback=None, cancel_event=None):
+    def run(self, cmd, output_callback=None, cancel_event=None, inspect_log=None):
         Path(self.log_path).parent.mkdir(parents=True, exist_ok=True)
         text = self.__class__.stderr or ""
         Path(self.log_path).write_text(text)

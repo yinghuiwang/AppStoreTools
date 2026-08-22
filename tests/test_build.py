@@ -35,7 +35,7 @@ class _FakeSpinner:
         self.log_path = log_path
         self.on_log_line = on_log_line
 
-    def run(self, cmd, output_callback=None, cancel_event=None):
+    def run(self, cmd, output_callback=None, cancel_event=None, inspect_log=None):
         # Write a minimal log file so helpers that read it don't error
         Path(self.log_path).parent.mkdir(parents=True, exist_ok=True)
         Path(self.log_path).write_text(self.__class__.stderr or "")
@@ -250,9 +250,9 @@ def test_run_xcodebuild_archive_calls_correct_command(tmp_path, monkeypatch):
     captured_cmd = {}
 
     class _TrackingSpinner(_FakeSpinner):
-        def run(self, cmd, output_callback=None):
+        def run(self, cmd, output_callback=None, **kwargs):
             captured_cmd["cmd"] = cmd
-            return super().run(cmd, output_callback=output_callback)
+            return super().run(cmd, output_callback=output_callback, **kwargs)
 
     _TrackingSpinner.returncode = 0
     _TrackingSpinner.stderr = ""
@@ -306,9 +306,9 @@ def test_run_xcodebuild_export_calls_correct_command(tmp_path, monkeypatch):
     captured_cmd = {}
 
     class _TrackingSpinner(_FakeSpinner):
-        def run(self, cmd, output_callback=None):
+        def run(self, cmd, output_callback=None, **kwargs):
             captured_cmd["cmd"] = cmd
-            return super().run(cmd, output_callback=output_callback)
+            return super().run(cmd, output_callback=output_callback, **kwargs)
 
     _TrackingSpinner.returncode = 0
     _TrackingSpinner.stderr = ""
@@ -369,9 +369,9 @@ def test_upload_ipa_uses_altool(tmp_path, monkeypatch):
     captured_cmd = {}
 
     class _TrackingSpinner(_FakeSpinner):
-        def run(self, cmd, output_callback=None):
+        def run(self, cmd, output_callback=None, **kwargs):
             captured_cmd["cmd"] = cmd
-            return super().run(cmd, output_callback=output_callback)
+            return super().run(cmd, output_callback=output_callback, **kwargs)
 
     _TrackingSpinner.returncode = 0
     _TrackingSpinner.stderr = ""
@@ -404,9 +404,14 @@ def test_upload_ipa_verbose_streams_altool_output(tmp_path, monkeypatch):
             super().__init__(label, log_path=log_path, verbose=verbose, tty=tty, on_log_line=on_log_line)
             captured["verbose"] = verbose
 
-        def run(self, cmd, output_callback=None, cancel_event=None):
+        def run(self, cmd, output_callback=None, cancel_event=None, inspect_log=None):
             captured["has_output_callback"] = output_callback is not None
-            return super().run(cmd, output_callback=output_callback, cancel_event=cancel_event)
+            return super().run(
+                cmd,
+                output_callback=output_callback,
+                cancel_event=cancel_event,
+                inspect_log=inspect_log,
+            )
 
     _TrackingSpinner.returncode = 0
     _TrackingSpinner.stderr = "Uploading package: 25%"
@@ -443,6 +448,86 @@ def test_upload_ipa_raises_on_failure(tmp_path, monkeypatch):
             key_file="/path/to/key.p8",
             destination="testflight",
         )
+
+    _FakeSpinner.returncode = 0
+    _FakeSpinner.stderr = ""
+
+
+_ALTOOL_UPLOAD_FAILED_LOG = """
+2026-08-22 16:47:31.332 ERROR: [ContentDelivery.Uploader.60000136C5C0]
+=======================================
+UPLOAD FAILED with 1 error
+=======================================
+2026-08-22 16:47:31.332 ERROR: [altool.60000136C5C0] Validation failed (409) Invalid large app icon. The large app icon in the asset catalog in “RenderTide.app” can’t be transparent or contain an alpha channel. For details, visit: https://developer.apple.com/design/human-interface-guidelines/app-icons. (ID: 86fb8bbd-10f4-42d5-94fb-70c61929c91b)
+Failed to upload package.
+"""
+
+
+def test_altool_upload_error_extracts_validation_message():
+    from asc.commands.build import altool_upload_error
+
+    err = altool_upload_error(_ALTOOL_UPLOAD_FAILED_LOG)
+    assert err is not None
+    assert "Invalid large app icon" in err
+    assert "alpha channel" in err
+
+
+def test_altool_upload_error_ignores_successful_log():
+    from asc.commands.build import altool_upload_error
+
+    assert altool_upload_error("No errors uploading 'MyApp.ipa'.\n") is None
+    assert altool_upload_error("UPLOAD SUCCEEDED\n") is None
+
+
+def test_upload_ipa_raises_when_altool_exits_zero_but_log_says_failed(tmp_path, monkeypatch):
+    """altool can exit 0 after writing UPLOAD FAILED; treat the log as the source of truth."""
+    from asc.commands.build import upload_ipa
+
+    ipa = tmp_path / "MyApp.ipa"
+    ipa.write_bytes(b"fake")
+
+    _FakeSpinner.returncode = 0
+    _FakeSpinner.stderr = _ALTOOL_UPLOAD_FAILED_LOG
+    monkeypatch.setattr("asc.commands.build.Spinner", _FakeSpinner)
+
+    with pytest.raises(RuntimeError, match="Invalid large app icon"):
+        upload_ipa(
+            ipa_path=str(ipa),
+            issuer_id="issuer-123",
+            key_id="key-456",
+            key_file="/path/to/key.p8",
+            destination="testflight",
+        )
+
+    _FakeSpinner.returncode = 0
+    _FakeSpinner.stderr = ""
+
+
+def test_deploy_core_does_not_report_success_when_altool_log_failed(
+    tmp_path, monkeypatch, capsys
+):
+    from asc.commands.build import deploy_core
+
+    ipa = tmp_path / "MyApp.ipa"
+    ipa.write_bytes(b"x" * 1024)
+
+    _FakeSpinner.returncode = 0
+    _FakeSpinner.stderr = _ALTOOL_UPLOAD_FAILED_LOG
+    monkeypatch.setattr("asc.commands.build.Spinner", _FakeSpinner)
+
+    with pytest.raises(RuntimeError, match="Invalid large app icon"):
+        deploy_core(
+            ipa_path=str(ipa),
+            issuer_id="issuer-123",
+            key_id="key-456",
+            key_file="/path/to/key.p8",
+            destination="testflight",
+            dry_run=False,
+        )
+
+    captured = capsys.readouterr()
+    assert "上传成功" not in captured.out
+    assert "上传成功" not in captured.err
 
     _FakeSpinner.returncode = 0
     _FakeSpinner.stderr = ""

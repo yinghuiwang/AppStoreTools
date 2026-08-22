@@ -88,6 +88,19 @@ def test_spinner_creates_parent_dir(tmp_path):
     assert log.is_file()
 
 
+def test_spinner_inspect_log_overrides_zero_exit(tmp_path, capsys):
+    log = tmp_path / "out.log"
+    sp = Spinner("Upload", log_path=str(log), verbose=False, tty=False)
+    result = sp.run(
+        [sys.executable, "-c", "print('UPLOAD FAILED with 1 error')"],
+        inspect_log=lambda path: "UPLOAD FAILED" if "UPLOAD FAILED" in path.read_text() else None,
+    )
+    assert result.returncode == 1
+    err = capsys.readouterr().err
+    assert "❌" in err
+    assert "UPLOAD FAILED" in err
+
+
 def test_spinner_tail_limit_on_failure(tmp_path, capsys):
     """Failure tail should not echo more than ~20 lines."""
     log = tmp_path / "out.log"

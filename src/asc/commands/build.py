@@ -46,6 +46,7 @@ _BYTE_PROGRESS_RE = re.compile(
     re.IGNORECASE,
 )
 _PERCENT_PROGRESS_RE = re.compile(r"(?P<percent>\d{1,3})(?:\.\d+)?\s*%")
+_ALTOOL_FAIL_MARKERS = ("UPLOAD FAILED", "Failed to upload package")
 
 
 def _format_bytes(num_bytes: int) -> str:
@@ -564,6 +565,28 @@ def cmd_build(
         typer.echo(f"\n✅ 构建完成: {ipa}")
 
 
+def altool_upload_error(log_text: str) -> str | None:
+    """Return a user-facing error if altool wrote a failed upload, else None.
+
+    ``xcrun altool --upload-app`` can exit 0 after Transporter prints
+    ``UPLOAD FAILED`` / ``Failed to upload package``. Exit code alone is not enough.
+    """
+    if not any(marker in log_text for marker in _ALTOOL_FAIL_MARKERS):
+        return None
+    for line in log_text.splitlines():
+        idx = line.find("Validation failed")
+        if idx >= 0:
+            return line[idx:].strip()
+    return "UPLOAD FAILED"
+
+
+def _altool_log_error(log_path: Path) -> str | None:
+    try:
+        return altool_upload_error(log_path.read_text(errors="replace"))
+    except OSError:
+        return None
+
+
 def upload_ipa(
     ipa_path: str,
     issuer_id: str,
@@ -603,15 +626,21 @@ def upload_ipa(
         on_log_line=on_log_line,
     )
     if cancel_event is None:
-        result = sp.run(cmd, output_callback=progress_reporter.handle_output_line)
+        result = sp.run(
+            cmd,
+            output_callback=progress_reporter.handle_output_line,
+            inspect_log=_altool_log_error,
+        )
     else:
         result = sp.run(
             cmd,
             output_callback=progress_reporter.handle_output_line,
             cancel_event=cancel_event,
+            inspect_log=_altool_log_error,
         )
-    if result.returncode != 0:
-        raise RuntimeError(f"Upload failed (see {log_path})")
+    log_error = _altool_log_error(log_path)
+    if result.returncode != 0 or log_error:
+        raise RuntimeError(log_error or f"Upload failed (see {log_path})")
 
 
 def deploy_core(

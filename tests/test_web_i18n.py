@@ -365,8 +365,6 @@ def test_iap_editor_list_dialog_i18n_keys():
     assert "data/iap_packages.json" in t("iap.json_path_help", lang="en")
     assert "data/iap_packages.json" in t("iap.json_path_meaning", lang="zh")
     assert "data/iap_packages.json" in t("iap.json_path_meaning", lang="en")
-    assert t("iap.open_and_edit", lang="zh") == "打开并去编辑"
-    assert t("iap.open_and_edit", lang="en") == "Open and edit"
     assert t("iap.file_opened", lang="zh") == "文件已打开"
     assert t("iap.file_opened", lang="en") == "File opened"
     assert t("iap.draft_applied", lang="zh") == "草稿已应用"
