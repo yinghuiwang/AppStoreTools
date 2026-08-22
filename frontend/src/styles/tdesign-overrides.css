@@ -94,6 +94,16 @@ html.dark .t-dialog__ctx .t-dialog {
   border: 1px solid var(--border);
 }
 
+html.dark .t-drawer,
+html.dark .t-drawer__content {
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+html.dark .t-drawer__header {
+  border-bottom-color: transparent;
+}
+
 html.dark .t-input,
 html.dark .t-textarea__inner {
   background-color: var(--raised);

@@ -219,8 +219,10 @@ def test_profiles_tab_uses_full_width_wrapping_cards() -> None:
     assert "profiles-page" in src
     assert "max-width: none" in src
     assert "<t-dialog" in src
+    assert "<t-drawer" not in src
     assert src.find("profiles-page") < src.find("<t-dialog")
-    assert "dialog-form" in src
+    assert 'class="profile-panel"' in src
+    assert 'class="profile-form"' in src
     assert "importCandidates" in src
     assert "profiles.import_hint" in src
     assert "profiles.import_skip" in src
@@ -229,6 +231,71 @@ def test_profiles_tab_uses_full_width_wrapping_cards() -> None:
     assert 'csv: "data/appstore_info.csv"' not in src
     assert 'screenshots: "data/screenshots"' not in src
     assert 'v-if="editing"' in src
+    toolbar = src[src.find('class="toolbar"') : src.find("<PageLoading")]
+    assert 't("profiles.add")' in toolbar
+    assert "profiles.import_confirm" not in toolbar
+    assert "profiles.create" not in toolbar
+    assert "openAdd" in toolbar
+    panel = src[src.find("<t-dialog") :]
+    assert ':header="dialogTitle"' in panel
+    assert ':footer="false"' in panel
+    assert "<template #header>" not in panel
+    assert "<template #footer>" not in panel
+    assert 'placement="center"' in panel
+    assert 'width="480px"' in panel
+    assert "dialog-top-actions" not in src
+    top = panel[panel.find('class="profile-panel"') : panel.find('class="profile-form"')]
+    assert 'class="import-card"' in top
+    assert "profiles.import_hint" in top
+    assert 't("profiles.import_confirm")' in top
+    assert top.find('class="import-card"') < top.find('t("profiles.import_confirm")')
+    assert top.find('t("profiles.import_confirm")') < top.find('t("profiles.name")')
+    assert top.find('t("profiles.import_confirm")') < top.find('class="profile-import-footer"')
+    form = panel[panel.find('class="profile-form"') :]
+    assert 't("profiles.create")' in form
+    assert 't("common.save")' in form
+    assert 't("common.cancel")' in form
+    assert "profiles.import_confirm" not in form
+    assert form.find('t("profiles.name")') < form.find('class="profile-form-actions"')
+    assert form.find('t("profiles.p8")') < form.find('t("profiles.app_id")')
+    assert form.find('t("profiles.app_id")') < form.find('class="profile-form-actions"')
+    assert form.find('t("profiles.create")') > form.find('class="profile-form-actions"')
+    assert "profiles.csv_optional" in form
+    assert form.find('v-if="editing"') < form.find("profiles.csv_optional")
+
+
+def test_topbar_new_profile_opens_add_dialog() -> None:
+    """Topbar + New App Profile must open the same centered add dialog as Profiles."""
+    topbar = (FRONTEND / "components" / "AppTopbar.vue").read_text(encoding="utf-8")
+    profiles = (FRONTEND / "views" / "system" / "ProfilesTab.vue").read_text(encoding="utf-8")
+    composable = (FRONTEND / "composables" / "useAddProfile.ts").read_text(encoding="utf-8")
+
+    assert 'class="new-profile"' in topbar
+    assert 'href="/profiles?new=1"' in topbar
+    assert 'to="/profiles"' not in topbar
+    assert "useAddProfile" in topbar
+    assert "requestOpen" in topbar
+    assert "onNewProfile" in topbar
+    assert 'route.path === "/profiles"' in topbar
+    assert "event.preventDefault()" in topbar
+    assert 'query: { new: "1" }' in topbar
+    assert "router.push" in topbar
+
+    assert "pending" in composable
+    assert "requestOpen" in composable
+    assert "pending.value = true" in composable
+
+    assert "useAddProfile" in profiles
+    assert "consumeOpenRequest" in profiles
+    assert "queryWantsNew" in profiles
+    assert "route.query.new" in profiles
+    assert "pending.value" in profiles
+    assert "await openAdd()" in profiles
+    assert "onActivated" in profiles
+    assert 'path !== "/profiles"' in profiles or 'path === "/profiles"' in profiles
+    assert "<t-dialog" in profiles
+    assert 'placement="center"' in profiles
+    assert "<t-drawer" not in profiles
 
 
 def test_retry_paths_map_legacy_system_tabs() -> None:

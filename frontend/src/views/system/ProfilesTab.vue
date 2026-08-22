@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onActivated, onMounted, reactive, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import { useRoute, useRouter } from "vue-router";
 import { MessagePlugin } from "tdesign-vue-next";
 import { httpJson } from "@/api/http";
 import ExampleHelp from "@/components/ExampleHelp.vue";
 import PageLoading from "@/components/PageLoading.vue";
+import { useAddProfile } from "@/composables/useAddProfile";
 import { useBrowse } from "@/composables/useBrowse";
 import { rememberFormPath } from "@/composables/useFormPaths";
 import { useProfile } from "@/composables/useProfile";
@@ -30,14 +32,18 @@ type ImportCandidate = {
 };
 
 const { t } = useI18n();
+const route = useRoute();
+const router = useRouter();
 const browse = useBrowse();
 const { refresh } = useProfile();
+const { pending } = useAddProfile();
 const profiles = ref<string[]>([]);
 const details = ref<Record<string, Detail>>({});
 const defaultName = ref("");
 const canCreate = ref(true);
 const dialog = ref(false);
 const importOpen = ref(false);
+const addOpening = ref(false);
 const importBusy = ref(false);
 const importError = ref("");
 const importCandidates = ref<ImportCandidate[]>([]);
@@ -47,6 +53,20 @@ const loading = ref(true);
 const loaded = ref(false);
 const editing = ref("");
 const keyFile = ref<File | null>(null);
+const showIssuer = ref(false);
+const showKeyId = ref(false);
+const formError = ref("");
+const dialogOpen = computed({
+  get: () => dialog.value || importOpen.value,
+  set: (visible: boolean) => {
+    if (!visible) closeDialog();
+  },
+});
+const dialogTitle = computed(() => {
+  if (editing.value) return t("profiles.edit_title");
+  if (importOpen.value) return t("profiles.import_title");
+  return t("profiles.add_title");
+});
 const form = reactive({
   name: "",
   issuer_id: "",
@@ -87,14 +107,82 @@ async function load() {
   }
 }
 
-function openCreate() {
+function closeDialog() {
+  dialog.value = false;
+  importOpen.value = false;
+  importBusy.value = false;
+  formError.value = "";
+  importError.value = "";
+}
+
+function resetCreateForm() {
   editing.value = "";
   Object.assign(form, {
     name: "", issuer_id: "", key_id: "", app_id: "",
     csv: "", screenshots: "",
   });
   keyFile.value = null;
+  showIssuer.value = false;
+  showKeyId.value = false;
+  formError.value = "";
+}
+
+function openCreate() {
+  resetCreateForm();
   dialog.value = true;
+}
+
+async function openAdd() {
+  if (!canCreate.value || addOpening.value) return;
+  importError.value = "";
+  addOpening.value = true;
+  try {
+    const found = await httpJson<{ candidates: ImportCandidate[] }>("/api/profiles/discover-local");
+    const candidates = found.candidates || [];
+    if (candidates.length) {
+      importCandidates.value = candidates;
+      importName.value = candidates[0].suggested_name || "";
+      importSetDefault.value = true;
+      importOpen.value = true;
+      return;
+    }
+  } catch {
+    // Fall through to the manual create dialog.
+  } finally {
+    addOpening.value = false;
+  }
+  openCreate();
+}
+
+function queryWantsNew(): boolean {
+  const raw = route.query.new;
+  const value = String(Array.isArray(raw) ? raw[0] : raw || "");
+  return value === "1" || value === "true";
+}
+
+function stripNewQuery() {
+  if (!queryWantsNew() || route.path !== "/profiles") return;
+  const { new: _new, ...rest } = route.query;
+  void router.replace({ path: "/profiles", query: rest });
+}
+
+const consumingOpen = ref(false);
+
+async function consumeOpenRequest() {
+  const fromQuery = queryWantsNew();
+  const fromPending = pending.value;
+  if (!fromQuery && !fromPending) return;
+  if (consumingOpen.value) return;
+  consumingOpen.value = true;
+  pending.value = false;
+  try {
+    stripNewQuery();
+    if (dialog.value || importOpen.value || addOpening.value) return;
+    if (!loaded.value) await load();
+    await openAdd();
+  } finally {
+    consumingOpen.value = false;
+  }
 }
 
 function openEdit(name: string) {
@@ -105,6 +193,10 @@ function openEdit(name: string) {
     csv: d.csv || "", screenshots: d.screenshots || "",
   });
   keyFile.value = null;
+  showIssuer.value = false;
+  showKeyId.value = false;
+  formError.value = "";
+  importOpen.value = false;
   dialog.value = true;
 }
 
@@ -119,6 +211,7 @@ async function pickShots() {
 }
 
 async function save() {
+  formError.value = "";
   const body = new FormData();
   body.set("name", form.name);
   body.set("issuer_id", form.issuer_id);
@@ -131,16 +224,22 @@ async function save() {
     rememberFormPath("profile.screenshots", form.screenshots);
   }
   if (keyFile.value) body.set("key_file", keyFile.value);
-  if (editing.value) {
-    await httpJson(`/api/profiles/${encodeURIComponent(editing.value)}`, { method: "PUT", body });
-  } else {
-    if (!keyFile.value) {
-      MessagePlugin.error("key_file");
-      return;
+  try {
+    if (editing.value) {
+      await httpJson(`/api/profiles/${encodeURIComponent(editing.value)}`, { method: "PUT", body });
+    } else {
+      if (!keyFile.value) {
+        formError.value = "key_file";
+        MessagePlugin.error("key_file");
+        return;
+      }
+      await httpJson("/api/profiles", { method: "POST", body });
     }
-    await httpJson("/api/profiles", { method: "POST", body });
+  } catch {
+    formError.value = t("profiles.save_failed");
+    return;
   }
-  dialog.value = false;
+  closeDialog();
   await load();
   await refresh();
 }
@@ -156,23 +255,10 @@ async function setDefault(name: string) {
   await load();
 }
 
-async function importLocal() {
-  importError.value = "";
-  const found = await httpJson<{ candidates: ImportCandidate[] }>("/api/profiles/discover-local");
-  const candidates = found.candidates || [];
-  if (!candidates.length) {
-    openCreate();
-    return;
-  }
-  importCandidates.value = candidates;
-  importName.value = candidates[0].suggested_name || "";
-  importSetDefault.value = true;
-  importOpen.value = true;
-}
-
 function skipImport() {
+  resetCreateForm();
+  dialog.value = true;
   importOpen.value = false;
-  openCreate();
 }
 
 async function importCandidate(candidate: ImportCandidate) {
@@ -188,7 +274,7 @@ async function importCandidate(candidate: ImportCandidate) {
         set_default: importSetDefault.value,
       }),
     });
-    importOpen.value = false;
+    closeDialog();
     await load();
     await refresh();
   } catch {
@@ -198,15 +284,37 @@ async function importCandidate(candidate: ImportCandidate) {
   }
 }
 
-onMounted(() => { void load(); });
+watch(pending, (value) => {
+  if (value) void consumeOpenRequest();
+});
+watch(() => route.query.new, () => {
+  void consumeOpenRequest();
+});
+
+const didMount = ref(false);
+onMounted(() => {
+  void load().then(() => {
+    didMount.value = true;
+    return consumeOpenRequest();
+  });
+});
+onActivated(() => {
+  if (!didMount.value) return;
+  void consumeOpenRequest();
+});
 </script>
 
 <template>
   <div class="page-stack profiles-page">
     <div class="card">
       <div class="toolbar">
-        <t-button theme="primary" :disabled="!canCreate" :title="canCreate ? t('profiles.add_title') : t('profiles.cannot_create')" @click="openCreate">{{ t("profiles.add") }}</t-button>
-        <t-button :disabled="!canCreate" @click="importLocal">{{ t("profiles.import_confirm") }}</t-button>
+        <t-button
+          theme="primary"
+          :disabled="!canCreate"
+          :loading="addOpening"
+          :title="canCreate ? t('profiles.add_title') : t('profiles.cannot_create')"
+          @click="openAdd"
+        >{{ t("profiles.add") }}</t-button>
       </div>
       <PageLoading v-if="loading && !loaded" size="page" />
       <t-empty v-else-if="!rows.length" :description="t('profiles.empty')">
@@ -242,103 +350,204 @@ onMounted(() => { void load(); });
       </div>
     </div>
   </div>
-  <t-dialog v-model:visible="dialog" :header="editing ? t('common.edit') : t('profiles.create')" width="520px" placement="center">
-    <div class="dialog-form">
-      <label class="field"><span>{{ t("profiles.name") }}</span><t-input v-model="form.name" /></label>
-      <label class="field"><span>Issuer ID</span><t-input v-model="form.issuer_id" /></label>
-      <label class="field"><span>Key ID</span><t-input v-model="form.key_id" /></label>
-      <label class="field"><span>App ID</span><t-input v-model="form.app_id" /></label>
-      <div v-if="editing" class="field">
-        <ExampleHelp kind="csv" :label="t('profiles.csv_optional')" />
-        <div class="field-row">
-          <t-input v-model="form.csv" />
-          <t-button @click="pickCsv">{{ t("filebrowser.browse") }}</t-button>
+  <t-dialog
+    v-model:visible="dialogOpen"
+    :header="dialogTitle"
+    :footer="false"
+    width="480px"
+    placement="center"
+    attach="body"
+    :close-on-overlay-click="true"
+    class="profile-dialog"
+  >
+    <div class="profile-panel">
+      <div v-if="importOpen && !editing" class="profile-import">
+        <p class="import-hint">{{ t("profiles.import_hint") }}</p>
+        <article v-for="item in importCandidates" :key="item.env_file_path || item.suggested_name" class="import-card">
+          <div class="import-card-actions">
+            <t-button
+              theme="primary"
+              :disabled="!item.key_file_exists || importBusy"
+              :loading="importBusy"
+              @click="importCandidate(item)"
+            >{{ importBusy ? t("profiles.importing") : t("profiles.import_confirm") }}</t-button>
+          </div>
+          <header class="import-head">
+            <span class="name mono">{{ item.suggested_name }}</span>
+            <span class="badge">{{ t("profiles.import_local") }}</span>
+          </header>
+          <dl class="import-meta">
+            <div class="meta-item">
+              <dt>App ID</dt>
+              <dd class="mono">{{ item.app_id || "—" }}</dd>
+            </div>
+            <div class="meta-item">
+              <dt>{{ t("profiles.import_project") }}</dt>
+              <dd class="mono">{{ item.project_root || "—" }}</dd>
+            </div>
+            <div class="meta-item">
+              <dt>Key ID</dt>
+              <dd class="mono">{{ item.key_id || "—" }}</dd>
+            </div>
+            <div class="meta-item">
+              <dt>{{ t("profiles.key_file") }}</dt>
+              <dd class="mono" :class="{ missing: !item.key_file_exists }">{{ item.key_file || "—" }}</dd>
+            </div>
+          </dl>
+          <t-alert v-if="!item.key_file_exists" theme="error" :title="t('profiles.import_missing_key')" />
+          <label class="field">
+            <span>{{ t("profiles.name") }}</span>
+            <t-input v-model="importName" :placeholder="item.suggested_name" />
+          </label>
+          <t-checkbox v-model="importSetDefault">
+            {{ t("profiles.import_set_default") }}
+          </t-checkbox>
+        </article>
+        <t-alert v-if="importError" theme="error" :title="importError" />
+        <div class="profile-import-footer">
+          <t-button variant="outline" @click="skipImport">{{ t("profiles.import_skip") }}</t-button>
+          <t-button variant="outline" @click="closeDialog">{{ t("common.cancel") }}</t-button>
         </div>
       </div>
-      <div v-if="editing" class="field">
-        <ExampleHelp kind="shots" :label="t('profiles.shots_optional')" />
-        <div class="field-row">
-          <t-input v-model="form.screenshots" />
-          <t-button @click="pickShots">{{ t("filebrowser.browse") }}</t-button>
-        </div>
-      </div>
-      <label class="field">
-        <span>.p8</span>
-        <input type="file" accept=".p8" @change="keyFile = ($event.target as HTMLInputElement).files?.[0] || null" />
-      </label>
-    </div>
-    <template #footer>
-      <t-button @click="dialog = false">{{ t("common.cancel") }}</t-button>
-      <t-button theme="primary" @click="save">{{ t("common.save") }}</t-button>
-    </template>
-  </t-dialog>
-  <t-dialog v-model:visible="importOpen" :header="t('profiles.import_title')" width="520px" placement="center">
-    <div class="dialog-form">
-      <p class="import-hint">{{ t("profiles.import_hint") }}</p>
-      <article v-for="item in importCandidates" :key="item.env_file_path || item.suggested_name" class="import-card">
-        <header class="import-head">
-          <span class="name mono">{{ item.suggested_name }}</span>
-          <span class="badge">{{ t("profiles.import_local") }}</span>
-        </header>
-        <dl class="profile-meta">
-          <div class="meta-item">
-            <dt>App ID</dt>
-            <dd class="mono">{{ item.app_id || "—" }}</dd>
-          </div>
-          <div class="meta-item">
-            <dt>{{ t("profiles.import_project") }}</dt>
-            <dd class="mono">{{ item.project_root || "—" }}</dd>
-          </div>
-          <div class="meta-item">
-            <dt>Key ID</dt>
-            <dd class="mono">{{ item.key_id || "—" }}</dd>
-          </div>
-          <div class="meta-item">
-            <dt>{{ t("profiles.key_file") }}</dt>
-            <dd class="mono" :class="{ missing: !item.key_file_exists }">{{ item.key_file || "—" }}</dd>
-          </div>
-        </dl>
-        <t-alert v-if="!item.key_file_exists" theme="error" :title="t('profiles.import_missing_key')" />
+
+      <form v-else class="profile-form" @submit.prevent="save">
         <label class="field">
           <span>{{ t("profiles.name") }}</span>
-          <t-input v-model="importName" :placeholder="item.suggested_name" />
+          <t-input v-model="form.name" placeholder="myapp" />
         </label>
-        <t-checkbox v-model="importSetDefault">
-          {{ t("profiles.import_set_default") }}
-        </t-checkbox>
-        <t-button
-          theme="primary"
-          :disabled="!item.key_file_exists || importBusy"
-          :loading="importBusy"
-          @click="importCandidate(item)"
-        >{{ importBusy ? t("profiles.importing") : t("profiles.import_confirm") }}</t-button>
-      </article>
-      <t-alert v-if="importError" theme="error" :title="importError" />
+        <label class="field">
+          <span>Issuer ID</span>
+          <t-input v-model="form.issuer_id" :type="showIssuer ? 'text' : 'password'">
+            <template #suffix>
+              <button type="button" class="reveal" @click="showIssuer = !showIssuer">
+                {{ showIssuer ? t("profiles.hide") : t("profiles.show") }}
+              </button>
+            </template>
+          </t-input>
+        </label>
+        <label class="field">
+          <span>Key ID</span>
+          <t-input v-model="form.key_id" :type="showKeyId ? 'text' : 'password'">
+            <template #suffix>
+              <button type="button" class="reveal" @click="showKeyId = !showKeyId">
+                {{ showKeyId ? t("profiles.hide") : t("profiles.show") }}
+              </button>
+            </template>
+          </t-input>
+        </label>
+        <label class="field">
+          <span>{{ t("profiles.p8") }}</span>
+          <input type="file" accept=".p8" @change="keyFile = ($event.target as HTMLInputElement).files?.[0] || null" />
+          <p v-if="editing" class="keep-key">{{ t("profiles.keep_key") }}</p>
+        </label>
+        <label class="field">
+          <span>{{ t("profiles.app_id") }}</span>
+          <t-input v-model="form.app_id" placeholder="1234567890" />
+        </label>
+        <div v-if="editing" class="field">
+          <ExampleHelp kind="csv" :label="t('profiles.csv_optional')" />
+          <div class="field-row">
+            <t-input v-model="form.csv" />
+            <t-button @click="pickCsv">{{ t("filebrowser.browse") }}</t-button>
+          </div>
+        </div>
+        <div v-if="editing" class="field">
+          <ExampleHelp kind="shots" :label="t('profiles.shots_optional')" />
+          <div class="field-row">
+            <t-input v-model="form.screenshots" />
+            <t-button @click="pickShots">{{ t("filebrowser.browse") }}</t-button>
+          </div>
+        </div>
+        <t-alert v-if="formError" theme="error" :title="formError" />
+        <div class="profile-form-actions">
+          <t-button theme="primary" type="submit">{{ editing ? t("common.save") : t("profiles.create") }}</t-button>
+          <t-button variant="outline" type="button" @click="closeDialog">{{ t("common.cancel") }}</t-button>
+        </div>
+      </form>
     </div>
-    <template #footer>
-      <t-button @click="skipImport">{{ t("profiles.import_skip") }}</t-button>
-      <t-button @click="importOpen = false">{{ t("common.cancel") }}</t-button>
-    </template>
   </t-dialog>
 </template>
 
 <style scoped>
-.dialog-form {
+.profile-dialog :deep(.t-dialog__header) {
+  border-bottom: 0;
+  padding: 20px 24px 8px;
+}
+.profile-dialog :deep(.t-dialog__body) {
+  padding: 8px 24px 24px;
+}
+.profile-panel,
+.profile-import,
+.profile-form {
   display: flex;
   flex-direction: column;
+  gap: 20px;
+}
+.profile-form .field > span {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+.reveal {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-faint);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 500;
+  cursor: pointer;
+}
+.reveal:hover {
+  color: var(--text-muted);
+}
+.keep-key {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.profile-form-actions,
+.profile-import-footer {
+  display: flex;
+  flex-wrap: wrap;
   gap: 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.profile-form-actions :deep(.t-button + .t-button),
+.profile-import-footer :deep(.t-button + .t-button),
+.import-card-actions :deep(.t-button + .t-button) {
+  margin-left: 0;
 }
 .import-hint { margin: 0; color: var(--text-muted); font-size: 13px; }
 .import-card {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 14px 16px;
+  padding: 16px;
 }
-.import-head { display: flex; align-items: center; gap: 8px; }
+.import-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.import-meta {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  margin: 0;
+}
+.import-card-actions {
+  display: flex;
+  gap: 12px;
+}
 .missing { color: var(--err); }
 .profiles-page {
   align-self: stretch;

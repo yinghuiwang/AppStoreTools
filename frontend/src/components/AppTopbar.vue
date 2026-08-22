@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { MessagePlugin } from "tdesign-vue-next";
 import { httpForm } from "@/api/http";
+import { useAddProfile } from "@/composables/useAddProfile";
 import { useProfile } from "@/composables/useProfile";
 
 const { t, locale } = useI18n();
 const route = useRoute();
+const router = useRouter();
 const { snapshot, switchProfile } = useProfile();
+const { requestOpen } = useAddProfile();
 
 const TITLE_KEYS: Array<{ test: (path: string) => boolean; key: string }> = [
   { test: (p) => p === "/", key: "nav.dashboard" },
@@ -55,6 +58,16 @@ async function setLang(code: unknown) {
     MessagePlugin.error(t("lang.switch_failed"));
   }
 }
+
+function onNewProfile(event: MouseEvent) {
+  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) {
+    return;
+  }
+  event.preventDefault();
+  requestOpen();
+  if (route.path === "/profiles") return;
+  void router.push({ path: "/profiles", query: { new: "1" } });
+}
 </script>
 
 <template>
@@ -64,9 +77,14 @@ async function setLang(code: unknown) {
       <span class="profile-name mono">{{ currentName || t("nav.select_app") }}</span>
     </div>
     <div class="topbar-right">
-      <router-link v-if="!hasMachine" class="new-profile" to="/profiles">
+      <a
+        v-if="!hasMachine"
+        class="new-profile"
+        href="/profiles?new=1"
+        @click="onNewProfile"
+      >
         {{ t("nav.new_profile") }}
-      </router-link>
+      </a>
       <t-select
         class="profile-select"
         :value="currentName"
