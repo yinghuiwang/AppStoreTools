@@ -639,6 +639,8 @@
   "iap.col_price": "价格",
   "iap.col_locales": "语言数",
   "iap.col_status": "状态",
+  "iap.col_group_level": "groupLevel",
+  "iap.col_shot": "截图",
   "iap.dialog_ok": "确定",
   "iap.dialog_add_consumable": "新增消耗型",
   "iap.dialog_add_non_consumable": "新增非消耗型",

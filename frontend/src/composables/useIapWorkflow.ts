@@ -73,6 +73,34 @@ export type PlanItem = {
   missingScreenshot?: boolean;
 };
 
+export function isAbsoluteFsPath(path: string): boolean {
+  const value = (path || "").trim();
+  return value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value);
+}
+
+export function parentDir(path: string): string {
+  const normalized = (path || "").replace(/[/\\]+$/, "");
+  const idx = Math.max(normalized.lastIndexOf("/"), normalized.lastIndexOf("\\"));
+  return idx >= 0 ? normalized.slice(0, idx) : ".";
+}
+
+export function resolveReviewShotPath(shot: string, iapFile: string): string {
+  const value = (shot || "").trim();
+  if (!value) return "";
+  if (isAbsoluteFsPath(value)) return value;
+  const base = parentDir((iapFile || "").trim() || ".");
+  const rel = value.replace(/^\.[/\\]/, "");
+  const sep = base.includes("\\") && !base.includes("/") ? "\\" : "/";
+  return `${base.replace(/[/\\]+$/, "")}${sep}${rel}`;
+}
+
+export function reviewShotThumbUrl(shot: string, iapFile: string): string {
+  const resolved = resolveReviewShotPath(shot, iapFile);
+  if (!resolved) return "";
+  const root = parentDir(resolved) || ".";
+  return `/api/listing/thumb?path=${encodeURIComponent(resolved)}&root=${encodeURIComponent(root)}`;
+}
+
 function emptySnapshot(): IapSnapshot {
   return { items: [], subscriptionGroups: [] };
 }

@@ -382,6 +382,10 @@ def test_iap_editor_list_dialog_i18n_keys():
     assert t("iap.dialog_ok", lang="en") == "OK"
     assert t("iap.section_items", lang="zh") == "一次性 IAP"
     assert t("iap.col_status", lang="en") == "Status"
+    assert t("iap.col_group_level", lang="zh") == "groupLevel"
+    assert t("iap.col_group_level", lang="en") == "groupLevel"
+    assert t("iap.col_shot", lang="zh") == "截图"
+    assert t("iap.col_shot", lang="en") == "Shot"
     assert t("iap.confirm_delete", lang="zh").startswith("确定删除")
     assert t("iap.status.missing-shot", lang="zh") == "缺审核截图"
     assert t("iap.status.missing-shot", lang="en") == "Missing review screenshot"

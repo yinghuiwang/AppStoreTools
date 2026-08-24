@@ -639,6 +639,8 @@
   "iap.col_price": "Price",
   "iap.col_locales": "Locales",
   "iap.col_status": "Status",
+  "iap.col_group_level": "groupLevel",
+  "iap.col_shot": "Shot",
   "iap.dialog_ok": "OK",
   "iap.dialog_add_consumable": "Add consumable",
   "iap.dialog_add_non_consumable": "Add non-consumable",

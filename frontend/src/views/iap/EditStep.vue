@@ -18,6 +18,7 @@ import {
 } from "@/composables/useIapWorkflow";
 import { useTaskLog } from "@/composables/useTaskLog";
 import IapEditorDialog from "./IapEditorDialog.vue";
+import IapReviewThumb from "./IapReviewThumb.vue";
 
 const { t } = useI18n();
 const browse = useBrowse();
@@ -512,6 +513,10 @@ function typeLabel(item: IapItem): string {
   return t("iap.kind_consumable");
 }
 
+function groupLevelLabel(level?: number | null): string {
+  return typeof level === "number" && Number.isFinite(level) && level >= 1 ? String(level) : "—";
+}
+
 function currentPlan(pid: string): PlanItem | undefined {
   return planById.value[pid];
 }
@@ -598,19 +603,21 @@ function currentPlan(pid: string): PlanItem | undefined {
         </div>
       </header>
       <div class="list-table">
-        <div class="list-head">
+        <div class="list-head list-head-sub">
           <span>{{ t("iap.col_product") }}</span>
           <span>{{ t("iap.col_name") }}</span>
           <span>{{ t("iap.period") }}</span>
+          <span>{{ t("iap.col_group_level") }}</span>
           <span>{{ t("iap.col_price") }}</span>
           <span>{{ t("iap.col_locales") }}</span>
+          <span>{{ t("iap.col_shot") }}</span>
           <span>{{ t("iap.col_status") }}</span>
           <span />
         </div>
         <div
           v-for="entry in row.subs"
           :key="`sub:${row.gIndex}:${entry.sIndex}`"
-          class="list-row"
+          class="list-row list-row-sub"
           role="button"
           tabindex="0"
           @click="editSub(row.gIndex, entry.sIndex)"
@@ -619,8 +626,12 @@ function currentPlan(pid: string): PlanItem | undefined {
           <span class="mono">{{ entry.sub.productId }}</span>
           <span>{{ entry.sub.name || "—" }}</span>
           <span>{{ entry.sub.subscriptionPeriod || "—" }}</span>
+          <span>{{ groupLevelLabel(entry.sub.groupLevel) }}</span>
           <span>{{ priceLabel(entry.sub.price) }}</span>
           <span>{{ locCount(entry.sub.localizations) }}</span>
+          <span class="shot-cell" @click.stop>
+            <IapReviewThumb :path="shotPath(entry.sub.review?.screenshot)" />
+          </span>
           <span class="badges">
             <span class="badge" :data-status="planStatus(entry.sub.productId)">
               {{ t(`iap.status.${planStatus(entry.sub.productId)}`) }}
@@ -652,19 +663,20 @@ function currentPlan(pid: string): PlanItem | undefined {
         <h3>{{ t("iap.section_items") }}</h3>
       </header>
       <div class="list-table">
-        <div class="list-head">
+        <div class="list-head list-head-item">
           <span>{{ t("iap.col_product") }}</span>
           <span>{{ t("iap.col_name") }}</span>
           <span>{{ t("iap.type") }}</span>
           <span>{{ t("iap.col_price") }}</span>
           <span>{{ t("iap.col_locales") }}</span>
+          <span>{{ t("iap.col_shot") }}</span>
           <span>{{ t("iap.col_status") }}</span>
           <span />
         </div>
         <div
           v-for="entry in visibleItems"
           :key="`item:${entry.index}`"
-          class="list-row"
+          class="list-row list-row-item"
           role="button"
           tabindex="0"
           @click="editItem(entry.index)"
@@ -675,6 +687,9 @@ function currentPlan(pid: string): PlanItem | undefined {
           <span>{{ typeLabel(entry.item) }}</span>
           <span>{{ priceLabel(entry.item.price) }}</span>
           <span>{{ locCount(entry.item.localizations) }}</span>
+          <span class="shot-cell" @click.stop>
+            <IapReviewThumb :path="shotPath(entry.item.review?.screenshot)" />
+          </span>
           <span class="badges">
             <span class="badge" :data-status="planStatus(entry.item.productId)">
               {{ t(`iap.status.${planStatus(entry.item.productId)}`) }}
@@ -803,11 +818,20 @@ function currentPlan(pid: string): PlanItem | undefined {
 .list-table { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .list-head, .list-row {
   display: grid;
-  grid-template-columns: minmax(140px, 1.4fr) minmax(100px, 1fr) minmax(80px, 0.8fr) minmax(80px, 0.7fr) 72px minmax(90px, 0.8fr) minmax(180px, auto);
   gap: 8px;
   align-items: center;
   padding: 8px 10px;
   text-align: left;
+}
+.list-head-sub, .list-row-sub {
+  grid-template-columns: minmax(140px, 1.4fr) minmax(90px, 1fr) minmax(70px, 0.7fr) 72px minmax(70px, 0.6fr) 56px 44px minmax(80px, 0.7fr) minmax(180px, auto);
+}
+.list-head-item, .list-row-item {
+  grid-template-columns: minmax(140px, 1.4fr) minmax(90px, 1fr) minmax(70px, 0.7fr) minmax(70px, 0.6fr) 56px 44px minmax(80px, 0.7fr) minmax(180px, auto);
+}
+.shot-cell {
+  display: flex;
+  align-items: center;
 }
 .list-head {
   font-size: 11px;

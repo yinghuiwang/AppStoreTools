@@ -16,6 +16,7 @@ import {
 } from "@/composables/useIapWorkflow";
 import { useLocaleCatalog } from "@/composables/useLocaleCatalog";
 import { useRightRail } from "@/composables/useRightRail";
+import IapReviewThumb from "./IapReviewThumb.vue";
 
 const props = defineProps<{
   visible: boolean;
@@ -77,6 +78,12 @@ function shotPath(): string {
   if (item.value) return item.value.review?.screenshot || "";
   if (sub.value) return sub.value.review?.screenshot || "";
   return "";
+}
+
+function shotName(): string {
+  const path = shotPath().trim();
+  if (!path) return "";
+  return path.split(/[/\\]/).pop() || path;
 }
 
 function sourceLocale(): { locale: string; name: string; description: string } | null {
@@ -360,8 +367,9 @@ function onVisible(value: boolean) {
         </section>
         <section class="mod">
           <h3 class="mod-title">{{ t("iap.review_shot") }}</h3>
-          <div class="field-row">
-            <t-input :value="shotPath()" readonly />
+          <div class="field-row shot-field">
+            <IapReviewThumb :path="shotPath()" size="field" />
+            <span class="shot-name" :title="shotPath() || undefined">{{ shotName() || t("iap.status.missing-shot") }}</span>
             <t-button size="small" @click="pickShot">{{ t("filebrowser.browse") }}</t-button>
           </div>
         </section>
@@ -396,8 +404,9 @@ function onVisible(value: boolean) {
         </section>
         <section class="mod">
           <h3 class="mod-title">{{ t("iap.review_shot") }}</h3>
-          <div class="field-row">
-            <t-input :value="shotPath()" readonly />
+          <div class="field-row shot-field">
+            <IapReviewThumb :path="shotPath()" size="field" />
+            <span class="shot-name" :title="shotPath() || undefined">{{ shotName() || t("iap.status.missing-shot") }}</span>
             <t-button size="small" @click="pickShot">{{ t("filebrowser.browse") }}</t-button>
           </div>
         </section>
@@ -530,6 +539,16 @@ function onVisible(value: boolean) {
 }
 .loc-cap .t-button { margin-left: auto; }
 .field-row { display: flex; gap: 8px; align-items: center; }
+.shot-field { align-items: center; }
+.shot-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--text-muted);
+}
 .field { display: flex; flex-direction: column; gap: 6px; flex: 1; }
 .muted { color: var(--text-muted); font-size: 12px; }
 .diff-box {
