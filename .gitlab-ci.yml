@@ -1,0 +1,21 @@
+stages:
+  - test
+
+variables:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+pytest:
+  stage: test
+  image: python:3.12-bookworm
+  script:
+    - pip install -e ".[dev]"
+    - pytest tests/test_project_dependencies.py::test_package_version_matches_cli_version -q
+    - pytest -q -m "not e2e"
+
+frontend:
+  stage: test
+  image: node:20-bookworm
+  script:
+    - cd frontend
+    - npm ci
+    - npm run build

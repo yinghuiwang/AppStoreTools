@@ -201,11 +201,11 @@ def test_apply_draft_conflict_and_pending_success(tmp_path, monkeypatch):
     client = TestClient(create_app())
     shown = client.get(f"/api/agent/plans/{plan_id}").json()
     assert shown["status"] == "draft"
-    assert client.post("/api/agent/apply", json={"plan_id": plan_id, "rerun": False}).status_code == 409
+    assert client.post("/api/agent/apply", json={"plan_id": plan_id, "rerun": False, "confirm": True}).status_code == 409
     empty_id = agents.insert_plan_draft(session["id"], 1, "manual", [], None, ["do it yourself"])
     agents.promote_drafts(session["id"], 1)
-    assert client.post("/api/agent/apply", json={"plan_id": empty_id, "rerun": False}).status_code == 400
-    ok = client.post("/api/agent/apply", json={"plan_id": plan_id, "rerun": False})
+    assert client.post("/api/agent/apply", json={"plan_id": empty_id, "rerun": False, "confirm": True}).status_code == 400
+    ok = client.post("/api/agent/apply", json={"plan_id": plan_id, "rerun": False, "confirm": True})
     assert ok.status_code == 200
     assert "new" in csv_path.read_text(encoding="utf-8")
     store.close()
@@ -247,7 +247,7 @@ def test_concurrent_apply_one_409(tmp_path, monkeypatch):
     codes: list[int] = []
 
     def _post():
-        codes.append(client.post("/api/agent/apply", json={"plan_id": plan_id, "rerun": False}).status_code)
+        codes.append(client.post("/api/agent/apply", json={"plan_id": plan_id, "rerun": False, "confirm": True}).status_code)
 
     t1 = threading.Thread(target=_post)
     t2 = threading.Thread(target=_post)

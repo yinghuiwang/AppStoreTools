@@ -461,6 +461,8 @@ def agent_plan(plan_id: str):
 @router.post("/apply")
 async def agent_apply(request: Request):
     body = await _json_body(request)
+    if not _as_bool(body.get("confirm")):
+        raise HTTPException(status_code=400, detail="confirm is required")
     plan_id = _opt_str(body.get("plan_id"))
     if not plan_id:
         raise HTTPException(status_code=400, detail="plan_id is required")

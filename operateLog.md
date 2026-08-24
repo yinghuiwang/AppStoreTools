@@ -2,6 +2,14 @@
 
 ## 2026-08-24
 
+- 高危操作二次确认：`POST /api/update/run` 与 `POST /api/agent/apply` 必须带 `confirm`，否则 400，不启动更新、不写文件。
+- 更新页三个安装按钮、Agent 计划「应用」改为 `t-popconfirm`；前端请求同时传 `confirm=true`。
+- 新增 GitHub Actions `.github/workflows/ci.yml` 与 GitLab CI：pytest（排除 e2e）、`pyproject`/`__version__` 对齐、`frontend` npm build。
+- 新增 `tests/test_web_confirm.py`；已有 Agent apply 测试补上 `confirm`。
+- 修正 `test_page_modules_grow_and_main_column_scrolls`：预览步语言目录 `.locale-toc` 允许内部滚动，不再误杀 CI。
+- `test_large_screenshot_warns_but_passes` 改为断言 stderr（订阅校验警告走 `print(..., file=sys.stderr)`）。
+- 已重新构建 SPA（`index-CvuqS-Dq.js`）。
+- 已提交并推送 `3d89961` 到 `origin/feat/iap-workflow` 与 `github/feat/iap-workflow`：`fix: stop false upload success and lock down the local Web UI`。`docs/asc-locale-codes.md` 未纳入提交。
 - Web 加固：`/api/listing/thumb`、`listing/iap local/save`、`/api/browse` 禁止读写 `.p8` / `~/.config/asc/keys` 以及家目录与临时目录之外的路径。
 - LLM `base_url` 与 Webhook URL 拒绝 `file://`、链路本地 / 云 metadata（`169.254.169.254`）；发送时再解析一次，解析到禁网段则拒绝。本机 Ollama（`127.0.0.1`）仍可用。
 - `/api/profiles` 与 `/api/guard/status` 对 issuer_id、key_id、指纹、IP 打码；编辑 Profile 留空则保留原值，前端不再把列表里的掩码填回表单。

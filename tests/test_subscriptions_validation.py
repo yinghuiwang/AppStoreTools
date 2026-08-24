@@ -158,5 +158,5 @@ def test_large_screenshot_warns_but_passes(tmp_path, capsys):
         ],
     }
     validate_subscription_config([g])
-    out = capsys.readouterr().out
-    assert "exceeds 5MB" in out
+    captured = capsys.readouterr()
+    assert "exceeds 5MB" in captured.err

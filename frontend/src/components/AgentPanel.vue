@@ -837,7 +837,7 @@ onBeforeUnmount(() => {
             placement="left"
             variant="text"
           >
-            <article class="plan" :data-agent-plan="turn.plan.id">
+            <article class="plan agent-plan-card" :data-agent-plan="turn.plan.id">
               <p class="plan-summary">{{ turn.plan.summary }}</p>
               <div
                 v-for="(mutation, mi) in turn.plan.mutations"
@@ -865,13 +865,15 @@ onBeforeUnmount(() => {
                   />
                   {{ t("agent.rerun_after_apply") }}
                 </label>
-                <button
+                <t-popconfirm
                   v-if="turn.plan.mutations.length"
-                  type="button"
-                  @click="applyPlan(turn.plan)"
+                  :content="t('agent.confirm_apply')"
+                  :confirm-btn="t('agent.confirm_apply_ok')"
+                  :cancel-btn="t('common.cancel')"
+                  @confirm="applyPlan(turn.plan)"
                 >
-                  {{ t("agent.apply") }}
-                </button>
+                  <button type="button">{{ t("agent.apply") }}</button>
+                </t-popconfirm>
                 <button type="button" @click="reject(turn.plan.id)">{{ t("agent.ignore") }}</button>
               </div>
             </article>

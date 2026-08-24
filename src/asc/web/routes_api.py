@@ -2406,8 +2406,11 @@ def update_run(
     version: str = _Form(""),
     branch: str = _Form(""),
     verbose: str = _Form(""),
+    confirm: str = _Form(""),
 ):
-    """Run update."""
+    """Run update after an explicit confirm from the local UI."""
+    if not _as_bool(confirm):
+        raise HTTPException(status_code=400, detail="confirm is required")
     task_id = _start_update_task(
         version=version or None,
         branch=branch or None,

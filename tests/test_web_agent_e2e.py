@@ -220,6 +220,11 @@ def _open_drawer_explain(page: Page, task_id: str) -> None:
     expect(page.locator("#task-log-drawer.is-open")).to_be_visible()
 
 
+def _confirm_apply(page: Page, card) -> None:
+    card.get_by_role("button", name="应用", exact=True).click()
+    page.get_by_role("button", name="确认应用", exact=True).click()
+
+
 def _close_log_overlay(page: Page, how: str) -> None:
     expect(page.locator("#task-log-drawer.is-open")).to_be_visible()
     if how == "x":
@@ -640,7 +645,7 @@ def test_apply_opens_log_overlay_without_rebinding_session(agent_ui: AgentE2E):
     card = page.locator(".agent-plan-card")
     expect(card.get_by_role("button", name="应用", exact=True)).to_be_visible()
     before = page.evaluate("() => window.AscAgentDock.getState()")
-    card.get_by_role("button", name="应用", exact=True).click()
+    _confirm_apply(page, card)
     expect(page.locator("#task-log-drawer.is-open")).to_be_visible()
     after = page.evaluate("() => window.AscAgentDock.getState()")
     assert after["sessionId"] == before["sessionId"]
@@ -713,7 +718,7 @@ def test_apply_does_not_throw_and_opens_logs_on_rerun(agent_ui: AgentE2E):
     card = page.locator(".agent-plan-card")
     expect(card.get_by_role("button", name="应用", exact=True)).to_be_visible()
     with page.expect_response(lambda response: "/api/agent/apply" in response.url) as apply_resp:
-        card.get_by_role("button", name="应用", exact=True).click()
+        _confirm_apply(page, card)
     assert apply_resp.value.ok
     expect(page.locator("#task-log-drawer.is-open")).to_be_visible()
     expect(page.locator("#task-log-panel-logs")).to_be_visible()
@@ -721,6 +726,7 @@ def test_apply_does_not_throw_and_opens_logs_on_rerun(agent_ui: AgentE2E):
     payload = json.loads(agent_ui.spies["apply"][0])
     assert payload.get("plan_id")
     assert payload.get("rerun") is True
+    assert payload.get("confirm") is True
     assert "new" in agent_ui.csv_path.read_text(encoding="utf-8")
     assert agent_ui.page_errors == []
 

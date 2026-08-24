@@ -104,6 +104,7 @@ async function run(version = "", branch = "") {
     version,
     branch,
     verbose: verbose.value ? "true" : "",
+    confirm: "true",
   });
   const { task_id } = await httpForm<{ task_id: string }>("/api/update/run", body);
   rail.openLogs(task_id);
@@ -184,7 +185,15 @@ onMounted(() => {
       <p class="found-label">{{ t("update.found") }}</p>
       <p class="version-num mono">{{ checkResult.detail.latest }}</p>
       <p v-if="snapshot?.is_editable">{{ t("update.editable_latest_blocked") }}</p>
-      <t-button v-else theme="primary" @click="run()">{{ t("update.install_now") }}</t-button>
+      <t-popconfirm
+        v-else
+        :content="t('update.confirm_install')"
+        :confirm-btn="t('update.install_now')"
+        :cancel-btn="t('common.cancel')"
+        @confirm="run()"
+      >
+        <t-button theme="primary">{{ t("update.install_now") }}</t-button>
+      </t-popconfirm>
     </div>
     <div class="card">
       <h2>{{ t("update.advanced") }}</h2>
@@ -202,7 +211,14 @@ onMounted(() => {
           <t-input v-else v-model="selectedVersion" :placeholder="t('update.version_ph')" />
         </label>
         <p v-if="versionError" class="muted">{{ versionError }}</p>
-        <t-button theme="primary" :disabled="versionsLoading" @click="run(selectedVersion, '')">{{ t("update.install_version") }}</t-button>
+        <t-popconfirm
+          :content="t('update.confirm_install_version', { version: selectedVersion || '—' })"
+          :confirm-btn="t('update.install_version')"
+          :cancel-btn="t('common.cancel')"
+          @confirm="run(selectedVersion, '')"
+        >
+          <t-button theme="primary" :disabled="versionsLoading">{{ t("update.install_version") }}</t-button>
+        </t-popconfirm>
       </div>
       <div v-show="advanced === 'branch'" class="form-stack">
         <PageLoading v-if="branchesLoading && !branches.length" size="inline" />
@@ -214,7 +230,14 @@ onMounted(() => {
           <t-input v-else v-model="selectedBranch" :placeholder="t('update.branch_ph')" />
         </label>
         <p v-if="branchError" class="muted">{{ branchError }}</p>
-        <t-button theme="primary" :disabled="branchesLoading" @click="run('', selectedBranch)">{{ t("update.install_branch") }}</t-button>
+        <t-popconfirm
+          :content="t('update.confirm_install_branch', { branch: selectedBranch || '—' })"
+          :confirm-btn="t('update.install_branch')"
+          :cancel-btn="t('common.cancel')"
+          @confirm="run('', selectedBranch)"
+        >
+          <t-button theme="primary" :disabled="branchesLoading">{{ t("update.install_branch") }}</t-button>
+        </t-popconfirm>
       </div>
       <t-checkbox v-model="verbose">{{ t("build.verbose") }}</t-checkbox>
       <p class="muted">{{ t("update.note") }}</p>

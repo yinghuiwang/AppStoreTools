@@ -117,6 +117,10 @@ def test_update_tab_keeps_status_in_check_card() -> None:
     assert "checkResult.message" in src
     assert 't("update.found")' in src
     assert 't("update.install_now")' in src
+    assert "t-popconfirm" in src
+    assert "update.confirm_install" in src
+    assert "update.confirm_install_version" in src
+    assert "update.confirm_install_branch" in src
     assert 't("update.up_to_date")' not in src
     assert 't("update.badge_latest")' in src
     assert 't("update.current_short")' in src
@@ -371,9 +375,17 @@ def test_page_modules_grow_and_main_column_scrolls() -> None:
     assert "<t-steps" in listing
     assert "overflow: visible" in create
     assert "overflow: auto" not in create
-    assert "overflow: auto" not in preview
+    assert ".locale-toc" in preview
+    assert preview.count("overflow: auto") == 1
     assert "overflow: auto" not in build
     assert "align-items: stretch" in build
     assert "flex: 1 1 auto" in run
     assert "overflow: auto" in logs
     assert "overflow: auto" in agent
+
+
+def test_agent_panel_requires_apply_confirm() -> None:
+    src = (FRONTEND / "components" / "AgentPanel.vue").read_text(encoding="utf-8")
+    assert "t-popconfirm" in src
+    assert "agent.confirm_apply" in src
+    assert "confirm: true" in (FRONTEND / "composables" / "useAgent.ts").read_text(encoding="utf-8")

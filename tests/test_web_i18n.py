@@ -123,12 +123,17 @@ def test_nav_catalog_english_and_chinese():
     assert t("nav.guard", lang="en") == "Guard"
     assert t("nav.update", lang="en") == "Check Updates"
     assert t("update.open_github", lang="en") == "Open GitHub repository"
+    assert "restart" in t("update.confirm_install", lang="en").lower()
+    assert t("agent.confirm_apply_ok", lang="en") == "Apply now"
     assert t("nav.dashboard", lang="zh") == "仪表盘"
     assert t("nav.settings", lang="zh") == "设置"
     assert t("nav.profiles", lang="zh") == "App 管理"
     assert t("nav.guard", lang="zh") == "Guard 安全守卫"
     assert t("nav.update", lang="zh") == "检查更新"
     assert t("update.open_github", lang="zh") == "打开 GitHub 仓库"
+    assert "重启" in t("update.confirm_install", lang="zh")
+    assert t("agent.confirm_apply", lang="zh").startswith("将按该计划")
+    assert t("agent.confirm_apply_ok", lang="zh") == "确认应用"
     assert t("nav.listing", lang="en") == "Listing"
     assert t("nav.listing", lang="zh") == "商品页"
     assert t("nav.group.listing", lang="zh") == "上架"

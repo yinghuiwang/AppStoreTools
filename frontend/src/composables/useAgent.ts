@@ -311,6 +311,7 @@ async function apply(planId: string, rerun: boolean): Promise<void> {
       body: JSON.stringify({
         plan_id: planId,
         rerun,
+        confirm: true,
         form_paths: collectedFormPaths(),
       }),
     });
