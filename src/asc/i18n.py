@@ -100,8 +100,8 @@ HELP = {
         'zh': 'IAP JSON 配置文件路径（参考 data/iap_packages.example.json）'
     },
     'update_existing': {
-        'en': 'Update existing IAP/subscriptions. Default: skip items that already exist.',
-        'zh': '更新已存在的 IAP/订阅。默认：跳过已存在的项目。'
+        'en': 'Overwrite existing IAP/subscription fields that Apple allows. Default: create missing localizations/prices only.',
+        'zh': '覆盖 Apple 允许修改的已有 IAP/订阅字段。默认：只补齐缺失的本地化/价格，不改已有内容。'
     },
     'project_path': {
         'en': 'Xcode project path (.xcodeproj or .xcworkspace)',
@@ -405,6 +405,14 @@ ERRORS = {
         'en': 'Screenshots directory is not configured. Pass --screenshots, or run "asc app edit {app}" to set it.',
         'zh': '未配置截图目录。请使用 --screenshots 指定，或运行 "asc app edit {app}" 填写。',
     },
+    'iap_price_cannot_replace': {
+        'en': 'Price schedule already exists; Apple API cannot replace it (remove price from JSON or edit in App Store Connect).',
+        'zh': '价格时间表已存在，Apple API 不支持直接替换（请从 JSON 去掉 price，或在 App Store Connect 中改价）。',
+    },
+    'iap_availability_cannot_replace': {
+        'en': 'Sales territories already exist; Apple API cannot replace them (remove availableTerritories / availableInAllTerritories from JSON or edit in App Store Connect).',
+        'zh': '销售地区已存在，Apple API 不支持直接替换（请从 JSON 去掉 availableTerritories / availableInAllTerritories，或在 App Store Connect 中修改）。',
+    },
     'iap_config_not_found': {
         'en': 'IAP config file not found: {path}',
         'zh': 'IAP 配置文件不存在: {path}',
@@ -567,6 +575,18 @@ ERRORS = {
     'screenshot_upload_failed': {
         'en': 'Screenshot {filename} failed to upload: {reason}',
         'zh': '截图 {filename} 上传失败：{reason}',
+    },
+    'screenshot_processing_failed': {
+        'en': 'Screenshot {filename} was rejected by App Store Connect: {reason}',
+        'zh': '截图 {filename} 被 App Store Connect 拒绝：{reason}',
+    },
+    'screenshot_processing_timeout': {
+        'en': 'Screenshot {filename} is still processing; App Store Connect did not finish in time',
+        'zh': '截图 {filename} 处理超时，请在 App Store Connect 中检查后重试',
+    },
+    'screenshot_unmapped_size': {
+        'en': 'Unrecognized screenshot size(s) in {folder}: {details}. Use official pixels or --display-type.',
+        'zh': '文件夹 {folder} 中有无法识别的截图尺寸：{details}。请使用官方像素或 --display-type。',
     },
 }
 

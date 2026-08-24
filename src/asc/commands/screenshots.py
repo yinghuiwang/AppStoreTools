@@ -57,6 +57,17 @@ def _group_files_by_display_type(folder: Path) -> dict[str, list[Path]]:
     return groups
 
 
+def _unmapped_screenshot_files(files: list[Path]) -> list[tuple[Path, tuple[int, int]]]:
+    """Return (path, size) for images whose pixels are not in DISPLAY_TYPE_BY_SIZE."""
+    unmapped: list[tuple[Path, tuple[int, int]]] = []
+    for path in files:
+        if _detect_display_type(path):
+            continue
+        with Image.open(path) as img:
+            unmapped.append((path, img.size))
+    return unmapped
+
+
 def _filter_screenshot_jobs(
     jobs: list[tuple[str, str, list[Path]]],
     scopes: list[dict] | None,
@@ -257,6 +268,19 @@ def _collect_locale_screenshot_jobs(
                 (resolved, loc_data, folder, files, display_type_override, used_fallback)
             )
             return
+
+        unmapped = _unmapped_screenshot_files(files)
+        if unmapped:
+            details = ", ".join(
+                f"{path.name} {width}x{height}" for path, (width, height) in unmapped
+            )
+            msg = t(ERRORS["screenshot_unmapped_size"]).format(
+                folder=folder.name,
+                details=details,
+            )
+            reporter.log(f"  ── 文件夹: {folder.name} → locale: {resolved} ──")
+            reporter.fail(msg)
+            raise RuntimeError(msg)
 
         groups = _group_files_by_display_type(folder)
         if not groups:
@@ -502,10 +526,20 @@ def _upload_screenshots_core(
                 errors = check["data"]["attributes"]["assetDeliveryState"].get(
                     "errors", []
                 )
-                reporter.log(f"         ❌ 上传失败: {errors}")
-                reporter.log("💡 请检查网络连接后重试")
+                msg = t(ERRORS["screenshot_processing_failed"]).format(
+                    filename=filename,
+                    reason=errors or "FAILED",
+                )
+                reporter.log(f"         ❌ {msg}")
+                reporter.fail(msg)
+                raise AssetUploadError(msg)
             else:
-                reporter.log("         ⚠️  处理超时，请在 App Store Connect 中检查状态")
+                msg = t(ERRORS["screenshot_processing_timeout"]).format(
+                    filename=filename,
+                )
+                reporter.log(f"         ⚠️  {msg}")
+                reporter.fail(msg)
+                raise AssetUploadError(msg)
 
             current += 1
             reporter.progress(

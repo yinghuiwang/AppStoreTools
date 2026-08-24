@@ -147,6 +147,12 @@ async def iap_local_save(request: Request):
         return JSONResponse(_no_profile_payload(lang), status_code=400)
     body = await _read_object(request)
     path = _default_iap_file(profile, body.get("iap_file") or body.get("iapFile"))
+    from asc.web.security import WebPathError, forbidden_response, resolve_web_data_path
+
+    try:
+        path = str(resolve_web_data_path(path))
+    except WebPathError:
+        return forbidden_response()
     snapshot = body.get("snapshot")
     if snapshot is None:
         raise HTTPException(status_code=400, detail="snapshot is required")

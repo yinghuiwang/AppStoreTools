@@ -728,6 +728,56 @@ def test_subscriptions_respect_cancel_event_before_first_group(fake_api, tmp_png
     assert fake_api.groups == {}
 
 
+def test_sync_subscription_price_raises_when_create_fails(fake_api):
+    import pytest
+
+    from asc.commands.subscriptions import _sync_subscription_price
+
+    sub_id = "sub_price_fail"
+    fake_api.find_subscription_price_point = lambda s, t, a: "pp_usd_999"
+    fake_api.price_points[sub_id] = [
+        {"id": "pp_usd_999", "territory": "USA", "customerPrice": "9.99"},
+    ]
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("price create denied")
+
+    fake_api.create_subscription_price = boom
+
+    with pytest.raises(RuntimeError, match="1 失败"):
+        _sync_subscription_price(
+            fake_api,
+            sub_id,
+            {
+                "baseTerritory": "USA",
+                "baseAmount": "9.99",
+                "applyEqualizedPrices": False,
+                "creationMode": "post",
+            },
+            update_existing=False,
+            dry_run=False,
+        )
+
+
+def test_upload_subscriptions_counts_price_create_failure(fake_api, tmp_png):
+    groups = [{
+        "referenceName": "Pro",
+        "localizations": {"en-US": {"name": "Pro"}},
+        "subscriptions": [_min_sub(tmp_png)],
+    }]
+    fake_api.find_subscription_price_point = lambda s, t, a: "pp_usd_999"
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("price create denied")
+
+    fake_api.create_subscription_price = boom
+
+    failed = _upload_subscriptions_core(
+        fake_api, "app1", groups, update_existing=False, dry_run=False
+    )
+    assert failed == 1
+
+
 def test_update_existing_deletes_prices_in_parallel(fake_api):
     import threading
     import time

@@ -1,5 +1,38 @@
 # 操作日志
 
+## 2026-08-24
+
+- Web 加固：`/api/listing/thumb`、`listing/iap local/save`、`/api/browse` 禁止读写 `.p8` / `~/.config/asc/keys` 以及家目录与临时目录之外的路径。
+- LLM `base_url` 与 Webhook URL 拒绝 `file://`、链路本地 / 云 metadata（`169.254.169.254`）；发送时再解析一次，解析到禁网段则拒绝。本机 Ollama（`127.0.0.1`）仍可用。
+- `/api/profiles` 与 `/api/guard/status` 对 issuer_id、key_id、指纹、IP 打码；编辑 Profile 留空则保留原值，前端不再把列表里的掩码填回表单。
+- 新增 `src/asc/web/security.py` 与 `tests/test_web_security.py`。相关套件 273 passed。
+- Web UI 增加本机会话鉴权：启动时生成随机 token；`GET /` 与 `GET /api/session` 下发 `HttpOnly` + `SameSite=Strict` 的 `asc_session` cookie；其余 `/api/*` 必须带 cookie 或 `X-ASC-Token`。
+- 非 loopback 的 `Origin` / `Referer`（如 `https://evil.example`）一律 403，阻止跨站读接口或 CSRF。静态页与 `/static` 不验。
+- 前端启动先 `ensureSession()`，请求遇 401 会重新领 cookie 再试一次；更新重启探测也会先打 `/api/session`。
+- 现有 TestClient 通过 `conftest` 自动带 `X-ASC-Token`，无需逐个改测试。新增 `tests/test_web_auth.py`。相关套件 22 passed；Web TestClient 大套件 271 passed（另有 1 个既有 CSS 断言失败，与本次无关）。
+- 已构建 SPA。已重启本地 Web UI：`http://127.0.0.1:8080`（PID 82019，工作目录为仓库根）。无 cookie 访问 `/api/profiles` 返回 401；先 `GET /api/session` 再访问可通过。
+- 一次性 IAP：已有 SKU 不再整项跳过，会补齐缺失的本地化/价格/地区；`--update-existing` 在价格时间表或显式销售地区无法替换时失败，不再报成功。销售地区创建失败会上抛。
+- 文案 `iap_price_cannot_replace` / `iap_availability_cannot_replace`；教程与 pitfalls 已同步。`tests/test_iap_core.py` 等相关 56 passed。
+- 补齐官方截图像素映射：1260×2736 / 1206×2622 / 1080×2340 / 11" iPad 额外尺寸；无法识别的尺寸改为失败，不再静默丢掉。
+- 订阅改价：地区价格创建失败会上抛并计入失败，不再带「失败」仍打勾；有失败商品时不再 `reporter.done`。inline 回退 POST 成功时不再把 inline 失败数累加进去。
+- 知识库 `screenshots.md` / `pitfalls.md` 已同步。相关测试 128 passed。
+- 修复 `get_editable_version`：无可编辑状态时返回 `None`，不再回退到 `READY_FOR_SALE` / 第一项。
+- 截图 Apple 处理 `FAILED` 或超时现在抛 `AssetUploadError` 并 `reporter.fail`，不再报「上传完成」。
+- 新增文案 `screenshot_processing_failed` / `screenshot_processing_timeout`；知识库 `version.md` 写明不回退。
+- 测试：`test_api.py` 覆盖非可编辑返回 None；`test_screenshots.py` 覆盖处理失败与超时。相关套件 65 passed。
+- IAP 编辑步订阅列表增加 `groupLevel` 列；一次性 IAP 与订阅都增加审核截图列，用行内 36px 缩略图展示（点击可放大）。
+- 编辑弹窗不再用只读路径输入框作为主展示，改为行内 48px 缩略图 + 文件名 + 浏览。
+- 相对路径按 `iap_packages.json` 所在目录解析，复用 `/api/listing/thumb`。新增 `IapReviewThumb.vue` 与 `reviewShotThumbUrl` 辅助函数。
+- 中英文案 `iap.col_group_level` / `iap.col_shot`，并补充 `tests/test_web_i18n.py` 断言。已构建 SPA。
+- 已提交并推送 `ccca606` 到 `origin/feat/iap-workflow` 与 `github/feat/iap-workflow`：`feat(iap): show groupLevel and review screenshot thumbs in the editor`。`operateLog.md` 与 `docs/asc-locale-codes.md` 未纳入提交。
+- 商品页第二步预览（`frontend/src/views/listing/PreviewStep.vue`）增加按语言 tag 的快速导航目录：左侧粘性目录列出当前可见语言码，点击平滑滚动到对应卡片。
+- 目录随筛选/搜索更新；滚动时高亮当前语言；有变更/仅本地/一致用既有状态色，缺截图显示红点。
+- 窄屏改为顶部横向标签。中英文案 `listing.toc_title` / `listing.toc_jump`，并补充 `tests/test_web_i18n.py` 断言。
+- 已提交并推送 `f557777` 到 `origin/feat/iap-workflow` 与 `github/feat/iap-workflow`：`feat(listing): add locale tag directory on preview step`。`operateLog.md` 与 `docs/asc-locale-codes.md` 未纳入提交。
+- 新增 `docs/asc-locale-codes.md`：导出 App Store 官方 50 个地区语言码。
+- 完整对照表含语言码、中文、English、CSV 别名、截图文件夹别名、skill 默认 16 语、2026-03-31 新增 11 语。
+- 另附三列速查表，便于按语言码快速对照中文名。数据来自 `src/asc/data/asc_locales.json` 与 `src/asc/constants.py`。
+
 ## 2026-08-22
 
 - 商品页创建步（`frontend/src/views/listing/CreateStep.vue`）去掉「打开并去预览」按钮，并删除仅服务于该按钮的 `openRemembered`。

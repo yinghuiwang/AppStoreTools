@@ -131,7 +131,7 @@ asc --app myapp iap --iap-file AppStore/data/iap_packages.json --dry-run
 asc --app myapp iap --iap-file AppStore/data/iap_packages.json
 ```
 
-默认行为是**仅创建**：已存在的产品会被跳过。
+默认会创建缺失的 SKU，并补齐已有 SKU 上缺失的本地化/价格。已有名称、本地化、价格和审核图不会改，除非加上 `--update-existing`。Apple 无法替换一次性 IAP 的价格时间表或销售地区；这类更新会失败，而不会报成功。
 
 ---
 

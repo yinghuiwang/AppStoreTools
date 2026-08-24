@@ -161,6 +161,12 @@ def _locale_status(fields: list) -> str:
     return "unchecked"
 
 
+def _resolve_data_file(path: str) -> Path:
+    from asc.web.security import resolve_web_data_path
+
+    return resolve_web_data_path(path)
+
+
 def _resolve_under_root(root: str, path: str) -> Path:
     """Resolve `path`'s realpath and ensure it lies under `root`'s realpath.
 
@@ -224,6 +230,12 @@ async def listing_thumb(path: str, root: str):
     `/api/browse`'s pattern of gating solely on a real-path containment check.
     """
     target = _resolve_under_root(root, path)
+    from asc.web.security import WebPathError, resolve_web_data_path
+
+    try:
+        resolve_web_data_path(target)
+    except WebPathError:
+        raise HTTPException(status_code=403, detail="Forbidden") from None
     if not target.exists() or not target.is_file():
         raise HTTPException(status_code=404, detail="not found")
     media_type, _ = mimetypes.guess_type(str(target))
@@ -248,6 +260,12 @@ async def listing_local_save(request: Request):
     csv_path = body.get("csv_path")
     if not isinstance(csv_path, str) or not csv_path.strip():
         raise HTTPException(status_code=400, detail="csv_path is required")
+    from asc.web.security import WebPathError, forbidden_response
+
+    try:
+        csv_path = str(_resolve_data_file(csv_path))
+    except WebPathError:
+        return forbidden_response()
 
     expected_mtime = body.get("expected_mtime")
     if expected_mtime is not None and not isinstance(expected_mtime, (int, float)):

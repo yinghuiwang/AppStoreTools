@@ -27,7 +27,7 @@ export function apiErrorMessage(err: ApiError): string {
 
 function notifyGuard(err: ApiError, skip?: boolean) {
   if (skip) return;
-  if (err.status === 403 || err.status === 409) {
+  if (err.status === 401 || err.status === 403 || err.status === 409) {
     NotifyPlugin.error({ content: apiErrorMessage(err), duration: 6000 });
   }
 }
@@ -57,6 +57,29 @@ async function parse(res: Response, skipNotify?: boolean): Promise<unknown> {
   return data;
 }
 
+let sessionPromise: Promise<void> | null = null;
+
+export async function ensureSession(): Promise<void> {
+  if (!sessionPromise) {
+    sessionPromise = fetch("/api/session", { credentials: "same-origin" }).then((res) => {
+      if (!res.ok) {
+        sessionPromise = null;
+        throw new ApiError(res.status, "Web UI session required");
+      }
+    });
+  }
+  return sessionPromise;
+}
+
+async function authedFetch(url: string, init: RequestInit): Promise<Response> {
+  await ensureSession();
+  const first = await fetch(url, { ...init, credentials: "same-origin" });
+  if (first.status !== 401) return first;
+  sessionPromise = null;
+  await ensureSession();
+  return fetch(url, { ...init, credentials: "same-origin" });
+}
+
 export async function httpJson<T>(url: string, init: RequestInit & Extra = {}): Promise<T> {
   const { skipNotify, ...rest } = init;
   const headers = new Headers(rest.headers);
@@ -65,7 +88,7 @@ export async function httpJson<T>(url: string, init: RequestInit & Extra = {}): 
     headers.set("Content-Type", "application/json");
   }
   try {
-    const res = await fetch(url, { ...rest, headers, credentials: "same-origin" });
+    const res = await authedFetch(url, { ...rest, headers });
     return (await parse(res, skipNotify)) as T;
   } catch (err) {
     if (err instanceof TypeError) startResumeWatch("disconnect");
@@ -83,11 +106,10 @@ export async function httpForm<T>(
     headers.set("Content-Type", "application/x-www-form-urlencoded");
   }
   try {
-    const res = await fetch(url, {
+    const res = await authedFetch(url, {
       method: "POST",
       body,
       headers,
-      credentials: "same-origin",
     });
     return (await parse(res, extra.skipNotify)) as T;
   } catch (err) {

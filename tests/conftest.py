@@ -7,6 +7,7 @@ import threading
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
 os.environ.setdefault(
     "ASC_WEB_TASKS_PATH",
@@ -16,6 +17,20 @@ os.environ.setdefault(
     "ASC_WEB_AGENT_PATH",
     str(Path(tempfile.gettempdir()) / f"asc-web-agent-pytest-{os.getpid()}.db"),
 )
+
+
+@pytest.fixture(autouse=True)
+def _authenticate_web_test_client(monkeypatch):
+    """Existing Web tests hit /api directly; attach the process session token."""
+    original_init = TestClient.__init__
+
+    def _init(self, app, *args, **kwargs):
+        original_init(self, app, *args, **kwargs)
+        token = getattr(getattr(app, "state", None), "session_token", None)
+        if token:
+            self.headers["X-ASC-Token"] = token
+
+    monkeypatch.setattr(TestClient, "__init__", _init)
 
 
 class FakeAPI:

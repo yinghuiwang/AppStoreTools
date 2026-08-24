@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from asc import __version__
 from asc.cli import _installed_commit_short
 from asc.web.agent_store import agent_store
+from asc.web.auth import attach_session_cookie, generate_session_token, protect_request
 from asc.web.tasks import task_store
 
 _STATIC_DIR = Path(__file__).parent / "static"
@@ -66,6 +67,7 @@ def create_app() -> FastAPI:
     from asc.web.i18n import COOKIE_NAME, resolve_lang
 
     app = FastAPI(title="asc Web UI", docs_url=None, redoc_url=None, lifespan=_lifespan)
+    app.state.session_token = generate_session_token()
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
     @app.middleware("http")
@@ -75,6 +77,20 @@ def create_app() -> FastAPI:
             accept_language=request.headers.get("accept-language"),
         )
         return await call_next(request)
+
+    @app.middleware("http")
+    async def session_auth_middleware(request: Request, call_next):
+        denied = protect_request(request)
+        if denied is not None:
+            return denied
+        response = await call_next(request)
+        if not str(request.url.path).startswith("/api/") or request.url.path == "/api/session":
+            attach_session_cookie(response, request.app.state.session_token)
+        return response
+
+    @app.get("/api/session")
+    def session_ok():
+        return {"ok": True}
 
     from asc.web import routes_api, routes_listing, routes_agent, routes_iap
     app.include_router(routes_api.router, prefix="/api")

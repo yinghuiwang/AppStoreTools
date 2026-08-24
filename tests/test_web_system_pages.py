@@ -102,6 +102,7 @@ def test_update_tab_waits_for_new_boot_and_reloads() -> None:
     assert "watchAfterRun" in tab
     assert "location.reload" in watcher
     assert "/api/update/post-restart" in watcher
+    assert "/api/session" in watcher
     assert "/api/task/" in watcher and "/status" in watcher
     assert "restarting" in watcher
     assert "boot_id" in watcher

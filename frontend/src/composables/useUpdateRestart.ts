@@ -39,6 +39,7 @@ async function runResumeLoop(generation: number, mode: "update" | "disconnect") 
   const deadline = Date.now() + (mode === "update" ? UPDATE_WAIT_MS : DISCONNECT_WAIT_MS);
   while (Date.now() < deadline && resumeGeneration === generation) {
     try {
+      await fetch("/api/session", { credentials: "same-origin" });
       const res = await fetch("/api/update/post-restart", {
         credentials: "same-origin",
         headers: { Accept: "application/json" },

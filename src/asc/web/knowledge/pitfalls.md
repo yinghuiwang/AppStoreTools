@@ -6,11 +6,11 @@ keywords: rejection 拒审 tool limit no editable version delete screenshots cre
 
 1. **Will not create an App Store version.** User must already have an editable version in App Store Connect.
 2. **Screenshot upload deletes then replaces** every image in that `screenshotDisplayType` for the locale. Partial “add one shot” is not supported.
-3. **IAP default is create-only.** Existing SKUs/prices/offers/review shots are skipped unless `--update-existing`.
+3. **IAP default is create-only for existing fields.** Missing localizations/prices/territories on an existing SKU are still created. `--update-existing` overwrites name/localizations/review shots; Apple cannot replace an IAP price schedule or availability, so those requests fail instead of reporting success.
 4. **CSV has no promotional text / What’s New / copyright.** Promo text is 170 chars and can be edited in ASC without a new version; What’s New is a separate command (4000 chars).
 5. **Territory IDs are 3 letters** (`USA`, `CHN`). `US` / `CN` fail validation.
 6. **Price** needs `pricePointId` or `baseTerritory` + `baseAmount`.
-7. **Unmapped screenshot pixels** (e.g. 1260×2736, 1206×2622) are official Apple sizes but **not** in `constants.DISPLAY_TYPE_BY_SIZE` — the tool may skip them. Do not call that an Apple rejection.
+7. **Unmapped screenshot pixels** fail the upload instead of being skipped. Official sizes such as 1260×2736 / 1206×2622 / 1080×2340 are mapped. Truly unknown sizes need `--display-type` or a constants update — that is not an Apple rejection.
 8. **`constants.py` locale aliases are incomplete** vs official 50 locales. Prefer official shortcodes (`pt-PT`, `es-MX`, `bn-BD`, …).
 9. Agent file tools only see the **user project** + form paths. Knowledge lives in this package — use `search_knowledge` / `get_knowledge`, never `read_file` on AppStoreTools sources.
 10. `write_file` / `delete_file` cannot and must not edit this knowledge base.

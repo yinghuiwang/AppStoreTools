@@ -189,7 +189,7 @@ function openEdit(name: string) {
   const d = details.value[name] || ({} as Detail);
   editing.value = name;
   Object.assign(form, {
-    name, issuer_id: d.issuer_id, key_id: d.key_id, app_id: d.app_id,
+    name, issuer_id: "", key_id: "", app_id: d.app_id,
     csv: d.csv || "", screenshots: d.screenshots || "",
   });
   keyFile.value = null;

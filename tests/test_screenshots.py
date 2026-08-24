@@ -107,6 +107,40 @@ def test_detect_unknown_size_returns_none(tmp_path):
     assert _detect_display_type(img_path) is None
 
 
+def test_detect_official_1260_iphone_69(tmp_path):
+    img_path = tmp_path / "screen.png"
+    _make_png(img_path, 1260, 2736)
+    assert _detect_display_type(img_path) == "APP_IPHONE_67"
+
+
+def test_upload_screenshots_fails_when_some_sizes_are_unmapped(tmp_path):
+    api = ScreenshotFakeAPI()
+    locale_dir = tmp_path / "en-US"
+    locale_dir.mkdir()
+    _make_png(locale_dir / "1.png", 1290, 2796)
+    _make_png(locale_dir / "mystery.png", 100, 100)
+
+    with pytest.raises(RuntimeError) as ei:
+        _upload_screenshots_core(api, "app1", str(tmp_path))
+
+    assert "mystery.png" in str(ei.value)
+    assert "100x100" in str(ei.value)
+    assert "create_screenshot_set" not in [c[0] for c in api.calls]
+
+
+def test_upload_screenshots_fails_when_all_sizes_are_unmapped(tmp_path):
+    api = ScreenshotFakeAPI()
+    locale_dir = tmp_path / "en-US"
+    locale_dir.mkdir()
+    _make_png(locale_dir / "odd.png", 100, 100)
+
+    with pytest.raises(RuntimeError) as ei:
+        _upload_screenshots_core(api, "app1", str(tmp_path))
+
+    assert "odd.png" in str(ei.value)
+    assert api.calls == []
+
+
 def test_detect_landscape_iphone_67(tmp_path):
     img_path = tmp_path / "screen.png"
     _make_png(img_path, 2796, 1290)
@@ -583,6 +617,59 @@ def test_upload_screenshots_rereserves_after_put_failure(tmp_path):
     assert len(reserves) == 2
     assert deletes == [("delete_screenshot", "shot_1")]
     assert commits == [("commit_screenshot", "shot_2")]
+
+
+def test_upload_screenshots_fails_when_apple_processing_fails(tmp_path):
+    from asc.api import AssetUploadError
+
+    class ProcessingFailAPI(ScreenshotFakeAPI):
+        def get(self, path, **params):
+            return {
+                "data": {
+                    "attributes": {
+                        "assetDeliveryState": {
+                            "state": "FAILED",
+                            "errors": [{"code": "IMAGE_TOO_LARGE"}],
+                        }
+                    }
+                }
+            }
+
+    api = ProcessingFailAPI()
+    locale_dir = tmp_path / "en-US"
+    locale_dir.mkdir()
+    _make_png(locale_dir / "1.png", 1290, 2796)
+
+    with patch("time.sleep"):
+        with pytest.raises(AssetUploadError) as ei:
+            _upload_screenshots_core(api, "app1", str(tmp_path))
+
+    assert "1.png" in str(ei.value)
+    assert "IMAGE_TOO_LARGE" in str(ei.value)
+
+
+def test_upload_screenshots_fails_when_apple_processing_times_out(tmp_path):
+    from asc.api import AssetUploadError
+
+    api = ScreenshotFakeAPI()
+    locale_dir = tmp_path / "en-US"
+    locale_dir.mkdir()
+    _make_png(locale_dir / "1.png", 1290, 2796)
+
+    def timeout_wait(*args, **kwargs):
+        return "TIMEOUT", {
+            "data": {"attributes": {"assetDeliveryState": {"state": "PROCESSING"}}}
+        }
+
+    with patch("time.sleep"):
+        with patch(
+            "asc.commands.screenshots._wait_for_screenshot_processing",
+            side_effect=timeout_wait,
+        ):
+            with pytest.raises(AssetUploadError) as ei:
+                _upload_screenshots_core(api, "app1", str(tmp_path))
+
+    assert "1.png" in str(ei.value)
 
 
 def test_upload_screenshots_fails_clearly_after_rereserve_exhausted(tmp_path):

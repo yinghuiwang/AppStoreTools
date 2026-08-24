@@ -247,19 +247,16 @@ def _upload_iap_core(
             iap_id = existing["id"]
             if not update_existing:
                 reporter.log(
-                    f"    已存在 (ID: {iap_id})，跳过（使用 --update-existing 以更新）"
+                    f"    已存在 (ID: {iap_id})，补齐缺失的价格/地区/本地化"
                 )
-                reporter.progress(
-                    idx + 1, total_items, msg=f"IAP {idx + 1}/{total_items}"
-                )
-                continue
-            reporter.log(f"    已存在 (ID: {iap_id})，执行更新")
-            if not dry_run:
-                update_attrs = {}
-                if name:
-                    update_attrs["name"] = name
-                if update_attrs:
-                    api.update_in_app_purchase(iap_id, update_attrs)
+            else:
+                reporter.log(f"    已存在 (ID: {iap_id})，执行更新")
+                if not dry_run:
+                    update_attrs = {}
+                    if name:
+                        update_attrs["name"] = name
+                    if update_attrs:
+                        api.update_in_app_purchase(iap_id, update_attrs)
         else:
             reporter.log("    不存在，执行创建")
             if not dry_run:
@@ -323,6 +320,9 @@ def _upload_iap_core(
                 continue
 
             if locale in loc_map:
+                if not update_existing:
+                    reporter.log(f"    {locale}: 本地化已存在，跳过")
+                    continue
                 api.update_in_app_purchase_localization(
                     loc_map[locale]["id"], loc_attrs
                 )
@@ -368,11 +368,17 @@ def _sync_iap_availability(api, iap_id, item, update_existing, dry_run, log=prin
     except Exception:
         existing = None
 
+    explicit_availability = any(
+        key in item
+        for key in ("availableInAllTerritories", "availableTerritories", "territories")
+    )
     if existing and not update_existing:
         log("    销售地区: 已存在，跳过")
         return
     if existing and update_existing:
-        log("    销售地区: 已存在（Apple API 不支持直接替换），跳过")
+        if explicit_availability:
+            raise RuntimeError(t(ERRORS["iap_availability_cannot_replace"]))
+        log("    销售地区: 已存在，跳过")
         return
 
     try:
@@ -383,7 +389,8 @@ def _sync_iap_availability(api, iap_id, item, update_existing, dry_run, log=prin
         )
         log(f"    销售地区: 已设置 {len(territory_ids)} 个地区 ✅")
     except Exception as e:
-        log(f"    ⚠️  销售地区设置跳过: {e}")
+        log(f"    ❌ 销售地区设置失败: {e}")
+        raise
 
 
 def _sync_iap_price(api, iap_id, price_cfg, update_existing, dry_run, log=print):
@@ -428,8 +435,7 @@ def _sync_iap_price(api, iap_id, price_cfg, update_existing, dry_run, log=print)
         log("    价格: 时间表已存在，跳过")
         return
     if _iap_price_schedule_has_prices(existing) and update_existing:
-        log("    价格: 时间表已存在（Apple API 不支持直接替换），跳过")
-        return
+        raise RuntimeError(t(ERRORS["iap_price_cannot_replace"]))
 
     price_points = [(territory, pp_id)]
     if apply_equalized:
@@ -588,7 +594,10 @@ def cmd_iap(
     }
 
     \b
-    Default behavior: creates new items only. Use --update-existing to modify.
+    Default behavior: create missing SKUs and missing localizations/prices.
+    Existing names, locales, prices, and review shots are left unchanged
+    unless --update-existing is set. Apple cannot replace an IAP price
+    schedule or availability; those requests fail instead of reporting success.
 
     \b
     Example:

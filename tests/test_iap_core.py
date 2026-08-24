@@ -419,12 +419,120 @@ def test_iap_skips_price_when_schedule_has_manual_prices():
         "price": {"baseTerritory": "USA", "baseAmount": "4.99"},
     }]
 
-    _upload_iap_core(api, "app1", items, update_existing=True)
+    _upload_iap_core(api, "app1", items)
 
     create_calls = [
         c for c in api.calls if c[0] == "create_in_app_purchase_price_schedule"
     ]
     assert create_calls == []
+
+
+def test_iap_update_existing_fails_when_price_schedule_cannot_be_replaced():
+    existing = [{"id": "iap_old", "attributes": {"productId": "com.example.item1"}}]
+    api = IapFakeAPI(existing_iaps=existing)
+    api._price_points["iap_old"] = [
+        {"id": "pp_499", "territory": "USA", "customerPrice": "4.99"},
+    ]
+    api._price_schedules["iap_old"] = {
+        "id": "schedule_existing",
+        "relationships": {
+            "manualPrices": {
+                "data": [{"type": "inAppPurchasePrices", "id": "price_1"}]
+            },
+            "automaticPrices": {"data": []},
+        },
+    }
+    items = [{
+        "productId": "com.example.item1",
+        "price": {"baseTerritory": "USA", "baseAmount": "4.99"},
+    }]
+
+    with pytest.raises(RuntimeError, match="cannot replace|不支持"):
+        _upload_iap_core(api, "app1", items, update_existing=True)
+
+
+def test_iap_fills_missing_localizations_when_sku_exists():
+    iap_id = "iap_old"
+    existing = [{"id": iap_id, "attributes": {"productId": "com.example.item1"}}]
+    api = IapFakeAPI(existing_iaps=existing)
+    api._locs[iap_id] = [
+        {"id": "loc_en", "attributes": {"locale": "en-US", "name": "Old Name"}}
+    ]
+    items = [{
+        "productId": "com.example.item1",
+        "name": "Should Not Update",
+        "localizations": {
+            "en-US": {"name": "New Name"},
+            "zh-Hans": {"name": "商品", "description": "描述"},
+        },
+    }]
+
+    _upload_iap_core(api, "app1", items)
+
+    update_iap = [c for c in api.calls if c[0] == "update_in_app_purchase"]
+    update_loc = [c for c in api.calls if c[0] == "update_in_app_purchase_localization"]
+    create_loc = [c for c in api.calls if c[0] == "create_in_app_purchase_localization"]
+    assert update_iap == []
+    assert update_loc == []
+    assert len(create_loc) == 1
+    assert create_loc[0][2] == "zh-Hans"
+
+
+def test_iap_creates_missing_price_when_sku_exists_create_only():
+    existing = [{"id": "iap_old", "attributes": {"productId": "com.example.item1"}}]
+    api = IapFakeAPI(existing_iaps=existing)
+    api._price_points["iap_old"] = [
+        {"id": "pp_499", "territory": "USA", "customerPrice": "4.99"},
+    ]
+    items = [{
+        "productId": "com.example.item1",
+        "price": {"baseTerritory": "USA", "baseAmount": "4.99", "applyEqualizedPrices": False},
+    }]
+
+    _upload_iap_core(api, "app1", items)
+
+    create_calls = [
+        c for c in api.calls if c[0] == "create_in_app_purchase_price_schedule"
+    ]
+    assert create_calls == [
+        (
+            "create_in_app_purchase_price_schedule",
+            "iap_old",
+            "USA",
+            [("USA", "pp_499")],
+            None,
+            None,
+        )
+    ]
+
+
+def test_iap_update_existing_fails_when_explicit_availability_exists():
+    existing = [{"id": "iap_old", "attributes": {"productId": "com.example.item1"}}]
+    api = IapFakeAPI(existing_iaps=existing)
+    api._availabilities["iap_old"] = {"id": "av_old"}
+    items = [{
+        "productId": "com.example.item1",
+        "availableInAllTerritories": True,
+    }]
+
+    with pytest.raises(RuntimeError, match="cannot replace|不支持"):
+        _upload_iap_core(api, "app1", items, update_existing=True)
+
+
+def test_iap_availability_create_failure_raises():
+    api = IapFakeAPI()
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("availability denied")
+
+    api.create_in_app_purchase_availability = boom
+    items = [{
+        "productId": "com.example.item1",
+        "availableTerritories": ["USA"],
+    }]
+
+    with pytest.raises(RuntimeError, match="availability denied"):
+        _upload_iap_core(api, "app1", items)
 
 
 def test_iap_skips_existing_by_default():

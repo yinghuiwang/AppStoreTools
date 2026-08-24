@@ -63,6 +63,27 @@ def test_ipad_pro_size():
     assert DISPLAY_TYPE_BY_SIZE[(2048, 2732)] == "APP_IPAD_PRO_3GEN_129"
 
 
+def test_official_iphone_69_1260_maps_to_67():
+    assert DISPLAY_TYPE_BY_SIZE[(1260, 2736)] == "APP_IPHONE_67"
+    assert DISPLAY_TYPE_BY_SIZE[(2736, 1260)] == "APP_IPHONE_67"
+
+
+def test_official_iphone_63_1206_maps_to_61():
+    assert DISPLAY_TYPE_BY_SIZE[(1206, 2622)] == "APP_IPHONE_61"
+    assert DISPLAY_TYPE_BY_SIZE[(2622, 1206)] == "APP_IPHONE_61"
+
+
+def test_official_iphone_61_1080_maps_to_61():
+    assert DISPLAY_TYPE_BY_SIZE[(1080, 2340)] == "APP_IPHONE_61"
+    assert DISPLAY_TYPE_BY_SIZE[(2340, 1080)] == "APP_IPHONE_61"
+
+
+def test_official_ipad_11_extra_sizes_map():
+    assert DISPLAY_TYPE_BY_SIZE[(1488, 2266)] == "APP_IPAD_PRO_3GEN_11"
+    assert DISPLAY_TYPE_BY_SIZE[(1668, 2420)] == "APP_IPAD_PRO_3GEN_11"
+    assert DISPLAY_TYPE_BY_SIZE[(1640, 2360)] == "APP_IPAD_PRO_3GEN_11"
+
+
 def test_canonicalize_english_headers():
     assert canonicalize_csv_header("locale") == "locale"
     assert canonicalize_csv_header("name") == "name"

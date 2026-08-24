@@ -7,6 +7,7 @@ import "@/styles/tdesign-overrides.css";
 import App from "./App.vue";
 import { router } from "./router";
 import { i18n } from "./i18n";
+import { ensureSession } from "@/api/http";
 import { useProfile } from "@/composables/useProfile";
 
 let spaMounted = false;
@@ -95,6 +96,7 @@ async function boot() {
   if (!spaMounted) renderBootLoading(root);
   const { refresh, snapshot } = useProfile();
   try {
+    await ensureSession();
     await refresh();
   } catch {
     renderBootFailed(root, boot);

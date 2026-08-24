@@ -268,6 +268,9 @@ def _upload_subscriptions_core(
             )
 
     _print_summary(stats, failures, log=log)
+    if stats["subs_failed"]:
+        reporter.fail(f"订阅上传失败: {stats['subs_failed']} 个商品")
+        return stats["subs_failed"]
     _finish_subscriptions(reporter, finalize)
     return stats["subs_failed"]
 
@@ -644,15 +647,19 @@ def _sync_subscription_price(
     )
 
     if amount:
-        log(
-            f"    价格: 基准 {territory} {amount} → 已设置 {created} 个地区"
-            f"{f' / {failed} 失败' if failed else ''} ✅"
+        summary = (
+            f"价格: 基准 {territory} {amount} → 已设置 {created} 个地区"
+            f"{f' / {failed} 失败' if failed else ''}"
         )
     else:
-        log(
-            f"    价格: Price Point {pp_id} → 已设置 {created} 个地区"
-            f"{f' / {failed} 失败' if failed else ''} ✅"
+        summary = (
+            f"价格: Price Point {pp_id} → 已设置 {created} 个地区"
+            f"{f' / {failed} 失败' if failed else ''}"
         )
+    if failed:
+        log(f"    ❌ {summary}")
+        raise RuntimeError(summary)
+    log(f"    {summary} ✅")
 
 
 def _parse_existing_subscription_price(price: dict) -> tuple[Optional[str], Optional[str]]:
@@ -763,7 +770,7 @@ def _create_subscription_prices(
             log=log,
             cancel_event=cancel_event,
         )
-        return created + fallback_created, failed + fallback_failed
+        return created + fallback_created, fallback_failed
 
     return _create_subscription_prices_post(
         api,

@@ -406,7 +406,7 @@ class AppStoreConnectAPI:
             )
             if state in editable_states:
                 return v
-        return versions[0] if versions else None
+        return None
 
     def get_version_localizations(self, version_id: str) -> list:
         return self._get_paginated_data(

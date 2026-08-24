@@ -38,6 +38,8 @@ API state strings this tool recognizes: `PREPARE_FOR_SUBMISSION`, `READY_FOR_REV
 `get_editable_version()` looks for:
 `PREPARE_FOR_SUBMISSION`, `DEVELOPER_REJECTED`, `REJECTED`, `METADATA_REJECTED`, `WAITING_FOR_REVIEW`, `IN_REVIEW`.
 
+It returns **none** when the only versions are live / ready-for-review / pending-release. It does **not** fall back to `READY_FOR_SALE`.
+
 **This tool does not create an App Store version.** If none exists (or none is editable), metadata / screenshots / What’s New fail with “no editable version”. Create the version in App Store Connect first.
 
 What’s New web path can additionally require `PREPARE_FOR_SUBMISSION` / `DEVELOPER_REJECTED` / `REJECTED`.

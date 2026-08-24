@@ -128,7 +128,7 @@ Validates the JSON and local review-image paths, reads current App Store Connect
 asc --app myapp iap --iap-file AppStore/data/iap_packages.json
 ```
 
-Default behavior is **create-only**: existing products are skipped.
+Default behavior creates missing SKUs and missing localizations/prices. Existing names, locales, prices, and review shots stay unchanged unless you pass `--update-existing`. Apple cannot replace an IAP price schedule or availability; those update requests fail instead of reporting success.
 
 ---
 

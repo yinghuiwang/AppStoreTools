@@ -5,7 +5,6 @@ import copy
 import hashlib
 import json
 import re
-import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -41,9 +40,6 @@ router = APIRouter()
 # Unique per process — frontend uses this to detect stop/start across update restart.
 WEB_BOOT_ID = uuid.uuid4().hex
 
-_HOME = Path.home().resolve()
-_TMPDIR = Path(tempfile.gettempdir()).resolve()
-_ALLOWED_ROOTS = (_HOME, _TMPDIR)
 _DATA_DIR = Path(__file__).resolve().parents[3] / "data"
 _TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates"
 
@@ -138,19 +134,19 @@ def _validate_webhook_config_payload(data: object) -> str | None:
                 stripped_url.startswith("http://") or stripped_url.startswith("https://")
             ):
                 return f"Provider {provider} url must start with http:// or https://"
+            from asc.web.security import is_safe_outbound_url
+
+            if stripped_url and not is_safe_outbound_url(stripped_url):
+                return f"Provider {provider} url is not allowed"
 
     return None
 
 
 def _is_under_allowed_root(target: Path) -> bool:
     """Return True if target is at or under any allowed root."""
-    for root in _ALLOWED_ROOTS:
-        try:
-            target.relative_to(root)
-            return True
-        except ValueError:
-            continue
-    return False
+    from asc.web.security import is_under_allowed_root
+
+    return is_under_allowed_root(target)
 
 
 def _extension_filter(ext: str) -> set[str]:
@@ -222,17 +218,21 @@ async def switch_profile(profile: str):
 
 @router.get("/browse")
 def browse(request: Request, path: str = ".", mode: str = "dir", ext: str = ""):
+    from asc.web.agent_workspace import is_blocked_workspace_path
+    from asc.web.security import forbidden_response
+
     target = Path(path).expanduser().resolve()
-    if not _is_under_allowed_root(target):
-        return JSONResponse({"ok": False, "error": "Forbidden"}, status_code=403)
+    home = Path.home().resolve()
+    if not _is_under_allowed_root(target) or is_blocked_workspace_path(target):
+        return forbidden_response()
 
     if not target.exists():
-        target = _HOME
+        target = home
     if target.is_file():
         target = target.parent
 
     entries = []
-    if target != _HOME and target.parent != target:
+    if target != home and target.parent != target:
         entries.append({"name": "..", "path": str(target.parent), "is_dir": True})
 
     try:
@@ -243,6 +243,12 @@ def browse(request: Request, path: str = ".", mode: str = "dir", ext: str = ""):
     allowed_exts = _extension_filter(ext)
     for item in items:
         if item.name.startswith("."):
+            continue
+        try:
+            resolved_item = item.resolve()
+        except OSError:
+            continue
+        if is_blocked_workspace_path(resolved_item):
             continue
         if mode == "file" and not item.is_dir():
             if allowed_exts and item.suffix.lower() not in allowed_exts:
@@ -1153,14 +1159,16 @@ async def list_profiles_api():
     for app in apps:
         data = config.get_app_profile(app) or {}
         key_file = data.get("key_file", "")
-        profile_details[app] = {
+        from asc.web.security import redact_credential_fields
+
+        profile_details[app] = redact_credential_fields({
             "issuer_id": data.get("issuer_id", ""),
             "key_id": data.get("key_id", ""),
             "key_file_name": Path(key_file).name if key_file else "",
             "app_id": str(data.get("app_id", "")),
             "csv": data.get("csv", ""),
             "screenshots": data.get("screenshots", ""),
-        }
+        })
     from asc.guard import Guard
     guard = Guard()
     access = guard.profile_access({
@@ -1219,8 +1227,10 @@ async def discover_local_profiles():
     from asc.utils import discover_local_import_candidates
 
     candidates = discover_local_import_candidates(Path.cwd())
+    from asc.web.security import redact_credential_fields
+
     return {
-        "candidates": candidates,
+        "candidates": [redact_credential_fields(dict(item)) for item in candidates],
         "cwd": str(Path.cwd()),
     }
 
@@ -1293,8 +1303,8 @@ async def update_profile(
     request: Request,
     name: str,
     new_name: str = _Form(..., alias="name"),
-    issuer_id: str = _Form(...),
-    key_id: str = _Form(...),
+    issuer_id: str = _Form(""),
+    key_id: str = _Form(""),
     app_id: str = _Form(...),
     csv: str = _Form(""),
     screenshots: str = _Form(""),
@@ -1317,6 +1327,11 @@ async def update_profile(
         raise HTTPException(status_code=404, detail="Profile not found")
     if new_name != name and config.get_app_profile(new_name) is not None:
         raise HTTPException(status_code=409, detail="Profile name already exists")
+
+    from asc.web.security import kept_or_submitted
+
+    issuer_id = kept_or_submitted(issuer_id, existing.get("issuer_id", ""))
+    key_id = kept_or_submitted(key_id, existing.get("key_id", ""))
 
     await _asyncio.to_thread(_enforce_web_profile_guard, app_id, new_name, key_id, issuer_id)
 
@@ -1407,7 +1422,9 @@ async def get_profile(name: str):
         raise HTTPException(status_code=404, detail="Profile not found")
     data["key_file_name"] = Path(data["key_file"]).name if data.get("key_file") else ""
     data.pop("key_file", None)
-    return data
+    from asc.web.security import redact_credential_fields
+
+    return redact_credential_fields(data)
 
 
 def _empty_current_environment() -> dict:
@@ -1461,7 +1478,9 @@ def guard_status(request: Request):
                 str(env[section].get("app_id", "")), ""
             )
         data["current_environment"] = env
-        return data
+        from asc.web.security import redact_guard_status
+
+        return redact_guard_status(data)
     except Exception as e:
         return {
             "enabled": False,
@@ -2685,6 +2704,10 @@ async def save_llm_config(request: Request):
     api_key = data.get("api_key", "")
     model = data.get("model", "gpt-4o")
     set_default = data.get("set_default", True)
+    from asc.web.security import is_safe_outbound_url
+
+    if str(base_url).strip() and not is_safe_outbound_url(str(base_url)):
+        return JSONResponse({"error": "Unsafe base_url"}, status_code=400)
 
     try:
         config = Config()

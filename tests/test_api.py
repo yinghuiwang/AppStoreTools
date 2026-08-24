@@ -557,11 +557,18 @@ def test_get_editable_version_prefers_editable(api):
     assert result["id"] == "v2"
 
 
-def test_get_editable_version_falls_back_to_first(api):
+def test_get_editable_version_returns_none_when_not_editable(api):
     versions = [_make_version("READY_FOR_SALE", "v1")]
     with patch.object(api, "get", return_value={"data": versions}):
         result = api.get_editable_version("app123")
-    assert result["id"] == "v1"
+    assert result is None
+
+
+def test_get_editable_version_returns_none_for_ready_for_review(api):
+    versions = [_make_version("READY_FOR_REVIEW", "v1")]
+    with patch.object(api, "get", return_value={"data": versions}):
+        result = api.get_editable_version("app123")
+    assert result is None
 
 
 def test_get_editable_version_returns_none_when_empty(api):

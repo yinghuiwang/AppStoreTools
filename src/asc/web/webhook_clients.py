@@ -73,6 +73,10 @@ def send_provider(
     url = str(config.get("url") or "")
     secret = str(config.get("secret") or "")
     provider_name = provider.lower()
+    from asc.web.security import is_safe_outbound_url
+
+    if url and not is_safe_outbound_url(url, resolve=True):
+        return {"provider": provider, "ok": False, "error": "Unsafe URL"}
 
     try:
         if provider_name == "feishu":
