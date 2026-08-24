@@ -28,7 +28,13 @@
 
 ### 1. 安装 `asc`
 
-推荐使用仓库安装脚本，它会自动选择可用的安装方式，并将 `asc` 命令配置到 PATH：
+推荐从 PyPI 安装已发布的包：
+
+```bash
+python -m pip install asc-appstore-tools
+```
+
+macOS / Linux 也可用仓库安装脚本（默认 PyPI，失败再回退 GitHub；`--ref` 指定分支）：
 
 ```bash
 curl -fL --retry 5 --connect-timeout 20 \

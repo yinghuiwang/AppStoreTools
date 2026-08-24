@@ -30,6 +30,7 @@ from asc.web.agent_knowledge import get_topic, search_notes
 from asc.web.agent_redact import redact_obj, redact_text
 from asc.web.agent_workspace import (
     FILE_MUTATION_OPS,
+    WorkspacePathError,
     _FORM_PATH_PARAM_KEYS,
     apply_file_mutation,
     build_file_mutation,
@@ -37,6 +38,8 @@ from asc.web.agent_workspace import (
     file_mutation_summary,
     is_blocked_workspace_path,
     normalize_allowed_roots,
+    resolve_workspace_path,
+    sanitize_form_paths,
     tool_grep,
     tool_read_file,
     validate_file_mutation,
@@ -347,7 +350,7 @@ class AgentToolContext:
             text = str(item or "").strip()
             if text:
                 cleaned.append(text)
-        self.form_paths = cleaned
+        self.form_paths = sanitize_form_paths(self.project_root, cleaned)
         attached: list[str] = []
         for item in self.attachment_paths or []:
             text = str(item or "").strip()
@@ -358,6 +361,75 @@ class AgentToolContext:
 
 class _ApplyStepError(Exception):
     """A single mutation failed during apply_fix."""
+
+
+def _snapshot_paths_for_mutation(ctx: AgentToolContext, mutation: dict) -> list[Path]:
+    op = mutation.get("op")
+    paths: list[Path] = []
+    if op in FILE_MUTATION_OPS:
+        try:
+            resolved = resolve_workspace_path(
+                ctx.project_root,
+                mutation.get("path"),
+                allow_root=False,
+                allowed_roots=ctx_allowed_roots(ctx),
+            )
+            paths.append(resolved)
+        except WorkspacePathError:
+            pass
+        return paths
+    resolved, error = _resolve_mutation_path(ctx, mutation.get("path"))
+    if error or resolved is None:
+        return paths
+    paths.append(resolved)
+    if op != "screenshot_fs":
+        return paths
+    action = mutation.get("action")
+    if action == "rename":
+        new_name = mutation.get("new_name")
+        if isinstance(new_name, str) and new_name.strip():
+            dest = Path(new_name)
+            if not dest.is_absolute() and ".." not in dest.parts:
+                paths.append(resolved.parent / dest.name)
+    elif action == "reorder":
+        locale_dir = resolved if resolved.is_dir() else resolved.parent
+        if locale_dir.is_dir():
+            try:
+                paths.extend(item for item in locale_dir.iterdir() if item.is_file())
+            except OSError:
+                pass
+    return paths
+
+
+def _take_file_snapshots(paths: list[Path]) -> list[tuple[Path, bytes | None]]:
+    out: list[tuple[Path, bytes | None]] = []
+    seen: set[str] = set()
+    for path in paths:
+        try:
+            key = str(path.resolve())
+        except OSError:
+            key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        if path.is_file():
+            out.append((path, path.read_bytes()))
+        else:
+            out.append((path, None))
+    return out
+
+
+def _restore_file_snapshots(snaps: list[tuple[Path, bytes | None]]) -> None:
+    for path, data in reversed(snaps):
+        try:
+            if data is None:
+                if path.is_file():
+                    path.unlink()
+                continue
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+        except OSError:
+            continue
 
 
 def execute_model_tool(ctx: AgentToolContext, name: str, arguments: dict) -> dict:
@@ -385,10 +457,16 @@ def apply_fix(ctx: AgentToolContext, plan_id: str) -> dict:
     if claimed is None:
         return dict(_CONFLICT)
     mutations = claimed.get("mutations") or []
+    snapshots: list[tuple[Path, bytes | None]] = []
     for index, mutation in enumerate(mutations):
         try:
+            if isinstance(mutation, dict):
+                snapshots.extend(
+                    _take_file_snapshots(_snapshot_paths_for_mutation(ctx, mutation))
+                )
             _apply_one_mutation(ctx, mutation)
         except Exception as exc:
+            _restore_file_snapshots(snapshots)
             message = redact_text(str(exc))
             ctx.agent_store.set_plan_status(plan_id, "apply_failed", error=message)
             op = mutation.get("op") if isinstance(mutation, dict) else None

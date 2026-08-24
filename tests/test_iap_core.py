@@ -607,9 +607,10 @@ def test_iap_dry_run_no_api_writes():
 def test_iap_skips_item_without_product_id():
     api = IapFakeAPI()
     items = [{"name": "No Product ID"}]
-    _upload_iap_core(api, "app1", items)
+    failed = _upload_iap_core(api, "app1", items)
     create_calls = [c for c in api.calls if c[0] == "create_in_app_purchase"]
     assert create_calls == []
+    assert failed == 1
 
 
 def test_iap_uploads_review_screenshot_for_new_item(tmp_path):
@@ -866,6 +867,25 @@ def test_iap_skip_existing_still_reports_progress():
 def test_iap_source_has_no_progress_protocol():
     src = Path(__file__).resolve().parents[1] / "src" / "asc" / "commands" / "iap.py"
     assert "[PROGRESS:" not in src.read_text(encoding="utf-8")
+
+
+def test_iap_missing_product_id_fails_job(tmp_path):
+    from asc.reporting import TaskReporter
+
+    sink = RecordingSink()
+    reporter = TaskReporter(sinks=[sink], verbose=False)
+    api = IapFakeAPI()
+    items = [
+        {"name": "No Product ID"},
+        {"productId": "com.example.item2", "name": "Item 2"},
+    ]
+    failed = _upload_iap_core(api, "app1", items, reporter=reporter)
+    assert failed == 1
+    create_ids = [c[2]["productId"] for c in api.calls if c[0] == "create_in_app_purchase"]
+    assert create_ids == ["com.example.item2"]
+    joined = "\n".join(msg for _, msg in sink.logs)
+    assert "IAP 上传完成" not in joined
+    assert "IAP 上传失败" in joined
 
 
 def test_iap_logs_summaries_via_reporter():

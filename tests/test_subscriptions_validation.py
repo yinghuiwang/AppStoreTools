@@ -4,6 +4,10 @@ from __future__ import annotations
 import pytest
 
 from asc.commands.subscriptions import validate_subscription_config, ValidationError
+from asc.iap.validate import (
+    ValidationError as IapValidationError,
+    validate_subscription_config as iap_validate_subscription_config,
+)
 
 
 def _valid_group(tmp_png):
@@ -24,6 +28,11 @@ def _valid_group(tmp_png):
             }
         ],
     }
+
+
+def test_validation_lives_in_iap_package():
+    assert validate_subscription_config is iap_validate_subscription_config
+    assert ValidationError is IapValidationError
 
 
 def test_valid_config_passes(tmp_png):

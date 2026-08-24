@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import inspect
 import json
 
 import pytest
 import requests_mock as rm
 
-from src.asc.llm import LLMClient
-from src.asc.services.translator import OpenAITranslator, Translator
+from asc.llm import LLMClient
+from asc.services import translator as translator_mod
+from asc.services.translator import OpenAITranslator, Translator
+
+
+def test_translator_imports_installed_package_path():
+    assert "from src.asc" not in inspect.getsource(translator_mod)
 
 
 def test_translate_calls_llm_with_correct_messages_structure():

@@ -737,7 +737,7 @@ def _start_iap_task(
 
             if items:
                 reporter.log(f"📦 一次性 IAP: {len(items)} 项")
-                _upload_iap_core(
+                failed_items = _upload_iap_core(
                     api,
                     app_id,
                     items,
@@ -748,6 +748,8 @@ def _start_iap_task(
                     finalize=not bool(groups),
                     cancel_event=cancel_event,
                 )
+                if failed_items:
+                    raise RuntimeError(f"iap upload failed: {failed_items} item(s)")
             if groups:
                 if cancel_event.is_set():
                     raise ProcessCanceled("iap upload canceled")

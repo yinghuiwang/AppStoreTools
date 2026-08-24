@@ -33,6 +33,17 @@ AppStoreTools (`asc`) 是一个用于批量上传 App Store Connect 元数据的
 │  build.py           │ 构建/部署（xcodebuild + TestFlight）      │
 │  app_config.py      │ App 配置管理（add/list/remove）           │
 │  guard_cmd.py       │ 守卫命令（status/enable/disable）         │
+│  web_cmd.py         │ 本机 Web UI（仅 loopback）                 │
+└────────────────────────┬────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    🌐 Web UI + Agent                             │
+├─────────────────────────────────────────────────────────────────┤
+│  server.py / auth.py │ FastAPI + 本机会话 / Origin / 本机客户端 │
+│  routes_*.py         │ 商品页 / IAP / 系统 / Agent API          │
+│  frontend/           │ Vue 3 SPA，构建到 web/static/spa/        │
+│  agent_tools.py      │ propose_fix；apply 需 confirm            │
 └────────────────────────┬────────────────────────────────────────┘
                          │
                          ▼
@@ -115,7 +126,7 @@ AppStoreTools (`asc`) 是一个用于批量上传 App Store Connect 元数据的
     ├─ KEY_FILE
     ├─ APP_ID
     ├─ ASC_LANG (zh/en)
-    └─ ASC_GUARD_DISABLE (1 禁用守卫)
+    └─ ASC_GUARD_DISABLE (1 且处于 CI 时禁用守卫)
 ```
 
 ---
@@ -463,8 +474,8 @@ data/screenshots/
 ```toml
 [dependencies]
 typer>=0.12.0              # CLI 框架
-PyJWT>=2.8.0               # JWT 认证
-cryptography>=41.0.0       # 加密库
+PyJWT[crypto]>=2.8.0       # JWT 认证（ES256 需要 cryptography）
+cryptography>=41.0.0       # [dev] 测试直接导入；运行时由 PyJWT[crypto] 带入
 requests>=2.31.0           # HTTP 客户端
 Pillow>=10.0.0             # 图片处理
 python-dotenv>=1.0.0       # .env 文件支持

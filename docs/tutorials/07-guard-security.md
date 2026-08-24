@@ -91,11 +91,12 @@ Clears all binding records. Guard remains enabled/disabled as before.
 For automated pipelines where you don't want Guard to block runs:
 
 ```bash
+export CI=1
 export ASC_GUARD_DISABLE=1
 asc --app myapp upload
 ```
 
-Or set it in your CI environment variables. See [08 CI/CD Automation](08-ci-cd.md) for a full example.
+`ASC_GUARD_DISABLE=1` is ignored on a normal workstation so a leftover export cannot turn Guard off. GitHub Actions and GitLab CI already set `CI=true`. On a laptop use `asc guard disable` instead. See [08 CI/CD Automation](08-ci-cd.md) for a full example.
 
 ---
 

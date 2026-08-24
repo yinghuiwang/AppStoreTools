@@ -76,6 +76,17 @@ Price: `pricePointId` **or** `baseTerritory` + `baseAmount`. Territory must be 3
 - Missing review screenshot can warn; skill workflows may allow generating JSON first and adding PNG later.
 - Do not put Credits **subscriptions** (`_points_month_` / period in the ID) into `items[]`.
 
+## Store pull (this tool)
+
+`pull_remote_snapshot` / Web「从商店导入」copies product identity, type, period, `groupLevel`, localizations, intro summary, and the **base** price only.
+
+It does **not**:
+
+- download review screenshots (local `review.screenshot` stays empty; existing local paths are kept on merge)
+- expand Apple's equalized / per-territory price matrix (`applyEqualizedPrices` is recorded as true when a base price exists)
+
+After pull, attach review PNGs and confirm prices before upload.
+
 ## Web Agent workflow (`iap-packages` skill)
 
 This Agent does **not** run Ruby skill scripts (`infer_iap_products.rb`, `sync_iap_packages.rb`, `discover_iap_manifest.rb`). Prefer the create-step table infer UI, or edit `iap_packages.json` with `json_patch` / `propose_fix` **after** the user confirms.

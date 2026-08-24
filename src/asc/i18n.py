@@ -505,6 +505,30 @@ ERRORS = {
         'en': 'This app is already bound to a machine. Unbind it first before adding a new binding manually.',
         'zh': '该 App 已绑定到某台机器，请先解绑后再手动添加。',
     },
+    'guard_fingerprint_invalid': {
+        'en': 'Machine fingerprint must be 6-128 characters: letters, digits, ".", "_", ":", or "-".',
+        'zh': '机器指纹须为 6-128 位字母、数字或 . _ : -。',
+    },
+    'guard_fingerprint_taken': {
+        'en': 'This machine fingerprint is already bound. Unbind it first.',
+        'zh': '该机器指纹已被绑定，请先解绑。',
+    },
+    'guard_ip_invalid': {
+        'en': 'IP address must be a valid IPv4 or IPv6 address.',
+        'zh': 'IP 地址必须是合法的 IPv4 或 IPv6。',
+    },
+    'guard_ip_taken': {
+        'en': 'This IP address is already bound. Unbind it first.',
+        'zh': '该 IP 已被绑定，请先解绑。',
+    },
+    'guard_credential_taken': {
+        'en': 'This API key is already bound. Unbind it first.',
+        'zh': '该 API 凭证已被绑定，请先解绑。',
+    },
+    'guard_ip_unavailable': {
+        'en': 'Public IP lookup failed and IP bindings already exist. Check the network or set ASC_GUARD_ALLOW_UNKNOWN_IP=1.',
+        'zh': '无法获取公网 IP，且已有 IP 绑定。请检查网络，或设置 ASC_GUARD_ALLOW_UNKNOWN_IP=1。',
+    },
     'xcode_scheme_failed': {
         'en': 'Failed to get Xcode scheme list. Ensure --project points to a valid Xcode project.',
         'zh': '无法获取 Xcode scheme 列表。请确认 --project 路径指向有效的 Xcode 项目。',

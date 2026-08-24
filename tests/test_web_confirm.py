@@ -30,6 +30,18 @@ def test_update_run_starts_after_confirm():
     start.assert_called_once()
 
 
+def test_guard_manual_bind_rejects_without_confirm():
+    client = TestClient(create_app())
+    with patch("asc.guard.Guard") as guard_cls:
+        resp = client.post(
+            "/api/guard/manual-bind",
+            data={"fingerprint": "SERIAL-A", "profile": "myapp"},
+        )
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "confirm is required"
+    guard_cls.assert_not_called()
+
+
 def test_agent_apply_rejects_without_confirm(tmp_path, monkeypatch):
     from asc.web.agent_store import AgentStore
 

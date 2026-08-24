@@ -16,7 +16,7 @@
 CI 环境中：
 
 1. **用 Secrets 创建临时 App Profile**，非交互命令仍需要可解析的 Profile；不要提交生成的 `.toml` 或 `.p8` 文件
-2. **关闭 Guard**（`ASC_GUARD_DISABLE=1`），因为 CI 机器和 IP 每次都会变化
+2. **关闭 Guard**（`ASC_GUARD_DISABLE=1`，GitHub/GitLab 已设置 `CI=true`），因为 CI 机器和 IP 每次都会变化
 3. **显式传入 `--app ci`**，不要依赖交互式 Profile 选择器
 4. **对 `build` 或 `release` 使用 `--no-interactive`**，缺少构建输入时直接失败
 
@@ -178,7 +178,7 @@ jobs:
 | `ASC_KEY_ID` | 用于生成 `ci.toml` 的 API Key ID |
 | `ASC_KEY_P8` | 写入临时密钥文件的私钥内容 |
 | `ASC_APP_ID` | 用于生成 `ci.toml` 的 App 数字 ID |
-| `ASC_GUARD_DISABLE` | 设为 `1` 关闭 Guard（CI 必须设置） |
+| `ASC_GUARD_DISABLE` | 设为 `1`，且需同时处于 CI（GitHub/GitLab 已设置 `CI=true`） |
 | `ASC_LANG` | 界面语言（`zh` 或 `en`） |
 
 ---

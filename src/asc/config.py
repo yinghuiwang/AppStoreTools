@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 from typing import Any, Optional
 
@@ -17,6 +18,40 @@ except ImportError:
         tomllib = None
 
 from dotenv import load_dotenv
+
+
+def ensure_keys_dir(*, home: Path | None = None) -> Path:
+    """Create ``~/.config/asc/keys`` and lock it to owner-only access."""
+    root = (Path(home) if home is not None else Path.home()) / ".config" / "asc" / "keys"
+    root.mkdir(parents=True, exist_ok=True)
+    try:
+        root.chmod(0o700)
+    except OSError:
+        pass
+    return root
+
+
+def install_key_file(
+    src: Path,
+    dest_dir: Path | None = None,
+    *,
+    overwrite: bool = False,
+) -> Path:
+    """Copy a ``.p8`` key into the keys directory and chmod it ``0600``."""
+    dest_dir = dest_dir or ensure_keys_dir()
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        dest_dir.chmod(0o700)
+    except OSError:
+        pass
+    dest = dest_dir / Path(src).name
+    if overwrite or not dest.exists():
+        shutil.copy2(src, dest)
+    try:
+        dest.chmod(0o600)
+    except OSError:
+        pass
+    return dest
 
 
 class Config:

@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import importlib.resources
 import re
-import shutil
 from pathlib import Path
 from typing import Optional
 
 import typer
 
-from asc.config import Config
+from asc.config import Config, ensure_keys_dir, install_key_file
 from asc.error_handler import get_action_hint
 from asc.guard import GuardViolationError
 from asc.i18n import t, ERRORS
@@ -80,11 +79,12 @@ def cmd_app_add(
 
     _enforce_profile_guard_cli(app_id, name, key_id, issuer_id)
 
-    global_keys_dir = Path.home() / ".config" / "asc" / "keys"
-    global_keys_dir.mkdir(parents=True, exist_ok=True)
-    dest_key = global_keys_dir / key_path.name
-    if not dest_key.exists():
-        shutil.copy2(key_path, dest_key)
+    dest_dir = ensure_keys_dir()
+    dest_key = dest_dir / key_path.name
+    if dest_key.exists():
+        dest_key.chmod(0o600)
+    else:
+        dest_key = install_key_file(key_path, dest_dir)
         typer.echo(f"  ✅ Key file copied to {dest_key}")
 
     config = Config()
@@ -255,12 +255,11 @@ def cmd_app_edit(
         if not new_key_path.exists():
             typer.echo(f"❌ Key file not found: {new_key_path}", err=True)
             raise typer.Exit(1)
-        global_keys_dir = config._global_dir / "keys"
-        global_keys_dir.mkdir(parents=True, exist_ok=True)
-        dest_key = global_keys_dir / new_key_path.name
-        if dest_key.exists():
-            typer.echo(f"  ⚠️  Overwriting existing key file at {dest_key}")
-        shutil.copy2(new_key_path, dest_key)
+        dest_dir = config._global_dir / "keys"
+        dest_preview = dest_dir / new_key_path.name
+        if dest_preview.exists():
+            typer.echo(f"  ⚠️  Overwriting existing key file at {dest_preview}")
+        dest_key = install_key_file(new_key_path, dest_dir, overwrite=True)
         typer.echo(f"  ✅ Key file copied to {dest_key}")
         final_key_file = str(dest_key)
     else:
@@ -515,13 +514,12 @@ def _do_import_from_env(
             interactive=interactive,
         )
 
-    global_keys_dir = Path.home() / ".config" / "asc" / "keys"
-    global_keys_dir.mkdir(parents=True, exist_ok=True)
-    dest_key = global_keys_dir / key_path.name
+    dest_key = ensure_keys_dir() / key_path.name
     if dest_key.exists():
+        dest_key.chmod(0o600)
         _echo(f"  ℹ️  密钥文件已存在，跳过拷贝：{dest_key}")
     else:
-        shutil.copy2(key_path, dest_key)
+        dest_key = install_key_file(key_path)
         _echo(f"  ✅ 密钥文件已拷贝到 {dest_key}")
 
     # 仅在文件真实存在时写入 csv / screenshots，避免写死尚未准备的模板路径

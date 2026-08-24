@@ -93,9 +93,20 @@ def test_guard_handles_corrupted_config(tmp_path):
         assert (tmp_path / "guard.json.backup").exists()
 
 
-def test_guard_disable_via_env(tmp_path, monkeypatch):
+def test_guard_disable_via_env_ignored_outside_ci(tmp_path, monkeypatch):
     from asc.guard import Guard
     monkeypatch.setenv("ASC_GUARD_DISABLE", "1")
+    for name in ("CI", "GITHUB_ACTIONS", "GITLAB_CI", "ASC_CI"):
+        monkeypatch.delenv(name, raising=False)
+    with patch("asc.guard.GUARD_FILE", tmp_path / "guard.json"):
+        g = Guard()
+        assert g.is_enabled() is True
+
+
+def test_guard_disable_via_env_in_ci(tmp_path, monkeypatch):
+    from asc.guard import Guard
+    monkeypatch.setenv("ASC_GUARD_DISABLE", "1")
+    monkeypatch.setenv("CI", "true")
     with patch("asc.guard.GUARD_FILE", tmp_path / "guard.json"):
         g = Guard()
         assert g.is_enabled() is False
@@ -635,16 +646,74 @@ def test_manual_bind_creates_optional_ip_and_credential_and_note(tmp_path):
         assert data["app_notes"]["123456789"] == "office spare mac"
 
 
-def test_manual_bind_updates_existing_machine_binding(tmp_path):
-    from asc.guard import Guard
+def test_manual_bind_rejects_existing_machine_fingerprint(tmp_path):
+    from asc.guard import Guard, GuardViolationError
     guard_file = tmp_path / "guard.json"
     with patch("asc.guard.GUARD_FILE", guard_file):
         g = Guard()
         g.manual_bind("SERIAL-MANUAL", "first", app_id="1", issuer_id="ISS1")
-        g.manual_bind("SERIAL-MANUAL", "second", app_id="2", issuer_id="ISS2")
+        with pytest.raises(GuardViolationError):
+            g.manual_bind("SERIAL-MANUAL", "second", app_id="2", issuer_id="ISS2")
         data = json.loads(guard_file.read_text())
-        assert data["bindings"]["machine"]["SERIAL-MANUAL"]["app_id"] == "2"
-        assert data["bindings"]["machine"]["SERIAL-MANUAL"]["app_name"] == "second"
+        assert data["bindings"]["machine"]["SERIAL-MANUAL"]["app_id"] == "1"
+
+
+def test_manual_bind_rejects_invalid_fingerprint_and_ip(tmp_path):
+    from asc.guard import Guard, GuardConfigError
+    guard_file = tmp_path / "guard.json"
+    with patch("asc.guard.GUARD_FILE", guard_file):
+        g = Guard()
+        with pytest.raises(GuardConfigError):
+            g.manual_bind("../etc/passwd", "myapp", app_id="1")
+        with pytest.raises(GuardConfigError):
+            g.manual_bind("abc", "myapp", app_id="1")
+        with pytest.raises(GuardConfigError):
+            g.manual_bind("SERIAL-OK", "myapp", app_id="1", ip="not-an-ip")
+
+
+def test_check_and_enforce_fails_closed_when_ip_unknown_and_bindings_exist(tmp_path):
+    from asc.guard import Guard, GuardViolationError
+    guard_file = tmp_path / "guard.json"
+    with patch("asc.guard.GUARD_FILE", guard_file), \
+         patch.object(Guard, "_get_machine_fingerprint", return_value="fp1"), \
+         patch.object(Guard, "_get_public_ip", return_value="1.1.1.1"):
+        g = Guard()
+        g.bind("com.ex.app", "myapp", "K1", "I1")
+    with patch("asc.guard.GUARD_FILE", guard_file), \
+         patch.object(Guard, "_get_machine_fingerprint", return_value="fp1"), \
+         patch.object(Guard, "_get_public_ip", return_value="unknown"):
+        g = Guard()
+        with pytest.raises(GuardViolationError):
+            g.check_and_enforce(app_id="com.ex.app", app_name="myapp", key_id="K1", issuer_id="I1")
+
+
+def test_check_and_enforce_allows_unknown_ip_when_none_bound(tmp_path):
+    from asc.guard import Guard
+    guard_file = tmp_path / "guard.json"
+    with patch("asc.guard.GUARD_FILE", guard_file), \
+         patch.object(Guard, "_get_machine_fingerprint", return_value="fp1"), \
+         patch.object(Guard, "_get_public_ip", return_value="unknown"):
+        g = Guard()
+        g.check_and_enforce(app_id="com.ex.app", app_name="myapp", key_id="K1", issuer_id="I1")
+        data = json.loads(guard_file.read_text())
+        assert data["bindings"]["machine"]["fp1"]["app_id"] == "com.ex.app"
+        assert data["bindings"]["ip"] == {}
+
+
+def test_check_and_enforce_allows_unknown_ip_with_override(tmp_path, monkeypatch):
+    from asc.guard import Guard
+    monkeypatch.setenv("ASC_GUARD_ALLOW_UNKNOWN_IP", "1")
+    guard_file = tmp_path / "guard.json"
+    with patch("asc.guard.GUARD_FILE", guard_file), \
+         patch.object(Guard, "_get_machine_fingerprint", return_value="fp1"), \
+         patch.object(Guard, "_get_public_ip", return_value="1.1.1.1"):
+        g = Guard()
+        g.bind("com.ex.app", "myapp", "K1", "I1")
+    with patch("asc.guard.GUARD_FILE", guard_file), \
+         patch.object(Guard, "_get_machine_fingerprint", return_value="fp1"), \
+         patch.object(Guard, "_get_public_ip", return_value="unknown"):
+        g = Guard()
+        g.check_and_enforce(app_id="com.ex.app", app_name="myapp", key_id="K1", issuer_id="I1")
 
 
 def test_bound_app_ids_collects_across_all_binding_categories(tmp_path):

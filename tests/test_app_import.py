@@ -97,6 +97,8 @@ def test_import_copies_key_file(project_root, isolated_global_dir):
     dest = isolated_global_dir / ".config" / "asc" / "keys" / "AuthKey_TESTKEY123.p8"
     assert dest.exists()
     assert dest.read_text() == "fake-key-content"
+    assert dest.stat().st_mode & 0o777 == 0o600
+    assert dest.parent.stat().st_mode & 0o777 == 0o700
 
 
 def test_import_skips_existing_key_file(project_root, isolated_global_dir):
@@ -288,3 +290,16 @@ def test_import_skips_enforcement_when_guard_disabled(
 
     assert result.exit_code == 0, result.output
     import_guard.check_and_enforce.assert_not_called()
+
+
+def test_ensure_keys_dir_is_owner_only(tmp_path, monkeypatch):
+    from asc.config import ensure_keys_dir, install_key_file
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    src = tmp_path / "AuthKey_NEW.p8"
+    src.write_text("secret", encoding="utf-8")
+    dest = install_key_file(src)
+    assert dest.parent == Path.home() / ".config" / "asc" / "keys"
+    assert dest.stat().st_mode & 0o777 == 0o600
+    assert dest.parent.stat().st_mode & 0o777 == 0o700
+    assert ensure_keys_dir() == dest.parent

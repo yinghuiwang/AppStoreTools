@@ -38,6 +38,7 @@ def test_cryptography_is_not_a_hard_install_dependency():
 
     dependencies = pyproject["project"]["dependencies"]
 
+    assert any(dep.replace(" ", "").startswith("PyJWT[crypto]") for dep in dependencies)
     assert not any(dep.lower().startswith("cryptography") for dep in dependencies)
 
 

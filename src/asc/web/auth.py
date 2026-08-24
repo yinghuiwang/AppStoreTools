@@ -12,6 +12,7 @@ from asc.web.daemon import is_loopback_host
 
 COOKIE_NAME = "asc_session"
 HEADER_NAME = "X-ASC-Token"
+_TEST_CLIENT_HOSTS = frozenset({"testclient", "testserver"})
 
 
 def generate_session_token() -> str:
@@ -26,6 +27,21 @@ def is_allowed_origin(value: str) -> bool:
     if not host:
         return False
     return is_loopback_host(host)
+
+
+def is_local_client_host(host: str | None) -> bool:
+    """Allow TestClient and loopback peers; reject LAN or public clients."""
+    if not host:
+        return False
+    name = host.strip().lower()
+    if name in _TEST_CLIENT_HOSTS:
+        return True
+    return is_loopback_host(name)
+
+
+def client_is_local(request: Request) -> bool:
+    client = request.client
+    return is_local_client_host(client.host if client else None)
 
 
 def origin_allowed(request: Request) -> bool:
@@ -86,10 +102,20 @@ def _forbidden_origin() -> JSONResponse:
     )
 
 
+def _forbidden_remote() -> JSONResponse:
+    return JSONResponse(
+        {"ok": False, "error": "forbidden_remote", "message": "Web UI only accepts loopback clients"},
+        status_code=403,
+    )
+
+
 def protect_request(request: Request) -> JSONResponse | None:
     """Return an error response when the request must not proceed."""
     path = request.url.path
     method = request.method.upper()
+
+    if not client_is_local(request):
+        return _forbidden_remote()
 
     if not origin_allowed(request):
         return _forbidden_origin()

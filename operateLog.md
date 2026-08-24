@@ -2,6 +2,27 @@
 
 ## 2026-08-24
 
+- IAP / 订阅上传校验收到 `src/asc/iap/validate.py`；CLI 命令模块改为调用该模块。编辑器用的 `validate_snapshot` 仍在 `iap/local.py`。
+- `_upload_iap_core` 缺少 productId 或子步骤失败不再报「上传完成」：会计失败数、`reporter.fail`，CLI / Web 整单失败；IAP 失败时不再继续传订阅。销售地区若不是列表会直接失败。
+- 商店 pull 行为写清：知识库、`iap/remote.py` 与创建步文案都说明不下载审核截图、不拉等价价格矩阵，只带基准价。
+- 新增 `listing/translator`、`asc check`、`asc uninstall` 单测。安装默认走 PyPI（`install.sh` 失败再回退 GitHub）；文档补充 Windows / pipx 卸载。`mypy` / `ruff` 列入 dev extra，CI 不跑。
+- 已重新构建 SPA（`index-ySOPEmNu.js`），商店导入说明已打进前端包。
+
+- Agent `form_paths` 沙箱收紧：额外根必须落在项目、家目录或临时目录内；拒绝 `/`、`$HOME`、临时目录根，以及 `~/Library` / `~/.ssh` 等过宽或敏感目录。系统路径（如 `/etc/hosts`）不能再把 `/etc` 加成可读根。父目录过宽时只把文件本身当根。
+- `AgentToolContext` 会丢掉无法成为沙箱根的客户端路径；`.ssh` / `.gnupg` / `.aws` / `.kube` 视为敏感目录。
+- `apply_fix` 半失败会按应用前快照回滚已成功步骤（含新建文件删除、截图 rename 还原）。原先「第一步留下、第二步失败」改为整单回滚。
+- 测试：`test_apply_fix_rolls_back_previous_steps`、`test_apply_fix_rolls_back_created_file`，以及系统路径 / tmp 根 / `.ssh` 拒绝用例。
+
+- 密钥目录统一：`ensure_keys_dir()` / `install_key_file()` 将 `~/.config/asc/keys` 设为 `0700`，`.p8` 设为 `0600`。CLI `app add/edit/import` 与 Web 上传密钥共用。
+- 应用层强制本机访问：`create_app()` 拒绝非 loopback 的 `ASC_WEB_HOST`；请求中间件拒绝非 loopback 客户端（TestClient 的 `testclient` 仍放行）。即使 `uvicorn --host 0.0.0.0`，局域网请求也会 403。
+- 运行时依赖改为 `PyJWT[crypto]>=2.8.0`，避免缺 `cryptography` 时 ES256 JWT 失败。
+- 修复 `translator.py` 的 `from src.asc.llm` 为 `from asc.llm`。
+- `CLAUDE.md` / `ARCHITECTURE.md` 补上 Web UI 与 Agent。
+- Guard 收紧：`ASC_GUARD_DISABLE=1` 只在 CI 标记（`CI` / `GITHUB_ACTIONS` / `GITLAB_CI` / `ASC_CI`）下生效，本机残留环境变量不再静默关闭守卫。
+- 公网 IP 探测失败且已有 IP 绑定时，`check_and_enforce` 拒绝继续；可用 `ASC_GUARD_ALLOW_UNKNOWN_IP=1` 显式放行。无 IP 绑定时仍可只绑定机器和凭证。
+- `manual_bind` 不再覆盖已有指纹 / IP / 凭证；指纹须为 6-128 位安全字符，IP 必须是合法地址。Web 手动添加需 `confirm` + popconfirm。
+- 教程 07/08、`CLAUDE.md`、`ARCHITECTURE.md` 已同步。新增 `tests/test_web_confirm.py` 的 manual-bind 用例。相关套件 235 passed。已重新构建 SPA。
+- 已提交并推送 `58de70d` 到 `origin/feat/iap-workflow` 与 `github/feat/iap-workflow`：`feat: gate high-risk Web actions and add test CI`。`docs/asc-locale-codes.md` 未纳入提交。
 - 高危操作二次确认：`POST /api/update/run` 与 `POST /api/agent/apply` 必须带 `confirm`，否则 400，不启动更新、不写文件。
 - 更新页三个安装按钮、Agent 计划「应用」改为 `t-popconfirm`；前端请求同时传 `confirm=true`。
 - 新增 GitHub Actions `.github/workflows/ci.yml` 与 GitLab CI：pytest（排除 e2e）、`pyproject`/`__version__` 对齐、`frontend` npm build。

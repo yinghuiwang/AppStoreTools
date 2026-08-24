@@ -191,7 +191,7 @@ async function submitAdd() {
   }
   addSaving.value = true;
   try {
-    await httpForm("/api/guard/manual-bind", new URLSearchParams({ ...addForm }));
+    await httpForm("/api/guard/manual-bind", new URLSearchParams({ ...addForm, confirm: "true" }));
     addOpen.value = false;
     await loadGuard();
     await loadProfiles();
@@ -386,9 +386,16 @@ onMounted(() => {
       </div>
       <template #footer>
         <t-button @click="addOpen = false">{{ t("common.cancel") }}</t-button>
-        <t-button theme="primary" :loading="addSaving" :disabled="!availableProfiles.length" @click="submitAdd">
-          {{ addSaving ? t("guard.saving") : t("guard.manual_add_submit") }}
-        </t-button>
+        <t-popconfirm
+          :content="t('guard.confirm_manual_add')"
+          :confirm-btn="t('guard.manual_add_submit')"
+          :cancel-btn="t('common.cancel')"
+          @confirm="submitAdd"
+        >
+          <t-button theme="primary" :loading="addSaving" :disabled="!availableProfiles.length">
+            {{ addSaving ? t("guard.saving") : t("guard.manual_add_submit") }}
+          </t-button>
+        </t-popconfirm>
       </template>
     </t-dialog>
 </template>

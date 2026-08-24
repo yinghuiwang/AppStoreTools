@@ -18,87 +18,11 @@ from asc.progress import ProcessCanceled
 from asc.reporting import TaskReporter, make_cli_reporter
 from asc.utils import make_api_from_config, resolve_app_profile
 from asc.i18n import t, ERRORS, HELP
-
-REVIEW_SCREENSHOT_WARNING_BYTES = 5 * 1024 * 1024
-REVIEW_SCREENSHOT_EXTS = {".png", ".jpg", ".jpeg"}
-
-
-def _non_empty_str(value) -> bool:
-    return isinstance(value, str) and value.strip() != ""
-
-
-def _valid_territory_id(value) -> bool:
-    return isinstance(value, str) and len(value.strip()) == 3 and value.strip().isalpha()
-
-
-def _validate_iap_item_price(item: dict, label: str) -> None:
-    price = item.get("price")
-    if price is None:
-        return
-    if not isinstance(price, dict):
-        raise ValueError(f"{label}.price must be an object")
-
-    has_price_point = _non_empty_str(price.get("pricePointId"))
-    has_base_lookup = (
-        _non_empty_str(price.get("baseTerritory"))
-        and _non_empty_str(price.get("baseAmount"))
-    )
-    if not has_price_point and not has_base_lookup:
-        raise ValueError(
-            f"{label}.price requires either pricePointId or baseTerritory + baseAmount"
-        )
-    if has_price_point and not _non_empty_str(price.get("baseTerritory")):
-        raise ValueError(f"{label}.price.baseTerritory required when pricePointId is set")
-    if price.get("baseTerritory") is not None and not _valid_territory_id(
-        price.get("baseTerritory")
-    ):
-        raise ValueError(
-            f"{label}.price.baseTerritory must be a 3-letter territory id such as USA or CHN"
-        )
-    if price.get("territory") is not None and not _valid_territory_id(
-        price.get("territory")
-    ):
-        raise ValueError(
-            f"{label}.price.territory must be a 3-letter territory id such as USA or CHN"
-        )
-
-
-def _resolve_review_screenshot(obj: dict, config_dir: Path) -> None:
-    """Resolve relative review.screenshot path against config_dir (in-place)."""
-    review = obj.get("review")
-    if not isinstance(review, dict):
-        return
-    shot = review.get("screenshot")
-    if not shot or not isinstance(shot, str):
-        return
-    p = Path(shot)
-    if not p.is_absolute():
-        review["screenshot"] = str(config_dir / p)
-
-
-def _validate_review_screenshot(item: dict, label: str) -> Optional[Path]:
-    review = item.get("review")
-    if not isinstance(review, dict):
-        return None
-    shot = review.get("screenshot")
-    if not shot:
-        return None
-    if not isinstance(shot, str) or not shot.strip():
-        raise ValueError(f"{label}.review.screenshot path required")
-    path = Path(shot)
-    if not path.exists() or not path.is_file():
-        raise ValueError(f"{label}.review.screenshot file not found: {shot}")
-    if path.suffix.lower() not in REVIEW_SCREENSHOT_EXTS:
-        raise ValueError(
-            f"{label}.review.screenshot must be .png/.jpg/.jpeg, got {path.suffix}"
-        )
-    size = path.stat().st_size
-    if size > REVIEW_SCREENSHOT_WARNING_BYTES:
-        typer.echo(
-            f"⚠️  {label}.review.screenshot exceeds 5MB ({size} bytes); "
-            "continuing and leaving final validation to App Store Connect"
-        )
-    return path
+from asc.iap.validate import (
+    resolve_review_screenshot,
+    validate_iap_item_price,
+    validate_review_screenshot,
+)
 
 
 def _load_iap_config(file_path: str) -> tuple[list[dict], list[dict]]:
@@ -128,12 +52,12 @@ def _load_iap_config(file_path: str) -> tuple[list[dict], list[dict]]:
 
     # Resolve relative file paths against the config file's directory
     for idx, item in enumerate(items):
-        _resolve_review_screenshot(item, config_dir)
-        _validate_review_screenshot(item, f"items[{idx}]")
-        _validate_iap_item_price(item, f"items[{idx}]")
+        resolve_review_screenshot(item, config_dir)
+        validate_review_screenshot(item, f"items[{idx}]", warn=typer.echo)
+        validate_iap_item_price(item, f"items[{idx}]")
     for group in subs:
         for sub in group.get("subscriptions", []):
-            _resolve_review_screenshot(sub, config_dir)
+            resolve_review_screenshot(sub, config_dir)
 
     return items, subs
 
@@ -209,133 +133,161 @@ def _upload_iap_core(
     if total_items == 0:
         reporter.progress(1, 1, msg="IAP 0/0")
         _finish_iap(reporter, finalize)
-        return
+        return 0
 
+    failed = 0
     for idx, item in enumerate(iap_items):
         if cancel_event is not None and cancel_event.is_set():
             raise ProcessCanceled("iap upload canceled")
         product_id = str(item.get("productId", "")).strip()
         if not product_id:
-            reporter.log("  ❌ 跳过：缺少 productId")
+            reporter.log("  ❌ 缺少 productId")
+            failed += 1
             reporter.progress(
                 idx + 1, total_items, msg=f"IAP {idx + 1}/{total_items}"
             )
             continue
 
-        name = str(item.get("name", "")).strip()
-        iap_type = str(item.get("inAppPurchaseType", "")).strip()
-        review_note = str(item.get("reviewNote", "")).strip()
-        review = item.get("review") if isinstance(item.get("review"), dict) else {}
-        if not review_note:
-            review_note = str(review.get("note", "")).strip()
-        review_screenshot = review.get("screenshot")
-        price = item.get("price") if isinstance(item.get("price"), dict) else {}
-        localizations = item.get("localizations", {})
-
-        reporter.log(f"  ── IAP: {product_id} ──")
-        existing = existing_by_product_id.get(product_id)
-
-        attrs = {"productId": product_id}
-        if name:
-            attrs["name"] = name
-        if iap_type:
-            attrs["inAppPurchaseType"] = iap_type
-        if review_note:
-            attrs["reviewNote"] = review_note
-
-        if existing:
-            iap_id = existing["id"]
-            if not update_existing:
-                reporter.log(
-                    f"    已存在 (ID: {iap_id})，补齐缺失的价格/地区/本地化"
-                )
-            else:
-                reporter.log(f"    已存在 (ID: {iap_id})，执行更新")
-                if not dry_run:
-                    update_attrs = {}
-                    if name:
-                        update_attrs["name"] = name
-                    if update_attrs:
-                        api.update_in_app_purchase(iap_id, update_attrs)
-        else:
-            reporter.log("    不存在，执行创建")
-            if not dry_run:
-                create_resp = api.create_in_app_purchase(app_id, attrs)
-                iap_id = create_resp["data"]["id"]
-                reporter.log(f"    ✅ 已创建，ID: {iap_id}")
-            else:
-                iap_id = "DRY_RUN_ID"
-
-        _sync_iap_availability(
-            api, iap_id, item, update_existing, dry_run, log=reporter.log
-        )
-        _sync_iap_price(
-            api, iap_id, price, update_existing, dry_run, log=reporter.log
-        )
-
-        if review_screenshot:
-            _sync_iap_review_screenshot(
+        try:
+            _upload_one_iap_item(
                 api,
-                iap_id,
-                review_screenshot,
+                app_id,
+                item,
+                product_id,
+                existing_by_product_id,
                 update_existing,
                 dry_run,
-                log=reporter.log,
+                reporter,
             )
-
-        if not isinstance(localizations, dict) or not localizations:
-            reporter.log("    ⚠️  无本地化配置，跳过本地化上传")
-            reporter.progress(
-                idx + 1, total_items, msg=f"IAP {idx + 1}/{total_items}"
-            )
-            continue
-
-        if dry_run:
-            reporter.log(f"    [预览] 将更新本地化: {list(localizations.keys())}")
-            reporter.progress(
-                idx + 1, total_items, msg=f"IAP {idx + 1}/{total_items}"
-            )
-            continue
-
-        existing_locs = api.get_in_app_purchase_localizations(iap_id)
-        loc_map = {loc["attributes"]["locale"]: loc for loc in existing_locs}
-
-        for locale, loc_data in localizations.items():
-            if not isinstance(loc_data, dict):
-                reporter.log(f"    ⚠️  locale={locale} 配置格式错误，已跳过")
-                continue
-            loc_attrs = {}
-            display_name = str(
-                loc_data.get("name") or loc_data.get("displayName") or ""
-            ).strip()
-            description = str(loc_data.get("description") or "").strip()
-            if display_name:
-                loc_attrs["name"] = display_name
-            if description:
-                loc_attrs["description"] = description
-            if not loc_attrs:
-                reporter.log(
-                    f"    ⚠️  locale={locale} 无有效字段（name/description），已跳过"
-                )
-                continue
-
-            if locale in loc_map:
-                if not update_existing:
-                    reporter.log(f"    {locale}: 本地化已存在，跳过")
-                    continue
-                api.update_in_app_purchase_localization(
-                    loc_map[locale]["id"], loc_attrs
-                )
-                reporter.log(f"    ✅ {locale}: 已更新本地化")
-            else:
-                api.create_in_app_purchase_localization(iap_id, locale, loc_attrs)
-                reporter.log(f"    ✅ {locale}: 已创建本地化")
+        except ProcessCanceled:
+            raise
+        except Exception as exc:
+            reporter.log(f"    ❌ {exc}")
+            failed += 1
+            raise
 
         reporter.progress(
             idx + 1, total_items, msg=f"IAP {idx + 1}/{total_items}"
         )
 
+    if failed:
+        reporter.fail(f"IAP 上传失败: {failed} 项")
+        return failed
     _finish_iap(reporter, finalize)
+    return 0
+
+
+def _upload_one_iap_item(
+    api,
+    app_id,
+    item,
+    product_id,
+    existing_by_product_id,
+    update_existing,
+    dry_run,
+    reporter,
+):
+    name = str(item.get("name", "")).strip()
+    iap_type = str(item.get("inAppPurchaseType", "")).strip()
+    review_note = str(item.get("reviewNote", "")).strip()
+    review = item.get("review") if isinstance(item.get("review"), dict) else {}
+    if not review_note:
+        review_note = str(review.get("note", "")).strip()
+    review_screenshot = review.get("screenshot")
+    price = item.get("price") if isinstance(item.get("price"), dict) else {}
+    localizations = item.get("localizations", {})
+
+    reporter.log(f"  ── IAP: {product_id} ──")
+    existing = existing_by_product_id.get(product_id)
+
+    attrs = {"productId": product_id}
+    if name:
+        attrs["name"] = name
+    if iap_type:
+        attrs["inAppPurchaseType"] = iap_type
+    if review_note:
+        attrs["reviewNote"] = review_note
+
+    if existing:
+        iap_id = existing["id"]
+        if not update_existing:
+            reporter.log(
+                f"    已存在 (ID: {iap_id})，补齐缺失的价格/地区/本地化"
+            )
+        else:
+            reporter.log(f"    已存在 (ID: {iap_id})，执行更新")
+            if not dry_run:
+                update_attrs = {}
+                if name:
+                    update_attrs["name"] = name
+                if update_attrs:
+                    api.update_in_app_purchase(iap_id, update_attrs)
+    else:
+        reporter.log("    不存在，执行创建")
+        if not dry_run:
+            create_resp = api.create_in_app_purchase(app_id, attrs)
+            iap_id = create_resp["data"]["id"]
+            reporter.log(f"    ✅ 已创建，ID: {iap_id}")
+        else:
+            iap_id = "DRY_RUN_ID"
+
+    _sync_iap_availability(
+        api, iap_id, item, update_existing, dry_run, log=reporter.log
+    )
+    _sync_iap_price(
+        api, iap_id, price, update_existing, dry_run, log=reporter.log
+    )
+
+    if review_screenshot:
+        _sync_iap_review_screenshot(
+            api,
+            iap_id,
+            review_screenshot,
+            update_existing,
+            dry_run,
+            log=reporter.log,
+        )
+
+    if not isinstance(localizations, dict) or not localizations:
+        reporter.log("    ⚠️  无本地化配置，跳过本地化上传")
+        return
+
+    if dry_run:
+        reporter.log(f"    [预览] 将更新本地化: {list(localizations.keys())}")
+        return
+
+    existing_locs = api.get_in_app_purchase_localizations(iap_id)
+    loc_map = {loc["attributes"]["locale"]: loc for loc in existing_locs}
+
+    for locale, loc_data in localizations.items():
+        if not isinstance(loc_data, dict):
+            raise ValueError(f"locale={locale} 配置格式错误")
+        loc_attrs = {}
+        display_name = str(
+            loc_data.get("name") or loc_data.get("displayName") or ""
+        ).strip()
+        description = str(loc_data.get("description") or "").strip()
+        if display_name:
+            loc_attrs["name"] = display_name
+        if description:
+            loc_attrs["description"] = description
+        if not loc_attrs:
+            reporter.log(
+                f"    ⚠️  locale={locale} 无有效字段（name/description），已跳过"
+            )
+            continue
+
+        if locale in loc_map:
+            if not update_existing:
+                reporter.log(f"    {locale}: 本地化已存在，跳过")
+                continue
+            api.update_in_app_purchase_localization(
+                loc_map[locale]["id"], loc_attrs
+            )
+            reporter.log(f"    ✅ {locale}: 已更新本地化")
+        else:
+            api.create_in_app_purchase_localization(iap_id, locale, loc_attrs)
+            reporter.log(f"    ✅ {locale}: 已创建本地化")
 
 
 def _sync_iap_availability(api, iap_id, item, update_existing, dry_run, log=print):
@@ -344,8 +296,7 @@ def _sync_iap_availability(api, iap_id, item, update_existing, dry_run, log=prin
 
     if territory_ids is not None:
         if not isinstance(territory_ids, list):
-            log("    ⚠️  销售地区: availableTerritories/territories 必须是列表，跳过")
-            return
+            raise ValueError("availableTerritories/territories 必须是列表")
         territory_ids = [str(t).strip() for t in territory_ids if str(t).strip()]
     elif available_all:
         if dry_run:
@@ -658,7 +609,7 @@ def cmd_iap(
     exit_code = 0
     if items:
         reporter.log(f"📦 一次性 IAP: {len(items)} 项")
-        _upload_iap_core(
+        failed_items = _upload_iap_core(
             api,
             app_id,
             items,
@@ -668,8 +619,10 @@ def cmd_iap(
             manage_phases=False,
             finalize=not bool(groups),
         )
+        if failed_items:
+            exit_code = 1
 
-    if groups:
+    if groups and not exit_code:
         total_subs = sum(len(g.get("subscriptions", [])) for g in groups)
         reporter.log(f"🔁 订阅: {len(groups)} 组 / {total_subs} 商品")
         failed = _upload_subscriptions_core(

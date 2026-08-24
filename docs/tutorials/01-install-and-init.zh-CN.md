@@ -14,33 +14,36 @@
 
 ## 步骤 1：安装 asc
 
-**方式 A — curl 一键安装（推荐）**
+**方式 A — PyPI（推荐）**
+
+```bash
+pip install asc-appstore-tools
+# 或：pipx install asc-appstore-tools
+```
+
+Windows 也用这条 PyPI 命令。`install.sh` 只支持 macOS / Linux。
+
+**方式 B — curl 一键安装（macOS / Linux）**
+
+默认从 PyPI 安装；PyPI 不可用时回退 GitHub。
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh | bash
 ```
 
-安装指定分支用于测试：
+安装指定 GitHub 分支用于测试：
 
 ```bash
 asc_install_ref=your-branch-or-tag
 curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh | bash -s -- --ref "$asc_install_ref"
 ```
 
-**方式 B — 克隆仓库安装**
+**方式 C — 克隆仓库安装**
 
 ```bash
 git clone https://github.com/yinghuiwang/AppStoreTools.git
 cd AppStoreTools
 bash install.sh
-```
-
-**方式 C — PyPI**
-
-```bash
-pip install asc-appstore-tools
-# 或安装 GitHub 最新版本
-pip install git+https://github.com/yinghuiwang/AppStoreTools.git
 ```
 
 验证安装：
@@ -50,6 +53,14 @@ asc --version
 ```
 
 > **提示：** 如果提示 `asc: command not found`，执行 `source ~/.zshrc`（bash 用户执行 `source ~/.bash_profile`）。
+
+卸载：
+
+```bash
+asc uninstall --yes
+# 或：pip uninstall asc-appstore-tools
+# 或：pipx uninstall asc-appstore-tools
+```
 
 ---
 

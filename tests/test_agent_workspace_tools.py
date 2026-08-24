@@ -1,7 +1,11 @@
 """Workspace file tools: grep/read execute now; write/create/delete stay gated."""
 from __future__ import annotations
 
+import os
+import tempfile
 from pathlib import Path
+
+from asc.web.agent_workspace import collect_form_allowed_roots, sanitize_form_paths
 
 from asc.web.agent_store import AgentStore
 from asc.web.agent_tools import (
@@ -338,6 +342,72 @@ def test_replay_form_paths_become_allow_roots(tmp_path):
     out = execute_model_tool(ctx, "read_file", {"path": str(csv_path)})
     assert out["ok"] is True
     assert "ReplayApp" in str(out)
+    store.close()
+
+
+def test_form_path_system_and_tmp_root_rejected(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    store = TaskStore(project / "tasks.db")
+    tmp_root = Path(tempfile.gettempdir()).resolve()
+    ctx = _ctx(
+        project,
+        store,
+        form_paths=["/etc/hosts", "/etc", str(tmp_root), str(Path.home())],
+    )
+    assert ctx.form_paths == []
+    assert collect_form_allowed_roots(project, ["/etc/hosts", "/etc", str(tmp_root)]) == []
+    hosts = execute_model_tool(ctx, "read_file", {"path": "/etc/hosts"})
+    assert hosts["ok"] is False
+    if Path("/etc/hosts").is_file():
+        assert "root:" not in str(hosts).lower()
+    store.close()
+
+
+def test_form_path_file_in_tmpdir_does_not_open_siblings(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    tmp_root = Path(tempfile.gettempdir()).resolve()
+    suffix = f"asc-form-{os.getpid()}-{id(tmp_path)}"
+    target = tmp_root / f"{suffix}.csv"
+    sibling = tmp_root / f"{suffix}.txt"
+    target.write_text("locale,name\nen-US,TmpApp\n", encoding="utf-8")
+    sibling.write_text("secret-sibling\n", encoding="utf-8")
+    store = TaskStore(project / "tasks.db")
+    try:
+        roots = collect_form_allowed_roots(project, [str(target)])
+        assert roots == [target.resolve()]
+        ctx = _ctx(project, store, form_paths=[str(target)])
+        allowed = execute_model_tool(ctx, "read_file", {"path": str(target)})
+        assert allowed["ok"] is True
+        assert "TmpApp" in str(allowed)
+        denied = execute_model_tool(ctx, "read_file", {"path": str(sibling)})
+        assert denied["ok"] is False
+        assert "secret-sibling" not in str(denied)
+        listed = execute_model_tool(ctx, "grep", {"pattern": "secret-sibling", "path": str(tmp_root)})
+        assert listed["ok"] is False or "secret-sibling" not in str(listed)
+    finally:
+        target.unlink(missing_ok=True)
+        sibling.unlink(missing_ok=True)
+        store.close()
+
+
+def test_form_path_ssh_dir_is_blocked(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    ssh = home / ".ssh"
+    ssh.mkdir(parents=True)
+    (ssh / "id_ed25519").write_text("PRIVATE\n", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home.resolve()))
+    project = tmp_path / "project"
+    project.mkdir()
+    store = TaskStore(project / "tasks.db")
+    ctx = _ctx(project, store, form_paths=[str(ssh), str(ssh / "id_ed25519")])
+    assert ctx.form_paths == []
+    assert sanitize_form_paths(project, [str(ssh)]) == []
+    out = execute_model_tool(ctx, "read_file", {"path": str(ssh / "id_ed25519")})
+    assert out["ok"] is False
+    assert "PRIVATE" not in str(out)
     store.close()
 
 

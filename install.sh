@@ -75,8 +75,16 @@ while [[ $# -gt 0 ]]; do
       echo "  curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh | bash -s -- --branch BRANCH"
       echo ""
       echo "Options:"
-      echo "  --branch, --ref VALUE  Install a specific branch, tag, or commit"
+      echo "  --branch, --ref VALUE  Install a specific GitHub branch, tag, or commit"
       echo "  -h, --help            Show this help"
+      echo ""
+      echo "Default install is from PyPI (asc-appstore-tools)."
+      echo "This script targets macOS / Linux."
+      echo "Windows:  pip install asc-appstore-tools"
+      echo "          pipx install asc-appstore-tools"
+      echo "Uninstall: pipx uninstall asc-appstore-tools"
+      echo "           pip uninstall asc-appstore-tools"
+      echo "           asc uninstall --yes"
       _asc_stop 0
       ;;
     *)
@@ -96,7 +104,22 @@ OS="$(uname -s)"
 case "$OS" in
   Darwin) PLATFORM="macOS" ;;
   Linux)  PLATFORM="Linux" ;;
-  *)      fatal "不支持的操作系统: $OS"; _asc_stop 1 ;;
+  MINGW*|MSYS*|CYGWIN*)
+    error "install.sh 面向 macOS / Linux，不支持 Windows。"
+    echo "  请改用："
+    echo "    pip install asc-appstore-tools"
+    echo "    或 pipx install asc-appstore-tools"
+    echo "  卸载："
+    echo "    pip uninstall asc-appstore-tools"
+    echo "    或 pipx uninstall asc-appstore-tools"
+    echo "    或 asc uninstall --yes"
+    _asc_stop 1
+    ;;
+  *)
+    fatal "不支持的操作系统: $OS"
+    echo "  Windows 请使用: pip install asc-appstore-tools"
+    _asc_stop 1
+    ;;
 esac
 info "操作系统: $PLATFORM"
 
@@ -161,61 +184,73 @@ fi
 # ── 6. 安装 asc-appstore-tools ──
 echo ""
 
-if [ -n "$INSTALL_REF" ]; then
-  GITHUB_URL="git+https://github.com/yinghuiwang/AppStoreTools.git@${INSTALL_REF}"
-  echo "正在从 GitHub 安装 asc-appstore-tools ${INSTALL_REF} ..."
-else
-  echo "正在获取最新版本信息..."
-
-  # 通过 GitHub Releases API 获取最新 tag
-  LATEST_TAG=""
-  if command -v curl &>/dev/null; then
-    LATEST_TAG=$(curl -fsSL "https://api.github.com/repos/yinghuiwang/AppStoreTools/releases/latest" 2>/dev/null \
-      | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print(d.get('tag_name',''))" 2>/dev/null || true)
-  fi
-
-  if [ -n "$LATEST_TAG" ]; then
-    GITHUB_URL="git+https://github.com/yinghuiwang/AppStoreTools.git@${LATEST_TAG}"
-    echo "正在从 GitHub 安装 asc-appstore-tools ${LATEST_TAG} ..."
-  else
-    GITHUB_URL="git+https://github.com/yinghuiwang/AppStoreTools.git"
-    echo "正在从 GitHub 安装 asc-appstore-tools (main) ..."
-  fi
-fi
-
 LOCAL_BIN="$HOME/.local/bin"
 VENV_DIR="$HOME/.local/share/asc-appstore-tools/venv"
 _asc_need_local_bin_export=0
+PYPI_SPEC="asc-appstore-tools"
+GITHUB_REPO="git+https://github.com/yinghuiwang/AppStoreTools.git"
 
 mkdir -p "$LOCAL_BIN"
 
-if command -v pipx &>/dev/null; then
-  if pipx install --force "$GITHUB_URL"; then
-    info "asc-appstore-tools 安装成功（pipx）"
-  else
-    fatal "pipx install 失败，请检查网络或权限后重试"
-    _asc_stop 1
-  fi
-elif "$PYTHON" -m pip install --user --upgrade "$GITHUB_URL" 2>/dev/null; then
-  info "asc-appstore-tools 安装成功（--user 模式）"
-else
-  warn "当前 Python 环境禁止直接 pip 安装，改用独立虚拟环境..."
-  if ! "$PYTHON" -m venv "$VENV_DIR"; then
-    error "创建虚拟环境失败。"
-    if [ "$PLATFORM" = "Linux" ]; then
-      echo "  Debian/Ubuntu 可尝试：sudo apt install python3-venv"
+_asc_install_spec() {
+  local spec="$1"
+  local label="$2"
+  if command -v pipx &>/dev/null; then
+    if pipx install --force "$spec"; then
+      info "asc-appstore-tools 安装成功（pipx / ${label}）"
+      return 0
     fi
+    return 1
+  fi
+  if "$PYTHON" -m pip install --user --upgrade "$spec" 2>/dev/null; then
+    info "asc-appstore-tools 安装成功（--user / ${label}）"
+    return 0
+  fi
+  warn "当前 Python 环境禁止直接 pip 安装，改用独立虚拟环境..."
+  if [ ! -x "$VENV_DIR/bin/python" ]; then
+    if ! "$PYTHON" -m venv "$VENV_DIR"; then
+      error "创建虚拟环境失败。"
+      if [ "$PLATFORM" = "Linux" ]; then
+        echo "  Debian/Ubuntu 可尝试：sudo apt install python3-venv"
+      fi
+      return 1
+    fi
+    "$VENV_DIR/bin/python" -m pip install --upgrade pip >/dev/null
+  fi
+  if "$VENV_DIR/bin/python" -m pip install --upgrade --force-reinstall "$spec"; then
+    ln -sf "$VENV_DIR/bin/asc" "$LOCAL_BIN/asc"
+    info "asc-appstore-tools 安装成功（独立虚拟环境 / ${label}）"
+    return 0
+  fi
+  return 1
+}
+
+if [ -n "$INSTALL_REF" ]; then
+  echo "正在从 GitHub 安装 asc-appstore-tools ${INSTALL_REF} ..."
+  if ! _asc_install_spec "${GITHUB_REPO}@${INSTALL_REF}" "GitHub ${INSTALL_REF}"; then
+    fatal "GitHub 安装失败，请检查网络或权限后重试"
     _asc_stop 1
   fi
-
-  VENV_PYTHON="$VENV_DIR/bin/python"
-  "$VENV_PYTHON" -m pip install --upgrade pip >/dev/null
-  if "$VENV_PYTHON" -m pip install --upgrade --force-reinstall "$GITHUB_URL"; then
-    ln -sf "$VENV_DIR/bin/asc" "$LOCAL_BIN/asc"
-    info "asc-appstore-tools 安装成功（独立虚拟环境）"
-  else
-    fatal "虚拟环境内 pip install 失败，请检查网络后重试"
-    _asc_stop 1
+else
+  echo "正在从 PyPI 安装 asc-appstore-tools ..."
+  if ! _asc_install_spec "$PYPI_SPEC" "PyPI"; then
+    warn "PyPI 安装失败，回退到 GitHub"
+    LATEST_TAG=""
+    if command -v curl &>/dev/null; then
+      LATEST_TAG=$(curl -fsSL "https://api.github.com/repos/yinghuiwang/AppStoreTools/releases/latest" 2>/dev/null \
+        | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print(d.get('tag_name',''))" 2>/dev/null || true)
+    fi
+    if [ -n "$LATEST_TAG" ]; then
+      GITHUB_URL="${GITHUB_REPO}@${LATEST_TAG}"
+      echo "正在从 GitHub 安装 asc-appstore-tools ${LATEST_TAG} ..."
+    else
+      GITHUB_URL="$GITHUB_REPO"
+      echo "正在从 GitHub 安装 asc-appstore-tools (main) ..."
+    fi
+    if ! _asc_install_spec "$GITHUB_URL" "GitHub"; then
+      fatal "安装失败，请检查网络或权限后重试"
+      _asc_stop 1
+    fi
   fi
 fi
 

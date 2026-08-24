@@ -1,7 +1,8 @@
 """Pull IAP + subscription metadata from App Store Connect into a local snapshot.
 
-v1 scope: copy, type, period, groupLevel, base price, intro summary.
-Does not download review screenshots or the equalized price matrix.
+Copies product identity, type, period, groupLevel, localizations, intro
+summary, and the base price only. Review screenshots stay empty; the
+equalized / per-territory price matrix is not downloaded.
 """
 from __future__ import annotations
 

@@ -28,7 +28,13 @@ Metadata, screenshot, IAP, and Web UI workflows can run on Linux and Windows. Ap
 
 ### 1. Install `asc`
 
-The repository installer selects a supported installation method and configures the `asc` command on your PATH:
+Preferred: install the published package from PyPI.
+
+```bash
+python -m pip install asc-appstore-tools
+```
+
+On macOS / Linux, the repository installer also defaults to PyPI (GitHub is a fallback, or use `--ref` for a branch):
 
 ```bash
 curl -fL --retry 5 --connect-timeout 20 \

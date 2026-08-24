@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import shutil
 import copy
+import ipaddress
 import typer
 import click
 import platform
@@ -24,6 +26,28 @@ _EMPTY = {
     "app_notes": {},
     "bundle_bindings": {},
 }
+
+_CI_DISABLE_MARKERS = ("CI", "GITHUB_ACTIONS", "GITLAB_CI", "ASC_CI")
+_FINGERPRINT_RE = re.compile(r"^[A-Za-z0-9._:-]{6,128}$")
+
+
+def _env_flag(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def env_disables_guard() -> bool:
+    """``ASC_GUARD_DISABLE=1`` only works in a recognized CI environment.
+
+    A leftover export on a workstation must not silently turn Guard off.
+    Use ``asc guard disable`` locally, or set ``CI`` / ``ASC_CI`` in pipelines.
+    """
+    if os.getenv("ASC_GUARD_DISABLE", "").strip() != "1":
+        return False
+    return any(_env_flag(name) for name in _CI_DISABLE_MARKERS)
+
+
+def allow_unknown_ip() -> bool:
+    return _env_flag("ASC_GUARD_ALLOW_UNKNOWN_IP")
 
 
 def _get_machine_fingerprint_macos() -> str:
@@ -90,7 +114,7 @@ class Guard:
         self._data = self._load()
 
     def _load(self) -> dict:
-        if os.getenv("ASC_GUARD_DISABLE", "").strip() == "1":
+        if env_disables_guard():
             data = copy.deepcopy(_EMPTY)
             data["enabled"] = False
             return data
@@ -383,6 +407,8 @@ class Guard:
         app_name = str(app_name or "").strip()
         if not fingerprint:
             raise GuardConfigError(t(ERRORS['guard_fingerprint_required']))
+        if not _FINGERPRINT_RE.fullmatch(fingerprint):
+            raise GuardConfigError(t(ERRORS['guard_fingerprint_invalid']))
         if not app_name:
             raise GuardConfigError(t(ERRORS['guard_app_required']))
 
@@ -391,12 +417,23 @@ class Guard:
         key_id = str(key_id or "").strip()
         ip = str(ip or "").strip()
         note = str(note or "").strip()
+        if ip:
+            try:
+                ipaddress.ip_address(ip)
+            except ValueError as exc:
+                raise GuardConfigError(t(ERRORS['guard_ip_invalid'])) from exc
 
         if self.is_app_bound(app_id):
             raise GuardViolationError(t(ERRORS['guard_app_already_bound']))
 
         now = self._now()
         b = self._data["bindings"]
+        if fingerprint in b.get("machine", {}):
+            raise GuardViolationError(t(ERRORS['guard_fingerprint_taken']))
+        if ip and ip in b.get("ip", {}):
+            raise GuardViolationError(t(ERRORS['guard_ip_taken']))
+        if key_id and key_id in b.get("credential", {}):
+            raise GuardViolationError(t(ERRORS['guard_credential_taken']))
         b["machine"][fingerprint] = self._entry(
             b["machine"].get(fingerprint), app_id, app_name, issuer_id, now
         )
@@ -534,6 +571,12 @@ class Guard:
         # 只调用一次，避免重复网络请求
         fp = self._get_machine_fingerprint()
         ip = self._get_public_ip()
+        if (
+            ip == "unknown"
+            and self._data.get("bindings", {}).get("ip")
+            and not allow_unknown_ip()
+        ):
+            raise GuardViolationError(t(ERRORS["guard_ip_unavailable"]))
 
         conflicts = self._collect_conflicts(app_id, key_id, issuer_id, fp, ip)
 

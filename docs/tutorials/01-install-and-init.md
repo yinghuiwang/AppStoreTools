@@ -14,33 +14,36 @@
 
 ## Step 1: Install asc
 
-**Option A — one-line curl install (recommended)**
+**Option A — PyPI (recommended)**
+
+```bash
+pip install asc-appstore-tools
+# or: pipx install asc-appstore-tools
+```
+
+Windows uses the same PyPI command. `install.sh` is macOS / Linux only.
+
+**Option B — one-line curl install (macOS / Linux)**
+
+Installs from PyPI by default; falls back to GitHub if PyPI is unreachable.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh | bash
 ```
 
-Install a specific branch for testing:
+Install a specific GitHub branch for testing:
 
 ```bash
 asc_install_ref=your-branch-or-tag
 curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh | bash -s -- --ref "$asc_install_ref"
 ```
 
-**Option B — clone and install**
+**Option C — clone and install**
 
 ```bash
 git clone https://github.com/yinghuiwang/AppStoreTools.git
 cd AppStoreTools
 bash install.sh
-```
-
-**Option C — PyPI**
-
-```bash
-pip install asc-appstore-tools
-# or latest from GitHub
-pip install git+https://github.com/yinghuiwang/AppStoreTools.git
 ```
 
 Verify:
@@ -50,6 +53,14 @@ asc --version
 ```
 
 > **Tip:** If you see `asc: command not found`, run `source ~/.zshrc` (or `source ~/.bash_profile` for bash).
+
+Uninstall:
+
+```bash
+asc uninstall --yes
+# or: pip uninstall asc-appstore-tools
+# or: pipx uninstall asc-appstore-tools
+```
 
 ---
 

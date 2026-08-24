@@ -1137,8 +1137,9 @@ async def _save_uploaded_key(key_file: _UploadFile) -> Path:
     content = await key_file.read()
     if not content or len(content) > 1024 * 1024:
         raise HTTPException(status_code=400, detail="Invalid key file")
-    global_keys_dir = Path.home() / ".config" / "asc" / "keys"
-    global_keys_dir.mkdir(parents=True, exist_ok=True)
+    from asc.config import ensure_keys_dir
+
+    global_keys_dir = ensure_keys_dir()
     dest_key = global_keys_dir / f"{hashlib.sha256(content).hexdigest()}.p8"
     if not dest_key.exists():
         temp_key = global_keys_dir / f".{dest_key.name}.tmp"
@@ -1512,6 +1513,7 @@ async def guard_manual_bind(
     profile: str = _Form(...),
     ip: str = _Form(""),
     note: str = _Form(""),
+    confirm: str = _Form(""),
 ):
     """Manually register a machine-fingerprint binding for a local app profile.
 
@@ -1521,6 +1523,9 @@ async def guard_manual_bind(
     from fastapi import HTTPException
     from asc.config import Config
     from asc.guard import Guard, GuardConfigError, GuardViolationError
+
+    if not _as_bool(confirm):
+        raise HTTPException(status_code=400, detail="confirm is required")
 
     fingerprint = fingerprint.strip()
     profile = profile.strip()

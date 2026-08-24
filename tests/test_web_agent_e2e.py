@@ -265,6 +265,7 @@ def agent_ui(chromium_browser, tmp_path, monkeypatch):
     from asc.web.agent import WebAgent
 
     monkeypatch.setenv("ASC_GUARD_DISABLE", "1")
+    monkeypatch.setenv("CI", "true")
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.chdir(tmp_path)
 

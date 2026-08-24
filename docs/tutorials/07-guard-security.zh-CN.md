@@ -91,11 +91,12 @@ asc guard reset
 在自动化流水线中，可以通过环境变量跳过 Guard 检查：
 
 ```bash
+export CI=1
 export ASC_GUARD_DISABLE=1
 asc --app myapp upload
 ```
 
-或在 CI 环境变量中设置。完整示例请参考 [08 CI/CD 自动化](08-ci-cd.zh-CN.md)。
+本机单独设置 `ASC_GUARD_DISABLE=1` 不会关闭 Guard，避免环境变量残留绕过。GitHub Actions / GitLab CI 已自带 `CI=true`。本机请用 `asc guard disable`。完整示例见 [08 CI/CD 自动化](08-ci-cd.zh-CN.md)。
 
 ---
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from contextlib import asynccontextmanager
 import logging
 from pathlib import Path
@@ -14,6 +15,7 @@ from asc import __version__
 from asc.cli import _installed_commit_short
 from asc.web.agent_store import agent_store
 from asc.web.auth import attach_session_cookie, generate_session_token, protect_request
+from asc.web.daemon import is_loopback_host
 from asc.web.tasks import task_store
 
 _STATIC_DIR = Path(__file__).parent / "static"
@@ -65,6 +67,12 @@ async def _lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     from asc.web.i18n import COOKIE_NAME, resolve_lang
+
+    bind_host = (os.environ.get("ASC_WEB_HOST") or "").strip()
+    if bind_host and not is_loopback_host(bind_host):
+        raise RuntimeError(
+            f"Web UI refuses to start on non-loopback host {bind_host!r}"
+        )
 
     app = FastAPI(title="asc Web UI", docs_url=None, redoc_url=None, lifespan=_lifespan)
     app.state.session_token = generate_session_token()

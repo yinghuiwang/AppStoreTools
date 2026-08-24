@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import re
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -54,7 +55,12 @@ _SECRET_NAMES = frozenset(
     }
 )
 _SECRET_SUFFIXES = frozenset({".p8", ".pem", ".key"})
-_SECRET_DIR_NAMES = frozenset({"keys", ".git"})
+_SECRET_DIR_NAMES = frozenset(
+    {"keys", ".git", ".ssh", ".gnupg", ".aws", ".kube"}
+)
+_HOME_BROAD_CHILDREN = frozenset(
+    {"library", "applications", ".ssh", ".gnupg", ".aws", ".kube"}
+)
 _BINARY_SUFFIXES = frozenset(
     {
         ".png",
@@ -147,10 +153,45 @@ def _too_broad_root(path: Path) -> bool:
     if resolved == resolved.anchor or str(resolved) in {"/", "\\"}:
         return True
     try:
-        if resolved == Path.home().resolve():
+        home = Path.home().resolve()
+        if resolved == home:
+            return True
+        if (
+            resolved.parent == home
+            and resolved.name.lower() in _HOME_BROAD_CHILDREN
+        ):
             return True
     except OSError:
+        pass
+    try:
+        if resolved == Path(tempfile.gettempdir()).resolve():
+            return True
+    except OSError:
+        pass
+    return False
+
+
+def _form_path_scope_roots(project_root: Path) -> list[Path]:
+    roots = [Path(project_root).resolve()]
+    for extra in (Path.home(), Path(tempfile.gettempdir())):
+        try:
+            roots.append(Path(extra).resolve())
+        except OSError:
+            continue
+    return roots
+
+
+def _under_any_root(path: Path, roots: list[Path]) -> bool:
+    try:
+        target = Path(path).resolve()
+    except (OSError, ValueError):
         return False
+    for root in roots:
+        try:
+            _assert_under_root(root, target)
+            return True
+        except (PathTraversalError, OSError, ValueError):
+            continue
     return False
 
 
@@ -196,8 +237,11 @@ def collect_form_allowed_roots(project_root: Path, form_paths: list[Any] | None)
     roots: list[Path] = []
     seen: set[str] = set()
     base = Path(project_root).resolve()
+    scopes = _form_path_scope_roots(base)
 
     def add(value: Path) -> None:
+        if not _under_any_root(value, scopes):
+            return
         if _too_broad_root(value) or is_blocked_workspace_path(value, base):
             return
         key = str(value)
@@ -217,6 +261,8 @@ def collect_form_allowed_roots(project_root: Path, form_paths: list[Any] | None)
             resolved = path.resolve()
         except (OSError, ValueError):
             continue
+        if not _under_any_root(resolved, scopes):
+            continue
         if is_blocked_workspace_path(resolved, base):
             continue
         if resolved.is_dir():
@@ -224,8 +270,27 @@ def collect_form_allowed_roots(project_root: Path, form_paths: list[Any] | None)
             continue
         parent = resolved.parent if resolved.is_file() or resolved.parent.is_dir() else None
         if parent is not None and parent.is_dir():
-            add(parent.resolve())
+            parent = parent.resolve()
+            if not _too_broad_root(parent) and _under_any_root(parent, scopes):
+                add(parent)
+                continue
+        if resolved.is_file():
+            add(resolved)
     return roots
+
+
+def sanitize_form_paths(project_root: Path, form_paths: list[Any] | None) -> list[str]:
+    """Keep only client paths that can become extra sandbox roots."""
+    kept: list[str] = []
+    seen: set[str] = set()
+    for raw in form_paths or []:
+        text = str(raw or "").strip()
+        if not text or text in seen:
+            continue
+        if collect_form_allowed_roots(project_root, [text]):
+            seen.add(text)
+            kept.append(text)
+    return kept
 
 
 def resolve_workspace_path(
@@ -253,7 +318,8 @@ def resolve_workspace_path(
     if matching is None:
         raise WorkspacePathError("path escapes the workspace")
     if not allow_root and resolved in {root.resolve() for root in roots}:
-        raise WorkspacePathError("cannot target the project root")
+        if not resolved.is_file():
+            raise WorkspacePathError("cannot target the project root")
     if is_blocked_workspace_path(resolved, matching):
         raise WorkspacePathError("path is forbidden")
     return resolved
@@ -487,7 +553,7 @@ def build_file_mutation(
     rel = rel_workspace_path(project_root, resolved, allowed_roots=allowed_roots)
     roots = normalize_allowed_roots(project_root, allowed_roots)
     if op == "file_delete":
-        if resolved in roots:
+        if resolved in roots and resolved.is_dir():
             return None, "cannot delete the project root"
         if resolved.exists() and resolved.is_dir():
             return None, "cannot delete a directory"

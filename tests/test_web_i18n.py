@@ -420,6 +420,8 @@ def test_iap_editor_list_dialog_i18n_keys():
     assert t("iap.step.upload", lang="zh") == "上传"
     assert t("iap.step.upload", lang="en") == "Upload"
     assert t("iap.tab.table", lang="zh") == "粘贴商品表"
+    assert "不下载审核截图" in t("iap.asc_help", lang="zh")
+    assert "equalized price matrix" in t("iap.asc_help", lang="en")
     assert t("iap.tab.asc", lang="zh") == "从商店导入"
     assert t("iap.tab.json", lang="zh") == "打开 JSON"
     assert t("iap.tab.blank", lang="zh") == "空白新建"

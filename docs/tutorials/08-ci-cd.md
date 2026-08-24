@@ -16,7 +16,7 @@
 In CI environments:
 
 1. **Create an ephemeral App Profile from secrets** — non-interactive commands still require a resolvable profile; never commit the generated `.toml` or `.p8` file
-2. **Disable Guard** (`ASC_GUARD_DISABLE=1`) — CI machines and IPs change on every run
+2. **Disable Guard** (`ASC_GUARD_DISABLE=1`; GitHub/GitLab already set `CI=true`) — CI machines and IPs change on every run
 3. **Pass `--app ci` explicitly** — do not rely on an interactive profile picker
 4. **Use `--no-interactive` for `build` or `release`** — fail instead of waiting for build input
 
@@ -178,7 +178,7 @@ jobs:
 | `ASC_KEY_ID` | API Key ID used to generate `ci.toml` |
 | `ASC_KEY_P8` | Private-key content written to the ephemeral key file |
 | `ASC_APP_ID` | Numeric App ID used to generate `ci.toml` |
-| `ASC_GUARD_DISABLE` | Set to `1` to disable Guard (required in CI) |
+| `ASC_GUARD_DISABLE` | Set to `1` together with `CI=true` (already set on GitHub/GitLab) |
 | `ASC_LANG` | UI language (`zh` or `en`) |
 
 ---

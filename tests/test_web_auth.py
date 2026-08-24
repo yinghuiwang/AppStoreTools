@@ -169,6 +169,23 @@ def test_is_allowed_origin_only_accepts_loopback():
     assert is_allowed_origin("not-a-url") is False
 
 
+def test_local_client_host_rejects_lan_peers():
+    from asc.web.auth import is_local_client_host
+
+    assert is_local_client_host("127.0.0.1") is True
+    assert is_local_client_host("::1") is True
+    assert is_local_client_host("testclient") is True
+    assert is_local_client_host("192.168.1.8") is False
+    assert is_local_client_host("10.0.0.2") is False
+    assert is_local_client_host("") is False
+
+
+def test_create_app_refuses_non_loopback_bind_host(monkeypatch):
+    monkeypatch.setenv("ASC_WEB_HOST", "0.0.0.0")
+    with pytest.raises(RuntimeError, match="non-loopback"):
+        create_app()
+
+
 def test_frontend_establishes_session_before_bootstrap():
     root = Path(__file__).resolve().parents[1]
     main = (root / "frontend" / "src" / "main.ts").read_text(encoding="utf-8")

@@ -1464,6 +1464,7 @@ def test_profile_key_upload_uses_content_addressed_path(client, tmp_path, monkey
     assert paths[0].read_bytes() == contents[0]
     assert paths[1].read_bytes() == contents[1]
     assert all(path.stat().st_mode & 0o777 == 0o600 for path in paths)
+    assert paths[0].parent.stat().st_mode & 0o777 == 0o700
 
 
 def test_profile_create_guard_conflict_has_no_file_side_effects(
@@ -2017,6 +2018,7 @@ def test_guard_manual_bind_api_rejects_whitespace_only_fingerprint(client):
     resp = client.post("/api/guard/manual-bind", data={
         "fingerprint": "   ",
         "profile": "myapp",
+        "confirm": "true",
     })
     assert resp.status_code == 400
 
@@ -2027,6 +2029,7 @@ def test_guard_manual_bind_api_unknown_profile_returns_404(client):
         resp = client.post("/api/guard/manual-bind", data={
             "fingerprint": "SERIAL-A",
             "profile": "missing-app",
+            "confirm": "true",
         })
     assert resp.status_code == 404
 
@@ -2050,6 +2053,7 @@ def test_guard_manual_bind_api_success_uses_profile_credentials(client):
         resp = client.post("/api/guard/manual-bind", data={
             "fingerprint": "SERIAL-A",
             "profile": "myapp",
+            "confirm": "true",
         })
 
     assert resp.status_code == 200
@@ -2080,6 +2084,7 @@ def test_guard_manual_bind_api_ignores_client_supplied_key_id(client):
             "key_id": "KEY-CLIENT-OVERRIDE",
             "ip": "1.2.3.4",
             "note": "office spare mac",
+            "confirm": "true",
         })
 
     assert resp.status_code == 200
@@ -2106,6 +2111,7 @@ def test_guard_manual_bind_api_invalid_fingerprint_returns_400(client):
         resp = client.post("/api/guard/manual-bind", data={
             "fingerprint": "   ",
             "profile": "myapp",
+            "confirm": "true",
         })
 
     assert resp.status_code == 400
@@ -2123,6 +2129,7 @@ def test_guard_manual_bind_api_persists_to_disk(client, tmp_path):
         resp = client.post("/api/guard/manual-bind", data={
             "fingerprint": "SERIAL-NEW-MACHINE",
             "profile": "myapp",
+            "confirm": "true",
         })
 
     assert resp.status_code == 200
@@ -2144,6 +2151,7 @@ def test_guard_manual_bind_api_rejects_already_bound_app(client):
         resp = client.post("/api/guard/manual-bind", data={
             "fingerprint": "SERIAL-A",
             "profile": "myapp",
+            "confirm": "true",
         })
 
     assert resp.status_code == 409
@@ -2180,6 +2188,7 @@ def test_guard_manual_bind_api_rejects_already_bound_app_end_to_end(client, tmp_
         resp = client.post("/api/guard/manual-bind", data={
             "fingerprint": "SERIAL-NEW",
             "profile": "myapp",
+            "confirm": "true",
         })
 
     assert resp.status_code == 409

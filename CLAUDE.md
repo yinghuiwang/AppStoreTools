@@ -114,7 +114,7 @@ Source lives in `src/asc/`. Key modules:
 ### Core Layer
 - **`api.py`** (720 lines) — `AppStoreConnectAPI` REST client. JWT tokens auto-refresh every 15 minutes. Retries on HTTP 429 with `Retry-After`. Handles all ASC REST API endpoints.
 - **`config.py`** (194 lines) — `Config` class with 4-level priority chain: CLI args > local `.asc/config.toml` > global `~/.config/asc/profiles/<name>.toml` > env vars.
-- **`guard.py`** (168 lines) — `Guard` security system with machine/IP/credential binding. Prevents credential abuse. Storage: `~/.config/asc/guard.json`. Default enabled, disable via `asc guard disable` or `ASC_GUARD_DISABLE=1`.
+- **`guard.py`** — `Guard` security system with machine/IP/credential binding. Prevents credential abuse. Storage: `~/.config/asc/guard.json`. Default enabled. Disable locally with `asc guard disable`. `ASC_GUARD_DISABLE=1` only works when `CI` / `GITHUB_ACTIONS` / `GITLAB_CI` / `ASC_CI` is set.
 - **`utils.py`** — `parse_csv()`, `resolve_locale()`, `make_api_from_config()`, `md5_of_file()`.
 - **`i18n.py`** (376 lines) — CLI internationalization (Chinese/English). `t()` translation function, `get_system_language()`. Driven by `ASC_LANG`.
 - **`web/i18n.py`** — Web UI i18n (separate from CLI). Catalogs in `web/locales/`; resolve order Cookie `asc_lang` → Accept-Language → `ASC_LANG` → `en`. Language switch sets both Cookie and `ASC_LANG`.
@@ -129,6 +129,18 @@ Source lives in `src/asc/`. Key modules:
 - **`build.py`** (443 lines) — `build_core()`, `deploy_core()`, `upload_ipa()`; `asc build/deploy/release` subcommands.
 - **`app_config.py`** (617 lines) — `asc app add/list/show/edit/remove/default/import` profile management.
 - **`guard_cmd.py`** (114 lines) — `asc guard` subcommands (`status`, `enable`, `disable`, `unbind`, `reset`).
+- **`web_cmd.py`** — `asc web` / `asc web stop`; only binds loopback.
+
+### Web UI (`web/`)
+- **`server.py`** — FastAPI factory. Refuses `ASC_WEB_HOST` that is not loopback. Serves the Vue SPA from `web/static/spa/`.
+- **`auth.py`** — per-process session cookie (`asc_session`) plus Origin and loopback-client checks.
+- **`daemon.py`** — background uvicorn; rejects `0.0.0.0`.
+- **`routes_api.py` / `routes_listing.py` / `routes_iap.py` / `routes_agent.py`** — Web API.
+- Frontend source is `frontend/` (Vue 3 + TDesign). Build with `npm run build` into `src/asc/web/static/spa/`.
+
+### Agent
+- **`agent.py` / `agent_tools.py` / `agent_store.py`** — chat + tools. Model can `propose_fix`; writes go through `/api/agent/apply` after confirm.
+- Knowledge notes live in `web/knowledge/`.
 
 ### CLI Layer
 - **`cli.py`** — Typer app wiring all subcommands. Routes commands to appropriate handlers.
@@ -174,7 +186,7 @@ Same structure as local config, but stored globally for reuse across projects.
 ### Environment Variables
 - `ISSUER_ID`, `KEY_ID`, `KEY_FILE`, `APP_ID` — Credentials
 - `ASC_LANG` — Language (zh/en)
-- `ASC_GUARD_DISABLE=1` — Disable security guard
+- `ASC_GUARD_DISABLE=1` — Disable Guard in CI only (also requires `CI` / `ASC_CI`)
 
 ## Key Constraints
 
@@ -183,7 +195,7 @@ Same structure as local config, but stored globally for reuse across projects.
 - **Subscriptions**: Default behavior is create-only (existing groups/subscriptions/prices/offers/screenshots are skipped). Use `--update-existing` to overwrite.
 - **Subscription Prices**: Use `baseTerritory` + `baseAmount`; tool resolves to Apple Price Point and relies on Apple's automatic cross-territory conversion.
 - **Credentials**: Stored in `~/.config/asc/profiles/<name>.toml` and `~/.config/asc/keys/`. Never commit real credentials.
-- **Guard System**: Default enabled. Binds credentials to machine/IP. Disable via `asc guard disable` or `ASC_GUARD_DISABLE=1` for CI/CD environments.
+- **Guard System**: Default enabled. Binds credentials to machine/IP. Disable locally with `asc guard disable`. In CI set `ASC_GUARD_DISABLE=1` (GitHub/GitLab already set `CI=true`). If public IP lookup fails and IP bindings already exist, uploads fail unless `ASC_GUARD_ALLOW_UNKNOWN_IP=1`.
 
 ## Security Features
 
@@ -230,17 +242,15 @@ pip install -e ".[dev]"
 # Run tests (when available)
 pytest
 
-# Type checking
+# Optional local checks (not run in CI)
 mypy src/asc
-
-# Linting
 ruff check src/asc
 ```
 
 ### Dependencies
 - **typer>=0.12.0** — CLI framework
-- **PyJWT>=2.8.0** — JWT authentication
-- **cryptography>=41.0.0** — Encryption library
+- **PyJWT[crypto]>=2.8.0** — JWT authentication (pulls `cryptography` for ES256)
+- **cryptography>=41.0.0** — listed under `[dev]` for tests; runtime comes via `PyJWT[crypto]`
 - **requests>=2.31.0** — HTTP client
 - **Pillow>=10.0.0** — Image processing
 - **python-dotenv>=1.0.0** — .env file support

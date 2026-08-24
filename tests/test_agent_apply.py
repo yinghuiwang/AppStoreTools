@@ -283,10 +283,11 @@ def test_apply_fix_text_replace_and_screenshot_rename_succeed(tmp_path, monkeypa
     agents.close()
 
 
-def test_apply_fix_stops_without_rollback(tmp_path, monkeypatch):
+def test_apply_fix_rolls_back_previous_steps(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     csv_path = tmp_path / "app.csv"
-    csv_path.write_text("locale,keywords\nzh-Hans,oldkeywords\n", encoding="utf-8")
+    csv_original = "locale,keywords\nzh-Hans,oldkeywords\n"
+    csv_path.write_text(csv_original, encoding="utf-8")
     notes = tmp_path / "whats_new.txt"
     notes.write_text("Bug fixes.\nBug fixes.\n", encoding="utf-8")
     tasks = TaskStore(tmp_path / "tasks.db")
@@ -327,7 +328,48 @@ def test_apply_fix_stops_without_rollback(tmp_path, monkeypatch):
     assert agents.get_plan(proposed["plan_id"])["status"] == "apply_failed"
     assert result["failed_step"]["index"] == 1
     assert result["failed_step"]["op"] == "text_replace"
-    assert "new" in csv_path.read_text(encoding="utf-8")
+    assert csv_path.read_text(encoding="utf-8") == csv_original
+    assert notes.read_text(encoding="utf-8") == "Bug fixes.\nBug fixes.\n"
+    tasks.close()
+    agents.close()
+
+
+def test_apply_fix_rolls_back_created_file(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    notes = tmp_path / "whats_new.txt"
+    notes.write_text("Bug fixes.\nBug fixes.\n", encoding="utf-8")
+    tasks = TaskStore(tmp_path / "tasks.db")
+    agents = AgentStore(tmp_path / "agent.db")
+    replay = {
+        "kind": "whats-new",
+        "profile": "myapp",
+        "verbose": False,
+        "params": {"source_file": str(notes)},
+    }
+    task_id = tasks.create("whats-new", profile="myapp", replay=replay)
+    session = agents.get_or_create_session(task_id, "myapp")
+    ctx = AgentToolContext(tasks, agents, task_id, tmp_path, turn_seq=1, session_id=session["id"])
+    created = tmp_path / "fresh.txt"
+    proposed = execute_model_tool(ctx, "propose_fix", {
+        "summary": "create then bad replace",
+        "mutations": [
+            {"op": "file_create", "path": "fresh.txt", "content": "fresh\n"},
+            {
+                "op": "text_replace",
+                "path": str(notes),
+                "before": "Bug fixes.",
+                "after": "New notes.",
+                "count": 1,
+            },
+        ],
+        "manual_steps": [],
+    })
+    assert proposed["ok"] is True
+    agents.promote_drafts(ctx.session_id, 1)
+    result = apply_fix(ctx, proposed["plan_id"])
+    assert result["ok"] is False
+    assert agents.get_plan(proposed["plan_id"])["status"] == "apply_failed"
+    assert not created.exists()
     assert notes.read_text(encoding="utf-8") == "Bug fixes.\nBug fixes.\n"
     tasks.close()
     agents.close()
