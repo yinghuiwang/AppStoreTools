@@ -97,6 +97,8 @@
   "listing.plan_unchecked": "尚未核对商店，上传计划可能不完整。",
   "listing.plan_empty": "没有可上传的差异。",
   "listing.entries": "种语言",
+  "listing.toc_title": "语言目录",
+  "listing.toc_jump": "跳转到 {locale}",
   "listing.auto_translate": "添加语言时自动翻译",
   "listing.translate_no_key": "未配置 LLM API Key，无法自动翻译。",
   "listing.agent_seed_create": "请根据我提供的产品说明，生成 App Store 商品页 CSV（data/appstore_info.csv）。\n\n先补齐：完整应用名（保留 - / : 分隔符）、服务条款 URL、隐私政策 URL、订阅协议 URL。缺了就先问我。\n\n流程：只先写 en-US 和 zh-Hans；写作目标 name≤27、subtitle≤27、keywords≤90（硬限制 30/30/100）；停下来等我确认后再写其余语言。描述用纯文本（不要 Markdown），末尾加自动续订法律条款和三个 URL。\n\n字段与字数（Apple 官方）：\n- name：2–30 字\n- subtitle：≤30 字\n- keywords：≤100 字，逗号分隔、逗号后不加空格\n- description：≤4000 字，纯文本，不要 HTML\n- supportUrl / marketingUrl / privacyPolicyUrl：带协议的 URL\n\n不要写 promotionalText、What’s New、版权或审核备注。不要创建 AppStore/*.md。用 csv_set_fields / propose_fix 写回 CSV；locale 不存在时请追加新行。不要直接上传，也不要自动 apply_fix。",

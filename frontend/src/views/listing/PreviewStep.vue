@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { AddIcon, ChevronDownIcon, ChevronUpIcon } from "tdesign-icons-vue-next";
 import { MessagePlugin } from "tdesign-vue-next";
@@ -175,6 +175,88 @@ const visibleLocales = computed(() =>
 );
 
 const listEmpty = computed(() => !visibleLocales.value.length);
+const showLocaleToc = computed(() => visibleLocales.value.length > 1);
+const activeLocale = ref("");
+const tocEl = ref<HTMLElement | null>(null);
+let sectionObserver: IntersectionObserver | null = null;
+let tocLockUntil = 0;
+
+function localeAnchorId(locale: string): string {
+  return `listing-locale-${locale.replace(/[^A-Za-z0-9_-]/g, "_")}`;
+}
+
+function findScrollRoot(el: HTMLElement | null): HTMLElement | null {
+  const named = el?.closest(".listing-body");
+  if (named instanceof HTMLElement) return named;
+  let node = el?.parentElement ?? null;
+  while (node) {
+    const style = getComputedStyle(node);
+    if (/(auto|scroll)/.test(style.overflowY)) return node;
+    node = node.parentElement;
+  }
+  return null;
+}
+
+function syncActiveLocale() {
+  const codes = visibleLocales.value.map((entry) => entry.row.locale);
+  if (!codes.length) {
+    activeLocale.value = "";
+    return;
+  }
+  if (!codes.includes(activeLocale.value)) {
+    activeLocale.value = codes[0];
+  }
+}
+
+function scrollToLocale(locale: string) {
+  const el = document.getElementById(localeAnchorId(locale));
+  if (!el) return;
+  tocLockUntil = Date.now() + 800;
+  activeLocale.value = locale;
+  workflow.selectedLocale.value = locale;
+  el.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function disconnectSectionObserver() {
+  sectionObserver?.disconnect();
+  sectionObserver = null;
+}
+
+function bindSectionObserver() {
+  disconnectSectionObserver();
+  if (!showLocaleToc.value) return;
+  const root = findScrollRoot(tocEl.value);
+  sectionObserver = new IntersectionObserver(
+    (entries) => {
+      if (Date.now() < tocLockUntil) return;
+      const visible = entries
+        .filter((entry) => entry.isIntersecting)
+        .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+      const id = visible[0]?.target.id || "";
+      const prefix = "listing-locale-";
+      if (!id.startsWith(prefix)) return;
+      const locale = visibleLocales.value.find((entry) => localeAnchorId(entry.row.locale) === id)?.row.locale;
+      if (locale) activeLocale.value = locale;
+    },
+    { root, rootMargin: "0px 0px -55% 0px", threshold: [0.08, 0.24] },
+  );
+  for (const entry of visibleLocales.value) {
+    const el = document.getElementById(localeAnchorId(entry.row.locale));
+    if (el) sectionObserver.observe(el);
+  }
+}
+
+watch(visibleLocales, () => {
+  syncActiveLocale();
+  void nextTick(bindSectionObserver);
+}, { flush: "post" });
+
+onMounted(() => {
+  syncActiveLocale();
+  void nextTick(bindSectionObserver);
+});
+
+onUnmounted(disconnectSectionObserver);
 
 const emptyFilterText = computed(() => {
   if (query.value.trim()) return t("listing.filter.empty_changed");
@@ -472,7 +554,41 @@ const editorPlan = computed(() => {
       @change="onShotFileChange"
     />
 
-    <section v-for="entry in visibleLocales" :key="entry.row.locale" class="card group-card">
+    <div v-if="visibleLocales.length" class="preview-layout" :class="{ 'has-toc': showLocaleToc }">
+      <nav
+        v-if="showLocaleToc"
+        ref="tocEl"
+        class="card locale-toc"
+        :aria-label="t('listing.toc_title')"
+      >
+        <div class="toc-head">
+          <strong>{{ t("listing.toc_title") }}</strong>
+          <span class="muted">{{ visibleLocales.length }} {{ t("listing.entries") }}</span>
+        </div>
+        <div class="toc-tags" role="list">
+          <button
+            v-for="entry in visibleLocales"
+            :key="`toc:${entry.row.locale}`"
+            type="button"
+            class="toc-tag"
+            role="listitem"
+            :class="{ active: activeLocale === entry.row.locale }"
+            :data-status="planStatus(entry.row.locale)"
+            :title="t('listing.toc_jump', { locale: catalog.labelFor(entry.row.locale) })"
+            @click="scrollToLocale(entry.row.locale)"
+          >
+            <span class="toc-code">{{ entry.row.locale }}</span>
+            <i v-if="isMissingShot(entry.row)" class="toc-dot shot" />
+          </button>
+        </div>
+      </nav>
+      <div class="preview-main">
+    <section
+      v-for="entry in visibleLocales"
+      :id="localeAnchorId(entry.row.locale)"
+      :key="entry.row.locale"
+      class="card group-card"
+    >
       <div
         class="list-row"
         role="button"
@@ -561,6 +677,8 @@ const editorPlan = computed(() => {
         </div>
       </div>
     </section>
+      </div>
+    </div>
 
     <p v-if="!workflow.planLoading.value && listEmpty && workflow.hasContent.value" class="empty-row card">{{ emptyFilterText }}</p>
 
@@ -579,6 +697,102 @@ const editorPlan = computed(() => {
 </template>
 
 <style scoped>
+.preview-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.preview-layout.has-toc {
+  display: grid;
+  grid-template-columns: minmax(148px, 188px) minmax(0, 1fr);
+  align-items: start;
+}
+.preview-main {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.locale-toc {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  max-height: calc(100vh - var(--topbar-height) - 168px);
+  overflow: auto;
+}
+.toc-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.toc-head strong {
+  font-size: 13px;
+  font-weight: 650;
+}
+.toc-tags {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.toc-tag {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  text-align: left;
+}
+.toc-tag:hover {
+  background: var(--raised);
+  color: var(--text);
+}
+.toc-tag.active {
+  background: var(--accent-glow);
+  border-color: var(--accent-deep);
+  color: var(--accent);
+}
+.toc-tag[data-status="changed"] .toc-code { color: var(--warn); }
+.toc-tag[data-status="local-only"] .toc-code { color: var(--info); }
+.toc-tag[data-status="equal"] .toc-code { color: var(--ok); }
+.toc-tag.active[data-status="changed"],
+.toc-tag.active[data-status="local-only"],
+.toc-tag.active[data-status="equal"] {
+  color: inherit;
+}
+.toc-code {
+  font-family: "Fira Code", ui-monospace, monospace;
+  font-size: 12px;
+}
+.toc-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--err);
+  flex: 0 0 auto;
+}
+.toc-tag:focus-visible {
+  outline: 2px solid var(--accent-dim);
+  outline-offset: 1px;
+}
+@media (max-width: 900px) {
+  .preview-layout.has-toc { grid-template-columns: 1fr; }
+  .locale-toc { max-height: none; }
+  .toc-tags { flex-direction: row; flex-wrap: wrap; }
+  .toc-tag { width: auto; }
+}
 .edit-stack { display: flex; flex-direction: column; gap: 12px; }
 .empty-row {
   display: flex;
@@ -619,7 +833,7 @@ const editorPlan = computed(() => {
 }
 .tree-actions, .row-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .locale-add { min-width: 220px; flex: 1; }
-.group-card { display: flex; flex-direction: column; gap: 10px; }
+.group-card { display: flex; flex-direction: column; gap: 10px; scroll-margin-top: 8px; }
 .desc-block { display: flex; flex-direction: column; gap: 6px; }
 .group-card > h3,
 .desc-block h3 { margin: 0; font-size: 13px; }

@@ -136,6 +136,9 @@ def test_nav_catalog_english_and_chinese():
     assert t("listing.tab.local", lang="zh") == "本地工作台"
     assert t("listing.step.create", lang="zh") == "创建"
     assert t("listing.step.preview", lang="zh") == "预览"
+    assert t("listing.toc_title", lang="zh") == "语言目录"
+    assert t("listing.toc_title", lang="en") == "Language directory"
+    assert "en-US" in t("listing.toc_jump", lang="zh", locale="en-US")
     assert t("listing.step.upload", lang="zh") == "上传"
     assert t("listing.col_description", lang="zh") == "描述"
     assert t("listing.col_description", lang="en") == "Description"

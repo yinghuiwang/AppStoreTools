@@ -97,6 +97,8 @@
   "listing.plan_unchecked": "Store compare has not run yet, so the upload plan may be incomplete.",
   "listing.plan_empty": "Nothing to upload.",
   "listing.entries": "locales",
+  "listing.toc_title": "Language directory",
+  "listing.toc_jump": "Jump to {locale}",
   "listing.auto_translate": "Auto-translate when adding a locale",
   "listing.translate_no_key": "No LLM API key configured, so auto-translate is unavailable.",
   "listing.agent_seed_create": "Generate App Store listing CSV (data/appstore_info.csv) from the product description I provide.\n\nCollect first: full app name (keep the - / : separator), Terms of Service URL, Privacy Policy URL, Subscription Agreement URL. Ask if any are missing.\n\nWorkflow: draft only en-US and zh-Hans; writing targets name≤27, subtitle≤27, keywords≤90 (hard limits 30/30/100); stop for my confirmation before other locales. Description is plain text (no Markdown) and must end with the auto-renew legal block and those three URLs.\n\nField limits (Apple official):\n- name: 2–30 characters\n- subtitle: ≤30 characters\n- keywords: ≤100 characters, comma-separated with no space after commas\n- description: ≤4000 characters, plain text, no HTML\n- supportUrl / marketingUrl / privacyPolicyUrl: URLs with a protocol\n\nDo not write promotionalText, What’s New, copyright, or review notes. Do not create AppStore/*.md files. Write back with csv_set_fields / propose_fix; append a new row if the locale is missing. Do not upload, and do not apply_fix automatically.",
