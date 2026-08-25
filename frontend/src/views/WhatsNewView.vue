@@ -10,6 +10,14 @@ import { useProfile } from "@/composables/useProfile";
 import { useRightRail } from "@/composables/useRightRail";
 import { useTaskLog } from "@/composables/useTaskLog";
 import { useTaskPagePhase } from "@/composables/useTaskPagePhase";
+import {
+  WHATS_NEW_FORM_KEY_PREFIX,
+  formMemoryKey,
+  parseWhatsNewStored,
+  readFormMemory,
+  whatsNewFormPayload,
+  writeFormMemory,
+} from "@/composables/useFormMemory";
 
 const { t } = useI18n();
 const { snapshot } = useProfile();
@@ -20,6 +28,7 @@ defineOptions({ name: "WhatsNewView" });
 
 const { isForm, isRun, taskId, meta, enterRun, backToForm } = useTaskPagePhase("whats-new");
 const empty = computed(() => (snapshot.value?.current_profile || "") === "");
+const appProfile = computed(() => snapshot.value?.current_profile || "");
 const alert = ref("");
 const text = ref("");
 const texts = ref<Record<string, string>>({});
@@ -163,6 +172,35 @@ watch(
 watch(previewLocales, (keys) => {
   if (!keys.includes(previewLocale.value)) previewLocale.value = keys[0] || "";
 });
+
+function restoreWhatsNewMemory() {
+  const saved = parseWhatsNewStored(readFormMemory(formMemoryKey(WHATS_NEW_FORM_KEY_PREFIX, appProfile.value)));
+  if (!saved) return;
+  if (saved.text) text.value = saved.text;
+  if (saved.texts && Object.keys(saved.texts).length) texts.value = { ...saved.texts };
+  dryRun.value = !!saved.dry_run;
+  verbose.value = !!saved.verbose;
+  translateMode.value = !!saved.translate_mode;
+  if (saved.source_locale) sourceLocale.value = saved.source_locale;
+}
+
+function saveWhatsNewMemory() {
+  if (!appProfile.value) return;
+  writeFormMemory(
+    formMemoryKey(WHATS_NEW_FORM_KEY_PREFIX, appProfile.value),
+    whatsNewFormPayload({
+      text: text.value,
+      texts: texts.value,
+      dry_run: dryRun.value,
+      verbose: verbose.value,
+      translate_mode: translateMode.value,
+      source_locale: sourceLocale.value,
+    }),
+  );
+}
+
+restoreWhatsNewMemory();
+watch([text, texts, dryRun, verbose, translateMode, sourceLocale], saveWhatsNewMemory);
 
 watch(check, syncSelectedLocales, { immediate: true });
 

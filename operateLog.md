@@ -1,6 +1,16 @@
 # 操作日志
 
+## 2026-08-25
+
+- Listing / IAP 对照抽到 `useCompareSession`：共用 generation 取消、in-flight 去重、SSE 等待。两边仍各自保留缓存键、compare 请求体、草稿合并和 `markDirty` 规则（Listing 编辑会失效对照，IAP 不会），避免预览/上传状态跳变。已重新构建 SPA（`index-du-DDKKf.js`）。
+
 ## 2026-08-24
+
+- Web 性能与体验：`/api/listing/thumb` 支持 `w` 生成缓存 JPEG 缩略图（默认 320px，缓存在 `~/.cache/asc/thumbs` 或 `ASC_THUMBS_CACHE`）；非图片返回 400。Listing 预览按可见语言懒加载截图，大图查看走原图。
+- Listing / IAP compare 不再 250ms 轮询 `/status`，改为等 SSE 结束后再取一次结果。任务日志按通道 `push` + 2000 行环形缓冲，最多保留 20 个通道。
+- `keep-alive` 只缓存 Listing / Whats New / URLs / Build / IAP；Dashboard 离开后卸载。Dashboard 进度改为浅监听，不再 `deep` watch 全量日志。
+- What's New / URLs 按 profile 写入 `asc_whatsnew_form_*` / `asc_urls_form_*`，刷新后保留文案和选项。
+- 新增 `src/asc/web/thumbs.py`、`tests/test_web_thumbs.py`。已重新构建 SPA（`index-xJates2v.js`）。
 
 - IAP / 订阅上传校验收到 `src/asc/iap/validate.py`；CLI 命令模块改为调用该模块。编辑器用的 `validate_snapshot` 仍在 `iap/local.py`。
 - `_upload_iap_core` 缺少 productId 或子步骤失败不再报「上传完成」：会计失败数、`reporter.fail`，CLI / Web 整单失败；IAP 失败时不再继续传订阅。销售地区若不是列表会直接失败。

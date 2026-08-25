@@ -210,6 +210,7 @@ def test_scan_local_screenshots_groups_by_locale_and_display_type(tmp_path):
     qs = parse_qs(parsed.query)
     assert unquote(qs["path"][0]) == str(en / "01_a.png")
     assert unquote(qs["root"][0]) == str(base)
+    assert qs["w"] == ["320"]
 
 
 def test_scan_local_screenshots_unknown_dimension_marked_unknown(tmp_path):

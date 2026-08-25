@@ -19,6 +19,8 @@ def test_form_memory_reuses_pre_vue_storage_keys():
     assert 'BUILD_FORM_KEY_PREFIX = "asc_build_form_"' in src
     assert 'IAP_FORM_KEY_PREFIX = "asc_iap_form_"' in src
     assert 'IAP_DRAFT_KEY_PREFIX = "asc_iap_draft_"' in src
+    assert 'WHATS_NEW_FORM_KEY_PREFIX = "asc_whatsnew_form_"' in src
+    assert 'URLS_FORM_KEY_PREFIX = "asc_urls_form_"' in src
     assert 'LISTING_DRAFT_KEY_PREFIX = "asc_listing_draft_"' in src
     assert "localStorage" in src
     assert "sessionStorage" in src
@@ -48,6 +50,12 @@ def test_listing_build_iap_views_wire_form_memory():
     assert "persistMemory" in workflow
     assert "storeDraft" in workflow
     assert "iapDraftKey" in workflow
+    whats = (SRC / "views/WhatsNewView.vue").read_text(encoding="utf-8")
+    urls = (SRC / "views/UrlsView.vue").read_text(encoding="utf-8")
+    assert "WHATS_NEW_FORM_KEY_PREFIX" in whats
+    assert "restoreWhatsNewMemory" in whats
+    assert "URLS_FORM_KEY_PREFIX" in urls
+    assert "restoreUrlsMemory" in urls
     create = (SRC / "views/iap/CreateStep.vue").read_text(encoding="utf-8")
     assert "jsonPath" in create
     assert "setIapFile" in create
@@ -82,6 +90,8 @@ import {
   BUILD_FORM_KEY_PREFIX,
   IAP_FORM_KEY_PREFIX,
   METADATA_FORM_KEY_PREFIX,
+  URLS_FORM_KEY_PREFIX,
+  WHATS_NEW_FORM_KEY_PREFIX,
   applyListingStored,
   buildFormPayload,
   formMemoryKey,
@@ -89,8 +99,12 @@ import {
   iapFormPayload,
   parseBuildStored,
   parseIapStored,
+  parseUrlsStored,
+  parseWhatsNewStored,
   readFormMemory,
   resetFormMemory,
+  urlsFormPayload,
+  whatsNewFormPayload,
   writeFormMemory,
 } from './formMemory.mjs';
 
@@ -212,6 +226,34 @@ const other = hydrateListingForm('otherapp', {
 if (other.csv_path.value !== 'data/appstore_info.csv') {
   throw new Error('other profile must not inherit myapp listing memory');
 }
+
+const whatsKey = formMemoryKey(WHATS_NEW_FORM_KEY_PREFIX, 'myapp');
+if (whatsKey !== 'asc_whatsnew_form_myapp') throw new Error('whats-new key drifted: ' + whatsKey);
+writeFormMemory(whatsKey, whatsNewFormPayload({
+  text: 'Bug fixes.',
+  texts: { 'en-US': 'Hello' },
+  dry_run: true,
+  verbose: false,
+  translate_mode: true,
+  source_locale: 'en-US',
+}));
+const whats = parseWhatsNewStored(readFormMemory(whatsKey));
+if (whats.text !== 'Bug fixes.') throw new Error('whats-new text not restored');
+if (whats.texts['en-US'] !== 'Hello') throw new Error('whats-new texts not restored');
+if (whats.translate_mode !== true || whats.dry_run !== true) throw new Error('whats-new flags not restored');
+
+const urlsKey = formMemoryKey(URLS_FORM_KEY_PREFIX, 'myapp');
+if (urlsKey !== 'asc_urls_form_myapp') throw new Error('urls key drifted: ' + urlsKey);
+writeFormMemory(urlsKey, urlsFormPayload({
+  field: 'marketingUrl',
+  url: 'https://example.com',
+  dry_run: false,
+  verbose: true,
+}));
+const urls = parseUrlsStored(readFormMemory(urlsKey));
+if (urls.field !== 'marketingUrl') throw new Error('urls field not restored');
+if (urls.url !== 'https://example.com') throw new Error('urls address not restored');
+if (urls.verbose !== true) throw new Error('urls verbose not restored');
 
 console.log('ok');
 """,

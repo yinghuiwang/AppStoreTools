@@ -675,6 +675,7 @@ def test_wizard_views_exist():
     assert 'class="field-row"' not in flags_block
     assert "padding-left: 0" in upload
     workflow = (root / "composables/useIapWorkflow.ts").read_text(encoding="utf-8")
+    assert "createCompareSession" in workflow
     assert "dirty" in workflow
     assert "storeDraft" in workflow
     assert "iapDraftKey" in workflow

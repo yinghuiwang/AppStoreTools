@@ -3,6 +3,7 @@ import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { reviewShotThumbUrl, useIapWorkflow } from "@/composables/useIapWorkflow";
 import { useImageViewer } from "@/composables/useImageViewer";
+import { listingOriginalUrl } from "@/utils/listingMedia";
 
 const props = withDefaults(defineProps<{
   path?: string;
@@ -29,7 +30,7 @@ watch(src, () => {
 function preview(event: Event) {
   event.stopPropagation();
   if (!src.value || failed.value) return;
-  viewer.show([{ src: src.value, title: shot.value }]);
+  viewer.show([{ src: listingOriginalUrl(src.value), title: shot.value }]);
 }
 
 function onError() {
@@ -47,7 +48,7 @@ function onError() {
     :aria-label="t('iap.review_shot')"
     @click="preview"
   >
-    <img :src="src" alt="" @error="onError" />
+    <img :src="src" alt="" loading="lazy" decoding="async" @error="onError" />
   </button>
   <span
     v-else

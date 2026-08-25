@@ -242,7 +242,10 @@ watch([range, profileFilter, kind, statusFilter], () => {
 });
 
 watch(
-  channels,
+  () => Object.entries(channels)
+    .map(([id, ch]) => `${id}:${ch.progress.pct}:${ch.progress.msg}`)
+    .sort()
+    .join("|"),
   () => {
     const tasks = summary.value?.tasks;
     if (!tasks) return;
@@ -252,7 +255,6 @@ watch(
       task.progress = { pct: ch.progress.pct, msg: ch.progress.msg };
     }
   },
-  { deep: true },
 );
 
 watch(

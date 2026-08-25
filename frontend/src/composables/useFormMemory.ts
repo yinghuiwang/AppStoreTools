@@ -5,6 +5,8 @@ export const METADATA_FORM_KEY_PREFIX = "asc_metadata_form_";
 export const BUILD_FORM_KEY_PREFIX = "asc_build_form_";
 export const IAP_FORM_KEY_PREFIX = "asc_iap_form_";
 export const IAP_DRAFT_KEY_PREFIX = "asc_iap_draft_";
+export const WHATS_NEW_FORM_KEY_PREFIX = "asc_whatsnew_form_";
+export const URLS_FORM_KEY_PREFIX = "asc_urls_form_";
 /** sessionStorage draft of unsaved listing copy, keyed by profile + csv path. */
 export const LISTING_DRAFT_KEY_PREFIX = "asc_listing_draft_";
 
@@ -50,6 +52,22 @@ export type IapDraftMemory = {
   iap_file: string;
   snapshot: unknown;
   store_draft: boolean;
+};
+
+export type WhatsNewFormMemory = {
+  text: string;
+  texts: Record<string, string>;
+  dry_run: boolean;
+  verbose: boolean;
+  translate_mode: boolean;
+  source_locale: string;
+};
+
+export type UrlsFormMemory = {
+  field: string;
+  url: string;
+  dry_run: boolean;
+  verbose: boolean;
 };
 
 type ListingBucket = {
@@ -281,6 +299,60 @@ export function parseIapDraft(data: Record<string, unknown> | null): Partial<Iap
     iap_file: asText(data.iap_file) || undefined,
     snapshot,
     store_draft: data.store_draft !== false,
+  };
+}
+
+function asTextMap(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const next: Record<string, string> = {};
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof item === "string") next[key] = item;
+  }
+  return next;
+}
+
+export function parseWhatsNewStored(data: Record<string, unknown> | null): Partial<WhatsNewFormMemory> | null {
+  if (!data) return null;
+  return {
+    text: asText(data.text),
+    texts: asTextMap(data.texts),
+    dry_run: !!data.dry_run,
+    verbose: !!data.verbose,
+    translate_mode: !!data.translate_mode,
+    source_locale: asText(data.source_locale) || "auto",
+  };
+}
+
+export function whatsNewFormPayload(fields: WhatsNewFormMemory): Record<string, unknown> {
+  return {
+    text: fields.text,
+    texts: fields.texts,
+    dry_run: fields.dry_run,
+    verbose: fields.verbose,
+    translate_mode: fields.translate_mode,
+    source_locale: fields.source_locale,
+  };
+}
+
+export function parseUrlsStored(data: Record<string, unknown> | null): Partial<UrlsFormMemory> | null {
+  if (!data) return null;
+  const field = asText(data.field);
+  return {
+    field: field === "marketingUrl" || field === "privacyPolicyUrl" || field === "supportUrl"
+      ? field
+      : undefined,
+    url: asText(data.url) || undefined,
+    dry_run: !!data.dry_run,
+    verbose: !!data.verbose,
+  };
+}
+
+export function urlsFormPayload(fields: UrlsFormMemory): Record<string, unknown> {
+  return {
+    field: fields.field,
+    url: fields.url,
+    dry_run: fields.dry_run,
+    verbose: fields.verbose,
   };
 }
 

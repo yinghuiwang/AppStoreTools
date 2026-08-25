@@ -2,13 +2,12 @@
 from __future__ import annotations
 
 import asyncio
-import mimetypes
 import os
 from dataclasses import asdict
 from pathlib import Path
 
 import requests
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 
 from asc.config import Config
@@ -49,6 +48,7 @@ from asc.utils import make_api_from_config
 from asc.web.i18n import t
 from asc.web.task_runner import sanitize_replay, start_background_task
 from asc.web.tasks import task_store
+from asc.web.thumbs import THUMB_MAX_WIDTH
 
 router = APIRouter()
 
@@ -222,15 +222,21 @@ async def listing_local(
 
 
 @router.get("/thumb")
-async def listing_thumb(path: str, root: str):
-    """Serve a screenshot thumbnail/original file, restricted to `root`.
+async def listing_thumb(
+    path: str,
+    root: str,
+    w: int = Query(default=0, ge=0, le=THUMB_MAX_WIDTH),
+):
+    """Serve a screenshot thumbnail or original file, restricted to `root`.
 
     Read-only local filesystem access (no ASC credentials involved), so this
     endpoint intentionally does not require a selected profile — mirrors
     `/api/browse`'s pattern of gating solely on a real-path containment check.
+    Pass `w` to receive a cached JPEG resized to that width.
     """
     target = _resolve_under_root(root, path)
     from asc.web.security import WebPathError, resolve_web_data_path
+    from asc.web.thumbs import clamp_thumb_width, ensure_jpeg_thumb, guess_image_media_type
 
     try:
         resolve_web_data_path(target)
@@ -238,8 +244,26 @@ async def listing_thumb(path: str, root: str):
         raise HTTPException(status_code=403, detail="Forbidden") from None
     if not target.exists() or not target.is_file():
         raise HTTPException(status_code=404, detail="not found")
-    media_type, _ = mimetypes.guess_type(str(target))
-    return FileResponse(str(target), media_type=media_type or "application/octet-stream")
+    media_type = guess_image_media_type(target)
+    if not media_type:
+        raise HTTPException(status_code=400, detail="not an image")
+    width = clamp_thumb_width(w)
+    if width:
+        try:
+            cached = await asyncio.to_thread(ensure_jpeg_thumb, target, width)
+        except Exception:
+            cached = None
+        if cached is not None:
+            return FileResponse(
+                str(cached),
+                media_type="image/jpeg",
+                headers={"Cache-Control": "private, max-age=86400"},
+            )
+    return FileResponse(
+        str(target),
+        media_type=media_type,
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
 
 
 @router.post("/local/save")

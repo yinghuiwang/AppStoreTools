@@ -9,6 +9,14 @@ import { useAppLocales } from "@/composables/useAppLocales";
 import { useProfile } from "@/composables/useProfile";
 import { useRightRail } from "@/composables/useRightRail";
 import { useTaskPagePhase } from "@/composables/useTaskPagePhase";
+import {
+  URLS_FORM_KEY_PREFIX,
+  formMemoryKey,
+  parseUrlsStored,
+  readFormMemory,
+  urlsFormPayload,
+  writeFormMemory,
+} from "@/composables/useFormMemory";
 
 const { t } = useI18n();
 const { snapshot } = useProfile();
@@ -18,6 +26,7 @@ defineOptions({ name: "UrlsView" });
 
 const { isForm, isRun, taskId, enterRun, backToForm } = useTaskPagePhase("urls");
 const empty = computed(() => (snapshot.value?.current_profile || "") === "");
+const appProfile = computed(() => snapshot.value?.current_profile || "");
 const alert = ref("");
 const field = ref("supportUrl");
 const url = ref("");
@@ -58,6 +67,31 @@ async function run() {
     else throw err;
   }
 }
+
+function restoreUrlsMemory() {
+  const saved = parseUrlsStored(readFormMemory(formMemoryKey(URLS_FORM_KEY_PREFIX, appProfile.value)));
+  if (!saved) return;
+  if (saved.field) field.value = saved.field;
+  if (saved.url) url.value = saved.url;
+  dryRun.value = !!saved.dry_run;
+  verbose.value = !!saved.verbose;
+}
+
+function saveUrlsMemory() {
+  if (!appProfile.value) return;
+  writeFormMemory(
+    formMemoryKey(URLS_FORM_KEY_PREFIX, appProfile.value),
+    urlsFormPayload({
+      field: field.value,
+      url: url.value,
+      dry_run: dryRun.value,
+      verbose: verbose.value,
+    }),
+  );
+}
+
+restoreUrlsMemory();
+watch([field, url, dryRun, verbose], saveUrlsMemory);
 
 watch(check, syncSelectedLocales, { immediate: true });
 

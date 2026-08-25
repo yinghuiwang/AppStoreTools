@@ -13,10 +13,10 @@ import {
   writeFormMemory,
   writeIapDraft,
 } from "@/composables/useFormMemory";
+import { createCompareSession, postCompareTask } from "@/composables/useCompareSession";
 import { rememberFormPath } from "@/composables/useFormPaths";
 import { LISTING_FIELDS, useListingScope, type ListingLocaleRow } from "@/composables/useListingScope";
 import { useProfile } from "@/composables/useProfile";
-import { useTaskLog } from "@/composables/useTaskLog";
 
 export type ListingShot = {
   file_name: string;
@@ -123,14 +123,6 @@ export type CompareResult = {
 
 const planLocales = ref<ListingPlanLocale[]>([]);
 const planVersion = ref<{ versionString?: string; appStoreState?: string } | null>(null);
-const planError = ref("");
-const planOk = ref(true);
-const planLoading = ref(false);
-const planLoadedKey = ref("");
-const compareTaskId = ref("");
-const compareStartedAt = ref(0);
-let compareInFlight: { key: string; promise: Promise<void> } | null = null;
-let compareGen = 0;
 
 function persistMemory() {
   if (hydrating || boundProfile === undefined) return;
@@ -187,104 +179,40 @@ function dropDraft() {
   storeDraft.value = false;
 }
 
-async function waitForTask(taskId: string): Promise<{ status: string; result?: CompareResult }> {
-  for (;;) {
-    const state = await httpJson<{ status: string; result?: CompareResult }>(
-      `/api/task/${encodeURIComponent(taskId)}/status`,
-      { skipNotify: true },
-    );
-    const status = String(state.status || "");
-    if (["done", "error", "canceled"].includes(status)) return state;
-    await new Promise((resolve) => window.setTimeout(resolve, 250));
-  }
-}
-
 function planCacheKey(): string {
   const draft = dirty.value || storeDraft.value ? JSON.stringify(textOnlySnapshot(snapshot.value)) : "";
   return `${csvPath.value}|${screenshotsDir.value}|${mtime.value ?? ""}|${draft}`;
 }
 
-async function runCompare(key: string) {
-  const { subscribeIfNeeded } = useTaskLog();
-  const gen = ++compareGen;
-  planLoading.value = true;
-  planError.value = "";
-  compareStartedAt.value = Date.now();
-  try {
-    const { task_id } = await httpJson<{ task_id: string }>("/api/listing/compare", {
-      method: "POST",
-      skipNotify: true,
-      body: JSON.stringify({
-        csv_path: csvPath.value,
-        screenshots_dir: screenshotsDir.value,
-        ...((dirty.value || storeDraft.value) ? { snapshot: textOnlySnapshot(snapshot.value) } : {}),
-      }),
-    });
-    if (gen !== compareGen) return;
-    compareTaskId.value = task_id;
-    subscribeIfNeeded(task_id);
-    const state = await waitForTask(task_id);
-    if (gen !== compareGen) return;
-    const result = state.result || {};
-    if (state.status !== "done") {
-      planOk.value = false;
-      planError.value = result.error || state.status;
-      planLocales.value = [];
-      planVersion.value = null;
-      planLoadedKey.value = "";
-      return;
-    }
+function resetListingPlan() {
+  planLocales.value = [];
+  planVersion.value = null;
+}
+
+const {
+  planError,
+  planOk,
+  planLoading,
+  compareTaskId,
+  compareStartedAt,
+  compared,
+  ensureCompare,
+  invalidateCompare,
+} = createCompareSession<CompareResult>({
+  cacheKey: planCacheKey,
+  hasProfile: () => boundProfile !== undefined && !!boundProfile,
+  start: () => postCompareTask("/api/listing/compare", {
+    csv_path: csvPath.value,
+    screenshots_dir: screenshotsDir.value,
+    ...((dirty.value || storeDraft.value) ? { snapshot: textOnlySnapshot(snapshot.value) } : {}),
+  }),
+  applySuccess: (result) => {
     planLocales.value = result.locales || [];
     planVersion.value = result.version || null;
-    planLoadedKey.value = key;
-    planOk.value = result.ok !== false;
-    planError.value = planOk.value ? "" : result.error || "";
-  } catch (err) {
-    if (gen !== compareGen) return;
-    planOk.value = false;
-    if (err instanceof ApiError) planError.value = apiErrorMessage(err);
-    else planError.value = String(err);
-    planLocales.value = [];
-    planVersion.value = null;
-    planLoadedKey.value = "";
-  } finally {
-    if (gen === compareGen) {
-      planLoading.value = false;
-      compareTaskId.value = "";
-      compareStartedAt.value = 0;
-    }
-  }
-}
-
-async function ensureCompare(opts?: { force?: boolean }) {
-  if (boundProfile === undefined || !boundProfile) {
-    planLocales.value = [];
-    planError.value = "";
-    planOk.value = true;
-    planLoadedKey.value = "";
-    planVersion.value = null;
-    return;
-  }
-  const key = planCacheKey();
-  if (!opts?.force && planLoadedKey.value === key && !planLoading.value) return;
-  if (compareInFlight && compareInFlight.key === key && !opts?.force) {
-    await compareInFlight.promise;
-    return;
-  }
-  const promise = runCompare(key);
-  compareInFlight = { key, promise };
-  try {
-    await promise;
-  } finally {
-    if (compareInFlight?.promise === promise) compareInFlight = null;
-  }
-}
-
-function invalidateCompare() {
-  planLoadedKey.value = "";
-}
-
-const compared = computed(() => !!planLoadedKey.value && planLoadedKey.value === planCacheKey());
+  },
+  applyFailure: resetListingPlan,
+  onNoProfile: resetListingPlan,
+});
 
 function hydrate(profile: string, defaults: { csv: string; screenshots: string }) {
   if (boundProfile === profile) return;

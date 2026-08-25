@@ -34,6 +34,10 @@ const EMPTY_PROGRESS: TaskProgress = {
   pct: 0, msg: "", phase: "", phase_label: "", phase_index: 0, phase_total: 0,
 };
 
+const MAX_CHANNEL_LINES = 2000;
+const MAX_CHANNELS = 20;
+const TERMINAL_STATUS = new Set(["done", "error", "canceled"]);
+
 const channels = reactive<Record<string, Channel>>({});
 const runtime = new Map<string, Runtime>();
 const activeTaskId = ref("");
@@ -49,6 +53,30 @@ function emptyProgress(): TaskProgress {
   return { pct: 0, msg: "", phase: "", phase_label: "", phase_index: 0, phase_total: 0 };
 }
 
+function appendLine(ch: Channel, line: LogLine) {
+  ch.lines.push(line);
+  if (ch.lines.length > MAX_CHANNEL_LINES) {
+    ch.lines.splice(0, ch.lines.length - MAX_CHANNEL_LINES);
+  }
+}
+
+function pruneChannels(keepId?: string) {
+  const ids = Object.keys(channels);
+  if (ids.length <= MAX_CHANNELS) return;
+  const drop = ids.filter((id) => (
+    id !== keepId
+    && id !== activeTaskId.value
+    && TERMINAL_STATUS.has(channels[id]?.status || "")
+  ));
+  while (Object.keys(channels).length > MAX_CHANNELS && drop.length) {
+    const id = drop.shift();
+    if (!id) break;
+    closeSource(id);
+    delete channels[id];
+    runtime.delete(id);
+  }
+}
+
 function ensureChannel(taskId: string): Channel {
   if (!channels[taskId]) {
     channels[taskId] = {
@@ -59,6 +87,7 @@ function ensureChannel(taskId: string): Channel {
       lastSeq: 0,
       retries: 0,
     };
+    pruneChannels(taskId);
   }
   if (!runtime.has(taskId)) {
     runtime.set(taskId, { source: null, reconnectTimer: null, intentionalClose: false });
@@ -126,7 +155,7 @@ function openEventSource(taskId: string, after: number) {
     const seq = Number((event as MessageEvent).lastEventId || ch.lastSeq);
     ch.lastSeq = Number.isFinite(seq) ? seq : ch.lastSeq;
     const parsed = parseLogEventData((event as MessageEvent).data);
-    ch.lines = [...ch.lines, { seq: ch.lastSeq, message: parsed.message, level: parsed.level }];
+    appendLine(ch, { seq: ch.lastSeq, message: parsed.message, level: parsed.level });
   });
   source.addEventListener("progress", (event) => {
     if (runtime.get(taskId)?.source !== source) return;
@@ -149,19 +178,21 @@ function openEventSource(taskId: string, after: number) {
     ch.status = value;
     ch.connection = "closed";
     closeSource(taskId);
+    pruneChannels();
   };
   source.addEventListener("done", () => finish("done"));
   source.addEventListener("canceled", () => finish("canceled"));
   source.addEventListener("error_event", (event) => {
     if (runtime.get(taskId)?.source !== source) return;
     ch.status = "error";
-    ch.lines = [...ch.lines, {
+    appendLine(ch, {
       seq: ch.lastSeq,
       message: (event as MessageEvent).data,
       level: "error",
-    }];
+    });
     ch.connection = "closed";
     closeSource(taskId);
+    pruneChannels();
   });
   source.onerror = () => {
     if (runtime.get(taskId)?.source !== source) return;
@@ -184,6 +215,7 @@ async function recover(taskId: string) {
     if (["done", "error", "canceled"].includes(st)) {
       ch.status = st;
       ch.connection = "closed";
+      pruneChannels();
       return;
     }
   } catch {
@@ -200,6 +232,41 @@ async function recover(taskId: string) {
     ch.connection = "connecting";
     openEventSource(taskId, ch.lastSeq);
   }, 1000);
+}
+
+function waitUntilTerminal(taskId: string, opts?: { timeoutMs?: number }): Promise<string> {
+  const timeoutMs = opts?.timeoutMs ?? 15 * 60 * 1000;
+  return new Promise((resolve, reject) => {
+    const started = Date.now();
+    const tick = () => {
+      const status = channels[taskId]?.status || "";
+      if (TERMINAL_STATUS.has(status)) {
+        resolve(status);
+        return;
+      }
+      if (Date.now() - started > timeoutMs) {
+        reject(new Error("task wait timeout"));
+        return;
+      }
+      window.setTimeout(tick, 200);
+    };
+    tick();
+  });
+}
+
+async function waitForTaskResult<T = unknown>(
+  taskId: string,
+): Promise<{ status: string; result?: T }> {
+  subscribeIfNeeded(taskId);
+  try {
+    await waitUntilTerminal(taskId);
+  } catch {
+    /* still fetch the latest status after timeout */
+  }
+  return httpJson<{ status: string; result?: T }>(
+    `/api/task/${encodeURIComponent(taskId)}/status`,
+    { skipNotify: true },
+  );
 }
 
 function disconnect(taskId?: string) {
@@ -257,6 +324,8 @@ export function useTaskLog() {
     setActiveTask,
     subscribe,
     subscribeIfNeeded,
+    waitUntilTerminal,
+    waitForTaskResult,
     disconnect,
     cancel,
     clearLocal,

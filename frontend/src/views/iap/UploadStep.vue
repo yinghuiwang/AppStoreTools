@@ -9,6 +9,7 @@ import { useIapWorkflow } from "@/composables/useIapWorkflow";
 import { useImageViewer } from "@/composables/useImageViewer";
 import { useRightRail } from "@/composables/useRightRail";
 import { useTaskPagePhase } from "@/composables/useTaskPagePhase";
+import { withThumbWidth } from "@/utils/listingMedia";
 
 type Target = {
   kind: string;
@@ -112,6 +113,13 @@ async function scan() {
   } finally {
     scanning.value = false;
   }
+}
+
+function thumbSrc(path: string): string {
+  const root = path.replace(/[/\\][^/\\]+$/, "") || ".";
+  return withThumbWidth(
+    `/api/listing/thumb?path=${encodeURIComponent(path)}&root=${encodeURIComponent(root)}`,
+  );
 }
 
 function previewPath(path: string) {
@@ -258,8 +266,10 @@ defineExpose({ start });
             <img
               v-if="paths[item.id]"
               class="thumb"
-              :src="`/api/listing/thumb?path=${encodeURIComponent(paths[item.id])}&root=${encodeURIComponent(paths[item.id].replace(/[/\\\\][^/\\\\]+$/, '') || '.')}`"
+              :src="thumbSrc(paths[item.id])"
               alt=""
+              loading="lazy"
+              decoding="async"
               @click="previewPath(paths[item.id])"
             />
           </div>

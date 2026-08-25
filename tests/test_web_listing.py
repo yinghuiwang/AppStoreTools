@@ -1101,7 +1101,15 @@ def test_listing_compare_and_overwrite_live_in_wizard():
     upload = Path("frontend/src/views/listing/UploadStep.vue").read_text(encoding="utf-8")
     dialog = Path("frontend/src/views/listing/ListingEditorDialog.vue").read_text(encoding="utf-8")
     workflow = Path("frontend/src/composables/useListingWorkflow.ts").read_text(encoding="utf-8")
+    shared = Path("frontend/src/composables/useCompareSession.ts").read_text(encoding="utf-8")
     assert "/api/listing/compare" in workflow
+    assert "createCompareSession" in workflow
+    assert "waitForTaskResult" in shared
+    assert "setTimeout(resolve, 250)" not in workflow
+    assert "setTimeout(resolve, 250)" not in shared
+    assert "listingOriginalUrl" in preview
+    assert 'loading="lazy"' in preview
+    assert "hydratedLocales" in preview
     assert 'ref("data/appstore_info.csv")' not in workflow
     assert 'ref("data/screenshots")' not in workflow
     assert "/api/listing/diff" not in preview
@@ -1113,6 +1121,13 @@ def test_listing_compare_and_overwrite_live_in_wizard():
     assert "listing.compare.button" in preview
     assert "listing.compare.button" in upload
     assert "useListingScope" in upload
+    listing_dirty = workflow.split("function markDirty", 1)[1].split("function discard", 1)[0]
+    assert "invalidateCompare" in listing_dirty
+    iap = Path("frontend/src/composables/useIapWorkflow.ts").read_text(encoding="utf-8")
+    iap_dirty = iap.split("function markDirty", 1)[1].split("function discard", 1)[0]
+    assert "invalidateCompare" not in iap_dirty
+    assert "JSON.stringify(textOnlySnapshot" in workflow
+    assert "textOnlySnapshot" not in iap.split("function planCacheKey", 1)[1].split("function ", 1)[0]
 
 
 def test_listing_diff_includes_asc_screenshots(client, tmp_path):

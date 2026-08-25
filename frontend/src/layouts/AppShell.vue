@@ -8,7 +8,7 @@ import ImageViewer from "@/components/ImageViewer.vue";
 import { useProfile } from "@/composables/useProfile";
 import { useTaskLog } from "@/composables/useTaskLog";
 import { useAgent } from "@/composables/useAgent";
-import { bindTaskPageProfile } from "@/composables/useTaskPagePhase";
+import { bindTaskPageProfile, TASK_KEEP_ALIVE_NAMES } from "@/composables/useTaskPagePhase";
 
 const { snapshot } = useProfile();
 
@@ -33,9 +33,9 @@ onMounted(() => {
       <AppTopbar />
       <main class="shell-main">
         <router-view v-slot="{ Component }">
-          <!-- No include: cache every route so sidebar switches do not remount and flash loading. -->
+          <!-- Cache task form pages only. Dashboard / system pages remount so watches and images drop. -->
           <!-- Profile key recreates the cache when the App changes. -->
-          <keep-alive :key="snapshot?.current_profile ?? ''">
+          <keep-alive :include="TASK_KEEP_ALIVE_NAMES" :key="snapshot?.current_profile ?? ''">
             <component :is="Component" />
           </keep-alive>
         </router-view>

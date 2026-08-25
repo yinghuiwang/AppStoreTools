@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { AddIcon, ChevronDownIcon, ChevronUpIcon } from "tdesign-icons-vue-next";
 import { MessagePlugin } from "tdesign-vue-next";
@@ -17,6 +17,7 @@ import {
   type ListingSnapshot,
 } from "@/composables/useListingWorkflow";
 import { useTaskLog } from "@/composables/useTaskLog";
+import { listingOriginalUrl } from "@/utils/listingMedia";
 import ListingEditorDialog from "./ListingEditorDialog.vue";
 
 const { t } = useI18n();
@@ -178,7 +179,9 @@ const listEmpty = computed(() => !visibleLocales.value.length);
 const showLocaleToc = computed(() => visibleLocales.value.length > 1);
 const activeLocale = ref("");
 const tocEl = ref<HTMLElement | null>(null);
+const hydratedLocales = ref<Record<string, true>>({});
 let sectionObserver: IntersectionObserver | null = null;
+let shotObserver: IntersectionObserver | null = null;
 let tocLockUntil = 0;
 
 function localeAnchorId(locale: string): string {
@@ -217,9 +220,19 @@ function scrollToLocale(locale: string) {
   el.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+function markHydrated(locale: string) {
+  if (!locale || hydratedLocales.value[locale]) return;
+  hydratedLocales.value = { ...hydratedLocales.value, [locale]: true };
+}
+
 function disconnectSectionObserver() {
   sectionObserver?.disconnect();
   sectionObserver = null;
+}
+
+function disconnectShotObserver() {
+  shotObserver?.disconnect();
+  shotObserver = null;
 }
 
 function bindSectionObserver() {
@@ -246,17 +259,59 @@ function bindSectionObserver() {
   }
 }
 
+function bindShotObserver() {
+  disconnectShotObserver();
+  const first = visibleLocales.value[0]?.row.locale;
+  if (first) markHydrated(first);
+  const root = findScrollRoot(tocEl.value);
+  shotObserver = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        const locale = (entry.target as HTMLElement).dataset.locale || "";
+        markHydrated(locale);
+      }
+    },
+    { root, rootMargin: "240px 0px", threshold: 0.01 },
+  );
+  for (const entry of visibleLocales.value) {
+    const el = document.getElementById(localeAnchorId(entry.row.locale));
+    if (el) shotObserver.observe(el);
+  }
+}
+
 watch(visibleLocales, () => {
   syncActiveLocale();
-  void nextTick(bindSectionObserver);
+  void nextTick(() => {
+    bindSectionObserver();
+    bindShotObserver();
+  });
 }, { flush: "post" });
 
 onMounted(() => {
   syncActiveLocale();
-  void nextTick(bindSectionObserver);
+  void nextTick(() => {
+    bindSectionObserver();
+    bindShotObserver();
+  });
 });
 
-onUnmounted(disconnectSectionObserver);
+onActivated(() => {
+  void nextTick(() => {
+    bindSectionObserver();
+    bindShotObserver();
+  });
+});
+
+onDeactivated(() => {
+  disconnectSectionObserver();
+  disconnectShotObserver();
+});
+
+onUnmounted(() => {
+  disconnectSectionObserver();
+  disconnectShotObserver();
+});
 
 const emptyFilterText = computed(() => {
   if (query.value.trim()) return t("listing.filter.empty_changed");
@@ -445,7 +500,10 @@ async function moveShot(locale: string, displayType: string, index: number, delt
 }
 
 function openShots(group: ListingShot[], start: number) {
-  viewer.show(group.map((item) => ({ src: item.thumb_url, title: item.file_name })), start);
+  viewer.show(group.map((item) => ({
+    src: listingOriginalUrl(item.thumb_url),
+    title: item.file_name,
+  })), start);
 }
 
 function openAddShot(locale: string, displayType: string) {
@@ -587,6 +645,7 @@ const editorPlan = computed(() => {
       v-for="entry in visibleLocales"
       :id="localeAnchorId(entry.row.locale)"
       :key="entry.row.locale"
+      :data-locale="entry.row.locale"
       class="card group-card"
     >
       <div
@@ -644,7 +703,14 @@ const editorPlan = computed(() => {
         <div class="thumbs">
           <figure v-for="(item, idx) in group" :key="item.local_path || item.file_name" class="thumb">
             <div class="thumb-frame">
-              <img :src="item.thumb_url" :alt="item.file_name" @click="openShots(group, idx)" />
+              <img
+                v-if="hydratedLocales[entry.row.locale]"
+                :src="item.thumb_url"
+                :alt="item.file_name"
+                loading="lazy"
+                decoding="async"
+                @click="openShots(group, idx)"
+              />
             </div>
             <figcaption :title="item.file_name">{{ item.file_name }}</figcaption>
             <div class="thumb-actions">
@@ -833,7 +899,14 @@ const editorPlan = computed(() => {
 }
 .tree-actions, .row-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .locale-add { min-width: 220px; flex: 1; }
-.group-card { display: flex; flex-direction: column; gap: 10px; scroll-margin-top: 8px; }
+.group-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  scroll-margin-top: 8px;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 480px;
+}
 .desc-block { display: flex; flex-direction: column; gap: 6px; }
 .group-card > h3,
 .desc-block h3 { margin: 0; font-size: 13px; }

@@ -14,9 +14,9 @@ import {
   writeFormMemory,
   writeIapDraft,
 } from "@/composables/useFormMemory";
+import { createCompareSession, postCompareTask } from "@/composables/useCompareSession";
 import { rememberFormPath } from "@/composables/useFormPaths";
 import { useProfile } from "@/composables/useProfile";
-import { useTaskLog } from "@/composables/useTaskLog";
 
 export type LocEntry = { name: string; description?: string };
 export type LocMap = Record<string, LocEntry>;
@@ -98,7 +98,7 @@ export function reviewShotThumbUrl(shot: string, iapFile: string): string {
   const resolved = resolveReviewShotPath(shot, iapFile);
   if (!resolved) return "";
   const root = parentDir(resolved) || ".";
-  return `/api/listing/thumb?path=${encodeURIComponent(resolved)}&root=${encodeURIComponent(root)}`;
+  return `/api/listing/thumb?path=${encodeURIComponent(resolved)}&root=${encodeURIComponent(root)}&w=320`;
 }
 
 function emptySnapshot(): IapSnapshot {
@@ -198,17 +198,9 @@ type CompareResult = {
 };
 
 const planItems = ref<PlanItem[]>([]);
-const planError = ref("");
-const planOk = ref(true);
-const planLoading = ref(false);
-const planLoadedKey = ref("");
 const missingOnStore = ref<Record<string, true>>({});
 const scanLoadedKey = ref("");
 const scanLoading = ref(false);
-const compareTaskId = ref("");
-const compareStartedAt = ref(0);
-let compareInFlight: { key: string; promise: Promise<void> } | null = null;
-let compareGen = 0;
 
 function applyMissingOnStore(ids: string[]) {
   const next: Record<string, true> = {};
@@ -219,18 +211,6 @@ function applyMissingOnStore(ids: string[]) {
   missingOnStore.value = next;
 }
 
-async function waitForTask(taskId: string): Promise<{ status: string; result?: CompareResult }> {
-  for (;;) {
-    const state = await httpJson<{ status: string; result?: CompareResult }>(
-      `/api/task/${encodeURIComponent(taskId)}/status`,
-      { skipNotify: true },
-    );
-    const status = String(state.status || "");
-    if (["done", "error", "canceled"].includes(status)) return state;
-    await new Promise((resolve) => window.setTimeout(resolve, 250));
-  }
-}
-
 function planCacheKey(): string {
   return `${iapFile.value}|${updateExisting.value ? "1" : "0"}|${mtime.value ?? ""}`;
 }
@@ -238,6 +218,44 @@ function planCacheKey(): string {
 function applyPlanItems(items: PlanItem[]) {
   planItems.value = items;
 }
+
+function resetIapPlan() {
+  planItems.value = [];
+  missingOnStore.value = {};
+  scanLoadedKey.value = "";
+}
+
+const {
+  planError,
+  planOk,
+  planLoading,
+  planLoadedKey,
+  compareTaskId,
+  compareStartedAt,
+  compared,
+  ensureCompare,
+  invalidateCompare,
+  getInFlight,
+} = createCompareSession<CompareResult>({
+  cacheKey: planCacheKey,
+  hasProfile: () => boundProfile !== undefined && !!boundProfile,
+  start: () => postCompareTask("/api/iap/compare", {
+    iapFile: iapFile.value,
+    update_existing: updateExisting.value,
+    ...((dirty.value || storeDraft.value) ? { snapshot: snapshot.value } : {}),
+  }),
+  applySuccess: (result, key) => {
+    applyPlanItems(result.items || []);
+    applyMissingOnStore(result.missingOnStore || []);
+    scanLoadedKey.value = key;
+  },
+  applyFailure: resetIapPlan,
+  onNoProfile: resetIapPlan,
+  onInvalidate: () => {
+    scanLoadedKey.value = "";
+  },
+  isFresh: (key) => scanLoadedKey.value === key,
+});
 
 async function loadPlan(opts?: { force?: boolean }) {
   if (boundProfile === undefined || !boundProfile) {
@@ -248,8 +266,9 @@ async function loadPlan(opts?: { force?: boolean }) {
     return;
   }
   const key = planCacheKey();
-  if (compareInFlight && compareInFlight.key === key && !opts?.force) {
-    await compareInFlight.promise;
+  const inFlight = getInFlight();
+  if (inFlight && inFlight.key === key && !opts?.force) {
+    await inFlight.promise;
     return;
   }
   if (!opts?.force && planLoadedKey.value === key && !planLoading.value) return;
@@ -289,8 +308,9 @@ async function loadShotScan(opts?: { force?: boolean }) {
     return;
   }
   const key = `${iapFile.value}|${mtime.value ?? ""}`;
-  if (compareInFlight && !opts?.force) {
-    await compareInFlight.promise;
+  const inFlight = getInFlight();
+  if (inFlight && !opts?.force) {
+    await inFlight.promise;
     return;
   }
   if (!opts?.force && scanLoadedKey.value === key && !scanLoading.value) return;
@@ -309,95 +329,6 @@ async function loadShotScan(opts?: { force?: boolean }) {
     scanLoading.value = false;
   }
 }
-
-async function runCompare(key: string) {
-  const { subscribeIfNeeded } = useTaskLog();
-  const gen = ++compareGen;
-  planLoading.value = true;
-  planError.value = "";
-  compareStartedAt.value = Date.now();
-  try {
-    const { task_id } = await httpJson<{ task_id: string }>("/api/iap/compare", {
-      method: "POST",
-      skipNotify: true,
-      body: JSON.stringify({
-        iapFile: iapFile.value,
-        update_existing: updateExisting.value,
-        ...((dirty.value || storeDraft.value) ? { snapshot: snapshot.value } : {}),
-      }),
-    });
-    if (gen !== compareGen) return;
-    compareTaskId.value = task_id;
-    subscribeIfNeeded(task_id);
-    const state = await waitForTask(task_id);
-    if (gen !== compareGen) return;
-    const result = state.result || {};
-    if (state.status !== "done") {
-      planOk.value = false;
-      planError.value = result.error || state.status;
-      planItems.value = [];
-      missingOnStore.value = {};
-      planLoadedKey.value = "";
-      scanLoadedKey.value = "";
-      return;
-    }
-    applyPlanItems(result.items || []);
-    applyMissingOnStore(result.missingOnStore || []);
-    planLoadedKey.value = key;
-    scanLoadedKey.value = key;
-    planOk.value = result.ok !== false;
-    planError.value = planOk.value ? "" : result.error || "";
-  } catch (err) {
-    if (gen !== compareGen) return;
-    planOk.value = false;
-    if (err instanceof ApiError) planError.value = apiErrorMessage(err);
-    else planError.value = String(err);
-    planItems.value = [];
-    missingOnStore.value = {};
-    planLoadedKey.value = "";
-    scanLoadedKey.value = "";
-  } finally {
-    if (gen === compareGen) {
-      planLoading.value = false;
-      compareTaskId.value = "";
-      compareStartedAt.value = 0;
-    }
-  }
-}
-
-async function ensureCompare(opts?: { force?: boolean }) {
-  if (boundProfile === undefined || !boundProfile) {
-    planItems.value = [];
-    planError.value = "";
-    planOk.value = true;
-    planLoadedKey.value = "";
-    missingOnStore.value = {};
-    scanLoadedKey.value = "";
-    return;
-  }
-  const key = planCacheKey();
-  if (!opts?.force && planLoadedKey.value === key && scanLoadedKey.value === key && !planLoading.value) {
-    return;
-  }
-  if (compareInFlight && compareInFlight.key === key && !opts?.force) {
-    await compareInFlight.promise;
-    return;
-  }
-  const promise = runCompare(key);
-  compareInFlight = { key, promise };
-  try {
-    await promise;
-  } finally {
-    if (compareInFlight?.promise === promise) compareInFlight = null;
-  }
-}
-
-function invalidateCompare() {
-  planLoadedKey.value = "";
-  scanLoadedKey.value = "";
-}
-
-const compared = computed(() => !!planLoadedKey.value && planLoadedKey.value === planCacheKey());
 
 function hydrate(profile: string, defaultFile: string) {
   if (boundProfile === profile) return;

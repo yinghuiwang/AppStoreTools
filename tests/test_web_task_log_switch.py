@@ -38,6 +38,9 @@ def test_use_task_log_is_module_scoped_not_pinia() -> None:
     assert "function setActiveTask" in src
     assert "function subscribeIfNeeded" in src
     assert "function channelOf" in src
+    assert "function waitForTaskResult" in src
+    assert "function waitUntilTerminal" in src
+    assert "MAX_CHANNEL_LINES" in src
     assert "export function useTaskLog" in src
 
 
@@ -66,7 +69,7 @@ def test_sse_handlers_write_to_own_channel() -> None:
     body = _fn(src, "openEventSource")
     assert "closeSource(taskId)" in body
     assert "channels[taskId]" in body or "ensureChannel(taskId)" in body
-    assert "ch.lines" in body
+    assert "appendLine(ch" in body or "ch.lines" in body
     assert "ch.progress" in body
     assert "ch.status" in body
     # Must not append onto a single module-level lines buffer.

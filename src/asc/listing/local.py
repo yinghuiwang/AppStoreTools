@@ -181,8 +181,11 @@ def _folder_locale(folder_name: str) -> str:
     return SCREENSHOT_FOLDER_TO_LOCALE.get(folder_name.lower(), folder_name)
 
 
-def _thumb_url(root: str, path: Path) -> str:
-    return f"/api/listing/thumb?path={quote(str(path), safe='')}&root={quote(str(root), safe='')}"
+def _thumb_url(root: str, path: Path, *, width: int = 320) -> str:
+    url = f"/api/listing/thumb?path={quote(str(path), safe='')}&root={quote(str(root), safe='')}"
+    if width:
+        url += f"&w={int(width)}"
+    return url
 
 
 def scan_local_screenshots(screenshots_dir: str) -> dict[str, dict[str, list[ScreenshotItem]]]:
