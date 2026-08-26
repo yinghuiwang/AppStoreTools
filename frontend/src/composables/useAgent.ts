@@ -1,6 +1,6 @@
 import { ref } from "vue";
 import type { ChatMessagesData, ChatRequestParams, ChatServiceConfig, SSEChunkData } from "@tdesign-vue-next/chat";
-import { ApiError, httpJson } from "@/api/http";
+import { ApiError, ensureSession, httpJson } from "@/api/http";
 import { i18n } from "@/i18n";
 import type { AgentAttachmentPayload } from "@/composables/agentAttachments";
 import { collectedFormPaths } from "@/composables/useFormPaths";
@@ -89,12 +89,8 @@ async function listSessions(): Promise<void> {
   }
 }
 
-export const agentChatServiceConfig: ChatServiceConfig = {
-  endpoint: "/api/agent/agui",
-  protocol: "agui",
-  stream: true,
-  timeout: 0,
-  onRequest: (params) => ({
+function aguiRequestInit(params: ChatRequestParams): RequestInit {
+  return {
     method: "POST",
     credentials: "same-origin",
     headers: {
@@ -115,7 +111,41 @@ export const agentChatServiceConfig: ChatServiceConfig = {
       ],
       attachments: pendingAttachments.value,
     }),
-  }),
+  };
+}
+
+async function prepareAguiRequest(params: ChatRequestParams): Promise<RequestInit> {
+  const init = aguiRequestInit(params);
+  await ensureSession();
+  armAgui401Retry();
+  return init;
+}
+
+function armAgui401Retry() {
+  const nativeFetch = globalThis.fetch.bind(globalThis);
+  const wrapped: typeof fetch = async (input, init) => {
+    const url =
+      typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
+    if (!url.includes("/api/agent/agui")) return nativeFetch(input, init);
+    if (globalThis.fetch === wrapped) globalThis.fetch = nativeFetch;
+    const first = await nativeFetch(input, init);
+    if (first.status !== 401) return first;
+    try {
+      await httpJson("/api/agent/sessions", { skipNotify: true });
+    } catch {
+      await ensureSession();
+    }
+    return nativeFetch(input, init);
+  };
+  globalThis.fetch = wrapped;
+}
+
+export const agentChatServiceConfig: ChatServiceConfig = {
+  endpoint: "/api/agent/agui",
+  protocol: "agui",
+  stream: true,
+  timeout: 0,
+  onRequest: (params) => prepareAguiRequest(params),
   onMessage: (chunk) => {
     const data = parseChunkData(chunk);
     if (!data) return null;

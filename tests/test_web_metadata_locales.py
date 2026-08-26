@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -10,6 +11,11 @@ from asc.guard import GuardViolationError
 from asc.locales_catalog import LocaleCatalogError
 from asc.web.i18n import t
 from asc.web.server import create_app
+
+ROOT = Path(__file__).resolve().parents[1]
+FRONTEND = ROOT / "frontend"
+SRC = FRONTEND / "src"
+ESBUILD = FRONTEND / "node_modules" / "esbuild" / "bin" / "esbuild"
 
 
 @pytest.fixture(autouse=True)
@@ -239,6 +245,12 @@ def test_locale_picker_uses_catalog_then_presence():
     assert "presenceAvailable" in catalog_src
     assert "name_en" in catalog_src
     assert "name_zh" in catalog_src
+    assert "export function resetLocaleCatalog" in catalog_src
+    assert "catalogInflight" in catalog_src
+    assert "presenceInflight" in catalog_src
+    assert catalog_src.index("const rows = ref") < catalog_src.index("export function useLocaleCatalog")
+    assert "pinia" not in catalog_src.lower()
+    assert "defineStore" not in catalog_src
     assert "useLocaleCatalog({ presence: true })" in picker
     assert "navigator.clipboard.writeText" in picker
     assert "/api/listing/" not in picker
@@ -262,3 +274,143 @@ def test_locale_button_uses_catalog():
     assert "metadata.locales_btn" in src
     assert t("metadata.locales_btn", lang="zh") == "语言码"
     assert t("metadata.locales_btn", lang="en") == "Locale codes"
+
+
+def test_locale_catalog_cache_survives_remount_and_fills_presence(tmp_path: Path) -> None:
+    if not ESBUILD.exists():
+        pytest.skip("frontend esbuild is not installed")
+
+    http_mock = tmp_path / "http-mock.mjs"
+    http_mock.write_text(
+        """
+export function httpJson(url) {
+  globalThis.__httpCalls = globalThis.__httpCalls || [];
+  globalThis.__httpCalls.push(url);
+  if (url.includes("/presence")) {
+    if (globalThis.__presenceError) return Promise.reject(globalThis.__presenceError);
+    return Promise.resolve(globalThis.__presenceResult);
+  }
+  if (globalThis.__catalogError) return Promise.reject(globalThis.__catalogError);
+  return Promise.resolve(globalThis.__catalogResult);
+}
+""",
+        encoding="utf-8",
+    )
+    i18n_mock = tmp_path / "i18n-mock.mjs"
+    i18n_mock.write_text(
+        """
+export function useI18n() {
+  return {
+    t: (key) => key,
+    locale: { get value() { return globalThis.__uiLocale || "en"; } },
+  };
+}
+""",
+        encoding="utf-8",
+    )
+    bundled = tmp_path / "useLocaleCatalog.mjs"
+    bundled_run = subprocess.run(
+        [
+            str(ESBUILD),
+            str(SRC / "composables" / "useLocaleCatalog.ts"),
+            "--bundle",
+            "--platform=neutral",
+            "--format=esm",
+            f"--alias:@/api/http={http_mock}",
+            f"--alias:vue-i18n={i18n_mock}",
+            f"--outfile={bundled}",
+        ],
+        cwd=str(FRONTEND),
+        capture_output=True,
+        text=True,
+    )
+    assert bundled_run.returncode == 0, bundled_run.stdout + bundled_run.stderr
+
+    runner = tmp_path / "run.mjs"
+    runner.write_text(
+        """
+import { displayNameFor, resetLocaleCatalog, useLocaleCatalog } from './useLocaleCatalog.mjs';
+
+function assert(cond, message) {
+  if (!cond) throw new Error(message);
+}
+
+globalThis.__httpCalls = [];
+globalThis.__uiLocale = "en";
+globalThis.__catalogError = null;
+globalThis.__presenceError = null;
+globalThis.__catalogResult = {
+  locales: [
+    { code: "zh-Hans", name_en: "Chinese Simplified", name_zh: "简体中文" },
+    { code: "en-US", name_en: "English (US)", name_zh: "英语（美国）" },
+  ],
+};
+globalThis.__presenceResult = { codes: ["zh-Hans"], presenceAvailable: true };
+
+resetLocaleCatalog();
+const create = useLocaleCatalog({ presence: false });
+const preview = useLocaleCatalog({ presence: false });
+await Promise.all([create.load(), preview.load()]);
+assert(globalThis.__httpCalls.filter((u) => u === "/api/metadata/locales").length === 1, "concurrent catalog loads must share inflight");
+assert(!globalThis.__httpCalls.some((u) => u.includes("/presence")), "presence=false must not fetch presence");
+assert(create.rows.value.length === 2, "shared rows after first load");
+assert(create.labelFor("zh-Hans") === "zh-Hans Chinese Simplified", "en label follows vue-i18n locale");
+
+globalThis.__httpCalls = [];
+await useLocaleCatalog({ presence: false }).load();
+assert(globalThis.__httpCalls.length === 0, "new instance first load must reuse catalog");
+
+const picker = useLocaleCatalog({ presence: true });
+await picker.load();
+assert(globalThis.__httpCalls.filter((u) => u === "/api/metadata/locales").length === 0, "presence load must reuse catalog");
+assert(globalThis.__httpCalls.filter((u) => u === "/api/metadata/locales/presence").length === 1, "first presence load fetches presence");
+assert(picker.presenceAvailable.value === true, "presenceAvailable after merge");
+assert(picker.rows.value.find((r) => r.code === "zh-Hans").present === true, "present codes merged");
+assert(picker.rows.value.find((r) => r.code === "en-US").present === false, "missing codes stay false");
+assert(create.rows.value.find((r) => r.code === "zh-Hans").present === true, "presence merges onto shared catalog");
+
+globalThis.__httpCalls = [];
+await useLocaleCatalog({ presence: true }).load();
+assert(globalThis.__httpCalls.length === 0, "later presence=true must reuse presence cache");
+
+globalThis.__uiLocale = "zh";
+assert(create.labelFor("zh-Hans") === "zh-Hans 简体中文", "zh label follows vue-i18n locale");
+assert(displayNameFor(create.rows.value[0], "zh") === "简体中文", "displayNameFor stays locale-driven");
+assert(globalThis.__httpCalls.length === 0, "language switch must not refetch");
+
+globalThis.__httpCalls = [];
+await picker.load();
+assert(globalThis.__httpCalls.filter((u) => u === "/api/metadata/locales").length === 1, "same-instance reload refetches catalog");
+assert(globalThis.__httpCalls.filter((u) => u === "/api/metadata/locales/presence").length === 1, "same-instance reload refetches presence");
+
+resetLocaleCatalog();
+globalThis.__httpCalls = [];
+globalThis.__catalogError = new Error("catalog down");
+const failed = useLocaleCatalog({ presence: false });
+await failed.load();
+assert(failed.error.value === "catalog down", "catalog error stays on error ref");
+assert(failed.rows.value.length === 0, "failed catalog leaves rows empty");
+
+resetLocaleCatalog();
+globalThis.__catalogError = null;
+globalThis.__presenceError = new Error("presence down");
+globalThis.__httpCalls = [];
+const degr = useLocaleCatalog({ presence: true });
+await degr.load();
+assert(degr.rows.value.length === 2, "presence failure still keeps catalog");
+assert(degr.presenceAvailable.value === false, "presence failure degrades");
+assert(degr.error.value === "", "presence failure must not replace catalog error");
+
+console.log("ok");
+""",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        ["node", str(runner)],
+        cwd=str(tmp_path),
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "ok" in result.stdout

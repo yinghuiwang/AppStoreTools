@@ -14,7 +14,7 @@
 
 ## Web wizard (Create → Edit → Upload)
 
-Open **IAP** in the Web UI. This is a skippable wizard, not the listing Local / Diff / Upload tabs:
+Open **IAP** in the Web UI. This is a skippable wizard (Create → Edit → Upload), the same skippable pattern as Listing (Create → Preview → Upload):
 
 1. **Create**: five source tabs (paste table / from store / open JSON / blank new / Agent). The table infers types; **groupLevel must be confirmed per group** (1 = highest, same level = crossgrade) and is never filled silently. If a remembered JSON (or the profile default path) already has content, Create selects the **Open JSON** tab with that path filled so you can skip to Edit; otherwise **Paste table**.
 2. **Edit**: a preview list of subscription groups (with nested subscriptions) and one-time IAP. Add / edit opens a dialog for fields and localizations. Adding a locale auto-translates the display name (2–30) and description (≤45). Without an LLM key, the locale row is still added empty and the UI points to Settings.

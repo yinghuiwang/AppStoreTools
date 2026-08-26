@@ -589,8 +589,13 @@ async function runSearch() {
   }
 }
 
+let searchTimer = 0;
+
 function onSearchInput() {
-  void runSearch();
+  window.clearTimeout(searchTimer);
+  searchTimer = window.setTimeout(() => {
+    void runSearch();
+  }, 300);
 }
 
 function pickTask(id: unknown) {
@@ -651,6 +656,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  window.clearTimeout(searchTimer);
   detachAgentChatEngine();
   clearDrafts();
   document.removeEventListener("pointerdown", onDocPointerDown);

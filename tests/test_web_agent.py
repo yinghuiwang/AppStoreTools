@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from asc.web.agent_store import AgentStore
 from asc.web.tasks import TaskStatus, TaskStore
+
+FRONTEND = Path(__file__).resolve().parents[1] / "frontend" / "src"
 
 
 class ScriptedLLM:
@@ -382,4 +385,32 @@ def test_run_turn_without_task_creates_free_chat_session(tmp_path):
     assert follow_session["session_id"] == session_payload["session_id"]
     tasks.close()
     agents.close()
+
+
+def test_agui_on_request_handshakes_and_retries_401_once():
+    src = (FRONTEND / "composables" / "useAgent.ts").read_text(encoding="utf-8")
+    assert "ensureSession" in src
+    assert "prepareAguiRequest" in src
+    assert "armAgui401Retry" in src
+    assert "first.status !== 401" in src
+    assert "return nativeFetch(input, init)" in src
+    assert src.count("return nativeFetch(input, init)") >= 2
+    assert "skipNotify: true" in src
+    assert "attachments: pendingAttachments.value" in src
+    assert 'protocol: "agui"' in src
+    assert "bindSeq" in src
+
+
+def test_failed_task_search_input_is_debounced():
+    src = (FRONTEND / "components" / "AgentPanel.vue").read_text(encoding="utf-8")
+    assert "function onSearchInput" in src
+    assert "window.setTimeout" in src
+    assert "window.clearTimeout(searchTimer)" in src
+    assert ", 300)" in src
+    assert "void runSearch()" in src
+    assert "search.value.trim()" in src
+    assert src.index("window.clearTimeout(searchTimer)") < src.index("window.setTimeout")
+    helper = (FRONTEND / "composables" / "useAgent.ts").read_text(encoding="utf-8")
+    assert "/api/agent/failed-tasks" in helper
+    assert "skipNotify: true" in helper
 

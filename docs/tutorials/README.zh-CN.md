@@ -7,7 +7,7 @@
 | # | 教程 | 你将学到 |
 |---|------|---------|
 | 01 | [安装与项目初始化](01-install-and-init.zh-CN.md) | 安装 `asc`、创建 API Key、初始化项目、添加 App Profile |
-| 02 | [元数据与截图上传](02-metadata-and-screenshots.zh-CN.md) | 填写 CSV、命名截图文件夹、运行 `upload` / `metadata` / `screenshots` |
+| 02 | [元数据与截图上传](02-metadata-and-screenshots.zh-CN.md) | Web 商品页可跳步「创建 → 预览 → 上传」；也可运行 `upload` / `metadata` / `screenshots` |
 | 03 | [IAP 与订阅上传](03-iap-and-subscriptions.zh-CN.md) | 编写 `iap_packages.json`、上传一次性内购和自动续期订阅 |
 | 04 | [What's New 与商店 URL](04-whats-new-and-urls.zh-CN.md) | 更新版本说明和支持/营销/隐私政策 URL |
 | 05 | [构建与发布](05-build-and-deploy.zh-CN.md) | `asc build`、`asc deploy`、`asc release`、TestFlight 与 App Store |

@@ -2,6 +2,10 @@
 
 ## 2026-08-25
 
+- Agent 聊天先 `ensureSession()`，`/api/agent/agui` 遇 401 只重试一次再开流；附件失败任务搜索 300ms 尾随防抖，打开菜单仍立刻搜。相关 pytest 46 passed。
+- `useLocaleCatalog` 改为模块级缓存 + in-flight 去重：新实例走缓存，同实例再次 `load()` 仍刷新；presence 按需合并到同一份 rows。`tests/test_web_metadata_locales.py` 18 passed。
+- 教程 02/03/索引与 Agent 知识库（`listing.md` / `iap.md` / `INDEX.md`）改为以 Web 可跳步「创建 → 预览 → 上传」为主路径，CLI 仍作等价附录；去掉 Listing「本地 / Diff / 上传」三 Tab 对照。
+
 - Listing / IAP 对照抽到 `useCompareSession`：共用 generation 取消、in-flight 去重、SSE 等待。两边仍各自保留缓存键、compare 请求体、草稿合并和 `markDirty` 规则（Listing 编辑会失效对照，IAP 不会），避免预览/上传状态跳变。已重新构建 SPA（`index-du-DDKKf.js`）。
 
 ## 2026-08-24

@@ -11,6 +11,18 @@
 
 ---
 
+## Web wizard (Create → Preview → Upload)
+
+Open **Listing** in the Web UI. This is a skippable wizard (`?step=create|preview|upload`), not Local / Diff / Upload tabs:
+
+1. **Create**: four sources (Open CSV / From store / Blank draft / Agent). CSV and screenshot paths are chosen only on this step (the `?` next to each label opens the format help); Preview and Upload reuse them read-only. Store pull is a memory draft and does not write the CSV. If the file already has content, use **Skip to preview**.
+2. **Preview**: locale cards for copy and screenshots. The edit dialog changes only the 7 CSV fields; screenshots under a locale card write to disk immediately. You can add a locale (optional auto-translate). **Compare with store** does not run automatically — click it when you need a diff.
+3. **Upload**: pick metadata / screenshot scope, then **Start upload**. **Preview run** does not write to App Store Connect. A real upload saves first if there are unsaved changes or a store draft.
+
+The CSV and screenshot-folder rules below are shared by Web and CLI. CLI commands are in the appendix at the end.
+
+---
+
 ## Step 1: Fill in the metadata CSV
 
 If you followed tutorial 01, edit `AppStore/data/appstore_info.csv`. The imported profile stores this absolute path, so upload commands can find it from any working directory.
@@ -93,7 +105,7 @@ AppStore/data/screenshots/en-US/
 
 ---
 
-## Step 3: Dry run first
+## CLI appendix (equivalent commands)
 
 Always preview before uploading:
 
@@ -107,7 +119,7 @@ This validates credentials, CSV format, and screenshot paths without making any 
 
 ---
 
-## Step 4: Upload everything
+### Upload everything
 
 ```bash
 asc --app myapp upload

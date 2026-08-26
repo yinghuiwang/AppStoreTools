@@ -107,4 +107,4 @@ Default skill set (16): `en-US`, `zh-Hans`, `zh-Hant`, `ja`, `ko`, `es-ES`, `es-
 
 ## Web 向导
 
-三步：创建 → 预览 → 上传（`?step=create|preview|upload`）。旧 `?tab=local` 进预览，`?tab=diff|upload` 进上传。CSV / 截图路径只在创建步选择（标签旁 `?` 打开格式说明）；预览/上传只读沿用。商店拉取 `write:false` 只进内存。预览弹窗只改 7 个 CSV 字段；截图在语言卡片下立刻写盘。`csv_set_fields` 可追加 locale。`/api/listing/translate` 用商品页字数，不用 IAP 2–30/45。
+可跳步三步：创建 → 预览 → 上传（`?step=create|preview|upload`），不是本地 / Diff / 上传三个 Tab。旧 `?tab=local` 进预览，`?tab=diff|upload` 进上传。CSV / 截图路径只在创建步选择（标签旁 `?` 打开格式说明）；预览/上传只读沿用。商店拉取 `write:false` 只进内存。预览弹窗只改 7 个 CSV 字段；截图在语言卡片下立刻写盘。`csv_set_fields` 可追加 locale。`/api/listing/translate` 用商品页字数，不用 IAP 2–30/45。
