@@ -9,10 +9,69 @@ import requests
 
 
 class LLMHTTPError(Exception):
-    def __init__(self, status_code: int, retry_after: float | None = None) -> None:
+    def __init__(
+        self,
+        status_code: int,
+        retry_after: float | None = None,
+        *,
+        detail: str = "",
+        url: str = "",
+    ) -> None:
         self.status_code = status_code
         self.retry_after = retry_after
-        super().__init__(f"LLM HTTP {status_code}")
+        self.detail = detail
+        self.url = url
+        extra = f" {detail}" if detail else ""
+        super().__init__(f"LLM HTTP {status_code}{extra}")
+
+
+def provider_error_detail(response: Any) -> str:
+    """Best-effort provider error text. Truncated; no secrets assumed in body."""
+    raw = (getattr(response, "text", None) or "").strip()
+    if not raw:
+        return ""
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return raw[:300]
+    if not isinstance(data, dict):
+        return raw[:300]
+    err = data.get("error")
+    if isinstance(err, dict):
+        msg = err.get("message") or err.get("msg") or err.get("status_msg")
+        if msg:
+            return str(msg)[:300]
+    if isinstance(err, str) and err.strip():
+        return err.strip()[:300]
+    base = data.get("base_resp")
+    if isinstance(base, dict):
+        msg = base.get("status_msg") or base.get("message")
+        code = base.get("status_code")
+        if msg and code is not None:
+            return f"{code}: {msg}"[:300]
+        if msg:
+            return str(msg)[:300]
+    msg = data.get("message") or data.get("msg")
+    if msg:
+        return str(msg)[:300]
+    return json.dumps(data, ensure_ascii=False)[:300]
+
+
+def _raise_http_error(
+    response: Any,
+    retry_after: float | None = None,
+) -> None:
+    detail = provider_error_detail(response)
+    url = str(getattr(response, "url", "") or "")
+    closer = getattr(response, "close", None)
+    if callable(closer):
+        closer()
+    raise LLMHTTPError(
+        int(getattr(response, "status_code", 0) or 0),
+        retry_after=retry_after,
+        detail=detail,
+        url=url,
+    )
 
 
 class LLMClient:
@@ -23,7 +82,7 @@ class LLMClient:
         api_key: str,
         base_url: str,
         model: str,
-        timeout: int = 60,
+        timeout: int = 180,
     ) -> None:
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
@@ -99,14 +158,11 @@ class LLMClient:
                 wait = float(retry_after)
             except ValueError:
                 wait = 1.0
-            response.close()
-            raise LLMHTTPError(429, retry_after=wait)
+            _raise_http_error(response, retry_after=wait)
         if response.status_code >= 500:
-            response.close()
-            raise LLMHTTPError(response.status_code, retry_after=1.0)
+            _raise_http_error(response, retry_after=1.0)
         if response.status_code >= 400:
-            response.close()
-            raise LLMHTTPError(response.status_code)
+            _raise_http_error(response)
         try:
             for raw in response.iter_lines(decode_unicode=True):
                 if not raw:
@@ -121,6 +177,9 @@ class LLMClient:
                     obj = json.loads(data)
                 except json.JSONDecodeError:
                     continue
+                usage = obj.get("usage")
+                if usage:
+                    yield {"usage": usage}
                 for choice in obj.get("choices") or []:
                     delta = choice.get("delta") or {}
                     event: dict[str, Any] = {}

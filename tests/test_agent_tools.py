@@ -20,6 +20,8 @@ def test_openai_tools_match_model_names_and_keep_writes_gated():
     assert names == set(MODEL_TOOL_NAMES)
     assert "apply_fix" not in names
     assert "rerun_task" not in names
+    assert "search_files" not in names
+    assert "search_files" not in MODEL_TOOL_NAMES
     assert {
         "grep",
         "read_file",
@@ -28,8 +30,19 @@ def test_openai_tools_match_model_names_and_keep_writes_gated():
         "delete_file",
         "search_knowledge",
         "get_knowledge",
+        "get_listing_snapshot",
+        "get_iap_snapshot",
+        "validate_listing",
+        "validate_iap",
+        "count_listing_fields",
+        "inspect_screenshots",
     } <= names
     assert "apply_fix" not in MODEL_TOOL_NAMES
+    assert "choose" not in MODEL_TOOL_NAMES
+    assert "offer_choices" in names
+    assert "set_workflow" in names
+    assert "get_asc_version" in names
+    assert "list_asc_iaps" in names
 
 
 def test_hallucinated_apply_fix_does_not_write(tmp_path):
@@ -541,3 +554,101 @@ def test_propose_fix_rejects_bad_csv_fields_and_missing_session(tmp_path):
     assert csv_path.read_text(encoding="utf-8") == "locale,keywords\nzh-Hans,old\n"
     tasks.close()
     agents.close()
+
+
+def test_search_files_stays_as_handler_alias_not_advertised(tmp_path):
+    (tmp_path / "note.txt").write_text("alias_hit_abc\n", encoding="utf-8")
+    store = TaskStore(tmp_path / "tasks.db")
+    result = execute_model_tool(_ctx(tmp_path, store), "search_files", {"pattern": "alias_hit_abc"})
+    assert result["ok"] is True
+    assert "alias_hit_abc" in str(result)
+    assert "search_files" not in MODEL_TOOL_NAMES
+    assert "search_files" not in {t["function"]["name"] for t in OPENAI_TOOLS}
+    store.close()
+
+
+def test_domain_tools_default_paths_from_replay(tmp_path, monkeypatch):
+    csv_path = tmp_path / "appstore_info.csv"
+    csv_path.write_text("locale,name\nen-US,ReplayApp\n", encoding="utf-8")
+    iap_path = tmp_path / "iap_packages.json"
+    iap_path.write_text(
+        '{"items":[{"productId":"com.app.coin","name":"Coin","inAppPurchaseType":"CONSUMABLE"}],'
+        '"subscriptionGroups":[]}',
+        encoding="utf-8",
+    )
+    from PIL import Image
+
+    shots = tmp_path / "screenshots"
+    (shots / "en-US").mkdir(parents=True)
+    Image.new("RGB", (10, 10)).save(shots / "en-US" / "01.png")
+    store = TaskStore(tmp_path / "tasks.db")
+    replay = {
+        "kind": "metadata",
+        "profile": "myapp",
+        "verbose": False,
+        "params": {
+            "csv_path": str(csv_path),
+            "iap_file": str(iap_path),
+            "screenshots_dir": str(shots),
+        },
+    }
+    task_id = store.create("metadata", profile="myapp", replay=replay)
+    monkeypatch.chdir(tmp_path)
+    ctx = _ctx(tmp_path, store, task_id)
+
+    listing = execute_model_tool(ctx, "get_listing_snapshot", {})
+    assert listing["ok"] is True
+    assert listing["exists"] is True
+    assert listing["locales"][0]["fields"]["name"] == "ReplayApp"
+
+    iap = execute_model_tool(ctx, "get_iap_snapshot", {})
+    assert iap["ok"] is True
+    assert iap["item_count"] == 1
+    assert iap["items"][0]["productId"] == "com.app.coin"
+
+    shots_out = execute_model_tool(ctx, "inspect_screenshots", {})
+    assert shots_out["ok"] is True
+    assert shots_out["exists"] is True
+    assert shots_out["locales"][0]["locale"] == "en-US"
+    store.close()
+
+
+def test_domain_tools_block_p8_and_validate_listing_over_limit(tmp_path, monkeypatch):
+    csv_path = tmp_path / "over.csv"
+    csv_path.write_text(
+        "locale,name,subtitle,keywords,description,supportUrl,marketingUrl,privacyPolicyUrl\n"
+        "en-US," + "N" * 31 + "," + "S" * 31 + "," + "k" * 101 + ","
+        + "d" * 4001 + ",example.com/support,ftp://example.com,not-a-url\n",
+        encoding="utf-8",
+    )
+    keys = tmp_path / "keys"
+    keys.mkdir()
+    p8 = keys / "AuthKey_X.p8"
+    p8.write_text("-----BEGIN PRIVATE KEY-----\\nNOPE\\n-----END PRIVATE KEY-----", encoding="utf-8")
+    store = TaskStore(tmp_path / "tasks.db")
+    replay = {
+        "kind": "metadata",
+        "profile": "myapp",
+        "verbose": False,
+        "params": {"csv_path": str(csv_path)},
+    }
+    task_id = store.create("metadata", profile="myapp", replay=replay)
+    monkeypatch.chdir(tmp_path)
+    ctx = _ctx(tmp_path, store, task_id)
+
+    denied = execute_model_tool(ctx, "get_listing_snapshot", {"path": str(p8)})
+    assert denied["ok"] is False
+    assert "NOPE" not in str(denied)
+    assert "BEGIN PRIVATE KEY" not in str(denied)
+
+    missing = execute_model_tool(_ctx(tmp_path, store), "validate_listing", {})
+    assert missing["ok"] is False
+    assert missing["error"] == "path is required"
+
+    result = execute_model_tool(ctx, "validate_listing", {})
+    assert result["ok"] is True
+    errors = [issue for issue in result["issues"] if issue["level"] == "error"]
+    fields = {issue["field"] for issue in errors}
+    assert {"name", "subtitle", "keywords", "description", "supportUrl"} <= fields
+    assert result["error_count"] >= 5
+    store.close()

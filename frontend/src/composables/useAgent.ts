@@ -3,16 +3,24 @@ import type { ChatMessagesData, ChatRequestParams, ChatServiceConfig, SSEChunkDa
 import { ApiError, ensureSession, httpJson } from "@/api/http";
 import { i18n } from "@/i18n";
 import type { AgentAttachmentPayload } from "@/composables/agentAttachments";
+import {
+  clearAgentPageContext,
+  currentAgentPageContext,
+  type AgentPageContext,
+} from "@/composables/useAgentContext";
 import { collectedFormPaths } from "@/composables/useFormPaths";
+import { useProfile } from "@/composables/useProfile";
 import { useRightRail } from "@/composables/useRightRail";
 import {
   historyToChatMessages,
+  patchChoiceInMessages,
   patchPlanInMessages,
   type AgentPlan,
+  type AgentWorkflow,
   type StoreRow,
 } from "@/composables/agentStream";
 
-export type { AgentPlan, AgentToolStatus } from "@/composables/agentStream";
+export type { AgentPlan, AgentToolStatus, AgentWorkflow } from "@/composables/agentStream";
 
 export type AgentSessionSummary = {
   id: string;
@@ -24,7 +32,7 @@ export type AgentSessionSummary = {
 };
 
 type SessionPayload = {
-  session?: { id?: string; task_id?: string | null };
+  session?: { id?: string; task_id?: string | null; workflow?: AgentWorkflow };
   messages?: StoreRow[];
   plans?: AgentPlan[];
 };
@@ -42,8 +50,26 @@ const pendingAutoAnalyze = ref(false);
 const pendingAttachments = ref<AgentAttachmentPayload[]>([]);
 const appliedTick = ref(0);
 const sessions = ref<AgentSessionSummary[]>([]);
+const lastErrorText = ref("");
 let engineApi: ChatEngineApi | null = null;
 let bindSeq = 0;
+
+function formatEngineError(err: unknown): string {
+  if (err instanceof Response) {
+    return `HTTP ${err.status} ${err.statusText || ""}`.trim();
+  }
+  if (err && typeof err === "object") {
+    const rec = err as Record<string, unknown>;
+    const message = String(rec.message || rec.error || "").trim();
+    const where = String(rec.where || "").trim();
+    const code = String(rec.code || rec.statusCode || "").trim();
+    const lines = [message];
+    if (where && !message.includes(where)) lines.push(where);
+    else if (!message && (where || code)) lines.push([code, where].filter(Boolean).join(" "));
+    return lines.filter(Boolean).join("\n");
+  }
+  return String(err || "").trim();
+}
 
 function t(key: string): string {
   return String(i18n.global.t(key));
@@ -89,6 +115,44 @@ async function listSessions(): Promise<void> {
   }
 }
 
+function compactPageContext(ctx: AgentPageContext): AgentPageContext {
+  const out: AgentPageContext = {};
+  const assign = (key: keyof AgentPageContext, value: unknown) => {
+    if (key === "fields") {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return;
+      const fields: Record<string, string> = {};
+      for (const [name, text] of Object.entries(value as Record<string, unknown>)) {
+        if (text == null) continue;
+        const trimmed = String(text);
+        if (trimmed) fields[name] = trimmed;
+      }
+      if (Object.keys(fields).length) out.fields = fields;
+      return;
+    }
+    if (typeof value === "string" && value.trim()) {
+      (out as Record<string, string>)[key] = value;
+    }
+  };
+  for (const key of Object.keys(ctx) as Array<keyof AgentPageContext>) {
+    assign(key, ctx[key]);
+  }
+  return out;
+}
+
+function pageContextForRequest(): AgentPageContext {
+  const snap = useProfile().snapshot.value;
+  const paths = snap?.paths;
+  const overrides = currentAgentPageContext();
+  return compactPageContext({
+    ...overrides,
+    route: typeof window !== "undefined" ? window.location.pathname : overrides.route,
+    profile: snap?.current_profile || overrides.profile,
+    csv_path: paths?.csv || overrides.csv_path,
+    screenshots_path: paths?.screenshots || overrides.screenshots_path,
+    iap_path: paths?.iap || overrides.iap_path,
+  });
+}
+
 function aguiRequestInit(params: ChatRequestParams): RequestInit {
   return {
     method: "POST",
@@ -110,6 +174,7 @@ function aguiRequestInit(params: ChatRequestParams): RequestInit {
         ...pendingAttachments.value.map((item) => item.path || "").filter(Boolean),
       ],
       attachments: pendingAttachments.value,
+      page_context: pageContextForRequest(),
     }),
   };
 }
@@ -161,7 +226,13 @@ export const agentChatServiceConfig: ChatServiceConfig = {
       applySessionValue(data.value);
       void listSessions();
     }
+    if (data.type === "RUN_ERROR") {
+      lastErrorText.value = formatEngineError(data);
+    }
     return null;
+  },
+  onError: (err) => {
+    if (!lastErrorText.value) lastErrorText.value = formatEngineError(err);
   },
   onAbort: async () => {
     if (!sessionId.value) return;
@@ -195,6 +266,7 @@ async function send(opts: {
   attachments?: AgentAttachmentPayload[];
 }): Promise<void> {
   if (!engineApi) return;
+  lastErrorText.value = "";
   pendingAutoAnalyze.value = opts.autoAnalyze === true;
   pendingAttachments.value = opts.attachments || [];
   try {
@@ -219,7 +291,9 @@ function ingestSessionPayload(payload: SessionPayload) {
     boundTaskId.value = session.task_id ? String(session.task_id) : "";
   }
   syncRail();
-  replaceMessages(historyToChatMessages(payload.messages || [], payload.plans || []));
+  replaceMessages(
+    historyToChatMessages(payload.messages || [], payload.plans || [], session.workflow),
+  );
 }
 
 async function restoreMessages(): Promise<void> {
@@ -268,6 +342,7 @@ async function createSession(): Promise<void> {
   const seq = ++bindSeq;
   await stop();
   if (seq !== bindSeq) return;
+  clearAgentPageContext();
   try {
     const payload = await httpJson<SessionPayload>("/api/agent/sessions", {
       method: "POST",
@@ -318,6 +393,26 @@ function findPlan(planId: string): AgentPlan | null {
   return null;
 }
 
+function findLatestPendingPlan(): AgentPlan | null {
+  const messages = engineApi?.getMessages() || [];
+  let found: AgentPlan | null = null;
+  for (const msg of messages) {
+    if (msg.role !== "assistant" || !msg.content) continue;
+    for (const block of msg.content) {
+      if (block.type !== "activity") continue;
+      const plan = (block.data as unknown as { content?: AgentPlan } | undefined)?.content;
+      if (plan?.id && plan.status === "pending" && (plan.mutations || []).length) {
+        found = plan;
+      }
+    }
+  }
+  return found;
+}
+
+function looksLikeWriteBackChoice(optionId: string): boolean {
+  return /apply|write|writeback|write_back|commit/i.test(optionId);
+}
+
 function writePlanPatch(planId: string, patch: Partial<AgentPlan>) {
   const current = engineApi?.getMessages() || [];
   replaceMessages(patchPlanInMessages(current, planId, patch));
@@ -363,6 +458,40 @@ async function apply(planId: string, rerun: boolean): Promise<void> {
   }
 }
 
+function writeChoicePatch(patch: Partial<AgentWorkflow>) {
+  const current = engineApi?.getMessages() || [];
+  replaceMessages(patchChoiceInMessages(current, patch));
+}
+
+async function choose(optionId: string): Promise<void> {
+  const sid = sessionId.value;
+  const id = String(optionId || "").trim();
+  if (!sid || !id) return;
+  try {
+    const payload = await httpJson<{ ok?: boolean; prompt?: string }>("/api/agent/choose", {
+      method: "POST",
+      skipNotify: true,
+      body: JSON.stringify({
+        session_id: sid,
+        option_id: id,
+        confirm: true,
+      }),
+    });
+    writeChoicePatch({ phase: "confirmed", selected_id: id });
+    const pending = looksLikeWriteBackChoice(id) ? findLatestPendingPlan() : null;
+    if (pending) {
+      await apply(pending.id, false);
+      return;
+    }
+    const prompt = String(payload.prompt || "").trim();
+    if (prompt) await send({ message: prompt });
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 409) {
+      writeChoicePatch({ phase: "confirmed", selected_id: id });
+    }
+  }
+}
+
 async function reject(planId: string): Promise<void> {
   try {
     await httpJson("/api/agent/reject", {
@@ -392,11 +521,13 @@ export function useAgent() {
     sessionId,
     boundTaskId,
     pendingAutoAnalyze,
+    lastErrorText,
     sessions,
     send,
     stop,
     bindTask,
     apply,
+    choose,
     reject,
     searchFailed,
     restoreMessages,

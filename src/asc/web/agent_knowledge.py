@@ -14,8 +14,9 @@ _DEFAULT_SEARCH_CHARS = 8000
 _MAX_SEARCH_CHARS = 12000
 _DEFAULT_TOPIC_CHARS = 10000
 _MAX_TOPIC_CHARS = 14000
-_SNIPPET_RADIUS = 3
-_MAX_SNIPPETS = 8
+_SNIPPET_RADIUS = 2
+_MAX_SNIPPETS = 4
+_NOTE_CACHE: dict[str, str] = {}
 _SNIPPET_LINE_MAX = 240
 
 TOPIC_FILES: dict[str, str] = {
@@ -91,8 +92,13 @@ def normalize_topic(value: str | None) -> str | None:
 
 
 def _read_packaged(name: str) -> str:
+    cached = _NOTE_CACHE.get(name)
+    if cached is not None:
+        return cached
     path = knowledge_root().joinpath(name)
-    return path.read_text(encoding="utf-8")
+    text = path.read_text(encoding="utf-8")
+    _NOTE_CACHE[name] = text
+    return text
 
 
 def _clip(text: str, max_chars: int) -> tuple[str, bool]:
@@ -131,12 +137,15 @@ def _score_text(text: str, tokens: list[str]) -> int:
 
 def _snippets(text: str, tokens: list[str], *, limit: int = _MAX_SNIPPETS) -> list[str]:
     lines = text.splitlines()
-    hits: list[int] = []
     lowered_tokens = [token for token in tokens if token]
+    scored: list[tuple[int, int]] = []
     for index, line in enumerate(lines):
         blob = line.lower()
-        if any(token in blob for token in lowered_tokens):
-            hits.append(index)
+        score = sum(1 for token in lowered_tokens if token in blob)
+        if score:
+            scored.append((-score, index))
+    scored.sort()
+    hits = [index for _, index in scored]
     if not hits and lines:
         hits = [0]
     used: set[int] = set()

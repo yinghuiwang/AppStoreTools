@@ -118,6 +118,60 @@ def test_agent_agui_forwards_attachments(tmp_path, monkeypatch):
     store.close()
 
 
+def test_agent_stream_forwards_page_context(tmp_path, monkeypatch):
+    store = TaskStore(tmp_path / "tasks.db")
+    _isolate_task_store(monkeypatch, store)
+    captured = {}
+
+    def fake_turn(self, **kwargs):
+        captured.update(kwargs)
+        yield ("session", '{"session_id":"s1","task_id":null}')
+        yield ("token", "ok")
+        yield ("done", '{"session_id":"s1","plan_ids":[]}')
+
+    monkeypatch.setattr("asc.web.agent.WebAgent.run_turn", fake_turn)
+    monkeypatch.setattr(
+        "asc.config.Config.get_active_llm_config",
+        lambda self: {"api_key": "k", "base_url": "http://x", "model": "m"},
+    )
+    client = TestClient(create_app())
+    page_context = {"route": "/listing", "locale": "en-US"}
+    resp = client.post(
+        "/api/agent/stream",
+        json={"message": "hi", "page_context": page_context},
+    )
+    assert resp.status_code == 200
+    assert captured.get("page_context") == page_context
+    store.close()
+
+
+def test_agent_agui_forwards_page_context_from_forwarded_props(tmp_path, monkeypatch):
+    store = TaskStore(tmp_path / "tasks.db")
+    _isolate_task_store(monkeypatch, store)
+    captured = {}
+
+    def fake_turn(self, **kwargs):
+        captured.update(kwargs)
+        yield ("session", '{"session_id":"s1","task_id":null}')
+        yield ("token", "ok")
+        yield ("done", '{"session_id":"s1","plan_ids":[]}')
+
+    monkeypatch.setattr("asc.web.agent.WebAgent.run_turn", fake_turn)
+    monkeypatch.setattr(
+        "asc.config.Config.get_active_llm_config",
+        lambda self: {"api_key": "k", "base_url": "http://x", "model": "m"},
+    )
+    client = TestClient(create_app())
+    page_context = {"route": "/iap", "product_id": "com.app.pro"}
+    resp = client.post(
+        "/api/agent/agui",
+        json={"prompt": "hi", "forwardedProps": {"page_context": page_context}},
+    )
+    assert resp.status_code == 200
+    assert captured.get("page_context") == page_context
+    store.close()
+
+
 def test_agent_agui_is_sse_and_uses_official_event_types(tmp_path, monkeypatch):
     store = TaskStore(tmp_path / "tasks.db")
     _isolate_task_store(monkeypatch, store)
@@ -317,6 +371,7 @@ def test_sessions_by_session_id_and_missing_ids(tmp_path, monkeypatch):
     payload = ok.json()
     assert payload["session"]["id"] == session["id"]
     assert payload["session"]["task_id"] is None
+    assert payload["session"]["workflow"]["phase"] == "idle"
     assert [row["content"] for row in payload["messages"]] == ["hi"]
     created = client.post("/api/agent/sessions", json={})
     assert created.status_code == 200
@@ -326,6 +381,44 @@ def test_sessions_by_session_id_and_missing_ids(tmp_path, monkeypatch):
     assert created.json()["plans"] == []
     newest = client.get("/api/agent/sessions").json()["sessions"]
     assert newest[0]["id"] == new_session["id"]
+    store.close()
+    agents.close()
+
+
+def test_choose_route_requires_confirm(tmp_path, monkeypatch):
+    from asc.web.agent_store import AgentStore
+    from asc.web.agent_tools import AgentToolContext, execute_model_tool
+    from asc.web.server import create_app
+
+    store = TaskStore(tmp_path / "tasks.db")
+    agents = AgentStore(tmp_path / "agent.db")
+    _isolate_task_store(monkeypatch, store)
+    _isolate_agent_store(monkeypatch, agents)
+    session = agents.get_or_create_session(None, "p")
+    ctx = AgentToolContext(
+        task_store=store,
+        agent_store=agents,
+        bound_task_id=None,
+        project_root=tmp_path,
+        turn_seq=1,
+        session_id=session["id"],
+    )
+    execute_model_tool(
+        ctx,
+        "offer_choices",
+        {"prompt": "Pick", "options": [{"label": "A"}, {"label": "B"}]},
+    )
+    client = TestClient(create_app())
+    assert client.post(
+        "/api/agent/choose",
+        json={"session_id": session["id"], "option_id": "opt_1"},
+    ).status_code == 400
+    ok = client.post(
+        "/api/agent/choose",
+        json={"session_id": session["id"], "option_id": "opt_1", "confirm": True},
+    )
+    assert ok.status_code == 200
+    assert ok.json()["ok"] is True
     store.close()
     agents.close()
 

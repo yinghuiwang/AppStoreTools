@@ -43,15 +43,17 @@ def test_workspace_tools_are_registered_and_apply_stays_gated():
     assert names == set(MODEL_TOOL_NAMES)
     for name in (
         "grep",
-        "search_files",
         "read_file",
         "write_file",
         "create_file",
         "delete_file",
         "search_knowledge",
         "get_knowledge",
+        "get_listing_snapshot",
+        "inspect_screenshots",
     ):
         assert name in names
+    assert "search_files" not in names
     assert "apply_fix" not in names
     assert "rerun_task" not in names
 

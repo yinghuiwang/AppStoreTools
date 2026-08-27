@@ -157,6 +157,29 @@ def test_list_messages_returns_latest_limited_in_order(tmp_path: Path):
         store.close()
 
 
+def test_workflow_column_and_get_set_default(tmp_path: Path):
+    store = AgentStore(tmp_path / "agent.db")
+    try:
+        session = store.get_or_create_session(None, "p")
+        import sqlite3
+
+        conn = sqlite3.connect(str(tmp_path / "agent.db"))
+        try:
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(sessions)")}
+        finally:
+            conn.close()
+        assert "workflow_json" in cols
+        assert store.get_workflow(session["id"]) == {"phase": "idle"}
+        saved = store.set_workflow(
+            session["id"],
+            {"phase": "collecting", "kind": "generic", "prompt": "x"},
+        )
+        assert saved["phase"] == "collecting"
+        assert store.get_workflow(session["id"])["phase"] == "collecting"
+    finally:
+        store.close()
+
+
 def test_server_lifespan_closes_agent_store(monkeypatch):
     from asc.web import server
     from asc.web.tasks import TaskStore

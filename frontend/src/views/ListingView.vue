@@ -83,7 +83,7 @@ onMounted(async () => {
 
 watch(appliedTick, () => {
   if (workflow.emptyProfile.value) return;
-  void workflow.reload();
+  void workflow.reloadFromDisk();
 });
 
 watch(

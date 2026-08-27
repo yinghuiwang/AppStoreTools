@@ -399,6 +399,8 @@ def test_agui_on_request_handshakes_and_retries_401_once():
     assert "attachments: pendingAttachments.value" in src
     assert 'protocol: "agui"' in src
     assert "bindSeq" in src
+    assert "looksLikeWriteBackChoice" in src
+    assert "findLatestPendingPlan" in src
 
 
 def test_failed_task_search_input_is_debounced():
@@ -413,4 +415,137 @@ def test_failed_task_search_input_is_debounced():
     helper = (FRONTEND / "composables" / "useAgent.ts").read_text(encoding="utf-8")
     assert "/api/agent/failed-tasks" in helper
     assert "skipNotify: true" in helper
+
+
+def test_run_turn_injects_page_context_into_system_not_sqlite(tmp_path):
+    from asc.web.agent import WebAgent
+
+    tasks = TaskStore(tmp_path / "tasks.db")
+    agents = AgentStore(tmp_path / "agent.db")
+    llm = ScriptedLLM([[{"content": "ok", "finish_reason": "stop"}]])
+    agent = WebAgent(agent_store=agents, task_store=tasks, project_root=tmp_path)
+    events = list(
+        agent.run_turn(
+            session_id=None,
+            task_id=None,
+            message="hello",
+            auto_analyze=False,
+            lang="en",
+            llm_client=llm,
+            page_context={
+                "route": "/listing",
+                "locale": "en-US",
+                "csv_path": "data/appstore_info.csv",
+                "issuer_id": "should-drop",
+                "foo": "bar",
+            },
+        )
+    )
+    session_id = json.loads(events[0][1])["session_id"]
+    system = llm.messages_seen[0][0]["content"]
+    assert llm.messages_seen[0][0]["role"] == "system"
+    assert "[page]" in system
+    assert "route=/listing" in system
+    assert "locale=en-US" in system
+    page_block = system[system.index("[page]"):]
+    assert "issuer_id" not in page_block
+    assert "should-drop" not in system
+    assert "foo=bar" not in system
+    stored = " ".join(row["content"] for row in agents.list_messages(session_id))
+    assert "[page]" not in stored
+    assert "page_context" not in stored
+    assert "[workflow]" in system
+    tasks.close()
+    agents.close()
+
+
+def test_run_turn_auto_analyze_appends_failure_hint(tmp_path):
+    from asc.web.agent import WebAgent
+
+    tasks = TaskStore(tmp_path / "tasks.db")
+    agents = AgentStore(tmp_path / "agent.db")
+    task_id = tasks.create("metadata", profile="myapp")
+    tasks.append_log(task_id, "HTTP 429 rate limit Retry-After: 5")
+    tasks.set_status(task_id, TaskStatus.ERROR)
+    llm = ScriptedLLM([[{"content": "rate limited", "finish_reason": "stop"}]])
+    agent = WebAgent(agent_store=agents, task_store=tasks, project_root=tmp_path)
+    events = list(
+        agent.run_turn(
+            session_id=None,
+            task_id=task_id,
+            message="",
+            auto_analyze=True,
+            lang="en",
+            llm_client=llm,
+        )
+    )
+    session_id = json.loads(events[0][1])["session_id"]
+    user_rows = [row for row in llm.messages_seen[0] if row.get("role") == "user"]
+    user_blob = " ".join(str(row.get("content") or "") for row in user_rows)
+    assert "[failure_hint]" in user_blob
+    assert "code=rate_limited" in user_blob
+    assert "hint=" in user_blob
+    assert "get_task" in user_blob
+    assert "get_task_log" in user_blob
+    stored = " ".join(row["content"] for row in agents.list_messages(session_id))
+    assert "[failure_hint]" in stored
+    assert "code=rate_limited" in stored
+    tasks.close()
+    agents.close()
+
+
+def test_format_agent_error_includes_where_and_detail():
+    from asc.web.agent import format_agent_error
+
+    payload = format_agent_error(
+        "llm_unavailable",
+        "zh",
+        detail="invalid api key",
+        where="LLM HTTP 401 @ api.minimaxi.com",
+    )
+    assert payload["code"] == "llm_unavailable"
+    assert "位置：LLM HTTP 401 @ api.minimaxi.com" in payload["message"]
+    assert "invalid api key" in payload["message"]
+    assert payload["where"] == "LLM HTTP 401 @ api.minimaxi.com"
+    assert payload["detail"] == "invalid api key"
+
+
+def test_llm_http_error_tells_where_and_persists(tmp_path):
+    from asc.llm import LLMHTTPError
+    from asc.web.agent import WebAgent
+
+    class BoomLLM:
+        api_key = "k"
+
+        def chat_stream(self, messages, tools, temperature=0.3):
+            raise LLMHTTPError(
+                401,
+                detail="invalid api key",
+                url="https://api.minimaxi.com/v1/chat/completions",
+            )
+
+    tasks = TaskStore(tmp_path / "tasks.db")
+    agents = AgentStore(tmp_path / "agent.db")
+    agent = WebAgent(agent_store=agents, task_store=tasks, project_root=tmp_path)
+    events = list(
+        agent.run_turn(
+            session_id=None,
+            task_id=None,
+            message="哈喽",
+            auto_analyze=False,
+            lang="zh",
+            llm_client=BoomLLM(),
+        )
+    )
+    err = next(json.loads(data) for name, data in events if name == "error")
+    assert err["code"] == "llm_unavailable"
+    assert "401" in err["message"]
+    assert "api.minimaxi.com" in err["message"]
+    assert "invalid api key" in err["message"]
+    session_id = json.loads(events[0][1])["session_id"]
+    stored = " ".join(row["content"] for row in agents.list_messages(session_id) if row["role"] == "assistant")
+    assert "401" in stored
+    assert "invalid api key" in stored
+    tasks.close()
+    agents.close()
 

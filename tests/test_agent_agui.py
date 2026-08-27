@@ -166,6 +166,29 @@ def test_error_emits_run_error():
     assert err["message"] == "down"
 
 
+def test_error_forwards_where():
+    events = list(
+        translate_legacy_events(
+            [
+                ("session", json.dumps({"session_id": "s1"})),
+                (
+                    "error",
+                    json.dumps(
+                        {
+                            "code": "llm_unavailable",
+                            "message": "down",
+                            "where": "LLM HTTP 401 @ api.minimaxi.com",
+                        }
+                    ),
+                ),
+            ],
+            run_id="run3b",
+        )
+    )
+    err = next(item for item in events if item["type"] == "RUN_ERROR")
+    assert err["where"] == "LLM HTTP 401 @ api.minimaxi.com"
+
+
 def test_done_emits_plan_activity_snapshot():
     class FakeStore:
         def get_plan(self, plan_id: str):
@@ -186,3 +209,28 @@ def test_done_emits_plan_activity_snapshot():
     assert activity["activityType"] == "propose_fix"
     assert activity["content"]["id"] == "p1"
     assert activity["content"]["summary"] == "fix"
+
+
+def test_choices_event_emits_offer_choices_activity():
+    workflow = {
+        "phase": "awaiting_choice",
+        "kind": "listing",
+        "options": [{"id": "opt_1", "label": "Premium"}],
+    }
+    events = list(
+        translate_legacy_events(
+            [
+                ("session", json.dumps({"session_id": "s1"})),
+                ("choices", json.dumps(workflow)),
+                ("done", json.dumps({"session_id": "s1", "plan_ids": [], "workflow": workflow})),
+            ],
+            run_id="run-choices",
+        )
+    )
+    activity = next(
+        item
+        for item in events
+        if item.get("type") == "ACTIVITY_SNAPSHOT" and item.get("activityType") == "offer_choices"
+    )
+    assert activity["content"]["phase"] == "awaiting_choice"
+    assert activity["content"]["options"][0]["id"] == "opt_1"

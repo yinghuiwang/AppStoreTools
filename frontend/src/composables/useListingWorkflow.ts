@@ -406,6 +406,10 @@ export function useListingWorkflow() {
     load,
     save,
     reload: () => load(csvPath.value),
+    reloadFromDisk: () => {
+      dropDraft();
+      return load(csvPath.value);
+    },
     applySnapshot,
     markDirty,
     discard,

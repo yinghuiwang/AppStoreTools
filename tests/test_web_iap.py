@@ -546,7 +546,7 @@ def test_wizard_views_exist():
     assert "hasContent" not in mounted.group(0)
     applied = re.search(r"watch\(appliedTick, \(\) => \{.*?\}\);", iap, re.S)
     assert applied, "IapView appliedTick watcher missing"
-    assert "workflow.reload()" in applied.group(0)
+    assert "workflow.reloadFromDisk()" in applied.group(0)
     assert "hasContent" not in applied.group(0)
     assert "edit" not in applied.group(0)
     assert "ensureCompare" not in iap

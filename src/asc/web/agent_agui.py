@@ -234,11 +234,13 @@ class AguiTurnTranslator:
             payload = _parse_obj(data)
             message = str(payload.get("message") or data or "error")
             code = str(payload.get("code") or "")
-            yield from self._emit_visible(message)
+            where = str(payload.get("where") or "")
             yield from self._close_text()
             err: dict[str, Any] = {"type": "RUN_ERROR", "message": message}
             if code:
                 err["code"] = code
+            if where:
+                err["where"] = where
             yield err
             return
 
@@ -252,6 +254,17 @@ class AguiTurnTranslator:
                 "threadId": self.thread_id or self.run_id,
                 "runId": self.run_id,
                 "result": {"stopped": True, **payload},
+            }
+            return
+
+        if event == "choices":
+            payload = _parse_obj(data)
+            yield {
+                "type": "ACTIVITY_SNAPSHOT",
+                "messageId": self._next_id("choice"),
+                "activityType": "offer_choices",
+                "content": payload,
+                "replace": True,
             }
             return
 

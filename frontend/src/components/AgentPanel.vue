@@ -31,9 +31,11 @@ import {
   detachAgentChatEngine,
   useAgent,
   type AgentPlan,
+  type AgentWorkflow,
 } from "@/composables/useAgent";
 import {
   assistantTextOf,
+  choiceFromActivity,
   planFromActivity,
   toolStatusOf,
   toolSummaryOf,
@@ -53,6 +55,7 @@ import {
   type AgentDraftAttachment,
 } from "@/composables/agentAttachments";
 import { useBrowse } from "@/composables/useBrowse";
+import { clearAgentPageContext, setAgentPageContext } from "@/composables/useAgentContext";
 import { useRightRail } from "@/composables/useRightRail";
 
 const { t, locale } = useI18n();
@@ -64,11 +67,13 @@ const generating = computed(() => status.value === "pending" || status.value ===
 const {
   sessionId,
   boundTaskId,
+  lastErrorText,
   sessions,
   send,
   stop,
   bindTask,
   apply,
+  choose,
   reject,
   searchFailed,
   restoreMessages,
@@ -178,6 +183,17 @@ function canAct(plan: AgentPlan): boolean {
   return plan.status === "pending" || plan.status === "conflict";
 }
 
+function canChoose(workflow: AgentWorkflow): boolean {
+  return workflow.phase === "awaiting_choice" && !workflow.selected_id;
+}
+
+function choiceSelectedLabel(workflow: AgentWorkflow): string {
+  const id = workflow.selected_id;
+  if (!id) return "";
+  const match = (workflow.options || []).find((opt) => opt.id === id);
+  return match?.label || id;
+}
+
 function toolStatusLabel(status: string): string {
   if (status === "running") return t("agent.tool.running");
   if (status === "success") return t("agent.tool.success");
@@ -203,12 +219,14 @@ type AssistantTurn = {
   tools: Array<{ idx: number; msg: ToolMsg }>;
   assistant?: { idx: number; msg: AssistantMsg };
   plans: AgentPlan[];
+  choices: AgentWorkflow[];
 };
 
 type ChatTurn =
   | { key: string; kind: "user"; idx: number; text: string }
   | { key: string; kind: "error"; idx: number; text: string }
   | { key: string; kind: "plan"; idx: number; plan: AgentPlan }
+  | { key: string; kind: "choice"; idx: number; choice: AgentWorkflow }
   | AssistantTurn;
 
 function thinkText(block: AIMessageContent): string {
@@ -269,6 +287,7 @@ const chatTurns = computed((): ChatTurn[] => {
     const thinks: AssistantTurn["thinks"] = [];
     const tools: AssistantTurn["tools"] = [];
     const plans: AgentPlan[] = [];
+    const choices: AgentWorkflow[] = [];
     let assistantText = "";
     content.forEach((block, bi) => {
       if (block.type === "thinking" || block.type === "reasoning") {
@@ -284,36 +303,57 @@ const chatTurns = computed((): ChatTurn[] => {
         plans.push(plan);
         return;
       }
+      const choice = choiceFromActivity(block);
+      if (choice) {
+        choices.push(choice);
+        return;
+      }
       if (block.type === "markdown" || block.type === "text") {
         assistantText += typeof block.data === "string" ? block.data : "";
       }
     });
-    if (msg.status === "error" && assistantText) {
-      turns.push({ key: msg.id || `error-${idx}`, kind: "error", idx, text: assistantText });
+    if (thinks.length || tools.length || (assistantText && msg.status !== "error") || plans.length || choices.length) {
+      turns.push({
+        key: msg.id || `assistant-${idx}`,
+        kind: "assistant",
+        idx,
+        status: msg.status === "error" ? "complete" : msg.status,
+        thinks,
+        tools,
+        plans,
+        choices,
+        assistant: assistantText && msg.status !== "error" ? { idx, msg: { text: assistantText } } : undefined,
+      });
+    }
+    if (msg.status === "error") {
+      const fallback = lastErrorText.value.trim() || t("agent.error.request_failed");
+      turns.push({
+        key: msg.id || `error-${idx}`,
+        kind: "error",
+        idx,
+        text: assistantText.trim() || fallback,
+      });
       return;
     }
-    if (!thinks.length && !tools.length && !assistantText && !plans.length) return;
-    turns.push({
-      key: msg.id || `assistant-${idx}`,
-      kind: "assistant",
-      idx,
-      status: msg.status,
-      thinks,
-      tools,
-      plans,
-      assistant: assistantText ? { idx, msg: { text: assistantText } } : undefined,
-    });
+    if (!thinks.length && !tools.length && !assistantText && !plans.length && !choices.length) return;
     for (const plan of plans) {
       turns.push({ key: `plan-${plan.id}`, kind: "plan", idx, plan });
     }
+    choices.forEach((choice, ci) => {
+      turns.push({
+        key: `choice-${idx}-${choice.updated_at || choice.phase}-${ci}`,
+        kind: "choice",
+        idx,
+        choice,
+      });
+    });
   });
   return turns;
 });
 
-function assistantStatus(turn: AssistantTurn): "streaming" | "complete" | "error" {
-  // Official t-chat-item hides the content slot when status is pending, or
-  // streaming with empty content. Never pass pending; always pass content.
-  if (turn.status === "error") return "error";
+function assistantStatus(turn: AssistantTurn): "streaming" | "complete" {
+  // Official t-chat-item replaces custom slots with「请求出错」when status is
+  // error. Keep complete/streaming and render failures as our own error turn.
   const last = chatTurns.value[chatTurns.value.length - 1];
   if (generating.value && last?.key === turn.key) return "streaming";
   return "complete";
@@ -511,9 +551,48 @@ function toggleList() {
   }
 }
 
+const AUTO_ANALYZE_MARKERS = [
+  "请解释这次失败",
+  "Please explain this failure",
+  "First call get_task and get_task_log",
+  "Then inspect_local if needed",
+  "If it is locally fixable",
+  "[failure_hint]",
+];
+
+function isInjectedTitleLine(line: string): boolean {
+  const text = line.trim();
+  if (!text) return true;
+  if (text.startsWith("task_id=")) return true;
+  return AUTO_ANALYZE_MARKERS.some((marker) => text.includes(marker));
+}
+
 function sessionTitle(row: { title?: string }): string {
-  const text = String(row.title || "").replace(/\s+/g, " ").trim();
-  return text ? trunc(text, 48) : t("agent.untitled_session");
+  const lines = String(row.title || "")
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  const userLines = lines.filter((line) => !isInjectedTitleLine(line));
+  const picked = userLines.find((line) => line.length < 80);
+  return picked ? trunc(picked, 48) : t("agent.untitled_session");
+}
+
+function onSkillListing() {
+  clearAgentPageContext();
+  setAgentPageContext({ route: "/listing", phase: "create" });
+  rail.openAgent({ seedPrompt: t("listing.agent_seed_create") });
+}
+
+function onSkillIap() {
+  clearAgentPageContext();
+  setAgentPageContext({ route: "/iap", phase: "create" });
+  rail.openAgent({ seedPrompt: t("iap.agent_seed_create") });
+}
+
+function onSkillFailed() {
+  listOpen.value = false;
+  attachOpen.value = true;
+  void runSearch();
 }
 
 function sessionTime(row: { updated_at?: string; created_at?: string }): string {
@@ -606,6 +685,11 @@ function pickTask(id: unknown) {
 function applyPlan(plan: AgentPlan) {
   const rerun = rerunByPlan.value[plan.id] !== false;
   void apply(plan.id, Boolean(plan.rerun) && rerun);
+}
+
+function onChoose(optionId: string) {
+  if (generating.value) return;
+  void choose(optionId);
 }
 
 watch(
@@ -736,7 +820,25 @@ onBeforeUnmount(() => {
         :show-scroll-button="true"
         :is-stream-load="generating"
       >
-        <p v-if="!messages.length" class="empty agent-dock-empty">{{ t("agent.empty") }}</p>
+        <div v-if="!messages.length" class="empty-wrap">
+          <p class="empty agent-dock-empty">{{ t("agent.empty") }}</p>
+          <div class="skill-chips" data-agent-skills>
+            <button
+              type="button"
+              class="skill"
+              data-agent-skill="listing"
+              @click="onSkillListing"
+            >
+              {{ t("agent.skill.listing") }}
+            </button>
+            <button type="button" class="skill" data-agent-skill="iap" @click="onSkillIap">
+              {{ t("agent.skill.iap") }}
+            </button>
+            <button type="button" class="skill" data-agent-skill="failed" @click="onSkillFailed">
+              {{ t("agent.skill.failed") }}
+            </button>
+          </div>
+        </div>
         <template v-for="turn in chatTurns" :key="turn.key">
           <t-chat-message
             v-if="turn.kind === 'user'"
@@ -833,9 +935,8 @@ onBeforeUnmount(() => {
             role="assistant"
             placement="left"
             variant="text"
-            status="error"
           >
-            <t-chat-content role="assistant" status="error" :content="turn.text" />
+            <t-chat-content role="assistant" :content="turn.text" />
           </t-chat-message>
           <t-chat-message
             v-else-if="turn.kind === 'plan'"
@@ -882,6 +983,37 @@ onBeforeUnmount(() => {
                 </t-popconfirm>
                 <button type="button" @click="reject(turn.plan.id)">{{ t("agent.ignore") }}</button>
               </div>
+            </article>
+          </t-chat-message>
+          <t-chat-message
+            v-else-if="turn.kind === 'choice'"
+            role="assistant"
+            placement="left"
+            variant="text"
+          >
+            <article class="plan agent-choice-card" data-agent-choices>
+              <p class="plan-summary">{{ turn.choice.prompt || t("agent.choice.pick") }}</p>
+              <div class="skill-chips choice-chips">
+                <button
+                  v-for="opt in turn.choice.options || []"
+                  :key="opt.id"
+                  type="button"
+                  class="skill"
+                  :class="{ 'is-picked': turn.choice.selected_id === opt.id }"
+                  :data-agent-choice="opt.id"
+                  :disabled="!canChoose(turn.choice) || generating"
+                  :title="opt.description || opt.label"
+                  @click="onChoose(opt.id)"
+                >
+                  {{ opt.label }}
+                </button>
+              </div>
+              <p v-if="turn.choice.selected_id" class="choice-picked" data-agent-choice-status>
+                {{ t("agent.choice.picked") }}
+                <template v-if="choiceSelectedLabel(turn.choice)">
+                  · {{ choiceSelectedLabel(turn.choice) }}
+                </template>
+              </p>
             </article>
           </t-chat-message>
         </template>
@@ -1154,6 +1286,56 @@ onBeforeUnmount(() => {
   font-size: 13px;
 }
 
+.empty-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.skill-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.skill {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.skill:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent-deep);
+  background: var(--accent-glow);
+}
+
+.skill:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+
+.skill.is-picked {
+  color: var(--accent);
+  border-color: var(--accent-deep);
+  background: var(--accent-glow);
+  opacity: 1;
+}
+
+.choice-chips {
+  margin-top: 2px;
+}
+
+.choice-picked {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
 .agent-turn-body {
   display: flex;
   flex-direction: column;
@@ -1163,6 +1345,12 @@ onBeforeUnmount(() => {
 
 .agent-msg {
   max-width: 100%;
+}
+
+.agent-msg--error :deep(.t-chat__text),
+.agent-msg--error :deep(pre) {
+  color: var(--err, #e34d59);
+  white-space: pre-wrap;
 }
 
 .agent-msg--user :deep(.t-chat__text) {

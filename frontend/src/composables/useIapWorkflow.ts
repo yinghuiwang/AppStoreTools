@@ -486,6 +486,10 @@ export function useIapWorkflow() {
     load,
     save,
     reload: () => load(iapFile.value),
+    reloadFromDisk: () => {
+      dropDraft();
+      return load(iapFile.value);
+    },
     applySnapshot,
     markDirty,
     discard,

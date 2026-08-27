@@ -6,6 +6,7 @@ import { ApiError, apiErrorMessage, httpJson } from "@/api/http";
 import ExampleHelp from "@/components/ExampleHelp.vue";
 import { useBrowse } from "@/composables/useBrowse";
 import { useIapWorkflow, type IapGroup, type IapItem, type IapSnapshot } from "@/composables/useIapWorkflow";
+import { clearAgentPageContext, setAgentPageContext } from "@/composables/useAgentContext";
 import { useRightRail } from "@/composables/useRightRail";
 
 const emit = defineEmits<{ next: [] }>();
@@ -179,6 +180,8 @@ function blank() {
 }
 
 function openAgent() {
+  clearAgentPageContext();
+  setAgentPageContext({ route: "/iap", phase: "create" });
   rail.openAgent({ seedPrompt: t("iap.agent_seed_create") });
 }
 </script>

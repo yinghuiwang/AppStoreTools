@@ -232,9 +232,12 @@ def format_attachments_prompt(items: list[dict[str, Any]], lang: str) -> str:
     if not items:
         return ""
     header = (
-        "用户附带了这些文件。请先用 read_file 或 inspect_local 读取下列路径。"
+        "用户附带了这些文件。图片可能已被直接查看；仍请用 read_file 或 inspect_local 读取下列路径。"
         if lang == "zh"
-        else "The user attached these files. Use read_file or inspect_local on the paths below."
+        else (
+            "The user attached these files. Images may be seen directly; "
+            "still use read_file or inspect_local on the paths below."
+        )
     )
     lines = [ATTACH_MARKER, header]
     for index, item in enumerate(items, 1):

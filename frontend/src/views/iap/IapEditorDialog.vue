@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { MessagePlugin } from "tdesign-vue-next";
 import { ApiError, apiErrorMessage, httpJson } from "@/api/http";
@@ -15,6 +15,7 @@ import {
   type PlanItem,
 } from "@/composables/useIapWorkflow";
 import { useLocaleCatalog } from "@/composables/useLocaleCatalog";
+import { setAgentPageContext, clearAgentPageContext } from "@/composables/useAgentContext";
 import { useRightRail } from "@/composables/useRightRail";
 import IapReviewThumb from "./IapReviewThumb.vue";
 
@@ -286,7 +287,32 @@ async function pullOne() {
   }
 }
 
+function syncIapAgentContext() {
+  clearAgentPageContext();
+  setAgentPageContext({
+    route: "/iap",
+    product_id: productId(),
+    phase: "edit",
+  });
+}
+
+watch(
+  () => props.visible,
+  (visible) => {
+    if (visible) syncIapAgentContext();
+    else clearAgentPageContext();
+  },
+);
+
+watch(
+  () => productId(),
+  () => {
+    if (props.visible) syncIapAgentContext();
+  },
+);
+
 function openAgent() {
+  syncIapAgentContext();
   const locales = Object.keys(locsOf()).join(", ") || "en-US";
   rail.openAgent({
     seedPrompt: t("iap.agent_seed_edit", { productId: productId() || "(new)", locales }),

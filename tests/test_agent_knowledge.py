@@ -121,10 +121,16 @@ def test_system_prompt_requires_knowledge_first():
     assert "search_knowledge" in text
     assert "get_knowledge" in text
     assert "App Store Connect expert" in text
-    assert "appstore-listing" in text
-    assert "iap-packages" in text
-    assert "en-US and zh-Hans" in text
-    assert "groupLevel" in text
+    assert "get_knowledge(listing)" in text or "topic listing" in text
+    assert "get_knowledge(iap)" in text or "topic iap" in text
+    assert "get_listing_snapshot" in text
+    assert "validate_listing" in text
+    assert "count_listing_fields" in text
+    assert "get_iap_snapshot" in text
+    assert "validate_iap" in text
+    assert "inspect_screenshots" in text
+    assert "search_files" not in text
+    assert "en-US and zh-Hans" not in text
     assert "search_knowledge" in MODEL_TOOL_NAMES
     assert "get_knowledge" in MODEL_TOOL_NAMES
 
@@ -140,5 +146,22 @@ def test_get_knowledge_includes_skill_workflows():
     assert iap["ok"] is True
     assert iap.get("truncated") is not True
     assert "iap-packages" in iap["content"]
-    assert "one category per message" in iap["content"]
     assert "infer_iap_products.rb" in iap["content"]
+    assert "groupLevel" in iap["content"]
+    assert "one category per message" in iap["content"]
+
+
+def test_get_topic_second_call_does_not_reread_disk(monkeypatch):
+    from asc.web import agent_knowledge as ak
+
+    ak._NOTE_CACHE.clear()
+    first = get_topic("listing")
+    assert first["ok"] is True
+
+    def boom(*_args, **_kwargs):
+        raise AssertionError("should not re-read disk")
+
+    monkeypatch.setattr(ak.resources, "files", boom)
+    second = get_topic("listing")
+    assert second["ok"] is True
+    assert second["content"] == first["content"]

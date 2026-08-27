@@ -26,8 +26,22 @@ from asc.listing.local import (
     save_local_csv,
 )
 from asc.listing.models import FIELD_NAMES, ListingSnapshot, LocaleListing
+from asc.web.agent_domain import (
+    count_listing_fields,
+    iap_snapshot,
+    inspect_screenshots,
+    listing_snapshot,
+    validate_iap,
+    validate_listing,
+)
 from asc.web.agent_knowledge import get_topic, search_notes
+from asc.web.agent_asc import get_asc_version, list_asc_iaps
 from asc.web.agent_redact import redact_obj, redact_text
+from asc.web.agent_workflow import (
+    WORKFLOW_KINDS,
+    WORKFLOW_PHASES,
+    sanitize_option,
+)
 from asc.web.agent_workspace import (
     FILE_MUTATION_OPS,
     WorkspacePathError,
@@ -52,15 +66,24 @@ MODEL_TOOL_NAMES = (
     "get_task_log",
     "get_profile_context",
     "inspect_local",
+    "get_listing_snapshot",
+    "get_iap_snapshot",
+    "validate_listing",
+    "validate_iap",
+    "count_listing_fields",
+    "inspect_screenshots",
     "search_knowledge",
     "get_knowledge",
     "grep",
-    "search_files",
     "read_file",
     "write_file",
     "create_file",
     "delete_file",
     "propose_fix",
+    "offer_choices",
+    "set_workflow",
+    "get_asc_version",
+    "list_asc_iaps",
 )
 
 _GATED_ERROR = "writes are gated; use propose_fix"
@@ -203,6 +226,69 @@ OPENAI_TOOLS: list[dict] = [
         ["path"],
     ),
     _tool_schema(
+        "get_listing_snapshot",
+        "Read structured App Store listing CSV fields by locale. "
+        "Prefer this over read_file for listing CSV. Read-only.",
+        {
+            "path": {
+                "type": "string",
+                "description": "Optional CSV path; defaults to bound profile/replay/form csv",
+            },
+        },
+    ),
+    _tool_schema(
+        "get_iap_snapshot",
+        "Read IAP/subscription identity (productId, type, locale codes). "
+        "Does not dump localization text. Prefer this over read_file. Read-only.",
+        {
+            "path": {
+                "type": "string",
+                "description": "Optional IAP JSON path; defaults to bound profile/replay/form iap",
+            },
+        },
+    ),
+    _tool_schema(
+        "validate_listing",
+        "Validate listing CSV lengths and URL protocols. Returns issues with error/warning counts. Read-only.",
+        {
+            "path": {
+                "type": "string",
+                "description": "Optional CSV path; defaults to bound profile/replay/form csv",
+            },
+        },
+    ),
+    _tool_schema(
+        "validate_iap",
+        "Validate IAP JSON structure and types. Returns issues with error/warning counts. Read-only.",
+        {
+            "path": {
+                "type": "string",
+                "description": "Optional IAP JSON path; defaults to bound profile/replay/form iap",
+            },
+        },
+    ),
+    _tool_schema(
+        "count_listing_fields",
+        "Count listing field lengths vs Apple limits/targets (CJK counts as 1). Read-only.",
+        {
+            "path": {
+                "type": "string",
+                "description": "Optional CSV path; defaults to bound profile/replay/form csv",
+            },
+        },
+    ),
+    _tool_schema(
+        "inspect_screenshots",
+        "Inventory screenshot files by locale and display type. "
+        "Prefer this over read_file for screenshot folders. Read-only.",
+        {
+            "path": {
+                "type": "string",
+                "description": "Optional screenshots dir; defaults to bound profile/replay/form shots",
+            },
+        },
+    ),
+    _tool_schema(
         "search_knowledge",
         "Search packaged App Store Connect expert notes (locales, listing limits, "
         "screenshots, IAP, version/What's New, tool pitfalls). Read-only package data; "
@@ -267,17 +353,6 @@ OPENAI_TOOLS: list[dict] = [
         ["pattern"],
     ),
     _tool_schema(
-        "search_files",
-        "Alias of grep. Search file contents under the project/workspace root. "
-        "Paths are project-relative. Secrets and ignored dirs are skipped. Read-only.",
-        {
-            "pattern": {"type": "string", "description": "Regex (default) or literal string"},
-            "path": {"type": "string", "description": "Optional project-relative file or directory"},
-            "literal": {"type": "boolean", "description": "If true, treat pattern as a literal"},
-        },
-        ["pattern"],
-    ),
-    _tool_schema(
         "read_file",
         "Read a text file under the project/workspace root. Paths are project-relative. "
         "Use offset/limit (1-based lines) to avoid dumping the whole repo. "
@@ -327,6 +402,59 @@ OPENAI_TOOLS: list[dict] = [
             "path": {"type": "string", "description": "Project-relative file to delete"},
         },
         ["path"],
+    ),
+    _tool_schema(
+        "offer_choices",
+        "Offer 2-12 choices for the user to pick. Does not write files. "
+        "Use this instead of listing many options as plain text.",
+        {
+            "prompt": {"type": "string", "description": "Question shown with the choices"},
+            "options": {
+                "type": "array",
+                "description": "2-12 items with label; id optional (auto opt_N)",
+                "items": {"type": "object"},
+            },
+            "kind": {
+                "type": "string",
+                "description": "listing | iap | generic",
+            },
+        },
+        ["prompt", "options"],
+    ),
+    _tool_schema(
+        "set_workflow",
+        "Update workflow phase/kind. Cannot invent options. Does not write files.",
+        {
+            "phase": {
+                "type": "string",
+                "description": "idle | collecting | awaiting_choice | confirmed | expanding",
+            },
+            "kind": {
+                "type": "string",
+                "description": "listing | iap | generic",
+            },
+        },
+        ["phase"],
+    ),
+    _tool_schema(
+        "get_asc_version",
+        "Read the current editable App Store version and state. Prefer this over guessing.",
+        {
+            "profile": {
+                "type": "string",
+                "description": "Profile name; defaults to the session or task profile",
+            },
+        },
+    ),
+    _tool_schema(
+        "list_asc_iaps",
+        "List existing App Store IAPs (productId, name, type), cap 50. Prefer this over guessing.",
+        {
+            "profile": {
+                "type": "string",
+                "description": "Profile name; defaults to the session or task profile",
+            },
+        },
     ),
 ]
 
@@ -434,10 +562,10 @@ def _restore_file_snapshots(snaps: list[tuple[Path, bytes | None]]) -> None:
 
 def execute_model_tool(ctx: AgentToolContext, name: str, arguments: dict) -> dict:
     """Run one model-visible tool. Unknown or write tools never touch disk."""
-    if name not in MODEL_TOOL_NAMES:
+    handler = _HANDLERS.get(name)
+    if handler is None:
         return {"ok": False, "error": _GATED_ERROR}
     payload = arguments if isinstance(arguments, dict) else {}
-    handler = _HANDLERS[name]
     try:
         return handler(ctx, payload)
     except Exception as exc:
@@ -594,6 +722,123 @@ def _tool_get_knowledge(_ctx: AgentToolContext, arguments: dict) -> dict:
     return get_topic(str(topic))
 
 
+def _form_path_candidates(
+    ctx: AgentToolContext,
+    *,
+    suffixes: tuple[str, ...] = (),
+    prefer_dir: bool = False,
+) -> list[str]:
+    out: list[str] = []
+    for raw in ctx.form_paths or []:
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        lower = text.lower()
+        if suffixes and any(lower.endswith(suffix) for suffix in suffixes):
+            out.append(text)
+            continue
+        if prefer_dir:
+            try:
+                resolved = _resolve_user_path(ctx.project_root, text)
+            except Exception:
+                continue
+            name = resolved.name.lower()
+            if resolved.is_dir() or "screenshot" in name or "screenshots" in lower:
+                out.append(text)
+    return out
+
+
+def _default_path_for_kind(ctx: AgentToolContext, kind: str) -> str | None:
+    params = _bound_replay_params(ctx)
+    csv_path, shots, iap = _bound_profile_paths(ctx)
+    if kind == "listing":
+        values = (
+            params.get("csv_path"),
+            *_form_path_candidates(ctx, suffixes=(".csv",)),
+            csv_path,
+        )
+    elif kind == "iap":
+        values = (
+            params.get("iap_file"),
+            *_form_path_candidates(ctx, suffixes=(".json",)),
+            iap,
+        )
+    else:
+        values = (
+            params.get("screenshots_dir"),
+            *_form_path_candidates(ctx, prefer_dir=True),
+            shots,
+        )
+    for value in values:
+        if value:
+            return str(value)
+    return None
+
+
+def _resolve_optional_domain_path(
+    ctx: AgentToolContext,
+    arguments: dict,
+    kind: str,
+) -> tuple[Path | None, dict | None]:
+    raw = arguments.get("path")
+    if not raw:
+        raw = _default_path_for_kind(ctx, kind)
+    if not raw:
+        return None, {"ok": False, "error": "path is required"}
+    resolved, error = _resolve_mutation_path(ctx, raw)
+    if error or resolved is None:
+        return None, {"ok": False, "error": error or "path is required"}
+    return resolved, None
+
+
+def _tool_get_listing_snapshot(ctx: AgentToolContext, arguments: dict) -> dict:
+    resolved, err = _resolve_optional_domain_path(ctx, arguments, "listing")
+    if err:
+        return err
+    assert resolved is not None
+    return listing_snapshot(resolved)
+
+
+def _tool_get_iap_snapshot(ctx: AgentToolContext, arguments: dict) -> dict:
+    resolved, err = _resolve_optional_domain_path(ctx, arguments, "iap")
+    if err:
+        return err
+    assert resolved is not None
+    return iap_snapshot(resolved)
+
+
+def _tool_validate_listing(ctx: AgentToolContext, arguments: dict) -> dict:
+    resolved, err = _resolve_optional_domain_path(ctx, arguments, "listing")
+    if err:
+        return err
+    assert resolved is not None
+    return validate_listing(resolved)
+
+
+def _tool_validate_iap(ctx: AgentToolContext, arguments: dict) -> dict:
+    resolved, err = _resolve_optional_domain_path(ctx, arguments, "iap")
+    if err:
+        return err
+    assert resolved is not None
+    return validate_iap(resolved)
+
+
+def _tool_count_listing_fields(ctx: AgentToolContext, arguments: dict) -> dict:
+    resolved, err = _resolve_optional_domain_path(ctx, arguments, "listing")
+    if err:
+        return err
+    assert resolved is not None
+    return count_listing_fields(resolved)
+
+
+def _tool_inspect_screenshots(ctx: AgentToolContext, arguments: dict) -> dict:
+    resolved, err = _resolve_optional_domain_path(ctx, arguments, "screenshots")
+    if err:
+        return err
+    assert resolved is not None
+    return inspect_screenshots(resolved)
+
+
 def _tool_inspect_local(ctx: AgentToolContext, arguments: dict) -> dict:
     raw_path = arguments.get("path")
     if not raw_path:
@@ -632,6 +877,88 @@ def _tool_inspect_local(ctx: AgentToolContext, arguments: dict) -> dict:
         "content": redact_text(text),
         "truncated": size > max_bytes,
     }
+
+
+def _tool_offer_choices(ctx: AgentToolContext, arguments: dict) -> dict:
+    if not ctx.session_id:
+        return {"ok": False, "error": "session_id is required"}
+    if ctx.agent_store is None:
+        return {"ok": False, "error": "agent store is required"}
+    prompt = arguments.get("prompt")
+    if not isinstance(prompt, str) or not prompt.strip():
+        return {"ok": False, "error": "prompt is required"}
+    raw_options = arguments.get("options")
+    if not isinstance(raw_options, list) or not (2 <= len(raw_options) <= 12):
+        return {"ok": False, "error": "options must have 2-12 items"}
+    options: list[dict[str, str]] = []
+    for index, item in enumerate(raw_options, start=1):
+        cleaned = sanitize_option(item, index)
+        if cleaned is None:
+            return {"ok": False, "error": "each option needs a non-empty label"}
+        options.append(cleaned)
+    kind = arguments.get("kind") if arguments.get("kind") in WORKFLOW_KINDS else "generic"
+    ctx.agent_store.set_workflow(
+        ctx.session_id,
+        {
+            "phase": "awaiting_choice",
+            "kind": kind,
+            "prompt": prompt.strip(),
+            "options": options,
+            "selected_id": None,
+        },
+    )
+    return {
+        "ok": True,
+        "status": "pending",
+        "option_count": len(options),
+        "phase": "awaiting_choice",
+    }
+
+
+def _tool_set_workflow(ctx: AgentToolContext, arguments: dict) -> dict:
+    if not ctx.session_id:
+        return {"ok": False, "error": "session_id is required"}
+    if ctx.agent_store is None:
+        return {"ok": False, "error": "agent store is required"}
+    phase = arguments.get("phase")
+    if phase not in WORKFLOW_PHASES:
+        return {"ok": False, "error": "phase is required"}
+    current = ctx.agent_store.get_workflow(ctx.session_id)
+    if phase == "awaiting_choice" and not current.get("options"):
+        return {"ok": False, "error": "awaiting_choice requires existing options"}
+    payload = dict(current)
+    payload["phase"] = phase
+    kind = arguments.get("kind")
+    if kind in WORKFLOW_KINDS:
+        payload["kind"] = kind
+    saved = ctx.agent_store.set_workflow(ctx.session_id, payload)
+    return {
+        "ok": True,
+        "phase": saved.get("phase") or phase,
+        "kind": saved.get("kind") or current.get("kind") or "generic",
+    }
+
+
+def _resolve_asc_profile(ctx: AgentToolContext, arguments: dict) -> str:
+    profile = str(arguments.get("profile") or "").strip()
+    if profile:
+        return profile
+    profile = str(ctx.profile or "").strip()
+    if profile:
+        return profile
+    if ctx.bound_task_id:
+        state = ctx.task_store.get_state(str(ctx.bound_task_id))
+        if state:
+            return str(state.get("profile") or "").strip()
+    return ""
+
+
+def _tool_get_asc_version(ctx: AgentToolContext, arguments: dict) -> dict:
+    return get_asc_version(_resolve_asc_profile(ctx, arguments))
+
+
+def _tool_list_asc_iaps(ctx: AgentToolContext, arguments: dict) -> dict:
+    return list_asc_iaps(_resolve_asc_profile(ctx, arguments))
 
 
 def _tool_propose_fix(ctx: AgentToolContext, arguments: dict) -> dict:
@@ -770,6 +1097,12 @@ _HANDLERS: dict[str, Callable[[AgentToolContext, dict], dict]] = {
     "get_task_log": _tool_get_task_log,
     "get_profile_context": _tool_get_profile_context,
     "inspect_local": _tool_inspect_local,
+    "get_listing_snapshot": _tool_get_listing_snapshot,
+    "get_iap_snapshot": _tool_get_iap_snapshot,
+    "validate_listing": _tool_validate_listing,
+    "validate_iap": _tool_validate_iap,
+    "count_listing_fields": _tool_count_listing_fields,
+    "inspect_screenshots": _tool_inspect_screenshots,
     "search_knowledge": _tool_search_knowledge,
     "get_knowledge": _tool_get_knowledge,
     "grep": _tool_grep,
@@ -779,6 +1112,10 @@ _HANDLERS: dict[str, Callable[[AgentToolContext, dict], dict]] = {
     "create_file": _tool_create_file,
     "delete_file": _tool_delete_file,
     "propose_fix": _tool_propose_fix,
+    "offer_choices": _tool_offer_choices,
+    "set_workflow": _tool_set_workflow,
+    "get_asc_version": _tool_get_asc_version,
+    "list_asc_iaps": _tool_list_asc_iaps,
 }
 
 
@@ -937,6 +1274,8 @@ def _allow_roots(ctx: AgentToolContext) -> list[Path]:
     for name in _BUILD_LOG_NAMES:
         add(ctx.project_root / "build" / name)
     for item in ctx.attachment_paths or []:
+        add(item)
+    for item in ctx.form_paths or []:
         add(item)
 
     profile = None

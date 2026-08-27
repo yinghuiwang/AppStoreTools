@@ -8,6 +8,7 @@ import LocalePicker from "@/components/LocalePicker.vue";
 import { useBrowse } from "@/composables/useBrowse";
 import { useListingWorkflow, type ListingSnapshot } from "@/composables/useListingWorkflow";
 import { useLocaleCatalog } from "@/composables/useLocaleCatalog";
+import { clearAgentPageContext, setAgentPageContext } from "@/composables/useAgentContext";
 import { useRightRail } from "@/composables/useRightRail";
 
 const emit = defineEmits<{ next: [] }>();
@@ -101,6 +102,8 @@ function blank() {
 }
 
 function openAgent() {
+  clearAgentPageContext();
+  setAgentPageContext({ route: "/listing", phase: "create" });
   rail.openAgent({ seedPrompt: t("listing.agent_seed_create") });
 }
 </script>

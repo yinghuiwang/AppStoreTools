@@ -805,7 +805,10 @@ def test_listing_wizard_views_exist():
     assert "hasContent" not in mounted.group(0)
     applied = re.search(r"watch\(appliedTick, \(\) => \{.*?\}\);", src, re.S)
     assert applied, "ListingView appliedTick watcher missing"
-    assert "workflow.reload()" in applied.group(0)
+    assert "workflow.reloadFromDisk()" in applied.group(0)
+    workflow_src = (root / "composables/useListingWorkflow.ts").read_text(encoding="utf-8")
+    assert "reloadFromDisk:" in workflow_src
+    assert "dropDraft()" in workflow_src
     assert "hasContent" not in applied.group(0)
     assert "preview" not in applied.group(0)
     assert "LocalTab" not in src

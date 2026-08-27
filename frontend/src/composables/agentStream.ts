@@ -10,6 +10,21 @@ export type AgentPlan = {
   error?: string;
 };
 
+export type AgentChoiceOption = {
+  id: string;
+  label: string;
+  description?: string;
+};
+
+export type AgentWorkflow = {
+  phase: string;
+  kind?: string;
+  prompt?: string;
+  options?: AgentChoiceOption[];
+  selected_id?: string | null;
+  updated_at?: string;
+};
+
 export type AgentToolStatus = "running" | "success" | "error";
 
 export type StoreRow = {
@@ -131,7 +146,49 @@ function planActivity(plan: AgentPlan): AIMessageContent {
   };
 }
 
-export function historyToChatMessages(rows: StoreRow[], plans: AgentPlan[] = []): ChatMessagesData[] {
+function choiceActivity(workflow: AgentWorkflow): AIMessageContent {
+  return {
+    type: "activity",
+    status: "complete",
+    data: {
+      activityType: "offer_choices",
+      content: workflow,
+    },
+  };
+}
+
+function isPendingChoice(workflow?: AgentWorkflow | null): boolean {
+  return Boolean(workflow && workflow.phase === "awaiting_choice" && !workflow.selected_id);
+}
+
+function attachPendingChoice(
+  messages: ChatMessagesData[],
+  workflow?: AgentWorkflow | null,
+): ChatMessagesData[] {
+  if (!isPendingChoice(workflow) || !workflow) return messages;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const msg = messages[i];
+    if (msg.role !== "assistant") continue;
+    if ((msg.content || []).some((block) => isChoiceActivity(block))) return messages;
+    const content = [...(msg.content || []), choiceActivity(workflow)];
+    return messages.map((item, idx) => (idx === i ? { ...msg, content } : item));
+  }
+  return [
+    ...messages,
+    {
+      id: uid("assistant"),
+      role: "assistant",
+      status: "complete",
+      content: [choiceActivity(workflow)],
+    },
+  ];
+}
+
+export function historyToChatMessages(
+  rows: StoreRow[],
+  plans: AgentPlan[] = [],
+  workflow?: AgentWorkflow | null,
+): ChatMessagesData[] {
   const out: ChatMessagesData[] = [];
   let assistant: AIMessageContent[] = [];
 
@@ -192,7 +249,7 @@ export function historyToChatMessages(rows: StoreRow[], plans: AgentPlan[] = [])
   }
   for (const plan of plans) assistant.push(planActivity(plan));
   flushAssistant();
-  return out;
+  return attachPendingChoice(out, workflow);
 }
 
 export function userTextOf(msg: ChatMessagesData): string {
@@ -227,6 +284,26 @@ export function planFromActivity(block: AIMessageContent): AgentPlan | null {
   return content && content.id ? content : null;
 }
 
+export function isChoiceActivity(block: AIMessageContent): block is AIMessageContent & {
+  type: "activity";
+  data: { activityType: string; content: AgentWorkflow };
+} {
+  return (
+    block.type === "activity" &&
+    Boolean(block.data) &&
+    (block.data as { activityType?: string }).activityType === "offer_choices"
+  );
+}
+
+export function choiceFromActivity(block: AIMessageContent): AgentWorkflow | null {
+  if (!isChoiceActivity(block)) return null;
+  const content = (block.data as { content?: unknown }).content;
+  if (!content || typeof content !== "object" || Array.isArray(content)) return null;
+  const row = content as AgentWorkflow;
+  if (row.phase || (Array.isArray(row.options) && row.options.length)) return row;
+  return null;
+}
+
 export function toolStatusOf(block: AIMessageContent): AgentToolStatus {
   if (block.status === "pending" || block.status === "streaming") return "running";
   const raw = block.type === "toolcall" ? String(block.data?.result || "") : "";
@@ -259,6 +336,31 @@ export function patchPlanInMessages(
         data: {
           activityType: "propose_fix",
           content: { ...plan, ...patch },
+        },
+      } as AIMessageContent;
+    });
+    return changed ? { ...msg, content } : msg;
+  });
+}
+
+export function patchChoiceInMessages(
+  messages: ChatMessagesData[],
+  patch: Partial<AgentWorkflow>,
+): ChatMessagesData[] {
+  return messages.map((msg) => {
+    if (msg.role !== "assistant" || !msg.content) return msg;
+    let changed = false;
+    const content = msg.content.map((block) => {
+      const choice = choiceFromActivity(block);
+      if (!choice) return block;
+      if (choice.phase !== "awaiting_choice" || choice.selected_id) return block;
+      changed = true;
+      return {
+        ...block,
+        type: "activity",
+        data: {
+          activityType: "offer_choices",
+          content: { ...choice, ...patch },
         },
       } as AIMessageContent;
     });

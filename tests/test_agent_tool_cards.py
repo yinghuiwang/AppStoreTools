@@ -475,6 +475,12 @@ def test_tool_display_names_are_i18n_friendly():
         "delete_file",
         "search_knowledge",
         "get_knowledge",
+        "get_listing_snapshot",
+        "get_iap_snapshot",
+        "validate_listing",
+        "validate_iap",
+        "count_listing_fields",
+        "inspect_screenshots",
     ):
         key = f"agent.tool.name.{name}"
         assert zh[key]

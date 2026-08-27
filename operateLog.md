@@ -1,5 +1,21 @@
 # 操作日志
 
+## 2026-08-27
+
+- MiniMax HTTP 400 / 2013（`tool result's tool id not found`）：LLM 历史只取最近 20 条，会丢掉带 `tool_calls` 的 assistant，却留下后续 `role=tool`。现将窗口提到 80，并在送模型前 `sanitize_llm_messages`：丢掉孤立 tool 行，不完整的 tool 组改成纯文案（有文案才保留）。
+- 点「接受方案，写回 CSV」只是确认芯片，不会 apply；计划 `cf2760dc-…` 仍为 pending，所以预览不变。现改为：选项 id 含 apply/write 时自动 apply 最新 pending 计划；Apply 成功后 `reloadFromDisk()` 丢掉本地草稿再读磁盘，避免旧 store draft 盖住新 CSV。已重新构建 SPA（`index-D3GHLn1H.js`）。
+- Agent 失败不再只显示 TDesign 默认「请求出错」：`t-chat-message` 不再传 `status=error`（该状态会丢掉自定义文案）。后端把 LLM HTTP 状态、服务商错误体、失败位置（如 `LLM HTTP 401 @ api.minimaxi.com`）写进 `RUN_ERROR` 并持久化到会话。未捕获异常改为 `agent.stream` + 异常类型，不再一律说「服务暂不可用」。已重新构建 SPA（`index-CcCA2l-g.js`）。
+
+## 2026-08-26
+
+- 查 MiniMax CN 文档：聊天看图走 Chat Completions `image_url`（公网 URL 或 base64），单张官方 ≤10MB、请求体 ≤64MB；`POST /v1/files/upload` 的 `mm_file://` 用于视频理解/生成，不是商品图通道。将本轮视觉上限从 2 张 / 512KiB 对齐到 8 张 / 单张 10MB / 合计 20MB（仍不把 base64 写入 SQLite）。
+- Agent 效率第二批：会话 `workflow` + `offer_choices` / `choose` 确认芯片；只读 `get_asc_version` / `list_asc_iaps`；当前轮图片走 multimodal；LLM 默认超时 180s，`done` 带 `elapsed_ms` / `tool_batches` / 可选 `usage`。
+- Agent 相关 pytest 209 passed；已重新构建 SPA（`index-B9ozctOl.js`）。
+
+- Agent 效率第一批：只读领域工具（商品页/IAP 快照、校验、字数、截图盘点）、去掉对外 `search_files`、压缩工具结果与知识检索片段；`get_knowledge` 默认仍 10000 字以免截断 IAP 工作流。
+- 每轮注入脱敏后的 `page_context`；失败任务 `auto_analyze` 先做规则分类（`[failure_hint]`）。空状态增加「生成商品页 / 生成 IAP / 解释失败任务」技能入口。
+- 相关 pytest 124 passed；已重新构建 SPA（`index-DgQm8R8i.js`）。
+
 ## 2026-08-25
 
 - Agent 聊天先 `ensureSession()`，`/api/agent/agui` 遇 401 只重试一次再开流；附件失败任务搜索 300ms 尾随防抖，打开菜单仍立刻搜。相关 pytest 46 passed。
@@ -92,3 +108,7 @@
 - 已提交并推送 `97b8b28` 到 `github/feat/iap-workflow`：`fix(build): treat altool UPLOAD FAILED as a failed upload`。`operateLog.md` 未纳入提交。
 - Agent 强化（对照 SparkSkills `appstore-listing` / `iap-packages`）：知识库补上收集输入、先写 en-US+zh-Hans 再确认、groupLevel 分批确认、本地化 10 选且一次一类；系统提示与创建步种子提示同步；检索默认容量加大以免长笔记挤掉 What’s New。
 - 补充 Agent 工作流自动化测试 `tests/test_agent_skill_workflow.py`：用 ScriptedLLM 锁系统提示 / 知识库 / 种子文案，并走 get_knowledge → propose_fix 草稿（不写盘）。不覆盖真实模型是否遵守流程。
+
+## 2026-08-26
+
+- Task 2 代码审查：写入 `docs/superpowers/briefs/task-2-review.md`。结论 **Needs fixes**——计划要求的 `_DEFAULT_TOPIC_CHARS=6000` 会截断 `iap.md` 中 `one category per message` / groupLevel 分批确认等工作流（`get_knowledge(iap)` 约 5477 字符，`truncated: true`）；工具注册、写门控、缓存、精简 prompt 与 compact 实现基本符合规格。

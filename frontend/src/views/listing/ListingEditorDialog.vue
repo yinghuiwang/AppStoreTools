@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { MessagePlugin } from "tdesign-vue-next";
 import { ApiError, apiErrorMessage, httpJson } from "@/api/http";
+import { setAgentPageContext, clearAgentPageContext } from "@/composables/useAgentContext";
 import { LISTING_FIELDS } from "@/composables/useListingScope";
 import {
   useListingWorkflow,
@@ -89,7 +90,52 @@ async function pullOne() {
   }
 }
 
+function listingAgentContext() {
+  const row = fields.value || {};
+  const next: Record<string, string> = {};
+  for (const name of ["name", "subtitle", "keywords"] as const) {
+    const value = String(row[name] || "");
+    if (value) next[name] = value;
+  }
+  const description = String(row.description || "");
+  if (description && description.length < 200) next.description = description;
+  return {
+    route: "/listing",
+    locale: props.draft.locale || "",
+    phase: "edit",
+    fields: next,
+  };
+}
+
+function syncListingAgentContext() {
+  clearAgentPageContext();
+  setAgentPageContext(listingAgentContext());
+}
+
+watch(
+  () => props.visible,
+  (visible) => {
+    if (visible) syncListingAgentContext();
+    else clearAgentPageContext();
+  },
+);
+
+watch(
+  () =>
+    [
+      props.draft.locale,
+      fields.value?.name,
+      fields.value?.subtitle,
+      fields.value?.keywords,
+      fields.value?.description,
+    ] as const,
+  () => {
+    if (props.visible) syncListingAgentContext();
+  },
+);
+
 function openAgent() {
+  syncListingAgentContext();
   rail.openAgent({
     seedPrompt: t("listing.agent_seed_edit", { locale: props.draft.locale || "en-US" }),
   });

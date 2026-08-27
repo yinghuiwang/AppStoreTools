@@ -249,8 +249,8 @@ def test_chat_falls_back_to_sse_data_lines():
         assert result == "SSE OK"
 
 
-def test_chat_timeout_defaults_to_60():
-    """Default timeout is 60s."""
+def test_chat_timeout_defaults_to_180():
+    """Default timeout is 180s."""
     import requests
     from src.asc.llm import LLMClient
 
@@ -278,7 +278,7 @@ def test_chat_timeout_defaults_to_60():
             mp.setattr(requests, "post", capture_post)
             client.chat([{"role": "user", "content": "Hi"}])
 
-        assert captured_timeout == 60
+        assert captured_timeout == 180
 
 
 def test_chat_stream_yields_content_and_tool_call_deltas():
@@ -334,6 +334,28 @@ def test_chat_stream_raises_llm_http_error_on_429():
             list(client.chat_stream([], tools=[]))
         assert exc.value.status_code == 429
         assert exc.value.retry_after == 2.0
+        assert exc.value.detail == "rate limited"
+
+
+def test_chat_stream_captures_minimax_error_body():
+    from src.asc.llm import LLMClient, LLMHTTPError
+
+    with rm.Mocker() as m:
+        m.post(
+            "https://api.minimaxi.com/v1/chat/completions",
+            status_code=401,
+            json={"base_resp": {"status_code": 2049, "status_msg": "invalid api key"}},
+        )
+        client = LLMClient(
+            api_key="k",
+            base_url="https://api.minimaxi.com/v1",
+            model="MiniMax-M2.5",
+        )
+        with pytest.raises(LLMHTTPError) as exc:
+            list(client.chat_stream([], tools=[]))
+        assert exc.value.status_code == 401
+        assert "invalid api key" in exc.value.detail
+        assert "api.minimaxi.com" in exc.value.url
 
 
 def test_chat_still_sends_json_object_without_tools():

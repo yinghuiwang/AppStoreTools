@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import queue
 import threading
 import time
@@ -12,11 +13,13 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
-from asc.web.agent import AGENT_TURN_TIMEOUT_SEC, WebAgent
+from asc.web.agent import AGENT_TURN_TIMEOUT_SEC, WebAgent, format_agent_error
 from asc.web.agent_agui import translate_legacy_events
 from asc.web.agent_attachments import attachments_from_body
+from asc.web.agent_redact import redact_text
 from asc.web.agent_store import agent_store
 from asc.web.agent_tools import AgentToolContext, apply_fix
+from asc.web.agent_workflow import apply_choice
 from asc.web.i18n import t
 from asc.web.sse import format_sse_data, format_sse_event
 from asc.web.tasks import TASK_KIND_LABELS
@@ -25,7 +28,7 @@ router = APIRouter()
 
 AGENT_SSE_HEARTBEAT_SEC = 3.0
 _ALLOWED_SSE = frozenset(
-    {"session", "token", "tool_start", "tool_result", "error", "stopped", "done"}
+    {"session", "token", "tool_start", "tool_result", "choices", "error", "stopped", "done"}
 )
 _SENTINEL = object()
 
@@ -55,10 +58,19 @@ def _lang(request: Request) -> str:
     return getattr(request.state, "lang", None) or "en"
 
 
-def _error_data(code: str, lang: str) -> str:
+def _error_data(code: str, lang: str, *, detail: str = "", where: str = "") -> str:
     return json.dumps(
-        {"code": code, "message": t(f"agent.error.{code}", lang=lang)},
+        format_agent_error(code, lang, detail=detail, where=where),
         ensure_ascii=False,
+    )
+
+
+def _unexpected_error_data(exc: BaseException, lang: str) -> dict[str, str]:
+    return format_agent_error(
+        "internal",
+        lang,
+        detail=f"{type(exc).__name__}: {redact_text(str(exc))[:200]}",
+        where="agent.stream",
     )
 
 
@@ -73,10 +85,18 @@ def _llm_client_or_none():
         return None
     from asc.llm import LLMClient
 
+    raw = cfg.get("timeout") or os.getenv("ASC_LLM_TIMEOUT") or 180
+    try:
+        timeout = int(raw)
+    except (TypeError, ValueError):
+        timeout = 180
+    timeout = max(30, min(600, timeout))
+
     return LLMClient(
         api_key=api_key,
         base_url=cfg.get("base_url") or "https://api.openai.com/v1",
         model=cfg.get("model") or "gpt-4o",
+        timeout=timeout,
     )
 
 
@@ -115,6 +135,17 @@ def _form_paths_from_body(body: dict[str, Any]) -> list[str]:
         if text:
             paths.append(text)
     return paths
+
+
+def _session_with_workflow(session: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(session)
+    payload["workflow"] = agent_store.get_workflow(session["id"])
+    return payload
+
+
+def _page_context_from_body(body: dict[str, Any]) -> dict[str, Any] | None:
+    raw = body.get("page_context")
+    return raw if isinstance(raw, dict) else None
 
 
 def _last_user_text(messages: Any) -> str:
@@ -158,6 +189,7 @@ def _agui_turn_args(body: dict[str, Any]) -> dict[str, Any]:
         "auto_analyze": _as_bool(merged.get("auto_analyze")),
         "form_paths": _form_paths_from_body(merged),
         "attachments": attachments_from_body(merged),
+        "page_context": _page_context_from_body(merged),
         "run_id": _opt_str(merged.get("runId") or merged.get("messageID")) or uuid.uuid4().hex,
     }
 
@@ -174,6 +206,7 @@ def _sse_frames(
     form_paths: list[str] | None = None,
     profile: str = "",
     attachments: list[Any] | None = None,
+    page_context: dict[str, Any] | None = None,
 ):
     frames: queue.Queue = queue.Queue()
     session_holder: list[str | None] = [session_id]
@@ -190,6 +223,7 @@ def _sse_frames(
                 form_paths=form_paths,
                 profile=profile,
                 attachments=attachments,
+                page_context=page_context,
             ):
                 if event == "session":
                     try:
@@ -200,8 +234,13 @@ def _sse_frames(
                         session_holder[0] = str(parsed["session_id"])
                 if event in _ALLOWED_SSE:
                     frames.put(format_sse_event(event, data))
-        except Exception:
-            frames.put(format_sse_event("error", _error_data("llm_unavailable", lang)))
+        except Exception as exc:
+            frames.put(
+                format_sse_event(
+                    "error",
+                    json.dumps(_unexpected_error_data(exc, lang), ensure_ascii=False),
+                )
+            )
         finally:
             frames.put(_SENTINEL)
 
@@ -217,7 +256,9 @@ def _sse_frames(
                     WebAgent().request_stop(sid)
                     for plan in agent_store.list_plans(sid, statuses=("draft",)):
                         agent_store.abandon_drafts(sid, plan["turn_seq"])
-                yield format_sse_event("error", _error_data("timeout", lang))
+                yield format_sse_event(
+                    "error", _error_data("timeout", lang, where="agent.timeout")
+                )
                 return
             wait = min(AGENT_SSE_HEARTBEAT_SEC, remaining)
             try:
@@ -245,6 +286,7 @@ def _agui_frames(
     profile: str = "",
     run_id: str,
     attachments: list[Any] | None = None,
+    page_context: dict[str, Any] | None = None,
 ):
     frames: queue.Queue = queue.Queue()
     session_holder: list[str | None] = [session_id]
@@ -263,6 +305,7 @@ def _agui_frames(
                 form_paths=form_paths,
                 profile=profile,
                 attachments=attachments,
+                page_context=page_context,
             )
             for payload in translate_legacy_events(
                 events,
@@ -278,17 +321,11 @@ def _agui_frames(
                 frames.put(
                     format_sse_data(json.dumps(payload, ensure_ascii=False, default=str))
                 )
-        except Exception:
+        except Exception as exc:
+            payload = _unexpected_error_data(exc, lang)
             frames.put(
                 format_sse_data(
-                    json.dumps(
-                        {
-                            "type": "RUN_ERROR",
-                            "code": "llm_unavailable",
-                            "message": t("agent.error.llm_unavailable", lang=lang),
-                        },
-                        ensure_ascii=False,
-                    )
+                    json.dumps({"type": "RUN_ERROR", **payload}, ensure_ascii=False)
                 )
             )
         finally:
@@ -306,15 +343,9 @@ def _agui_frames(
                     WebAgent().request_stop(sid)
                     for plan in agent_store.list_plans(sid, statuses=("draft",)):
                         agent_store.abandon_drafts(sid, plan["turn_seq"])
+                payload = format_agent_error("timeout", lang, where="agent.timeout")
                 yield format_sse_data(
-                    json.dumps(
-                        {
-                            "type": "RUN_ERROR",
-                            "code": "timeout",
-                            "message": t("agent.error.timeout", lang=lang),
-                        },
-                        ensure_ascii=False,
-                    )
+                    json.dumps({"type": "RUN_ERROR", **payload}, ensure_ascii=False)
                 )
                 return
             wait = min(AGENT_SSE_HEARTBEAT_SEC, remaining)
@@ -351,6 +382,7 @@ async def agent_stream(request: Request):
             form_paths=_form_paths_from_body(body),
             profile=cookie,
             attachments=attachments_from_body(body),
+            page_context=_page_context_from_body(body),
         ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
@@ -378,6 +410,7 @@ async def agent_agui(request: Request):
             profile=cookie,
             run_id=args["run_id"],
             attachments=args["attachments"],
+            page_context=args.get("page_context"),
         ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
@@ -430,7 +463,7 @@ def agent_sessions(
     else:
         return {"sessions": agent_store.list_sessions()}
     return {
-        "session": session,
+        "session": _session_with_workflow(session),
         "messages": agent_store.list_messages(session["id"]),
         "plans": agent_store.list_plans(session["id"], statuses=("pending",)),
     }
@@ -444,7 +477,7 @@ async def agent_create_session(request: Request):
     task_id = _opt_str(body.get("task_id"))
     session = agent_store.create_session(profile, task_id)
     return {
-        "session": session,
+        "session": _session_with_workflow(session),
         "messages": [],
         "plans": [],
     }
@@ -456,6 +489,23 @@ def agent_plan(plan_id: str):
     if plan is None:
         raise HTTPException(status_code=404, detail="plan not found")
     return plan
+
+
+@router.post("/choose")
+async def agent_choose(request: Request):
+    body = await _json_body(request)
+    if not _as_bool(body.get("confirm")):
+        raise HTTPException(status_code=400, detail="confirm is required")
+    session_id = _opt_str(body.get("session_id"))
+    option_id = _opt_str(body.get("option_id"))
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id is required")
+    if not option_id:
+        raise HTTPException(status_code=400, detail="option_id is required")
+    result = apply_choice(agent_store, session_id, option_id)
+    if not result.get("ok"):
+        raise HTTPException(status_code=409, detail="conflict")
+    return result
 
 
 @router.post("/apply")

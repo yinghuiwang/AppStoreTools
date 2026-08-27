@@ -43,17 +43,24 @@ def test_listing_and_iap_contracts_are_searchable():
     assert listing["ok"] and iap["ok"]
     assert listing.get("truncated") is not True
     assert iap.get("truncated") is not True
+    assert "one category per message" in iap["content"]
     assert "en-US" in listing["content"] and "zh-Hans" in listing["content"]
     assert "csv_set_fields" in listing["content"]
     assert "legal block" in listing["content"]
     assert "groupLevel" in iap["content"]
-    assert "one category per message" in iap["content"]
     assert "infer_iap_products.rb" in iap["content"]
+    assert "iap-packages" in iap["content"]
 
     prompt = _system_prompt("zh")
-    assert "appstore-listing" in prompt
-    assert "iap-packages" in prompt
-    assert "en-US and zh-Hans" in prompt
+    assert "get_knowledge" in prompt
+    assert "listing" in prompt
+    assert "iap" in prompt
+    assert "get_knowledge(listing)" in prompt or "topic listing" in prompt
+    assert "get_knowledge(iap)" in prompt or "topic iap" in prompt
+    assert "get_asc_version" in prompt
+    assert "list_asc_iaps" in prompt
+    assert "guessing version/IAP existence" in prompt
+    assert "en-US and zh-Hans" not in prompt
 
     assert "en-US" in t("listing.agent_seed_create", lang="zh")
     assert "zh-Hans" in t("listing.agent_seed_create", lang="zh")
@@ -127,7 +134,8 @@ def test_scripted_listing_turn_loads_workflow_and_drafts_pilot_locales(tmp_path)
     assert names.count("tool_start") == 2
     assert names[-1] == "done"
     system = llm.messages_seen[0][0]["content"]
-    assert "appstore-listing" in system
+    assert "get_knowledge" in system
+    assert "listing" in system
     assert seed[:12] in json.dumps(llm.messages_seen[0], ensure_ascii=False)
 
     session_id = json.loads(events[0][1])["session_id"]
@@ -223,13 +231,14 @@ def test_scripted_iap_turn_loads_workflow_without_writing_json(tmp_path):
         replay={"kind": "iap", "profile": "myapp", "params": {"iap_file": str(iap_path)}},
     )
     assert events[-1][0] == "done"
-    assert "iap-packages" in llm.messages_seen[0][0]["content"]
+    assert "get_knowledge" in llm.messages_seen[0][0]["content"]
+    assert "iap" in llm.messages_seen[0][0]["content"]
     assert "groupLevel" in seed
     session_id = agents.list_sessions()[0]["id"]
     tool_blob = "\n".join(
         row["content"] for row in agents.list_messages(session_id, limit=50) if row["role"] == "tool"
     )
-    assert "one category per message" in tool_blob
+    assert "infer_iap_products.rb" in tool_blob
     assert "groupLevel" in tool_blob
     assert json.loads(iap_path.read_text(encoding="utf-8")) == original
     tasks.close()

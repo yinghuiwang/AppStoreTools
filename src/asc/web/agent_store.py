@@ -10,6 +10,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterator
 
+from asc.web.agent_workflow import default_workflow, sanitize_workflow
+
 PLAN_STATUSES = (
     "draft",
     "pending",
@@ -77,10 +79,12 @@ class AgentStore:
                     task_id TEXT,
                     profile TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
+                    updated_at TEXT NOT NULL,
+                    workflow_json TEXT
                 )
                 """
             )
+            self._ensure_column(conn, "sessions", "workflow_json", "TEXT")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS messages (
@@ -116,6 +120,17 @@ class AgentStore:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_sessions_task_id ON sessions(task_id)"
             )
+
+    def _ensure_column(
+        self,
+        conn: sqlite3.Connection,
+        table: str,
+        name: str,
+        decl: str,
+    ) -> None:
+        cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if name not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
 
     def _now(self) -> str:
         return datetime.now().isoformat()
@@ -260,6 +275,36 @@ class AgentStore:
                 (session_id, int(limit)),
             ).fetchall()
         return [self._message_from_row(row) for row in rows]
+
+    def get_workflow(self, session_id: str) -> dict:
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT workflow_json FROM sessions WHERE id = ?",
+                (session_id,),
+            ).fetchone()
+        if row is None:
+            return default_workflow()
+        raw = row["workflow_json"]
+        if not raw:
+            return default_workflow()
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return default_workflow()
+        if not isinstance(parsed, dict) or not parsed:
+            return default_workflow()
+        return sanitize_workflow(parsed)
+
+    def set_workflow(self, session_id: str, data: dict) -> dict:
+        now = self._now()
+        cleaned = sanitize_workflow(data if isinstance(data, dict) else {}, now=now)
+        encoded = json.dumps(cleaned, ensure_ascii=False)
+        with self._connection(write=True) as conn:
+            conn.execute(
+                "UPDATE sessions SET workflow_json = ?, updated_at = ? WHERE id = ?",
+                (encoded, now, session_id),
+            )
+        return cleaned
 
     def append_message(
         self,
