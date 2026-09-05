@@ -1017,7 +1017,7 @@ from asc.web.sse import format_task_log_sse as _fmt_task_log
 async def task_stream(
     task_id: str,
     after: int = Query(0, ge=0),
-    last_event_id: str | None = Header(None, alias="Last-Event-ID"),
+    last_event_id: Optional[str] = Header(None, alias="Last-Event-ID"),
 ):
     """SSE stream: replay sequenced logs after a cursor until task completes."""
     cursor = after

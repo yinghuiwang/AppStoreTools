@@ -1,5 +1,9 @@
 # 操作日志
 
+## 2026-09-05
+
+- `asc web` 在 Python 3.9 启动失败：uvicorn 加载 `create_app` 时 FastAPI/Pydantic 无法求值路由上的 PEP 604 `str | None`（`from __future__ import annotations` 不够）。Agent 查询参数和任务 SSE 的 `Last-Event-ID` 改为 `Optional[str]`，与 dashboard 路由一致；测试会扫描路由注解里的 `|` 并走 FastAPI 的 `get_typed_annotation`。
+
 ## 2026-08-27
 
 - MiniMax HTTP 400 / 2013（`tool result's tool id not found`）：LLM 历史只取最近 20 条，会丢掉带 `tool_calls` 的 assistant，却留下后续 `role=tool`。现将窗口提到 80，并在送模型前 `sanitize_llm_messages`：丢掉孤立 tool 行，不完整的 tool 组改成纯文案（有文案才保留）。

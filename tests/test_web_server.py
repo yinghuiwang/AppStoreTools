@@ -2,6 +2,7 @@
 from __future__ import annotations
 from datetime import datetime
 import inspect
+import sys
 from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
@@ -13,6 +14,61 @@ from asc.web.server import create_app
 @pytest.fixture
 def client():
     return TestClient(create_app())
+
+
+def test_asgi_factory_create_app_imports():
+    """uvicorn loads `asc.web.server:create_app --factory`; this must succeed on 3.9+."""
+    from fastapi import FastAPI
+
+    app = create_app()
+    assert isinstance(app, FastAPI)
+    assert app.routes
+
+
+def test_fastapi_route_params_avoid_pep604_unions():
+    """Python 3.9 + Pydantic cannot evaluate FastAPI `str | None` annotations.
+
+    Scan route signatures for `|` (catches the regression on 3.10+ CI too) and
+    evaluate each annotation the same way FastAPI does at route registration.
+    """
+    from fastapi.dependencies.utils import get_typed_annotation
+    from fastapi.routing import APIRoute
+
+    bad: list[str] = []
+    eval_errors: list[str] = []
+    app = create_app()
+    for route in app.routes:
+        if not isinstance(route, APIRoute):
+            continue
+        globalns = getattr(route.endpoint, "__globals__", {})
+        for name, annotation in route.endpoint.__annotations__.items():
+            if name == "return":
+                continue
+            text = annotation if isinstance(annotation, str) else repr(annotation)
+            if "|" in text:
+                bad.append(f"{route.path} {name}: {text}")
+            try:
+                get_typed_annotation(annotation, globalns)
+            except TypeError as exc:
+                eval_errors.append(f"{route.path} {name}: {exc}")
+    assert bad == []
+    assert eval_errors == []
+
+
+@pytest.mark.skipif(
+    sys.version_info >= (3, 10),
+    reason="PEP 604 unions evaluate natively on Python 3.10+",
+)
+def test_fastapi_rejects_pep604_union_query_on_python39():
+    """Lock the 3.9 failure mode so we do not 'fix' it by bumping Python."""
+    from fastapi import FastAPI, Query
+
+    app = FastAPI()
+    with pytest.raises(TypeError, match=r"Unable to evaluate type annotation 'str \| None'"):
+
+        @app.get("/bad")
+        def _bad(q: str | None = Query(None)):
+            return {"q": q}
 
 
 def test_lifespan_logs_runtime_version_and_commit(caplog, monkeypatch):

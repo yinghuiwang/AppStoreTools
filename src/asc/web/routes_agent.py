@@ -8,7 +8,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -430,8 +430,8 @@ async def agent_stop(request: Request):
 @router.get("/failed-tasks")
 def failed_tasks(
     request: Request,
-    q: str | None = Query(None),
-    kind: str | None = Query(None),
+    q: Optional[str] = Query(None),
+    kind: Optional[str] = Query(None),
 ):
     cookie = (request.cookies.get("asc_profile") or "").strip() or None
     rows = _current_task_store().list_failed(
@@ -447,8 +447,8 @@ def failed_tasks(
 
 @router.get("/sessions")
 def agent_sessions(
-    task_id: str | None = Query(None),
-    session_id: str | None = Query(None),
+    task_id: Optional[str] = Query(None),
+    session_id: Optional[str] = Query(None),
 ):
     sid = _opt_str(session_id)
     bound = _opt_str(task_id)
