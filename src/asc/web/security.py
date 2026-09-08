@@ -124,23 +124,15 @@ def redact_credential_fields(data: dict) -> dict:
 def redact_guard_status(data: dict) -> dict:
     redacted = copy.deepcopy(data)
     bindings = redacted.get("bindings") or {}
-    for category, masker in (
-        ("machine", mask_identifier),
-        ("ip", mask_ip),
-        ("credential", mask_identifier),
-    ):
+    for category in ("machine", "ip", "credential"):
         remapped: dict[str, dict] = {}
         for key, info in (bindings.get(category) or {}).items():
             entry = dict(info or {})
             if "issuer_id" in entry:
                 entry["issuer_id"] = mask_identifier(entry.get("issuer_id") or "")
-            remapped[masker(str(key))] = entry
+            display_key = (
+                mask_identifier(str(key)) if category == "credential" else str(key)
+            )
+            remapped[display_key] = entry
         bindings[category] = remapped
-    env = redacted.get("current_environment") or {}
-    machine = env.get("machine") or {}
-    if "fingerprint" in machine:
-        machine["fingerprint"] = mask_identifier(machine.get("fingerprint") or "")
-    ip = env.get("ip") or {}
-    if ip.get("address"):
-        ip["address"] = mask_ip(str(ip.get("address") or ""))
     return redacted

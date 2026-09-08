@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import patch
-from asc.web.security import mask_identifier, mask_ip
+from asc.web.security import mask_identifier
 from asc.web.server import create_app
 
 
@@ -1716,9 +1716,9 @@ def test_guard_status_returns_json(client):
     assert data["enabled"] is True
     assert "bindings" in data
     assert "current_profile" in data
-    assert data["current_environment"]["machine"]["fingerprint"] == mask_identifier("SERIAL-TEST")
+    assert data["current_environment"]["machine"]["fingerprint"] == "SERIAL-TEST"
     assert data["current_environment"]["machine"]["bound"] is False
-    assert data["current_environment"]["ip"]["address"] == mask_ip("1.2.3.4")
+    assert data["current_environment"]["ip"]["address"] == "1.2.3.4"
 
 
 def test_guard_status_returns_full_fingerprint(client):
@@ -1755,7 +1755,8 @@ def test_guard_status_returns_full_fingerprint(client):
     data = resp.json()
     machine_keys = list(data["bindings"]["machine"].keys())
     assert len(machine_keys) == 1
-    assert machine_keys[0] == mask_identifier(long_fp)
+    assert machine_keys[0] == long_fp
+    assert data["current_environment"]["machine"]["fingerprint"] == long_fp
     assert data["current_environment"]["machine"]["bound"] is True
     assert data["current_environment"]["machine"]["app_id"] == "123"
     assert data["current_environment"]["machine"]["app_name"] == "myapp"
@@ -1827,20 +1828,20 @@ def test_guard_status_returns_machine_ip_credential_and_profile_name(client):
     assert "error" not in data or not data["error"]
     assert "current_profile" in data
     assert data["app_notes"]["123"] == "office"
-    assert list(data["bindings"]["machine"]) == [mask_identifier("SERIAL-FULL")]
-    assert list(data["bindings"]["ip"]) == [mask_ip("1.2.3.4")]
+    assert list(data["bindings"]["machine"]) == ["SERIAL-FULL"]
+    assert list(data["bindings"]["ip"]) == ["1.2.3.4"]
     assert list(data["bindings"]["credential"]) == [mask_identifier("KEY1")]
-    assert data["bindings"]["machine"][mask_identifier("SERIAL-FULL")]["profile_name"] == "myapp"
-    assert data["bindings"]["ip"][mask_ip("1.2.3.4")]["profile_name"] == "myapp"
+    assert data["bindings"]["machine"]["SERIAL-FULL"]["profile_name"] == "myapp"
+    assert data["bindings"]["ip"]["1.2.3.4"]["profile_name"] == "myapp"
     assert data["bindings"]["credential"][mask_identifier("KEY1")]["profile_name"] == "myapp"
     assert data["bindings"]["credential"][mask_identifier("KEY1")]["issuer_id"] == mask_identifier("ISS1")
     env = data["current_environment"]
-    assert env["machine"]["fingerprint"] == mask_identifier("SERIAL-FULL")
+    assert env["machine"]["fingerprint"] == "SERIAL-FULL"
     assert env["machine"]["bound"] is True
     assert env["machine"]["app_id"] == "123"
     assert env["machine"]["profile_name"] == "myapp"
     assert env["machine"]["note"] == "office"
-    assert env["ip"]["address"] == mask_ip("1.2.3.4")
+    assert env["ip"]["address"] == "1.2.3.4"
     assert env["ip"]["available"] is True
     assert env["ip"]["bound"] is True
     assert env["ip"]["profile_name"] == "myapp"
@@ -1937,21 +1938,21 @@ def test_guard_status_returns_all_bindings_not_just_current(client):
     data = resp.json()
     assert data["current_profile"] == "app-one"
     assert set(data["bindings"]["machine"]) == {
-        mask_identifier("SERIAL-CURRENT"),
-        mask_identifier("SERIAL-OTHER-MAC"),
-        mask_identifier("SERIAL-THIRD"),
+        "SERIAL-CURRENT",
+        "SERIAL-OTHER-MAC",
+        "SERIAL-THIRD",
     }
-    assert set(data["bindings"]["ip"]) == {mask_ip("1.1.1.1"), mask_ip("8.8.8.8")}
+    assert set(data["bindings"]["ip"]) == {"1.1.1.1", "8.8.8.8"}
     assert set(data["bindings"]["credential"]) == {
         mask_identifier("KEY-ONE"),
         mask_identifier("KEY-TWO"),
     }
-    assert data["bindings"]["machine"][mask_identifier("SERIAL-OTHER-MAC")]["profile_name"] == "app-two"
-    assert data["bindings"]["machine"][mask_identifier("SERIAL-CURRENT")]["profile_name"] == "app-one"
+    assert data["bindings"]["machine"]["SERIAL-OTHER-MAC"]["profile_name"] == "app-two"
+    assert data["bindings"]["machine"]["SERIAL-CURRENT"]["profile_name"] == "app-one"
     assert data["bindings"]["credential"][mask_identifier("KEY-TWO")]["app_id"] == "222"
     assert data["app_notes"]["222"] == "other desk"
     env = data["current_environment"]
-    assert env["machine"]["fingerprint"] == mask_identifier("SERIAL-CURRENT")
+    assert env["machine"]["fingerprint"] == "SERIAL-CURRENT"
     assert len(data["bindings"]["machine"]) == 3
     assert len(data["bindings"]["ip"]) == 2
     assert len(data["bindings"]["credential"]) == 2

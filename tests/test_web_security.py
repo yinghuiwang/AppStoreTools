@@ -176,7 +176,7 @@ def test_profiles_list_masks_issuer_and_key(client):
     assert details["key_id"].startswith("•")
 
 
-def test_guard_status_masks_fingerprint_and_ip(client):
+def test_guard_status_shows_full_fingerprint_and_ip(client):
     from unittest.mock import MagicMock
 
     mock_guard = MagicMock()
@@ -229,10 +229,11 @@ def test_guard_status_masks_fingerprint_and_ip(client):
         resp = client.get("/api/guard/status")
     data = resp.json()
     dumped = json.dumps(data)
-    assert "SERIAL-FULL" not in dumped
-    assert "1.2.3.4" not in dumped
-    assert data["bindings"]["machine"]["•••••••FULL"]["issuer_id"] == "••••"
-    assert data["current_environment"]["ip"]["address"] == "1.2.3.*"
+    assert "SERIAL-FULL" in dumped
+    assert "1.2.3.4" in dumped
+    assert data["bindings"]["machine"]["SERIAL-FULL"]["issuer_id"] == "••••"
+    assert data["current_environment"]["machine"]["fingerprint"] == "SERIAL-FULL"
+    assert data["current_environment"]["ip"]["address"] == "1.2.3.4"
 
 
 def test_profile_edit_does_not_reuse_listed_secrets():
