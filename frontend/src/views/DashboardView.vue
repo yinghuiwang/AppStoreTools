@@ -209,7 +209,7 @@ async function load() {
   } catch (err) {
     if (requestId !== refreshRequest) return;
     if (err instanceof DOMException && err.name === "AbortError") return;
-    refreshError.value = t("dashboard.refresh_failed");
+    refreshError.value = summary.value ? t("dashboard.refresh_failed") : t("dashboard.load_failed");
   } finally {
     if (requestId === refreshRequest) {
       loading.value = false;
@@ -267,6 +267,7 @@ watch(
 
 onMounted(() => {
   document.addEventListener("visibilitychange", onVisible);
+  void load();
 });
 
 onActivated(() => {
@@ -344,7 +345,11 @@ onUnmounted(() => {
       <section v-if="loading && !summary" class="metrics-loading" :aria-label="t('index.summary_aria')">
         <PageLoading size="page" />
       </section>
-      <template v-else-if="summary">
+      <section v-else-if="!summary" class="metrics-error" :aria-label="t('index.summary_aria')">
+        <t-empty :description="refreshError || t('dashboard.load_failed')" />
+        <t-button size="small" @click="load">{{ t("index.retry") }}</t-button>
+      </section>
+      <template v-else>
         <section class="metrics" :aria-label="t('index.metrics_aria')">
           <article class="metric metric--accent">
             <t-statistic
@@ -513,7 +518,7 @@ onUnmounted(() => {
             </div>
           </template>
           <template #empty>
-            <t-empty :description="t('index.empty_history')" />
+            <t-empty :description="refreshError || t('index.empty_history')" />
           </template>
         </t-table>
       </div>
@@ -587,6 +592,13 @@ onUnmounted(() => {
   gap: 8px;
 }
 .metrics-loading { min-height: 64px; }
+.metrics-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 24px 8px;
+}
 .metric {
   position: relative;
   overflow: hidden;

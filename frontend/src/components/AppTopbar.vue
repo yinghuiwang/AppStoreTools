@@ -118,9 +118,10 @@ function onNewProfile(event: MouseEvent) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  flex-wrap: wrap;
+  gap: 8px 16px;
   min-height: var(--topbar-height);
-  padding: 0 24px;
+  padding: 8px 16px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
@@ -130,6 +131,7 @@ function onNewProfile(event: MouseEvent) {
   align-items: baseline;
   gap: 12px;
   min-width: 0;
+  flex: 1 1 160px;
 }
 
 .topbar-left h1 {
@@ -145,12 +147,17 @@ function onNewProfile(event: MouseEvent) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  max-width: min(220px, 36vw);
 }
 
 .topbar-right {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 10px;
+  min-width: 0;
+  flex: 1 1 220px;
 }
 
 .new-profile {
@@ -160,8 +167,10 @@ function onNewProfile(event: MouseEvent) {
 }
 
 .profile-select {
-  min-width: 160px;
-  max-width: 240px;
+  min-width: 0;
+  width: 160px;
+  max-width: 100%;
+  flex: 1 1 140px;
 }
 
 .topbar-right > .lang-switch {

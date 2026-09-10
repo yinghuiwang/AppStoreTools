@@ -121,6 +121,24 @@ def test_llm_client_or_none_timeout_defaults_to_180(monkeypatch):
     assert client.timeout == 180
 
 
+def test_llm_client_or_none_allows_empty_key_on_loopback(monkeypatch):
+    client = _client_timeout(
+        monkeypatch,
+        {"api_key": "", "base_url": "http://127.0.0.1:11434/v1", "model": "llama3.2"},
+    )
+    assert client is not None
+    assert client.api_key == "ollama"
+    assert client.base_url == "http://127.0.0.1:11434/v1"
+
+
+def test_llm_client_or_none_still_requires_key_for_remote(monkeypatch):
+    client = _client_timeout(
+        monkeypatch,
+        {"api_key": "", "base_url": "https://api.openai.com/v1", "model": "gpt-4o"},
+    )
+    assert client is None
+
+
 def test_llm_client_or_none_timeout_clamped(monkeypatch):
     low = _client_timeout(
         monkeypatch,

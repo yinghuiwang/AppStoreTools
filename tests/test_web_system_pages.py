@@ -342,6 +342,8 @@ def test_dashboard_restores_workspace_capabilities() -> None:
     assert 'path: "/listing"' in dash
     assert 'path: "/build"' in dash
     assert "schedulePoll" in dash
+    assert "metrics-error" in dash
+    assert "dashboard.load_failed" in dash
     assert "dashboard.refresh_failed" in dash
     assert "dashboard.refreshing" not in dash
     assert "dashboard.canceling" in dash

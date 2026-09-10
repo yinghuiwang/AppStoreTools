@@ -1808,6 +1808,95 @@ def test_writer_runtime_error_settles_batch_and_keeps_writer_alive(
     assert str(tmp_path / "tasks.db") in err
 
 
+def test_close_is_silent_when_wait_loses_shutdown_race(tmp_path, monkeypatch, capsys):
+    """Normal close must not ⚠️ if the writer already drained and settled."""
+    store = TaskStore(tmp_path / "silent-close.db")
+    task_id = store.create("metadata")
+    store.append_logs(task_id, ["kept"])
+    original_put = store._write_q.put
+
+    def wait_times_out_after_writer_finishes(op, *args, **kwargs):
+        if op.kind == "shutdown" and op.done is not None:
+            real_wait = op.done.wait
+
+            def lose_race(timeout=None):
+                store._writer_stop.wait(1.0)
+                if store._writer is not None:
+                    store._writer.join(1.0)
+                return False
+
+            op.done.wait = lose_race  # type: ignore[method-assign]
+            assert real_wait
+        return original_put(op, *args, **kwargs)
+
+    monkeypatch.setattr(store._write_q, "put", wait_times_out_after_writer_finishes)
+    failures_before = store._db_write_failures
+    store.close()
+
+    err = capsys.readouterr().err
+    assert "writer stopped during shutdown" not in err
+    assert "TaskStore DB error" not in err
+    assert store._db_write_failures == failures_before
+    assert store._write_q.unfinished_tasks == 0
+
+    recovered = TaskStore(tmp_path / "silent-close.db")
+    try:
+        assert "kept" in recovered.get(task_id)["logs"]
+    finally:
+        recovered.close()
+
+
+def test_close_drains_queued_writes_before_stop(tmp_path, capsys):
+    store = TaskStore(tmp_path / "drain-close.db")
+    task_id = store.create("metadata")
+    store._enqueue(
+        "append_logs",
+        task_id,
+        {"lines": ["flushed-on-close"], "now": store._now()},
+        wait=False,
+        critical=False,
+    )
+    store.close()
+
+    err = capsys.readouterr().err
+    assert "TaskStore DB error" not in err
+    recovered = TaskStore(tmp_path / "drain-close.db")
+    try:
+        assert "flushed-on-close" in recovered.get(task_id)["logs"]
+    finally:
+        recovered.close()
+
+
+def test_concurrent_close_is_idempotent_and_silent(tmp_path, capsys):
+    store = TaskStore(tmp_path / "concurrent-close.db")
+    task_id = store.create("metadata")
+    store.append_logs(task_id, ["safe"])
+    errors: list[BaseException] = []
+
+    def closer() -> None:
+        try:
+            store.close()
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=closer) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(2.0)
+    assert not errors
+    assert all(not thread.is_alive() for thread in threads)
+    err = capsys.readouterr().err
+    assert "writer stopped during shutdown" not in err
+    assert "TaskStore DB error" not in err
+
+    recovered = TaskStore(tmp_path / "concurrent-close.db")
+    try:
+        assert "safe" in recovered.get(task_id)["logs"]
+    finally:
+        recovered.close()
+
+
 def test_close_aborts_shutdown_enqueued_after_writer_dies(
     tmp_path, monkeypatch, capsys
 ):
@@ -1839,7 +1928,8 @@ def test_close_aborts_shutdown_enqueued_after_writer_dies(
     assert elapsed < 0.8
     assert captured and captured[0].settled.is_set()
     assert store._write_q.unfinished_tasks == 0
-    assert "writer stopped during shutdown" in capsys.readouterr().err
+    # Writer already drained; leftover shutdown sentinel is not a DB failure.
+    assert "TaskStore DB error" not in capsys.readouterr().err
 
     started = time.perf_counter()
     store.close()

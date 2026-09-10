@@ -142,8 +142,11 @@ def test_dashboard_refresh_uses_status_text_not_second_spinner():
     assert "PageLoading v-if=\"refreshing\"" not in src
     assert 'size="inline"' not in src
     assert "refreshError" in src
+    assert "dashboard.load_failed" in src
     assert "onActivated" in src
     assert "onDeactivated" in src
+    mounted = src.split("onMounted(() => {", 1)[1].split("onActivated", 1)[0]
+    assert "void load()" in mounted
 
 
 def test_build_refresh_prefers_button_after_first_scan():
@@ -212,6 +215,10 @@ def test_system_pages_do_not_cover_existing_content_on_refresh():
     assert 'size="page"' in guard
     assert 'PageLoading v-if="loading && !loaded"' in settings
     assert settings.count('PageLoading v-if="loading && !loaded"') == 1
+    assert "Promise.allSettled" in settings
+    assert "llmLoadError" in settings
+    assert "webhookLoadError" in settings
+    assert "loaded.value = true" in settings
     assert 'size="page"' in settings
     assert 'PageLoading v-if="versionsLoading && !versions.length"' in update
     assert 'PageLoading v-if="branchesLoading && !branches.length"' in update

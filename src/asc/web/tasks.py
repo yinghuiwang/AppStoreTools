@@ -486,9 +486,10 @@ class TaskStore:
         if self._db_path is None or self._writer is None:
             self._closed = True
             return
-        if self._closed:
-            return
-        self._closed = True
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
         if self._writer_stop.is_set() or not self._writer.is_alive():
             # Writer already gone: settle leftovers instead of waiting for a
             # shutdown op nobody will ever consume.
@@ -499,12 +500,17 @@ class TaskStore:
         self._write_q.put(shutdown_op)
         deadline = time.monotonic() + self._WRITE_WAIT_TIMEOUT_SEC
         while not done.wait(timeout=0.05):
+            if shutdown_op.settled.is_set() or done.is_set():
+                break
             if self._writer_stop.is_set() or not self._writer.is_alive():
+                if shutdown_op.settled.is_set() or done.is_set():
+                    break
+                # Writer died before consuming this sentinel. Abort leftovers
+                # (real writes still warn); do not ⚠️ a leftover shutdown op.
                 error = RuntimeError("TaskStore writer stopped during shutdown")
                 self._abort_writer(error)
                 if not shutdown_op.settled.is_set():
                     self._settle_write_op(shutdown_op, error=error)
-                self._note_db_error(error, operation="shutdown")
                 break
             if time.monotonic() >= deadline:
                 break
@@ -1248,7 +1254,11 @@ class TaskStore:
         for op in (*current, *orphans):
             if not op.settled.is_set():
                 self._settle_write_op(op, error=error)
-        pending = [*current, *orphans]
+        pending = [
+            op
+            for op in (*current, *orphans)
+            if op.kind not in {"shutdown", "flush"}
+        ]
         if pending:
             self._note_db_error(
                 error,

@@ -19,6 +19,7 @@ from asc.guard import (
     enforce_config_guard,
     read_ipa_bundle_id,
 )
+from asc.llm_presets import apply_llm_preset_fields, list_llm_presets
 from asc.locales_catalog import LocaleCatalogError, list_locales
 from asc.utils import make_api_from_config
 from asc.web import notifications
@@ -2648,7 +2649,14 @@ async def get_llm_config(request: Request):
     return {
         "configs": configs,
         "default": config.llm_default,
+        "presets": list_llm_presets(),
     }
+
+
+@router.get("/settings/llm/presets")
+async def get_llm_presets():
+    """Return built-in OpenAI-compatible LLM provider presets."""
+    return {"presets": list_llm_presets()}
 
 
 @router.get("/settings/webhooks")
@@ -2707,14 +2715,25 @@ async def save_llm_config(request: Request):
     except Exception:
         return JSONResponse({"error": "Invalid JSON"}, status_code=400)
 
-    name = data.get("name", "default")
-    base_url = data.get("base_url", "https://api.openai.com/v1")
     api_key = data.get("api_key", "")
-    model = data.get("model", "gpt-4o")
     set_default = data.get("set_default", True)
+    name, base_url, model = apply_llm_preset_fields(
+        preset_id=data.get("preset_id"),
+        name=str(data.get("name") or ""),
+        base_url=str(data.get("base_url") or ""),
+        model=str(data.get("model") or ""),
+    )
+    if not name:
+        name = "default"
+    if not model:
+        model = "gpt-4o"
+    if not str(base_url).strip():
+        if data.get("preset_id"):
+            return JSONResponse({"error": "base_url is required"}, status_code=400)
+        base_url = "https://api.openai.com/v1"
     from asc.web.security import is_safe_outbound_url
 
-    if str(base_url).strip() and not is_safe_outbound_url(str(base_url)):
+    if not is_safe_outbound_url(str(base_url)):
         return JSONResponse({"error": "Unsafe base_url"}, status_code=400)
 
     try:

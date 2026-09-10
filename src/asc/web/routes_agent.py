@@ -81,8 +81,14 @@ def _llm_client_or_none():
     if not cfg:
         return None
     api_key = str(cfg.get("api_key") or "").strip()
+    base_url = cfg.get("base_url") or "https://api.openai.com/v1"
     if not api_key:
-        return None
+        from asc.llm_presets import is_loopback_llm_base_url
+
+        if is_loopback_llm_base_url(str(base_url)):
+            api_key = "ollama"
+        else:
+            return None
     from asc.llm import LLMClient
 
     raw = cfg.get("timeout") or os.getenv("ASC_LLM_TIMEOUT") or 180
@@ -94,7 +100,7 @@ def _llm_client_or_none():
 
     return LLMClient(
         api_key=api_key,
-        base_url=cfg.get("base_url") or "https://api.openai.com/v1",
+        base_url=base_url,
         model=cfg.get("model") or "gpt-4o",
         timeout=timeout,
     )
