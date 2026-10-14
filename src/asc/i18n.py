@@ -82,6 +82,18 @@ SCHEDULE_TEXT = {
         'zh': '无法确定 IANA 时区',
         'en': 'Could not determine an IANA time zone',
     },
+    'timezone_invalid': {
+        'zh': '无效的 IANA 时区：{name}',
+        'en': 'Invalid IANA time zone: {name}',
+    },
+    'timezone_cli': {
+        'zh': '无法确定 IANA 时区。请使用 --timezone 指定，例如 --timezone Asia/Shanghai',
+        'en': 'Could not determine an IANA time zone. Pass --timezone, for example --timezone Asia/Shanghai',
+    },
+    'timezone_prompt': {
+        'zh': '请输入 IANA 时区名称：',
+        'en': 'Enter an IANA time zone name:',
+    },
     'enabled': {
         'zh': 'enabled 必须是布尔值',
         'en': 'enabled must be a boolean',
@@ -379,6 +391,10 @@ HELP = {
     'cmd_schedule': {
         'en': 'Schedule iOS review checks and webhook notices.',
         'zh': '定时查询 iOS 审核状态并发送 webhook 通知。',
+    },
+    'schedule_timezone': {
+        'en': 'IANA time zone, for example Asia/Shanghai. Omit to use the system time zone.',
+        'zh': 'IANA 时区，例如 Asia/Shanghai。省略时使用系统时区。',
     },
     'cmd_app_add': {
         'en': 'Add a new app profile.',

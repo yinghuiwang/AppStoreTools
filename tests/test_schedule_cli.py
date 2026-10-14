@@ -11,6 +11,7 @@ from asc.cli import app
 from asc.schedule import (
     QueryOutcome,
     ReviewSnapshot,
+    ScheduleError,
     format_timestamp,
     load_tasks,
     save_tasks,
@@ -97,8 +98,98 @@ def scheduled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     return path, backend, asc
 
 
-def _add(args):
-    return runner.invoke(app, ["schedule", "add", *args])
+def _add(args, **kwargs):
+    return runner.invoke(app, ["schedule", "add", *args], **kwargs)
+
+
+def _text(result) -> str:
+    return "\n".join([result.stdout or "", result.stderr or "", getattr(result, "output", "") or ""])
+
+
+def test_add_help_accepts_timezone(scheduled):
+    result = runner.invoke(app, ["schedule", "add", "--help"])
+    assert result.exit_code == 0
+    assert "--timezone" in result.stdout
+
+
+def test_explicit_timezone_skips_capture(scheduled, monkeypatch: pytest.MonkeyPatch):
+    path, _, _ = scheduled
+
+    def boom(**kwargs):
+        raise ScheduleError("timezone")
+
+    monkeypatch.setattr("asc.schedule.capture_timezone", boom)
+    monkeypatch.delenv("TZ", raising=False)
+    result = _add(["--app", "myapp", "--daily", "--time", "09:30", "--timezone", "Asia/Shanghai"])
+    assert result.exit_code == 0, _text(result)
+    assert load_tasks(path)[0].timezone == "Asia/Shanghai"
+
+
+def test_invalid_timezone_exits_without_capture(scheduled, monkeypatch: pytest.MonkeyPatch):
+    path, _, _ = scheduled
+
+    def boom(**kwargs):
+        raise AssertionError("capture_timezone should not run")
+
+    monkeypatch.setattr("asc.schedule.capture_timezone", boom)
+    result = _add(["--app", "myapp", "--daily", "--time", "09:30", "--timezone", "Not/AZone"])
+    assert result.exit_code == 1
+    assert "无效的 IANA 时区：Not/AZone" in _text(result)
+    assert not path.exists()
+    monkeypatch.setattr("asc.i18n.LANG", "en")
+    english = _add(["--app", "myapp", "--daily", "--time", "09:30", "--timezone", "Not/AZone"])
+    assert english.exit_code == 1
+    assert "Invalid IANA time zone: Not/AZone" in _text(english)
+
+
+def test_omitted_timezone_still_uses_capture(scheduled, monkeypatch: pytest.MonkeyPatch):
+    path, _, _ = scheduled
+    monkeypatch.setattr("asc.schedule.capture_timezone", lambda **kwargs: "Europe/Berlin")
+    result = _add(["--app", "myapp", "--daily", "--time", "09:30"])
+    assert result.exit_code == 0, _text(result)
+    assert load_tasks(path)[0].timezone == "Europe/Berlin"
+
+
+def test_capture_failure_without_tty_mentions_timezone_flag(scheduled, monkeypatch: pytest.MonkeyPatch):
+    path, _, _ = scheduled
+    monkeypatch.setattr(
+        "asc.schedule.capture_timezone",
+        lambda **kwargs: (_ for _ in ()).throw(ScheduleError("timezone")),
+    )
+    monkeypatch.setattr("asc.commands.schedule_cmd._stdin_is_tty", lambda: False)
+    result = _add(["--app", "myapp", "--daily", "--time", "09:30"])
+    assert result.exit_code == 1
+    text = _text(result)
+    assert "无法确定 IANA 时区" in text
+    assert "--timezone" in text
+    assert not path.exists()
+    monkeypatch.setattr("asc.i18n.LANG", "en")
+    english = _add(["--app", "myapp", "--daily", "--time", "09:30"])
+    assert "Could not determine an IANA time zone" in _text(english)
+    assert "--timezone" in _text(english)
+
+
+def test_tty_prompt_stores_one_chosen_timezone(scheduled, monkeypatch: pytest.MonkeyPatch):
+    path, _, _ = scheduled
+    monkeypatch.setattr(
+        "asc.schedule.capture_timezone",
+        lambda **kwargs: (_ for _ in ()).throw(ScheduleError("timezone")),
+    )
+    monkeypatch.setattr("asc.commands.schedule_cmd._stdin_is_tty", lambda: True)
+    chosen = _add(["--app", "myapp", "--daily", "--time", "09:30"], input="Europe/Berlin\n")
+    assert chosen.exit_code == 0, _text(chosen)
+    assert load_tasks(path)[0].timezone == "Europe/Berlin"
+    empty = _add(["--app", "myapp", "--daily", "--time", "09:30"], input="\n")
+    assert empty.exit_code == 1
+    assert "无法确定 IANA 时区" in _text(empty)
+    assert "无效的 IANA 时区" not in _text(empty)
+    assert "--timezone" not in _text(empty)
+    invalid = _add(["--app", "myapp", "--daily", "--time", "09:30"], input="Not/AZone\n")
+    assert invalid.exit_code == 1
+    invalid_text = _text(invalid)
+    assert "无法确定 IANA 时区" in invalid_text
+    assert "无效的 IANA 时区：Not/AZone" in invalid_text
+    assert [item.timezone for item in load_tasks(path)] == ["Europe/Berlin"]
 
 
 def _task_id(result) -> str:

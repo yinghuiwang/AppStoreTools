@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { MessagePlugin } from "tdesign-vue-next";
 import { ApiError, apiErrorMessage, httpJson } from "@/api/http";
+import { useProfile } from "@/composables/useProfile";
 
 defineOptions({ name: "SchedulesView" });
 
@@ -25,7 +26,6 @@ type ScheduleTask = {
 
 type Heartbeat = { installed: boolean; path: string };
 type Row = ScheduleTask & { cycle: string; nextText: string };
-type Bootstrap = { profiles?: string[]; current_profile?: string };
 
 const weekdayOptions = [1, 2, 3, 4, 5, 6, 7];
 
@@ -48,10 +48,12 @@ function decorate(task: ScheduleTask): Row {
   return { ...task, cycle: cycleLabel(task), nextText: nextLabel(task) };
 }
 
+const { snapshot } = useProfile();
+
 const rows = ref<Row[]>([]);
 const heartbeat = ref<Heartbeat>({ installed: false, path: "" });
-const profileNames = ref<string[]>([]);
-const currentProfile = ref("");
+const profileNames = computed(() => snapshot.value?.profiles ?? []);
+const timezoneNames = ref<string[]>([]);
 const dialogOpen = ref(false);
 const editingId = ref("");
 const notice = ref("");
@@ -88,14 +90,18 @@ async function load() {
   heartbeat.value = data.heartbeat || { installed: false, path: "" };
 }
 
-async function loadProfiles() {
-  const data = await httpJson<Bootstrap>("/api/bootstrap");
-  profileNames.value = data.profiles || [];
-  currentProfile.value = data.current_profile || "";
+function profileForCreate(): string {
+  const current = snapshot.value?.current_profile || "";
+  return profileNames.value.includes(current) ? current : "";
+}
+
+async function loadTimezones() {
+  const data = await httpJson<{ timezones: string[] }>("/api/schedules/timezones");
+  timezoneNames.value = data.timezones || [];
 }
 
 function resetForm() {
-  form.profile = currentProfile.value;
+  form.profile = profileForCreate();
   form.kind = "daily";
   form.time = "09:30";
   form.intervalHours = 2;
@@ -165,6 +171,7 @@ async function save() {
         body: encode(body),
       });
     } else {
+      if (form.timezone) body.timezone = form.timezone;
       await httpJson("/api/schedules", { method: "POST", body: encode(body) });
     }
     dialogOpen.value = false;
@@ -228,7 +235,7 @@ async function uninstallHeartbeat() {
 
 onMounted(async () => {
   try {
-    await Promise.all([load(), loadProfiles()]);
+    await Promise.all([load(), loadTimezones()]);
   } catch (err) {
     report(err);
   }
@@ -330,7 +337,17 @@ onMounted(async () => {
         </label>
         <label class="field">
           <span>{{ t("schedules.timezone") }}</span>
-          <input :value="form.timezone" type="text" readonly />
+          <t-select
+            v-if="!editingId"
+            v-model="form.timezone"
+            filterable
+            :placeholder="t('schedules.timezone_auto')"
+            :popup-props="{ attach: 'body' }"
+          >
+            <t-option :value="''" :label="t('schedules.timezone_auto')" />
+            <t-option v-for="zone in timezoneNames" :key="zone" :value="zone" :label="zone" />
+          </t-select>
+          <input v-else :value="form.timezone" type="text" readonly />
         </label>
         <p v-if="notice" class="row-error">{{ notice }}</p>
         <div class="actions">

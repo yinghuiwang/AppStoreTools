@@ -121,6 +121,80 @@ def test_second_add_keeps_order_and_skips_install(tmp_path: Path):
     assert [item.id for item in list_tasks(schedule_path=path)] == [first.id, second.id]
 
 
+def test_explicit_timezone_does_not_need_localtime(tmp_path: Path):
+    path = tmp_path / "schedules.toml"
+    backend = FakeHeartbeat()
+    asc = tmp_path / "asc"
+    asc.write_text("#!/bin/sh\n", encoding="utf-8")
+    created, installed = add_task(
+        profile="myapp",
+        kind="daily",
+        time="09:30",
+        timezone="Asia/Shanghai",
+        schedule_path=path,
+        now=NOW,
+        profile_lookup=lookup_ok,
+        backend=backend,
+        asc_path=asc.resolve(),
+        environ={},
+        localtime=tmp_path / "missing-localtime",
+    )
+    assert installed is True
+    assert created.timezone == "Asia/Shanghai"
+    assert load_tasks(path)[0].timezone == "Asia/Shanghai"
+
+
+def test_invalid_timezone_is_rejected_without_capture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    path = tmp_path / "schedules.toml"
+    backend = FakeHeartbeat()
+    asc = tmp_path / "asc"
+    asc.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    def boom(**kwargs):
+        raise AssertionError("capture_timezone should not run")
+
+    monkeypatch.setattr("asc.schedule.capture_timezone", boom)
+    with pytest.raises(ScheduleError) as exc:
+        add_task(
+            profile="myapp",
+            kind="daily",
+            time="09:30",
+            timezone="Not/AZone",
+            schedule_path=path,
+            now=NOW,
+            profile_lookup=lookup_ok,
+            backend=backend,
+            asc_path=asc.resolve(),
+            environ={},
+            localtime=tmp_path / "missing-localtime",
+        )
+    assert exc.value.code == "timezone_invalid"
+    assert exc.value.params["name"] == "Not/AZone"
+    assert backend.plist is None
+    assert not path.exists()
+
+
+def test_omitted_timezone_uses_capture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    path = tmp_path / "schedules.toml"
+    backend = FakeHeartbeat()
+    asc = tmp_path / "asc"
+    asc.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setattr("asc.schedule.capture_timezone", lambda **kwargs: "Europe/Berlin")
+    created, _ = add_task(
+        profile="myapp",
+        kind="daily",
+        time="09:30",
+        schedule_path=path,
+        now=NOW,
+        profile_lookup=lookup_ok,
+        backend=backend,
+        asc_path=asc.resolve(),
+        environ={},
+        localtime=tmp_path / "missing-localtime",
+    )
+    assert created.timezone == "Europe/Berlin"
+
+
 def test_missing_profile_and_bad_timezone_do_not_install(tmp_path: Path):
     path = tmp_path / "schedules.toml"
     backend = FakeHeartbeat()

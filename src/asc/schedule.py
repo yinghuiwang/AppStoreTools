@@ -18,7 +18,7 @@ from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, available_timezones
 
 try:
     import tomllib
@@ -387,6 +387,28 @@ def capture_timezone(*, environ=None, localtime: Optional[Path] = None) -> str:
     if not found or not _zone_accepted(found):
         raise ScheduleError("timezone")
     return found
+
+
+def require_timezone_name(value: object) -> str:
+    if isinstance(value, str):
+        name = value.strip()
+        shown = name or value
+    else:
+        name = ""
+        shown = value
+    if not name or not _zone_accepted(name):
+        raise ScheduleError("timezone_invalid", name=shown)
+    return name
+
+
+def list_timezones() -> list:
+    names = [
+        name
+        for name in available_timezones()
+        if not name.startswith(("posix/", "right/"))
+    ]
+    names.sort()
+    return names
 
 
 def parse_hhmm(value: str) -> tuple:
@@ -899,13 +921,17 @@ def add_task(
     asc_path: Path,
     environ=None,
     localtime: Optional[Path] = None,
+    timezone: Optional[str] = None,
 ) -> tuple:
     parse_hhmm(time)
     interval_hours, weekdays = _validate_kind_fields(kind, interval_hours, weekdays)
     if not isinstance(enabled, bool):
         raise ScheduleError("enabled")
     _require_profile(profile, profile_lookup)
-    timezone_name = capture_timezone(environ=environ, localtime=localtime)
+    if timezone is None:
+        timezone_name = capture_timezone(environ=environ, localtime=localtime)
+    else:
+        timezone_name = require_timezone_name(timezone)
     installed_now = False
     with schedule_lock(schedule_path, blocking=True):
         _require_profile(profile, profile_lookup)

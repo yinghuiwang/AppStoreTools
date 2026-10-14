@@ -112,6 +112,15 @@ def _schedule_fields(body: dict, *, creating: bool):
     return profile, kind, when, enabled, interval_hours, weekdays
 
 
+def _requested_timezone(body: dict):
+    if "timezone" not in body:
+        return None
+    value = body.get("timezone")
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    return schedule.require_timezone_name(value)
+
+
 def _task_json(task) -> dict:
     payload = {
         "id": task.id,
@@ -153,6 +162,12 @@ async def list_schedules(request: Request):
     }
 
 
+@router.get("/schedules/timezones")
+async def list_schedule_timezones():
+    names = await asyncio.to_thread(schedule.list_timezones)
+    return {"timezones": names}
+
+
 @router.post("/schedules")
 async def create_schedule(request: Request):
     body = await _read_object(request)
@@ -160,6 +175,7 @@ async def create_schedule(request: Request):
         return _error(request, "schedules.err.json", 400)
     try:
         profile, kind, when, enabled, interval_hours, weekdays = _schedule_fields(body, creating=True)
+        timezone_name = _requested_timezone(body)
     except ScheduleError as exc:
         return _schedule_error(request, exc)
 
@@ -171,6 +187,7 @@ async def create_schedule(request: Request):
             interval_hours=interval_hours,
             weekdays=weekdays,
             enabled=enabled,
+            timezone=timezone_name,
             schedule_path=schedule.default_schedule_path(),
             now=datetime.now().astimezone(),
             profile_lookup=schedule.default_profile_lookup,

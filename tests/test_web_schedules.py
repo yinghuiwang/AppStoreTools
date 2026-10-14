@@ -7,7 +7,13 @@ import plistlib
 import pytest
 from fastapi.testclient import TestClient
 
-from asc.schedule import ScheduleLockTimeout, add_task, load_tasks, query_review as real_query_review
+from asc.schedule import (
+    ScheduleError,
+    ScheduleLockTimeout,
+    add_task,
+    load_tasks,
+    query_review as real_query_review,
+)
 from asc.web.server import create_app
 
 
@@ -88,7 +94,73 @@ def scheduled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 def test_schedule_routes_are_mounted():
     paths = [getattr(route, "path", "") for route in create_app().routes]
     assert "/api/schedules" in paths
+    assert "/api/schedules/timezones" in paths
     assert "/api/schedules/heartbeat/install" in paths
+
+
+def test_timezones_are_sorted_and_include_shanghai_and_utc(scheduled):
+    client, _, _, _ = scheduled
+    response = client.get("/api/schedules/timezones")
+    assert response.status_code == 200
+    names = response.json()["timezones"]
+    assert names == sorted(names)
+    assert "Asia/Shanghai" in names
+    assert "UTC" in names
+    assert all(not name.startswith(("posix/", "right/")) for name in names)
+
+
+def test_invalid_timezone_is_400_on_create(scheduled, monkeypatch: pytest.MonkeyPatch):
+    client, path, _, _ = scheduled
+
+    def boom(**kwargs):
+        raise AssertionError("capture_timezone should not run")
+
+    monkeypatch.setattr("asc.schedule.capture_timezone", boom)
+    zh = client.post(
+        "/api/schedules",
+        json={"profile": "myapp", "kind": "daily", "time": "09:30", "timezone": "Not/AZone"},
+        cookies={"asc_lang": "zh"},
+    )
+    assert zh.status_code == 400
+    assert zh.json() == {"error": "无效的 IANA 时区：Not/AZone"}
+    en = client.post(
+        "/api/schedules",
+        json={"profile": "myapp", "kind": "daily", "time": "09:30", "timezone": "Not/AZone"},
+        cookies={"asc_lang": "en"},
+    )
+    assert en.status_code == 400
+    assert en.json() == {"error": "Invalid IANA time zone: Not/AZone"}
+    assert not path.exists()
+
+
+def test_explicit_timezone_persists_when_capture_fails(scheduled, monkeypatch: pytest.MonkeyPatch):
+    client, path, _, _ = scheduled
+
+    def boom(**kwargs):
+        raise ScheduleError("timezone")
+
+    monkeypatch.setattr("asc.schedule.capture_timezone", boom)
+    created = client.post(
+        "/api/schedules",
+        json={"profile": "myapp", "kind": "daily", "time": "09:30", "timezone": "Asia/Shanghai"},
+    )
+    assert created.status_code == 200, created.text
+    assert created.json()["timezone"] == "Asia/Shanghai"
+    assert load_tasks(path)[0].timezone == "Asia/Shanghai"
+
+
+def test_omitted_and_blank_timezone_use_capture(scheduled, monkeypatch: pytest.MonkeyPatch):
+    client, path, _, _ = scheduled
+    monkeypatch.setattr("asc.schedule.capture_timezone", lambda **kwargs: "Europe/Berlin")
+    omitted = client.post("/api/schedules", json={"profile": "myapp", "kind": "daily", "time": "09:30"})
+    assert omitted.status_code == 200, omitted.text
+    assert omitted.json()["timezone"] == "Europe/Berlin"
+    blank = client.post(
+        "/api/schedules",
+        json={"profile": "myapp", "kind": "daily", "time": "18:00", "timezone": ""},
+    )
+    assert blank.status_code == 200, blank.text
+    assert [item.timezone for item in load_tasks(path)] == ["Europe/Berlin", "Europe/Berlin"]
 
 
 def test_post_shares_the_schedule_file_and_lists_every_profile(scheduled):
@@ -303,7 +375,15 @@ def test_schedules_page_is_wired():
         key for key in en if key.startswith("schedules.")
     ]
     assert "/api/schedules" in view
-    assert "/api/bootstrap" in view
+    assert "/api/schedules/timezones" in view
+    assert "useProfile" in view
+    assert "function profileForCreate" in view
+    assert "profileNames.value.includes(current)" in view
+    assert "form.profile = profileForCreate()" in view
+    assert 'snapshot.value?.current_profile || ""' in view
+    assert "filterable" in view
+    assert "schedules.timezone_auto" in view
+    assert "body.timezone = form.timezone" in view
     assert "t-popconfirm" in view
     assert "function truncateTime" in view
     assert "slice(0, 5)" in view

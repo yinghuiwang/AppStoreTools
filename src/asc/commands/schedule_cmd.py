@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from datetime import datetime
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -42,6 +43,54 @@ def _next_label(task) -> str:
     return f"{moment.strftime('%Y-%m-%d %H:%M')} {task.timezone}"
 
 
+def _stdin_is_tty() -> bool:
+    try:
+        return bool(sys.stdin.isatty())
+    except Exception:
+        return False
+
+
+def _timezone_when_capture_fails() -> str:
+    if not _stdin_is_tty():
+        raise ScheduleError("timezone_cli")
+    typer.echo(user_message("timezone_prompt") + " ", nl=False, err=True)
+    try:
+        typed = sys.stdin.readline()
+    except EOFError:
+        typed = ""
+    name = typed.strip()
+    if not name:
+        raise ScheduleError("timezone")
+    try:
+        return schedule.require_timezone_name(name)
+    except ScheduleError as exc:
+        if exc.code == "timezone_invalid":
+            typer.echo(user_message("timezone"), err=True)
+        raise
+
+
+def _add_schedule(profile, kind, when, interval_hours, weekdays, timezone):
+    kwargs = dict(
+        profile=profile,
+        kind=kind,
+        time=when,
+        interval_hours=interval_hours,
+        weekdays=weekdays,
+        schedule_path=schedule.default_schedule_path(),
+        now=datetime.now().astimezone(),
+        profile_lookup=schedule.default_profile_lookup,
+        backend=SystemHeartbeatBackend(),
+        asc_path=resolve_asc_executable(),
+    )
+    try:
+        return schedule.add_task(timezone=timezone, **kwargs)
+    except ScheduleError as exc:
+        if exc.code != "timezone" or timezone is not None:
+            raise
+        chosen = _timezone_when_capture_fails()
+        return schedule.add_task(timezone=chosen, **kwargs)
+
+
 def _choose_kind(daily: bool, every: Optional[int], weekly: Optional[str]):
     selected = sum((bool(daily), every is not None, weekly is not None))
     if selected != 1:
@@ -62,21 +111,11 @@ def cmd_add(
     every: Optional[int] = typer.Option(None, "--every"),
     weekly: Optional[str] = typer.Option(None, "--weekly"),
     time: str = typer.Option(..., "--time"),
+    timezone: Optional[str] = typer.Option(None, "--timezone", help=t(HELP["schedule_timezone"])),
 ) -> None:
     try:
         kind, interval_hours, weekdays = _choose_kind(daily, every, weekly)
-        created, installed_now = schedule.add_task(
-            profile=app_name,
-            kind=kind,
-            time=time,
-            interval_hours=interval_hours,
-            weekdays=weekdays,
-            schedule_path=schedule.default_schedule_path(),
-            now=datetime.now().astimezone(),
-            profile_lookup=schedule.default_profile_lookup,
-            backend=SystemHeartbeatBackend(),
-            asc_path=resolve_asc_executable(),
-        )
+        created, installed_now = _add_schedule(app_name, kind, time, interval_hours, weekdays, timezone)
     except ScheduleError as exc:
         _fail(exc)
     typer.echo(f"{created.id} {created.next_run_at}")
