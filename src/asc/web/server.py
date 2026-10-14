@@ -100,11 +100,12 @@ def create_app() -> FastAPI:
     def session_ok():
         return {"ok": True}
 
-    from asc.web import routes_api, routes_listing, routes_agent, routes_iap
+    from asc.web import routes_api, routes_listing, routes_agent, routes_iap, routes_schedule
     app.include_router(routes_api.router, prefix="/api")
     app.include_router(routes_listing.router, prefix="/api/listing")
     app.include_router(routes_agent.router, prefix="/api/agent")
     app.include_router(routes_iap.router, prefix="/api/iap")
+    app.include_router(routes_schedule.router, prefix="/api")
 
     @app.get("/{full_path:path}")
     def spa_fallback(full_path: str):

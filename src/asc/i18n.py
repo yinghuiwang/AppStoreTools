@@ -41,6 +41,98 @@ def t(text_dict: Dict[str, str]) -> str:
     return text_dict.get(LANG, text_dict.get('en', ''))
 
 
+SCHEDULE_TEXT = {
+    'corrupt': {
+        'zh': '调度文件已损坏',
+        'en': 'Schedule file is corrupt',
+    },
+    'lock_timeout': {
+        'zh': '等待调度文件锁超时',
+        'en': 'Timed out waiting for the schedule file lock',
+    },
+    'lock_busy': {
+        'zh': '已有 tick 正在运行，本次跳过',
+        'en': 'A schedule tick is already running; this one was skipped',
+    },
+    'not_found': {
+        'zh': '找不到定时任务：{task_id}',
+        'en': 'Schedule not found: {task_id}',
+    },
+    'profile': {
+        'zh': '找不到 App profile：{name}',
+        'en': 'App profile not found: {name}',
+    },
+    'time': {
+        'zh': '时间必须是零填充的 HH:MM',
+        'en': 'Time must be zero-padded HH:MM',
+    },
+    'every': {
+        'zh': '小时间隔必须是大于等于 1 的整数',
+        'en': 'Hour interval must be an integer greater than or equal to 1',
+    },
+    'weekdays': {
+        'zh': '星期必须是 1 到 7 的不重复数字，用逗号分隔',
+        'en': 'Weekdays must be unique comma-separated numbers from 1 to 7',
+    },
+    'kind': {
+        'zh': '必须且只能指定一种周期：--daily、--every 或 --weekly',
+        'en': 'Specify exactly one of --daily, --every, or --weekly',
+    },
+    'timezone': {
+        'zh': '无法确定 IANA 时区',
+        'en': 'Could not determine an IANA time zone',
+    },
+    'enabled': {
+        'zh': 'enabled 必须是布尔值',
+        'en': 'enabled must be a boolean',
+    },
+    'kind_fields': {
+        'zh': '周期字段与 kind 不匹配',
+        'en': 'Schedule fields do not match kind',
+    },
+    'fcntl_unavailable': {
+        'zh': '当前系统不支持文件锁（fcntl）',
+        'en': 'File locking (fcntl) is not available on this system',
+    },
+    'not_executable': {
+        'zh': '请使用 asc 可执行文件安装心跳，不能用 python -m asc',
+        'en': 'Install the heartbeat with the asc executable, not python -m asc',
+    },
+    'user_agent': {
+        'zh': '心跳是当前用户的 LaunchAgent，请不要使用 sudo，直接运行 asc schedule install',
+        'en': 'The heartbeat is a per-user LaunchAgent. Run asc schedule install without sudo',
+    },
+    'install_failed': {
+        'zh': '心跳安装失败：{reason}',
+        'en': 'Failed to install heartbeat: {reason}',
+    },
+    'uninstall_failed': {
+        'zh': '心跳卸载失败：{reason}',
+        'en': 'Failed to uninstall heartbeat: {reason}',
+    },
+    'empty': {
+        'zh': '没有定时任务',
+        'en': 'No schedules',
+    },
+    'heartbeat_installed': {
+        'zh': '心跳已安装',
+        'en': 'Heartbeat installed',
+    },
+    'heartbeat_absent': {
+        'zh': '当前未安装',
+        'en': 'Heartbeat is not installed',
+    },
+    'col_id': {'zh': 'id', 'en': 'id'},
+    'col_app': {'zh': '应用', 'en': 'App'},
+    'col_cycle': {'zh': '周期', 'en': 'Schedule'},
+    'col_next': {'zh': '下次运行', 'en': 'Next run'},
+    'col_last': {'zh': '上次结果', 'en': 'Last result'},
+    'col_enabled': {'zh': '启用', 'en': 'Enabled'},
+    'state_enabled': {'zh': '启用', 'en': 'enabled'},
+    'state_disabled': {'zh': '停用', 'en': 'disabled'},
+}
+
+
 # Common help text translations
 HELP = {
     'app_profile_name': {
@@ -283,6 +375,10 @@ HELP = {
     'cmd_guard': {
         'en': 'Manage app binding guard.',
         'zh': '管理 App 绑定守卫功能。',
+    },
+    'cmd_schedule': {
+        'en': 'Schedule iOS review checks and webhook notices.',
+        'zh': '定时查询 iOS 审核状态并发送 webhook 通知。',
     },
     'cmd_app_add': {
         'en': 'Add a new app profile.',

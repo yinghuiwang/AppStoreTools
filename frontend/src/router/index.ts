@@ -6,6 +6,7 @@ import UrlsView from "@/views/UrlsView.vue";
 import BuildView from "@/views/BuildView.vue";
 import IapView from "@/views/IapView.vue";
 import ProfilesView from "@/views/ProfilesView.vue";
+import SchedulesView from "@/views/SchedulesView.vue";
 import GuardView from "@/views/GuardView.vue";
 import SettingsView from "@/views/SettingsView.vue";
 import UpdateView from "@/views/UpdateView.vue";
@@ -40,6 +41,7 @@ export const router = createRouter({
     { path: "/build", name: "BuildView", component: BuildView, meta: { keepAlive: true } },
     { path: "/iap", name: "IapView", component: IapView, meta: { keepAlive: true } },
     { path: "/profiles", name: "ProfilesView", component: ProfilesView },
+    { path: "/schedules", name: "SchedulesView", component: SchedulesView },
     { path: "/guard", name: "GuardView", component: GuardView },
     { path: "/settings", name: "SettingsView", component: SettingsView },
     { path: "/update", name: "UpdateView", component: UpdateView },

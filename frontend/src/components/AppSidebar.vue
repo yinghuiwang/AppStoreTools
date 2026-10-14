@@ -32,6 +32,7 @@ const groups: NavGroup[] = [
     labelKey: "nav.group.system",
     items: [
       { to: "/profiles", labelKey: "nav.profiles", match: "exact", icon: "profiles" },
+      { to: "/schedules", labelKey: "nav.schedules", match: "exact", icon: "notes" },
       { to: "/guard", labelKey: "nav.guard", match: "exact", icon: "guard" },
       { to: "/settings", labelKey: "nav.settings", match: "exact", icon: "settings" },
       { to: "/update", labelKey: "nav.update", match: "exact", icon: "update" },

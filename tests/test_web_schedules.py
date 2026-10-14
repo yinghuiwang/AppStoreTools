@@ -1,0 +1,345 @@
+import sys
+from datetime import datetime
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+import plistlib
+import pytest
+from fastapi.testclient import TestClient
+
+from asc.schedule import ScheduleLockTimeout, add_task, load_tasks, query_review as real_query_review
+from asc.web.server import create_app
+
+
+class FakeHeartbeat:
+    def __init__(self, system: str = "darwin"):
+        self._system = system
+        self.plist = None
+        self.crontab = ""
+        self.fail_bootstrap = False
+        self.crontab_fail_times = 0
+        self.bootouts = []
+        self.bootstraps = []
+        self._plist_path = Path("/tmp/LaunchAgents/com.asc.schedule.plist")
+        self._log_path = Path("/tmp/asc-home/schedule-tick.log")
+
+    def system(self):
+        return self._system
+
+    def uid(self):
+        return 501
+
+    def plist_path(self):
+        return self._plist_path
+
+    def log_path(self):
+        return self._log_path
+
+    def read_plist(self):
+        return self.plist
+
+    def write_plist(self, data: bytes):
+        self.plist = data
+
+    def remove_plist(self):
+        self.plist = None
+
+    def bootout(self, domain, plist):
+        self.bootouts.append((domain, plist))
+
+    def bootstrap(self, domain, plist):
+        self.bootstraps.append((domain, plist))
+        if self.fail_bootstrap:
+            raise RuntimeError("bootstrap failed")
+
+    def read_crontab(self):
+        return self.crontab
+
+    def write_crontab(self, text: str):
+        if self.crontab_fail_times:
+            self.crontab_fail_times -= 1
+            self.crontab = text
+            raise RuntimeError("crontab failed")
+        self.crontab = text
+
+
+def _lookup(name):
+    return {"issuer_id": "", "key_id": "", "key_file": "", "app_id": ""}
+
+
+@pytest.fixture
+def scheduled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    path = tmp_path / "schedules.toml"
+    asc = tmp_path / "asc"
+    asc.write_text("#!/bin/sh\n", encoding="utf-8")
+    backend = FakeHeartbeat()
+    monkeypatch.setattr("asc.schedule.default_schedule_path", lambda: path)
+    monkeypatch.setattr("asc.schedule.default_profile_lookup", _lookup)
+    monkeypatch.setattr("asc.schedule.query_review", lambda profile, **kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setenv("TZ", "Asia/Shanghai")
+    from asc.web import routes_schedule
+
+    monkeypatch.setattr(routes_schedule, "heartbeat_backend", lambda: backend)
+    monkeypatch.setattr(routes_schedule, "asc_executable", lambda: asc.resolve())
+    client = TestClient(create_app())
+    return client, path, backend, asc
+
+
+def test_schedule_routes_are_mounted():
+    paths = [getattr(route, "path", "") for route in create_app().routes]
+    assert "/api/schedules" in paths
+    assert "/api/schedules/heartbeat/install" in paths
+
+
+def test_post_shares_the_schedule_file_and_lists_every_profile(scheduled):
+    client, path, backend, asc = scheduled
+    body = {"profile": "myapp", "kind": "daily", "time": "09:30"}
+    assert "notify_kinds" not in body
+    created = client.post("/api/schedules", json=body)
+    assert created.status_code == 200
+    task_id = created.json()["id"]
+    assert load_tasks(path)[0].id == task_id
+    listed = client.get("/api/schedules")
+    assert listed.status_code == 200
+    assert [item["profile"] for item in listed.json()["tasks"]] == ["myapp"]
+    add_task(
+        profile="other",
+        kind="daily",
+        time="18:00",
+        schedule_path=path,
+        now=datetime(2026, 10, 14, 10, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+        profile_lookup=_lookup,
+        backend=backend,
+        asc_path=asc.resolve(),
+        environ={"TZ": "Asia/Shanghai"},
+    )
+    both = client.get("/api/schedules")
+    assert [item["profile"] for item in both.json()["tasks"]] == ["myapp", "other"]
+    assert "interval_hours" not in both.json()["tasks"][0]
+    deleted = client.delete(f"/api/schedules/{task_id}")
+    assert deleted.status_code == 200
+    assert task_id not in [item.id for item in load_tasks(path)]
+    assert backend.plist is not None
+
+
+def test_string_enabled_is_400_in_both_languages(scheduled):
+    client, path, _, _ = scheduled
+    zh = client.post(
+        "/api/schedules",
+        json={"profile": "myapp", "kind": "daily", "time": "09:30", "enabled": "true"},
+        cookies={"asc_lang": "zh"},
+    )
+    assert zh.status_code == 400
+    assert zh.json()["error"] == "enabled 必须是布尔值"
+    en = client.post(
+        "/api/schedules",
+        json={"profile": "myapp", "kind": "daily", "time": "09:30", "enabled": "true"},
+        cookies={"asc_lang": "en"},
+    )
+    assert en.status_code == 400
+    assert en.json()["error"] == "enabled must be a boolean"
+    assert not path.exists()
+
+
+def test_unknown_id_is_404(scheduled):
+    client, _, _, _ = scheduled
+    deleted = client.delete("/api/schedules/ffffffff")
+    ran = client.post("/api/schedules/ffffffff/run")
+    assert deleted.status_code == 404
+    assert ran.status_code == 404
+    assert "error" in deleted.json()
+    assert "detail" not in deleted.json()
+
+
+def test_lock_timeout_is_409(scheduled, monkeypatch: pytest.MonkeyPatch):
+    client, _, _, _ = scheduled
+
+    def boom(*args, **kwargs):
+        raise ScheduleLockTimeout()
+
+    monkeypatch.setattr("asc.schedule.schedule_lock", boom)
+    response = client.post(
+        "/api/schedules",
+        json={"profile": "myapp", "kind": "daily", "time": "09:30"},
+    )
+    assert response.status_code == 409
+    assert "error" in response.json()
+
+
+def test_corrupt_file_returns_400_without_rewrite(scheduled):
+    client, path, _, _ = scheduled
+    path.write_text('tasks = "no"\n', encoding="utf-8")
+    before = path.read_bytes()
+    response = client.get("/api/schedules", cookies={"asc_lang": "zh"})
+    assert response.status_code == 400
+    assert "error" in response.json()
+    assert path.read_bytes() == before
+
+
+def test_run_now_checks_review_and_sends_webhook_without_moving_next(
+    scheduled, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    client, path, backend, _ = scheduled
+    created = client.post(
+        "/api/schedules",
+        json={"profile": "myapp", "kind": "daily", "time": "09:30", "enabled": False},
+    )
+    assert created.status_code == 200
+    task_id = created.json()["id"]
+    before = load_tasks(path)[0].next_run_at
+    bootstraps = list(backend.bootstraps)
+    key = tmp_path / "AuthKey.p8"
+    key.write_bytes(b"not-a-real-key")
+    hook = tmp_path / "webhook.toml"
+    hook.write_text(
+        "\n".join([
+            "enabled = true",
+            "[providers.feishu]",
+            "enabled = true",
+            'url = "https://example.com/hook"',
+        ]),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ASC_WEBHOOK_CONFIG_PATH", str(hook))
+
+    class FakeConnect:
+        def __init__(self, issuer_id, key_id, key_file):
+            self.args = (issuer_id, key_id, key_file)
+
+        def _get_paginated_data(self, api_path, **params):
+            calls.append((api_path, params))
+            return [{
+                "id": "v1",
+                "attributes": {"appStoreState": "IN_REVIEW", "versionString": "1.2.3"},
+            }]
+
+    calls = []
+    sent = []
+
+    def lookup(name):
+        return {
+            "issuer_id": "issuer",
+            "key_id": "KEYID",
+            "key_file": str(key),
+            "app_id": "123",
+        }
+
+    def fake_send(provider, config, text):
+        sent.append((provider, text))
+        return {"provider": provider, "ok": True}
+
+    def forbid_subprocess(*args, **kwargs):
+        raise AssertionError(args)
+
+    monkeypatch.setattr("asc.schedule.query_review", real_query_review)
+    monkeypatch.setattr("asc.schedule.default_profile_lookup", lookup)
+    monkeypatch.setattr("asc.schedule._default_guard", lambda profile, creds: None)
+    monkeypatch.setattr("asc.api.AppStoreConnectAPI", FakeConnect)
+    monkeypatch.setattr("asc.web.webhook_clients.send_provider", fake_send)
+    monkeypatch.setattr("asc.schedule.subprocess.run", forbid_subprocess)
+
+    ran = client.post(f"/api/schedules/{task_id}/run")
+
+    assert ran.status_code == 200
+    body = ran.json()
+    assert body["last_result"] == "1.2.3 审核中"
+    assert body["last_error"] == ""
+    assert body["enabled"] is False
+    assert body["next_run_at"] == before
+    saved = load_tasks(path)[0]
+    assert saved.next_run_at == before
+    assert saved.last_result == "1.2.3 审核中"
+    assert saved.last_error == ""
+    assert calls == [("/v1/apps/123/appStoreVersions", {"filter[platform]": "IOS"})]
+    assert sent and sent[0][0] == "feishu"
+    assert "1.2.3" in sent[0][1]
+    assert backend.bootstraps == bootstraps
+
+
+def test_run_failure_returns_200_without_moving_next(scheduled):
+    client, path, _, _ = scheduled
+    created = client.post("/api/schedules", json={"profile": "myapp", "kind": "daily", "time": "09:30"})
+    assert created.status_code == 200
+    task_id = created.json()["id"]
+    before = load_tasks(path)[0].next_run_at
+    ran = client.post(f"/api/schedules/{task_id}/run")
+    assert ran.status_code == 200
+    body = ran.json()
+    assert body["last_error"]
+    assert body["next_run_at"] == before
+    assert load_tasks(path)[0].next_run_at == before
+
+
+def test_schedules_page_is_wired():
+    import json
+
+    root = Path(__file__).resolve().parents[1]
+    router = (root / "frontend/src/router/index.ts").read_text(encoding="utf-8")
+    sidebar = (root / "frontend/src/components/AppSidebar.vue").read_text(encoding="utf-8")
+    topbar = (root / "frontend/src/components/AppTopbar.vue").read_text(encoding="utf-8")
+    view = (root / "frontend/src/views/SchedulesView.vue").read_text(encoding="utf-8")
+    zh = json.loads((root / "src/asc/web/locales/zh.json").read_text(encoding="utf-8"))
+    en = json.loads((root / "src/asc/web/locales/en.json").read_text(encoding="utf-8"))
+
+    assert 'path: "/schedules"' in router
+    assert "SchedulesView" in router
+    assert "SYSTEM_PAGES" in router
+    assert '"schedules"' not in router.split("SYSTEM_PAGES", 1)[1].split(";", 1)[0]
+    profiles = sidebar.split('to: "/profiles"', 1)[1]
+    assert profiles.index('to: "/schedules"') < profiles.index('to: "/guard"')
+    assert 'labelKey: "nav.schedules"' in sidebar
+    assert 'icon: "notes"' in sidebar
+    assert 'p === "/schedules"' in topbar
+    assert "nav.schedules" in topbar
+    assert zh["nav.schedules"] == "定时任务"
+    assert en["nav.schedules"] == "Schedules"
+    assert zh["schedules.run"] == "立即执行"
+    assert en["schedules.run"] == "Run now"
+    assert "isRunning(row.id)" in view
+    assert ':disabled="isRunning(row.id)"' in view
+    assert ':disabled="!row.enabled"' not in view
+    assert "runSummary" in view
+    assert [key for key in zh if key.startswith("schedules.")] == [
+        key for key in en if key.startswith("schedules.")
+    ]
+    assert "/api/schedules" in view
+    assert "/api/bootstrap" in view
+    assert "t-popconfirm" in view
+    assert "function truncateTime" in view
+    assert "slice(0, 5)" in view
+    assert "new Date" not in view
+    assert "next_run_at" not in view.split("JSON.stringify", 1)[-1]
+    assert "notify_kinds" not in view
+    assert "notify_statuses" not in view
+
+
+def test_web_install_uses_sibling_asc_for_module_invocation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from asc.web import routes_schedule
+
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    python = bindir / "python"
+    python.write_text("#!/bin/sh\n", encoding="utf-8")
+    asc = bindir / "asc"
+    asc.write_text("#!/bin/sh\n", encoding="utf-8")
+    asc.chmod(0o755)
+    module = tmp_path / "asc" / "__main__.py"
+    module.parent.mkdir()
+    module.write_text("print('module')\n", encoding="utf-8")
+    empty = tmp_path / "empty-path"
+    empty.mkdir()
+    monkeypatch.setattr(sys, "executable", str(python))
+    monkeypatch.setattr(sys, "argv", [str(module), "web"])
+    monkeypatch.setenv("PATH", str(empty))
+    backend = FakeHeartbeat()
+    monkeypatch.setattr(routes_schedule, "heartbeat_backend", lambda: backend)
+    client = TestClient(create_app())
+
+    response = client.post("/api/schedules/heartbeat/install")
+
+    assert response.status_code == 200
+    assert response.json()["heartbeat"] == {"installed": True, "path": str(asc.resolve())}
+    program = plistlib.loads(backend.plist)["ProgramArguments"]
+    assert program == [str(asc.resolve()), "schedule", "tick"]

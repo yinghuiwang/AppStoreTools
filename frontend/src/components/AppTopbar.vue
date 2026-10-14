@@ -21,6 +21,7 @@ const TITLE_KEYS: Array<{ test: (path: string) => boolean; key: string }> = [
   { test: (p) => p === "/build", key: "nav.build" },
   { test: (p) => p === "/iap", key: "nav.iap" },
   { test: (p) => p === "/profiles", key: "nav.profiles" },
+  { test: (p) => p === "/schedules", key: "nav.schedules" },
   { test: (p) => p === "/guard", key: "nav.guard" },
   { test: (p) => p === "/settings", key: "nav.settings" },
   { test: (p) => p === "/update", key: "nav.update" },

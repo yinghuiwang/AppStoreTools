@@ -251,6 +251,9 @@ app.add_typer(web_app, name="web")
 from asc.commands.guard_cmd import guard_app
 app.add_typer(guard_app, name="guard")
 
+from asc.commands.schedule_cmd import schedule_app
+app.add_typer(schedule_app, name="schedule")
+
 # Install global exception handler (runs at module import time)
 from asc.error_handler import install
 install()
