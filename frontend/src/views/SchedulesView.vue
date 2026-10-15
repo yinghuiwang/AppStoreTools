@@ -14,6 +14,7 @@ type ScheduleTask = {
   profile: string;
   enabled: boolean;
   kind: string;
+  watch?: string;
   time: string;
   timezone: string;
   next_run_at: string;
@@ -36,6 +37,16 @@ function nextLabel(task: ScheduleTask): string {
 
 function truncateTime(value: string): string {
   return value.slice(0, 5);
+}
+
+function watchValue(task: ScheduleTask): string {
+  return task.watch === "testflight" ? "testflight" : "app_store";
+}
+
+function watchLabel(task: ScheduleTask): string {
+  return watchValue(task) === "testflight"
+    ? t("schedules.watch_testflight")
+    : t("schedules.watch_app_store");
 }
 
 function cycleLabel(task: ScheduleTask): string {
@@ -63,6 +74,7 @@ const runningIds = ref<string[]>([]);
 const form = reactive({
   profile: "",
   kind: "daily",
+  watch: "app_store",
   time: "09:30",
   intervalHours: 2,
   weekdays: [1] as number[],
@@ -103,6 +115,7 @@ async function loadTimezones() {
 function resetForm() {
   form.profile = profileForCreate();
   form.kind = "daily";
+  form.watch = "app_store";
   form.time = "09:30";
   form.intervalHours = 2;
   form.weekdays = [1];
@@ -122,6 +135,7 @@ function openEdit(task: ScheduleTask) {
   notice.value = "";
   form.profile = task.profile;
   form.kind = task.kind;
+  form.watch = watchValue(task);
   form.time = task.time;
   form.intervalHours = task.interval_hours || 1;
   form.weekdays = [...(task.weekdays || [])];
@@ -138,6 +152,7 @@ async function toggle(task: ScheduleTask, enabled: boolean) {
   const body: Record<string, unknown> = {
     profile: task.profile,
     kind: task.kind,
+    watch: watchValue(task),
     time: task.time,
     enabled,
   };
@@ -157,6 +172,7 @@ async function save() {
   const body: Record<string, unknown> = {
     profile: form.profile,
     kind: form.kind,
+    watch: form.watch,
     time: truncateTime(form.time),
   };
   if (form.kind === "interval") body.interval_hours = Number(form.intervalHours);
@@ -268,6 +284,7 @@ onMounted(async () => {
           <tr>
             <th>{{ t("schedules.col_id") }}</th>
             <th>{{ t("schedules.col_app") }}</th>
+            <th>{{ t("schedules.col_watch") }}</th>
             <th>{{ t("schedules.col_cycle") }}</th>
             <th>{{ t("schedules.col_next") }}</th>
             <th>{{ t("schedules.col_last") }}</th>
@@ -279,6 +296,7 @@ onMounted(async () => {
           <tr v-for="row in rows" :key="row.id">
             <td class="mono">{{ row.id }}</td>
             <td>{{ row.profile }}</td>
+            <td>{{ watchLabel(row) }}</td>
             <td class="mono">{{ row.cycle }}</td>
             <td class="mono">{{ row.nextText }}</td>
             <td>{{ row.last_result || "-" }}</td>
@@ -305,13 +323,20 @@ onMounted(async () => {
       </table>
     </section>
 
-    <t-dialog v-model:visible="dialogOpen" :header="dialogTitle" :footer="false" width="480px" placement="center">
+    <t-dialog v-model:visible="dialogOpen" :header="dialogTitle" :footer="false" width="520px" placement="center">
       <div class="dialog-form">
         <label class="field">
           <span>{{ t("schedules.profile") }}</span>
           <t-select v-model="form.profile" :placeholder="t('nav.select_app')">
             <t-option v-for="name in profileNames" :key="name" :value="name" :label="name" />
           </t-select>
+        </label>
+        <label class="field">
+          <span>{{ t("schedules.watch") }}</span>
+          <t-radio-group v-model="form.watch">
+            <t-radio value="app_store">{{ t("schedules.watch_app_store") }}</t-radio>
+            <t-radio value="testflight">{{ t("schedules.watch_testflight") }}</t-radio>
+          </t-radio-group>
         </label>
         <label class="field">
           <span>{{ t("schedules.col_cycle") }}</span>

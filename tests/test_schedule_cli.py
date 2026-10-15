@@ -226,6 +226,22 @@ def test_add_rejects_bad_schedule_fields(scheduled, args):
     assert not path.exists()
 
 
+def test_add_watch_defaults_to_app_store_and_accepts_testflight(scheduled):
+    path, _, _ = scheduled
+    defaulted = _add(["--app", "myapp", "--daily", "--time", "09:30"])
+    assert defaulted.exit_code == 0, _text(defaulted)
+    assert load_tasks(path)[0].watch == "app_store"
+    second = _add(["--app", "myapp", "--daily", "--time", "10:30", "--watch", "testflight"])
+    assert second.exit_code == 0, _text(second)
+    assert [item.watch for item in load_tasks(path)] == ["app_store", "testflight"]
+    listed = runner.invoke(app, ["schedule", "list"])
+    assert "App Store 版本审核" in listed.stdout
+    assert "TF 外部组版本审核" in listed.stdout
+    bad = _add(["--app", "myapp", "--daily", "--time", "11:30", "--watch", "store"])
+    assert bad.exit_code == 1
+    assert "app_store" in _text(bad) or "监听" in _text(bad)
+
+
 def test_add_sorts_weekdays_and_accepts_padded_every(scheduled):
     path, _, _ = scheduled
     weekly = _add(["--app", "myapp", "--weekly", "4,1", "--time", "09:30"])

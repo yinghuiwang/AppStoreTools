@@ -188,6 +188,7 @@ def test_post_shares_the_schedule_file_and_lists_every_profile(scheduled):
     both = client.get("/api/schedules")
     assert [item["profile"] for item in both.json()["tasks"]] == ["myapp", "other"]
     assert "interval_hours" not in both.json()["tasks"][0]
+    assert both.json()["tasks"][0]["watch"] == "app_store"
     deleted = client.delete(f"/api/schedules/{task_id}")
     assert deleted.status_code == 200
     assert task_id not in [item.id for item in load_tasks(path)]
@@ -367,6 +368,13 @@ def test_schedules_page_is_wired():
     assert en["nav.schedules"] == "Schedules"
     assert zh["schedules.run"] == "立即执行"
     assert en["schedules.run"] == "Run now"
+    assert zh["schedules.watch_app_store"] == "App Store 版本审核"
+    assert en["schedules.watch_app_store"] == "App Store version review"
+    assert zh["schedules.watch_testflight"] == "TF 外部组版本审核"
+    assert en["schedules.watch_testflight"] == "TF external Beta Review"
+    assert 'v-model="form.watch"' in view
+    assert 'value="app_store"' in view
+    assert 'value="testflight"' in view
     assert "isRunning(row.id)" in view
     assert ':disabled="isRunning(row.id)"' in view
     assert ':disabled="!row.enabled"' not in view
@@ -391,6 +399,144 @@ def test_schedules_page_is_wired():
     assert "next_run_at" not in view.split("JSON.stringify", 1)[-1]
     assert "notify_kinds" not in view
     assert "notify_statuses" not in view
+
+
+def test_create_and_update_watch_testflight(scheduled):
+    client, path, _, _ = scheduled
+    created = client.post(
+        "/api/schedules",
+        json={"profile": "myapp", "kind": "daily", "time": "09:30", "watch": "testflight"},
+    )
+    assert created.status_code == 200, created.text
+    assert created.json()["watch"] == "testflight"
+    assert load_tasks(path)[0].watch == "testflight"
+    omitted = client.post("/api/schedules", json={"profile": "myapp", "kind": "daily", "time": "10:30"})
+    assert omitted.status_code == 200
+    assert omitted.json()["watch"] == "app_store"
+    updated = client.put(
+        f"/api/schedules/{created.json()['id']}",
+        json={
+            "profile": "myapp",
+            "kind": "daily",
+            "time": "09:30",
+            "enabled": True,
+            "watch": "app_store",
+        },
+    )
+    assert updated.status_code == 200
+    assert updated.json()["watch"] == "app_store"
+    zh = client.post(
+        "/api/schedules",
+        json={"profile": "myapp", "kind": "daily", "time": "11:30", "watch": "store"},
+        cookies={"asc_lang": "zh"},
+    )
+    assert zh.status_code == 400
+    assert zh.json() == {"error": "监听类型必须是 app_store 或 testflight"}
+    en = client.post(
+        "/api/schedules",
+        json={"profile": "myapp", "kind": "daily", "time": "11:30", "watch": "store"},
+        cookies={"asc_lang": "en"},
+    )
+    assert en.status_code == 400
+    assert en.json() == {"error": "Watch type must be app_store or testflight"}
+
+
+def test_run_testflight_watch_queries_builds_not_versions(
+    scheduled, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    client, path, _, _ = scheduled
+    created = client.post(
+        "/api/schedules",
+        json={"profile": "myapp", "kind": "daily", "time": "09:30", "watch": "testflight"},
+    )
+    assert created.status_code == 200
+    task_id = created.json()["id"]
+    key = tmp_path / "AuthKey.p8"
+    key.write_bytes(b"not-a-real-key")
+
+    class FakeConnect:
+        def __init__(self, issuer_id, key_id, key_file):
+            self.args = (issuer_id, key_id, key_file)
+
+        def list_builds(self, app_id, **params):
+            calls.append(("list_builds", app_id, params))
+            return {
+                "data": [
+                    {
+                        "type": "builds",
+                        "id": "b1",
+                        "attributes": {"version": "123", "expired": False},
+                        "relationships": {
+                            "betaAppReviewSubmission": {
+                                "data": {"type": "betaAppReviewSubmissions", "id": "s1"}
+                            },
+                            "buildBetaDetail": {
+                                "data": {"type": "buildBetaDetails", "id": "d1"}
+                            },
+                            "betaGroups": {
+                                "data": [{"type": "betaGroups", "id": "g1"}]
+                            },
+                        },
+                    }
+                ],
+                "included": [
+                    {
+                        "type": "betaAppReviewSubmissions",
+                        "id": "s1",
+                        "attributes": {"betaReviewState": "WAITING_FOR_REVIEW"},
+                    },
+                    {
+                        "type": "buildBetaDetails",
+                        "id": "d1",
+                        "attributes": {"externalBuildState": "WAITING_FOR_BETA_REVIEW"},
+                    },
+                    {
+                        "type": "betaGroups",
+                        "id": "g1",
+                        "attributes": {"name": "External Testers", "isInternalGroup": False},
+                    },
+                ],
+            }
+
+        def list_beta_groups(self, app_id):
+            raise AssertionError("groups included")
+
+        def _get_paginated_data(self, api_path, **params):
+            raise AssertionError(api_path)
+
+    calls = []
+
+    def lookup(name):
+        return {
+            "issuer_id": "issuer",
+            "key_id": "KEYID",
+            "key_file": str(key),
+            "app_id": "123",
+        }
+
+    monkeypatch.setattr("asc.schedule.query_review", real_query_review)
+    monkeypatch.setattr("asc.schedule.default_profile_lookup", lookup)
+    monkeypatch.setattr("asc.schedule._default_guard", lambda profile, creds: None)
+    monkeypatch.setattr("asc.api.AppStoreConnectAPI", FakeConnect)
+    monkeypatch.setattr(
+        "asc.schedule._default_send",
+        lambda text: type("S", (), {"config_invalid": False, "failures": [], "attempted": False})(),
+    )
+
+    from asc.schedule import SendOutcome
+
+    monkeypatch.setattr(
+        "asc.schedule.send_channels",
+        lambda text, sender=None: SendOutcome(False, [], False),
+    )
+
+    ran = client.post(f"/api/schedules/{task_id}/run")
+    assert ran.status_code == 200, ran.text
+    body = ran.json()
+    assert body["watch"] == "testflight"
+    assert body["last_result"].startswith("TF 123")
+    assert body["last_error"] == ""
+    assert calls and calls[0][0] == "list_builds"
 
 
 def test_web_install_uses_sibling_asc_for_module_invocation(

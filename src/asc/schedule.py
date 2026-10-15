@@ -32,6 +32,14 @@ except ImportError:  # pragma: no cover - Python 3.11+ has tomllib
 _ID_RE = re.compile(r"^[0-9a-f]{8}$")
 _TIME_RE = re.compile(r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
 _TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$")
+WATCH_APP_STORE = "app_store"
+WATCH_TESTFLIGHT = "testflight"
+VALID_WATCH = frozenset({WATCH_APP_STORE, WATCH_TESTFLIGHT})
+WATCH_LABELS = {
+    WATCH_APP_STORE: "App Store 版本审核",
+    WATCH_TESTFLIGHT: "TestFlight 外部组版本审核",
+}
+_OPTIONAL_KEYS = frozenset({"watch"})
 _BASE_KEYS = frozenset(
     {
         "id",
@@ -91,6 +99,7 @@ class ScheduleTask:
         last_result: str,
         interval_hours: Optional[int] = None,
         weekdays: Optional[list] = None,
+        watch: str = WATCH_APP_STORE,
     ) -> None:
         self.id = id
         self.profile = profile
@@ -104,6 +113,7 @@ class ScheduleTask:
         self.last_result = last_result
         self.interval_hours = interval_hours
         self.weekdays = weekdays
+        self.watch = watch if watch in VALID_WATCH else WATCH_APP_STORE
 
 
 def default_schedule_path() -> Path:
@@ -231,7 +241,8 @@ def _parse_task(item: object, seen: set) -> ScheduleTask:
         raise ScheduleCorruptError()
     kind = item.get("kind")
     expected = _expected_keys(kind)
-    if expected is None or set(item) != expected:
+    keys = set(item)
+    if expected is None or not expected <= keys or keys - expected - _OPTIONAL_KEYS:
         raise ScheduleCorruptError()
     task_id = _require_id(item["id"], seen)
     profile = _require_text(item["profile"])
@@ -265,6 +276,7 @@ def _parse_task(item: object, seen: set) -> ScheduleTask:
         last_result=last_result,
         interval_hours=interval_hours,
         weekdays=weekdays,
+        watch=_parse_watch(item),
     )
 
 
@@ -276,6 +288,23 @@ def _expected_keys(kind: object) -> Optional[frozenset]:
     if kind == "weekly":
         return _BASE_KEYS | {"weekdays"}
     return None
+
+
+def _parse_watch(item: dict) -> str:
+    if "watch" not in item:
+        return WATCH_APP_STORE
+    value = item["watch"]
+    if value not in VALID_WATCH:
+        raise ScheduleCorruptError()
+    return value
+
+
+def require_watch(value: object) -> str:
+    if value is None:
+        return WATCH_APP_STORE
+    if not isinstance(value, str) or value not in VALID_WATCH:
+        raise ScheduleError("watch")
+    return value
 
 
 def _require_text(value: object) -> str:
@@ -345,6 +374,7 @@ def _render_task(task: ScheduleTask) -> str:
         f"profile = {_toml_basic(task.profile)}",
         f"enabled = {'true' if task.enabled else 'false'}",
         f"kind = {_toml_basic(task.kind)}",
+        f"watch = {_toml_basic(task.watch or WATCH_APP_STORE)}",
         f"time = {_toml_basic(task.time)}",
     ]
     if task.kind == "interval":
@@ -914,6 +944,7 @@ def add_task(
     interval_hours: Optional[int] = None,
     weekdays: Optional[list] = None,
     enabled: bool = True,
+    watch: str = WATCH_APP_STORE,
     schedule_path: Path,
     now: datetime,
     profile_lookup,
@@ -925,6 +956,7 @@ def add_task(
 ) -> tuple:
     parse_hhmm(time)
     interval_hours, weekdays = _validate_kind_fields(kind, interval_hours, weekdays)
+    watch = require_watch(watch)
     if not isinstance(enabled, bool):
         raise ScheduleError("enabled")
     _require_profile(profile, profile_lookup)
@@ -952,6 +984,7 @@ def add_task(
             last_result="",
             interval_hours=interval_hours,
             weekdays=weekdays,
+            watch=watch,
         )
         task.next_run_at = format_timestamp(next_slot(task, now))
         tasks.append(task)
@@ -998,9 +1031,12 @@ def update_task(
     schedule_path: Path,
     now: datetime,
     profile_lookup,
+    watch: Optional[str] = None,
 ) -> ScheduleTask:
     parse_hhmm(time)
     interval_hours, weekdays = _validate_kind_fields(kind, interval_hours, weekdays)
+    if watch is not None:
+        watch = require_watch(watch)
     if not isinstance(enabled, bool):
         raise ScheduleError("enabled")
     _require_profile(profile, profile_lookup)
@@ -1020,6 +1056,8 @@ def update_task(
         task.enabled = enabled
         task.interval_hours = interval_hours
         task.weekdays = weekdays
+        if watch is not None:
+            task.watch = watch
         if changed:
             task.next_run_at = format_timestamp(next_slot(task, now))
         save_tasks(schedule_path, tasks)
@@ -1054,9 +1092,15 @@ IN_REVIEW_LABELS = {
 
 
 class ReviewSnapshot:
-    def __init__(self, in_review: list, on_sale: list) -> None:
+    def __init__(
+        self,
+        in_review: list,
+        on_sale: list,
+        watch: str = WATCH_APP_STORE,
+    ) -> None:
         self.in_review = in_review
         self.on_sale = on_sale
+        self.watch = watch if watch in VALID_WATCH else WATCH_APP_STORE
 
 
 def _version_state(attributes: dict):
@@ -1100,6 +1144,12 @@ def classify_versions(versions: list) -> ReviewSnapshot:
 
 
 def format_last_result(snapshot: ReviewSnapshot) -> str:
+    if snapshot.watch == WATCH_TESTFLIGHT:
+        if snapshot.in_review:
+            return "；".join(f"TF {name} {label}" for name, label in snapshot.in_review)
+        if snapshot.on_sale:
+            return "当前无 TF 外部组在审构建；可测试 " + "、".join(snapshot.on_sale)
+        return "当前无 TF 外部组在审构建；暂无可测试构建"
     if snapshot.in_review:
         return "；".join(f"{name} {label}" for name, label in snapshot.in_review)
     if snapshot.on_sale:
@@ -1112,8 +1162,25 @@ def format_checked_at(now: datetime, timezone_name: str) -> str:
     return f"{local.strftime('%Y-%m-%d %H:%M')}（{timezone_name}）"
 
 
+def watch_label(watch: str) -> str:
+    return WATCH_LABELS.get(watch, WATCH_LABELS[WATCH_APP_STORE])
+
+
 def build_success_message(profile: str, checked_at: str, snapshot: ReviewSnapshot) -> str:
-    lines = [f"应用：{profile}", f"检查时间：{checked_at}"]
+    lines = [
+        f"应用：{profile}",
+        f"监听：{watch_label(snapshot.watch)}",
+        f"检查时间：{checked_at}",
+    ]
+    if snapshot.watch == WATCH_TESTFLIGHT:
+        if snapshot.in_review:
+            lines.append("TestFlight 外部组在审构建：")
+            lines.extend(f"- {name} {label}" for name, label in snapshot.in_review)
+        else:
+            lines.append("当前无 TF 外部组在审构建")
+            sold = "、".join(snapshot.on_sale) if snapshot.on_sale else "暂无可测试构建"
+            lines.append(f"可测试：{sold}")
+        return "\n".join(lines)
     if snapshot.in_review:
         lines.append("在审版本：")
         lines.extend(f"- {name} {label}" for name, label in snapshot.in_review)
@@ -1124,8 +1191,18 @@ def build_success_message(profile: str, checked_at: str, snapshot: ReviewSnapsho
     return "\n".join(lines)
 
 
-def build_failure_message(profile: str, checked_at: str, error: str) -> str:
-    return f"应用：{profile}\n检查时间：{checked_at}\n检查失败：{error}"
+def build_failure_message(
+    profile: str,
+    checked_at: str,
+    error: str,
+    watch: str = WATCH_APP_STORE,
+) -> str:
+    return (
+        f"应用：{profile}\n"
+        f"监听：{watch_label(watch)}\n"
+        f"检查时间：{checked_at}\n"
+        f"检查失败：{error}"
+    )
 
 
 def clamp_error(text: str) -> str:
@@ -1195,28 +1272,28 @@ def _default_guard(profile: str, creds: dict) -> None:
     )
 
 
-def query_review(
+def _open_query_api(
     profile: str,
     *,
     profile_lookup=None,
     api_factory=None,
     guard=None,
-) -> QueryOutcome:
+):
     from asc.guard import GuardError, GuardViolationError
 
     lookup = default_profile_lookup if profile_lookup is None else profile_lookup
     creds = lookup(profile)
     if creds is None:
-        return QueryOutcome("检查失败", "profile 不存在", None)
+        return QueryOutcome("检查失败", "profile 不存在", None), None, ""
     if not isinstance(creds, dict) or not _credentials_ready(creds):
-        return QueryOutcome("检查失败", "凭证不完整", None)
+        return QueryOutcome("检查失败", "凭证不完整", None), None, ""
     try:
         if guard is None:
             _default_guard(profile, creds)
         else:
             guard(profile, creds)
     except (GuardViolationError, GuardError) as exc:
-        return QueryOutcome("检查失败", clamp_error(str(exc)), None)
+        return QueryOutcome("检查失败", clamp_error(str(exc)), None), None, ""
     factory = _default_api_factory if api_factory is None else api_factory
     issuer_id = _credential_text(creds, "issuer_id")
     key_id = _credential_text(creds, "key_id")
@@ -1224,6 +1301,61 @@ def query_review(
     app_id = _credential_text(creds, "app_id")
     try:
         api = factory(issuer_id, key_id, key_file)
+    except Exception as exc:
+        return QueryOutcome("检查失败", clamp_error(str(exc)), None), None, ""
+    return None, api, app_id
+
+
+def query_testflight(
+    profile: str,
+    *,
+    profile_lookup=None,
+    api_factory=None,
+    guard=None,
+) -> QueryOutcome:
+    from asc.testflight import classify_testflight_builds, fetch_testflight_builds
+
+    failed, api, app_id = _open_query_api(
+        profile,
+        profile_lookup=profile_lookup,
+        api_factory=api_factory,
+        guard=guard,
+    )
+    if failed is not None:
+        return failed
+    try:
+        builds = fetch_testflight_builds(api, app_id)
+        in_review, ready = classify_testflight_builds(builds)
+        snapshot = ReviewSnapshot(in_review, ready, watch=WATCH_TESTFLIGHT)
+    except Exception as exc:
+        return QueryOutcome("检查失败", clamp_error(str(exc)), None)
+    return QueryOutcome(format_last_result(snapshot), "", snapshot)
+
+
+def query_review(
+    profile: str,
+    *,
+    profile_lookup=None,
+    api_factory=None,
+    guard=None,
+    watch: str = WATCH_APP_STORE,
+) -> QueryOutcome:
+    if watch == WATCH_TESTFLIGHT:
+        return query_testflight(
+            profile,
+            profile_lookup=profile_lookup,
+            api_factory=api_factory,
+            guard=guard,
+        )
+    failed, api, app_id = _open_query_api(
+        profile,
+        profile_lookup=profile_lookup,
+        api_factory=api_factory,
+        guard=guard,
+    )
+    if failed is not None:
+        return failed
+    try:
         versions = api._get_paginated_data(
             f"/v1/apps/{app_id}/appStoreVersions",
             **{"filter[platform]": "IOS"},
@@ -1302,6 +1434,19 @@ def _stamp_last_run(task: ScheduleTask, now: datetime) -> str:
     return format_timestamp(local)
 
 
+def _task_watch(task: ScheduleTask) -> str:
+    watch = getattr(task, "watch", None)
+    return watch if watch in VALID_WATCH else WATCH_APP_STORE
+
+
+def _invoke_query(query, task: ScheduleTask):
+    watch = _task_watch(task)
+    try:
+        return query(task.profile, watch=watch)
+    except TypeError:
+        return query(task.profile)
+
+
 def execute_task(
     task: ScheduleTask,
     tasks: list,
@@ -1313,7 +1458,7 @@ def execute_task(
     send,
 ) -> str:
     try:
-        outcome = query(task.profile)
+        outcome = _invoke_query(query, task)
     except Exception as exc:
         outcome = QueryOutcome("检查失败", clamp_error(str(exc)), None)
     if not isinstance(outcome, QueryOutcome):
@@ -1326,7 +1471,12 @@ def execute_task(
     save_tasks(schedule_path, tasks)
     checked = format_checked_at(now, task.timezone)
     if outcome.query_error or outcome.snapshot is None:
-        text = build_failure_message(task.profile, checked, outcome.query_error or "检查失败")
+        text = build_failure_message(
+            task.profile,
+            checked,
+            outcome.query_error or "检查失败",
+            watch=_task_watch(task),
+        )
     else:
         text = build_success_message(task.profile, checked, outcome.snapshot)
     send_outcome = send(text)

@@ -254,6 +254,9 @@ app.add_typer(guard_app, name="guard")
 from asc.commands.schedule_cmd import schedule_app
 app.add_typer(schedule_app, name="schedule")
 
+from asc.commands.tf import tf_app
+app.add_typer(tf_app, name="tf")
+
 # Install global exception handler (runs at module import time)
 from asc.error_handler import install
 install()

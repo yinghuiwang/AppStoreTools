@@ -12,10 +12,12 @@ import typer
 from asc import schedule
 from asc.i18n import HELP, t
 from asc.schedule import (
+    WATCH_APP_STORE,
     ScheduleError,
     SystemHeartbeatBackend,
     parse_timestamp,
     parse_weekdays,
+    require_watch,
     resolve_asc_executable,
     user_message,
 )
@@ -69,13 +71,14 @@ def _timezone_when_capture_fails() -> str:
         raise
 
 
-def _add_schedule(profile, kind, when, interval_hours, weekdays, timezone):
+def _add_schedule(profile, kind, when, interval_hours, weekdays, timezone, watch):
     kwargs = dict(
         profile=profile,
         kind=kind,
         time=when,
         interval_hours=interval_hours,
         weekdays=weekdays,
+        watch=watch,
         schedule_path=schedule.default_schedule_path(),
         now=datetime.now().astimezone(),
         profile_lookup=schedule.default_profile_lookup,
@@ -112,10 +115,14 @@ def cmd_add(
     weekly: Optional[str] = typer.Option(None, "--weekly"),
     time: str = typer.Option(..., "--time"),
     timezone: Optional[str] = typer.Option(None, "--timezone", help=t(HELP["schedule_timezone"])),
+    watch: str = typer.Option(WATCH_APP_STORE, "--watch", help=t(HELP["schedule_watch"])),
 ) -> None:
     try:
         kind, interval_hours, weekdays = _choose_kind(daily, every, weekly)
-        created, installed_now = _add_schedule(app_name, kind, time, interval_hours, weekdays, timezone)
+        watch_name = require_watch(watch)
+        created, installed_now = _add_schedule(
+            app_name, kind, time, interval_hours, weekdays, timezone, watch_name
+        )
     except ScheduleError as exc:
         _fail(exc)
     typer.echo(f"{created.id} {created.next_run_at}")
@@ -135,6 +142,7 @@ def cmd_list() -> None:
     header = [
         user_message("col_id"),
         user_message("col_app"),
+        user_message("col_watch"),
         user_message("col_cycle"),
         user_message("col_next"),
         user_message("col_last"),
@@ -148,6 +156,11 @@ def cmd_list() -> None:
                 [
                     task.id,
                     task.profile,
+                    user_message(
+                        "watch_testflight"
+                        if getattr(task, "watch", None) == schedule.WATCH_TESTFLIGHT
+                        else "watch_app_store"
+                    ),
                     cycle_label(task),
                     _next_label(task),
                     task.last_result or "-",

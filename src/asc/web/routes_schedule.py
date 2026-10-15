@@ -10,11 +10,13 @@ from fastapi.responses import JSONResponse
 
 from asc import schedule
 from asc.schedule import (
+    WATCH_APP_STORE,
     ScheduleCorruptError,
     ScheduleError,
     ScheduleLockTimeout,
     ScheduleNotFound,
     parse_hhmm,
+    require_watch,
 )
 from asc.web.i18n import t
 
@@ -112,6 +114,15 @@ def _schedule_fields(body: dict, *, creating: bool):
     return profile, kind, when, enabled, interval_hours, weekdays
 
 
+def _requested_watch(body: dict):
+    if "watch" not in body:
+        return None
+    value = body.get("watch")
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    return require_watch(value)
+
+
 def _requested_timezone(body: dict):
     if "timezone" not in body:
         return None
@@ -127,6 +138,7 @@ def _task_json(task) -> dict:
         "profile": task.profile,
         "enabled": task.enabled,
         "kind": task.kind,
+        "watch": getattr(task, "watch", None) or WATCH_APP_STORE,
         "time": task.time,
         "timezone": task.timezone,
         "next_run_at": task.next_run_at,
@@ -176,6 +188,7 @@ async def create_schedule(request: Request):
     try:
         profile, kind, when, enabled, interval_hours, weekdays = _schedule_fields(body, creating=True)
         timezone_name = _requested_timezone(body)
+        watch = _requested_watch(body) or WATCH_APP_STORE
     except ScheduleError as exc:
         return _schedule_error(request, exc)
 
@@ -187,6 +200,7 @@ async def create_schedule(request: Request):
             interval_hours=interval_hours,
             weekdays=weekdays,
             enabled=enabled,
+            watch=watch,
             timezone=timezone_name,
             schedule_path=schedule.default_schedule_path(),
             now=datetime.now().astimezone(),
@@ -210,6 +224,7 @@ async def update_schedule(task_id: str, request: Request):
         return _error(request, "schedules.err.json", 400)
     try:
         profile, kind, when, enabled, interval_hours, weekdays = _schedule_fields(body, creating=False)
+        watch = _requested_watch(body)
     except ScheduleError as exc:
         return _schedule_error(request, exc)
 
@@ -222,6 +237,7 @@ async def update_schedule(task_id: str, request: Request):
             enabled=enabled,
             interval_hours=interval_hours,
             weekdays=weekdays,
+            watch=watch,
             schedule_path=schedule.default_schedule_path(),
             now=datetime.now().astimezone(),
             profile_lookup=schedule.default_profile_lookup,

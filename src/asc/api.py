@@ -308,14 +308,24 @@ class AppStoreConnectAPI:
     def get(self, path: str, **params) -> dict:
         return self._request("GET", path, params=params)
 
-    def _get_paginated_data(self, path: str, **params) -> list:
-        """Follow ``links.next`` until exhausted.
+    def _get_paginated_document(self, path: str, **params) -> dict:
+        """Follow ``links.next`` and collect ``data`` plus ``included``.
 
         Guards against broken ASC pagination that repeats the same ``next`` URL
         (would otherwise spin forever and freeze the calling Web worker).
         """
         resp = self.get(path, **params)
-        data = list(resp.get("data", []))
+        data = list(resp.get("data", []) or [])
+        included: list = []
+        seen_included: set = set()
+        for item in resp.get("included", []) or []:
+            if not isinstance(item, dict):
+                continue
+            key = (item.get("type"), item.get("id"))
+            if key in seen_included:
+                continue
+            seen_included.add(key)
+            included.append(item)
         seen_pages = {path}
         max_pages = 500
 
@@ -323,13 +333,29 @@ class AppStoreConnectAPI:
             links = resp.get("links", {}) or {}
             next_page = links.get("next") if isinstance(links, dict) else None
             if not next_page or next_page in seen_pages:
-                return data
+                return {"data": data, "included": included}
             seen_pages.add(next_page)
             resp = self.get(next_page)
-            data.extend(resp.get("data", []))
+            data.extend(resp.get("data", []) or [])
+            for item in resp.get("included", []) or []:
+                if not isinstance(item, dict):
+                    continue
+                key = (item.get("type"), item.get("id"))
+                if key in seen_included:
+                    continue
+                seen_included.add(key)
+                included.append(item)
         raise Exception(
             f"分页结果过多或 links.next 循环，已中止（>{max_pages} 页）: {path}"
         )
+
+    def _get_paginated_data(self, path: str, **params) -> list:
+        """Follow ``links.next`` until exhausted.
+
+        Guards against broken ASC pagination that repeats the same ``next`` URL
+        (would otherwise spin forever and freeze the calling Web worker).
+        """
+        return self._get_paginated_document(path, **params)["data"]
 
     def post(self, path: str, data: dict) -> dict:
         return self._request("POST", path, json=data)
@@ -1377,3 +1403,32 @@ class AppStoreConnectAPI:
         return self.delete(
             f"/v1/subscriptionAppStoreReviewScreenshots/{screenshot_id}"
         )
+
+    # ── TestFlight（只读） ──
+
+    def list_builds(self, app_id: str, **params) -> dict:
+        """List builds for an app, including related resources when requested.
+
+        Pass ``include`` (for example
+        ``betaAppReviewSubmission,buildBetaDetail,betaGroups``) to avoid
+        per-build follow-up GETs. Returns ``{"data": [...], "included": [...]}``.
+        """
+        query = {"filter[app]": app_id, "limit": 200}
+        query.update(params)
+        return self._get_paginated_document("/v1/builds", **query)
+
+    def list_beta_groups(self, app_id: str, **params) -> list:
+        query = {"filter[app]": app_id, "limit": 200}
+        query.update(params)
+        return self._get_paginated_data("/v1/betaGroups", **query)
+
+    def list_beta_app_review_submissions(self, build_id: str) -> list:
+        return self._get_paginated_data(
+            "/v1/betaAppReviewSubmissions",
+            **{"filter[build]": build_id},
+        )
+
+    def get_build_beta_detail(self, build_id: str) -> Optional[dict]:
+        resp = self.get(f"/v1/builds/{build_id}/buildBetaDetail")
+        data = resp.get("data")
+        return data if isinstance(data, dict) else None

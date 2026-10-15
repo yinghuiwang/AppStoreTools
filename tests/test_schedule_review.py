@@ -2,6 +2,8 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from asc.schedule import (
+    WATCH_TESTFLIGHT,
+    ReviewSnapshot,
     build_failure_message,
     build_success_message,
     clamp_error,
@@ -80,6 +82,7 @@ def test_messages_use_profile_name_and_drop_seconds():
     ])
     assert build_success_message("myapp", checked, reviewing) == (
         "应用：myapp\n"
+        "监听：App Store 版本审核\n"
         "检查时间：2026-10-14 09:31（Asia/Shanghai）\n"
         "在审版本：\n"
         "- 1.2.3 审核中\n"
@@ -91,6 +94,36 @@ def test_messages_use_profile_name_and_drop_seconds():
     assert build_success_message("myapp", checked, empty).endswith("已上架：暂无已上架版本")
     assert build_failure_message("myapp", checked, "凭证不完整") == (
         "应用：myapp\n"
+        "监听：App Store 版本审核\n"
+        "检查时间：2026-10-14 09:31（Asia/Shanghai）\n"
+        "检查失败：凭证不完整"
+    )
+
+
+def test_testflight_messages_are_not_store_review():
+    checked = "2026-10-14 09:31（Asia/Shanghai）"
+    snapshot = ReviewSnapshot(
+        [("123（External）", "等待 Beta 审核")],
+        [],
+        watch=WATCH_TESTFLIGHT,
+    )
+    assert format_last_result(snapshot) == "TF 123（External） 等待 Beta 审核"
+    assert build_success_message("myapp", checked, snapshot) == (
+        "应用：myapp\n"
+        "监听：TestFlight 外部组版本审核\n"
+        "检查时间：2026-10-14 09:31（Asia/Shanghai）\n"
+        "TestFlight 外部组在审构建：\n"
+        "- 123（External） 等待 Beta 审核"
+    )
+    idle = ReviewSnapshot([], ["120"], watch=WATCH_TESTFLIGHT)
+    assert format_last_result(idle) == "当前无 TF 外部组在审构建；可测试 120"
+    empty = ReviewSnapshot([], [], watch=WATCH_TESTFLIGHT)
+    assert format_last_result(empty) == "当前无 TF 外部组在审构建；暂无可测试构建"
+    assert "App Store" not in build_success_message("myapp", checked, snapshot)
+    assert "在审版本" not in build_success_message("myapp", checked, snapshot)
+    assert build_failure_message("myapp", checked, "凭证不完整", watch=WATCH_TESTFLIGHT) == (
+        "应用：myapp\n"
+        "监听：TestFlight 外部组版本审核\n"
         "检查时间：2026-10-14 09:31（Asia/Shanghai）\n"
         "检查失败：凭证不完整"
     )

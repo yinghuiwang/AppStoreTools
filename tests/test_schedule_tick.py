@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from asc.schedule import (
+    WATCH_TESTFLIGHT,
     QueryOutcome,
     ReviewSnapshot,
     ScheduleNotFound,
@@ -250,6 +251,33 @@ def test_missing_schedule_tree_exits_0(tmp_path: Path, capsys):
     assert tick(schedule_path=path, query=_ok_query, send=_quiet_send) == 0
     assert not path.parent.exists()
     assert capsys.readouterr().out == ""
+
+
+def test_tick_passes_watch_and_keeps_legacy_app_store(tmp_path: Path):
+    path = tmp_path / "schedules.toml"
+    store = _task("a1b2c3d4", "store")
+    flight = _task("b2c3d4e5", "flight", watch=WATCH_TESTFLIGHT)
+    save_tasks(path, [store, flight])
+    seen = []
+
+    def query(profile, watch="app_store"):
+        seen.append((profile, watch))
+        if watch == WATCH_TESTFLIGHT:
+            return QueryOutcome(
+                "TF 123 等待 Beta 审核",
+                "",
+                ReviewSnapshot([("123", "等待 Beta 审核")], [], watch=WATCH_TESTFLIGHT),
+            )
+        return _ok_query(profile)
+
+    now = datetime(2026, 10, 14, 9, 32, tzinfo=SH)
+    assert tick(schedule_path=path, now=now, query=query, send=_quiet_send) == 0
+    assert seen == [("store", "app_store"), ("flight", "testflight")]
+    saved = load_tasks(path)
+    assert saved[0].watch == "app_store"
+    assert saved[0].last_result == "1.2.3 审核中"
+    assert saved[1].watch == "testflight"
+    assert saved[1].last_result == "TF 123 等待 Beta 审核"
 
 
 def test_fcntl_unavailable_exits_1(tmp_path: Path, capsys, monkeypatch: pytest.MonkeyPatch):

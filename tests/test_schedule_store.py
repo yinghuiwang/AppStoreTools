@@ -136,7 +136,9 @@ def test_round_trip_preserves_order_and_kind_fields(tmp_path: Path):
     assert loaded[0].interval_hours is None and loaded[0].weekdays is None
     assert loaded[1].interval_hours == 2 and loaded[1].weekdays is None
     assert loaded[2].weekdays == [1, 4] and loaded[2].interval_hours is None
+    assert [item.watch for item in loaded] == ["app_store", "app_store", "app_store"]
     text = path.read_text(encoding="utf-8")
+    assert 'watch = "app_store"' in text.split("[[tasks]]")[1]
     assert "interval_hours" in text.split("[[tasks]]")[2]
     assert "weekdays" not in text.split("[[tasks]]")[2]
     assert "weekdays" in text.split("[[tasks]]")[3]
@@ -212,3 +214,40 @@ def test_missing_fcntl_does_not_create_schedule(tmp_path: Path, monkeypatch: pyt
             pass
     assert exc.value.code == "fcntl_unavailable"
     assert not path.exists()
+
+
+def test_legacy_task_without_watch_defaults_to_app_store(tmp_path: Path):
+    path = tmp_path / "schedules.toml"
+    path.write_text(
+        "[[tasks]]\n"
+        'id = "a1b2c3d4"\nprofile = "myapp"\nenabled = true\nkind = "daily"\n'
+        'time = "09:30"\ntimezone = "Asia/Shanghai"\n'
+        'next_run_at = "2026-10-15T09:30:00+08:00"\n'
+        'last_run_at = ""\nlast_error = ""\nlast_result = ""\n',
+        encoding="utf-8",
+    )
+    loaded = load_tasks(path)
+    assert loaded[0].watch == "app_store"
+
+
+def test_watch_testflight_round_trips(tmp_path: Path):
+    path = tmp_path / "schedules.toml"
+    task = _daily()
+    task.watch = "testflight"
+    save_tasks(path, [task])
+    assert load_tasks(path)[0].watch == "testflight"
+    assert 'watch = "testflight"' in path.read_text(encoding="utf-8")
+
+
+def test_invalid_watch_is_corrupt(tmp_path: Path):
+    path = tmp_path / "schedules.toml"
+    path.write_text(
+        "[[tasks]]\n"
+        'id = "a1b2c3d4"\nprofile = "myapp"\nenabled = true\nkind = "daily"\n'
+        'watch = "store"\ntime = "09:30"\ntimezone = "Asia/Shanghai"\n'
+        'next_run_at = "2026-10-15T09:30:00+08:00"\n'
+        'last_run_at = ""\nlast_error = ""\nlast_result = ""\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ScheduleCorruptError):
+        load_tasks(path)

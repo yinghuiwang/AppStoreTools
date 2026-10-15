@@ -102,6 +102,10 @@ SCHEDULE_TEXT = {
         'zh': '周期字段与 kind 不匹配',
         'en': 'Schedule fields do not match kind',
     },
+    'watch': {
+        'zh': '监听类型必须是 app_store 或 testflight',
+        'en': 'Watch type must be app_store or testflight',
+    },
     'fcntl_unavailable': {
         'zh': '当前系统不支持文件锁（fcntl）',
         'en': 'File locking (fcntl) is not available on this system',
@@ -140,8 +144,29 @@ SCHEDULE_TEXT = {
     'col_next': {'zh': '下次运行', 'en': 'Next run'},
     'col_last': {'zh': '上次结果', 'en': 'Last result'},
     'col_enabled': {'zh': '启用', 'en': 'Enabled'},
+    'col_watch': {'zh': '监听', 'en': 'Watch'},
+    'watch_app_store': {'zh': 'App Store 版本审核', 'en': 'App Store version review'},
+    'watch_testflight': {'zh': 'TF 外部组版本审核', 'en': 'TF external Beta Review'},
     'state_enabled': {'zh': '启用', 'en': 'enabled'},
     'state_disabled': {'zh': '停用', 'en': 'disabled'},
+}
+
+TF_TEXT = {
+    'title': {
+        'zh': 'TestFlight 外部组版本审核',
+        'en': 'TestFlight external-group Beta Review',
+    },
+    'app': {'zh': '应用', 'en': 'App'},
+    'col_build': {'zh': '构建号', 'en': 'Build'},
+    'col_groups': {'zh': '外部组', 'en': 'External groups'},
+    'col_beta_review': {'zh': 'betaReviewState', 'en': 'betaReviewState'},
+    'col_external_state': {'zh': 'externalBuildState', 'en': 'externalBuildState'},
+    'empty': {'zh': '当前没有构建', 'en': 'No builds found'},
+    'none_external': {'zh': '（无外部组）', 'en': '(no external group)'},
+    'failed': {
+        'zh': '查询 TestFlight 状态失败：{error}',
+        'en': 'Failed to query TestFlight status: {error}',
+    },
 }
 
 
@@ -395,6 +420,18 @@ HELP = {
     'schedule_timezone': {
         'en': 'IANA time zone, for example Asia/Shanghai. Omit to use the system time zone.',
         'zh': 'IANA 时区，例如 Asia/Shanghai。省略时使用系统时区。',
+    },
+    'schedule_watch': {
+        'en': 'What to watch: app_store (App Store version review) or testflight (TestFlight external-group Beta Review). Default: app_store.',
+        'zh': '监听类型：app_store（App Store 版本审核）或 testflight（TestFlight 外部组版本审核）。默认 app_store。',
+    },
+    'cmd_tf': {
+        'en': 'Query TestFlight external-group Beta Review status.',
+        'zh': '查询 TestFlight 外部组 Beta 审核状态。',
+    },
+    'cmd_tf_status': {
+        'en': 'Show TestFlight external-group Beta Review status for an app.',
+        'zh': '显示某个 App 的 TestFlight 外部组 Beta 审核状态。',
     },
     'cmd_app_add': {
         'en': 'Add a new app profile.',
