@@ -5,21 +5,13 @@ from types import SimpleNamespace
 from typer.testing import CliRunner
 
 from asc.cli import app
-from tests.test_testflight import _build, _document
+from asc.i18n import TF_TEXT, t
+from tests.test_testflight import GroupFirstAPI
 
 runner = CliRunner()
 
 
-def test_tf_status_prints_build_and_states(monkeypatch):
-    class FakeAPI:
-        def list_builds(self, app_id, **params):
-            assert app_id == "123"
-            assert "betaAppReviewSubmission" in params["include"]
-            return _document(_build("b1", "321"))
-
-        def list_beta_groups(self, app_id):
-            raise AssertionError("included groups")
-
+def _install_api(monkeypatch, api):
     monkeypatch.setattr(
         "asc.commands.tf.resolve_app_profile",
         lambda app_name, config: "myapp",
@@ -30,33 +22,52 @@ def test_tf_status_prints_build_and_states(monkeypatch):
     )
     monkeypatch.setattr(
         "asc.commands.tf.make_api_from_config",
-        lambda config: (FakeAPI(), "123"),
+        lambda config: (api, "123"),
     )
+
+
+def test_tf_status_prints_build_and_states(monkeypatch):
+    api = GroupFirstAPI()
+    _install_api(monkeypatch, api)
     result = runner.invoke(app, ["tf", "status", "--app", "myapp"])
     assert result.exit_code == 0, result.output
     assert "321" in result.output
-    assert "External Testers" in result.output
+    assert "Public" in result.output
     assert "WAITING_FOR_REVIEW" in result.output
     assert "WAITING_FOR_BETA_REVIEW" in result.output
+    assert any(call[0] == "list_beta_group_builds" for call in api.calls)
+
+
+def test_tf_status_explains_no_external_groups(monkeypatch):
+    api = GroupFirstAPI(
+        groups=[{"id": "g-int", "attributes": {"name": "QA", "isInternalGroup": True}}],
+        group_builds={},
+    )
+    _install_api(monkeypatch, api)
+    result = runner.invoke(app, ["tf", "status", "--app", "myapp"])
+    assert result.exit_code == 0, result.output
+    assert t(TF_TEXT["no_external_groups"]) in result.output
+    assert not any(call[0] == "list_beta_group_builds" for call in api.calls)
+
+
+def test_tf_status_prints_not_submitted(monkeypatch):
+    api = GroupFirstAPI(
+        submissions={"b1": []},
+        details={"b1": {"id": "d1", "attributes": {"externalBuildState": "READY_FOR_BETA_SUBMISSION"}}},
+    )
+    _install_api(monkeypatch, api)
+    result = runner.invoke(app, ["tf", "status", "--app", "myapp"])
+    assert result.exit_code == 0, result.output
+    assert t(TF_TEXT["not_submitted"]) in result.output
+    assert "READY_FOR_BETA_SUBMISSION" in result.output
 
 
 def test_tf_status_exits_when_api_fails(monkeypatch):
     class FakeAPI:
-        def list_builds(self, app_id, **params):
+        def list_beta_groups(self, app_id, **params):
             raise RuntimeError("token expired")
 
-    monkeypatch.setattr(
-        "asc.commands.tf.resolve_app_profile",
-        lambda app_name, config: "myapp",
-    )
-    monkeypatch.setattr(
-        "asc.commands.tf.Config",
-        lambda app_name=None: SimpleNamespace(app_name="myapp"),
-    )
-    monkeypatch.setattr(
-        "asc.commands.tf.make_api_from_config",
-        lambda config: (FakeAPI(), "123"),
-    )
+    _install_api(monkeypatch, FakeAPI())
     monkeypatch.setattr("asc.commands.tf.get_action_hint", lambda exc: None)
     result = runner.invoke(app, ["tf", "status", "--app", "myapp"])
     assert result.exit_code == 1

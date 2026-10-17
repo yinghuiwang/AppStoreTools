@@ -163,6 +163,15 @@ TF_TEXT = {
     'col_external_state': {'zh': 'externalBuildState', 'en': 'externalBuildState'},
     'empty': {'zh': '当前没有构建', 'en': 'No builds found'},
     'none_external': {'zh': '（无外部组）', 'en': '(no external group)'},
+    'no_external_groups': {
+        'zh': '没有 TestFlight 外部测试组',
+        'en': 'No TestFlight external groups',
+    },
+    'no_group_builds': {
+        'zh': '外部测试组没有构建',
+        'en': 'No builds in external groups',
+    },
+    'not_submitted': {'zh': '未送审', 'en': 'Not submitted'},
     'failed': {
         'zh': '查询 TestFlight 状态失败：{error}',
         'en': 'Failed to query TestFlight status: {error}',
@@ -716,6 +725,10 @@ ERRORS = {
     'subscription_review_asset_label': {
         'en': 'Subscription review screenshot',
         'zh': '订阅审核截图',
+    },
+    'tf_forbidden': {
+        'en': 'This API key cannot access TestFlight. Use an Admin, App Manager, or Developer key in App Store Connect.',
+        'zh': '当前 API 密钥没有 TestFlight 权限。请在 App Store Connect 使用 Admin / App Manager / Developer 角色的密钥。',
     },
     'asset_upload_retry': {
         'en': 'Retry {attempt}/{total}: {reason}',

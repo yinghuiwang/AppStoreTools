@@ -458,6 +458,28 @@ def test_run_testflight_watch_queries_builds_not_versions(
         def __init__(self, issuer_id, key_id, key_file):
             self.args = (issuer_id, key_id, key_file)
 
+        def list_beta_groups(self, app_id, **params):
+            calls.append(("list_beta_groups", app_id, params))
+            return [
+                {
+                    "id": "g1",
+                    "attributes": {"name": "External Testers", "isInternalGroup": False},
+                }
+            ]
+
+        def list_beta_group_builds(self, group_id, **params):
+            calls.append(("list_beta_group_builds", group_id, params))
+            return {
+                "data": [
+                    {
+                        "type": "builds",
+                        "id": "b1",
+                        "attributes": {"version": "123", "expired": False},
+                    }
+                ],
+                "included": [],
+            }
+
         def list_builds(self, app_id, **params):
             calls.append(("list_builds", app_id, params))
             return {
@@ -466,40 +488,18 @@ def test_run_testflight_watch_queries_builds_not_versions(
                         "type": "builds",
                         "id": "b1",
                         "attributes": {"version": "123", "expired": False},
-                        "relationships": {
-                            "betaAppReviewSubmission": {
-                                "data": {"type": "betaAppReviewSubmissions", "id": "s1"}
-                            },
-                            "buildBetaDetail": {
-                                "data": {"type": "buildBetaDetails", "id": "d1"}
-                            },
-                            "betaGroups": {
-                                "data": [{"type": "betaGroups", "id": "g1"}]
-                            },
-                        },
                     }
                 ],
-                "included": [
-                    {
-                        "type": "betaAppReviewSubmissions",
-                        "id": "s1",
-                        "attributes": {"betaReviewState": "WAITING_FOR_REVIEW"},
-                    },
-                    {
-                        "type": "buildBetaDetails",
-                        "id": "d1",
-                        "attributes": {"externalBuildState": "WAITING_FOR_BETA_REVIEW"},
-                    },
-                    {
-                        "type": "betaGroups",
-                        "id": "g1",
-                        "attributes": {"name": "External Testers", "isInternalGroup": False},
-                    },
-                ],
+                "included": [],
             }
 
-        def list_beta_groups(self, app_id):
-            raise AssertionError("groups included")
+        def list_beta_app_review_submissions(self, build_id):
+            calls.append(("list_beta_app_review_submissions", build_id))
+            return [{"id": "s1", "attributes": {"betaReviewState": "WAITING_FOR_REVIEW"}}]
+
+        def get_build_beta_detail(self, build_id):
+            calls.append(("get_build_beta_detail", build_id))
+            return {"id": "d1", "attributes": {"externalBuildState": "WAITING_FOR_BETA_REVIEW"}}
 
         def _get_paginated_data(self, api_path, **params):
             raise AssertionError(api_path)
@@ -536,7 +536,12 @@ def test_run_testflight_watch_queries_builds_not_versions(
     assert body["watch"] == "testflight"
     assert body["last_result"].startswith("TF 123")
     assert body["last_error"] == ""
-    assert calls and calls[0][0] == "list_builds"
+    names = [item[0] for item in calls]
+    assert names[0] == "list_beta_groups"
+    assert "list_beta_group_builds" in names
+    assert "list_beta_app_review_submissions" in names
+    assert "get_build_beta_detail" in names
+    assert not any("appStoreVersions" in str(item) for item in calls)
 
 
 def test_web_install_uses_sibling_asc_for_module_invocation(

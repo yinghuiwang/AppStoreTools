@@ -1091,16 +1091,24 @@ IN_REVIEW_LABELS = {
 }
 
 
+TF_EMPTY_NOTES = {
+    "no_external_groups": "没有 TestFlight 外部测试组",
+    "no_builds": "外部测试组没有构建",
+}
+
+
 class ReviewSnapshot:
     def __init__(
         self,
         in_review: list,
         on_sale: list,
         watch: str = WATCH_APP_STORE,
+        note: str = "",
     ) -> None:
         self.in_review = in_review
         self.on_sale = on_sale
         self.watch = watch if watch in VALID_WATCH else WATCH_APP_STORE
+        self.note = note or ""
 
 
 def _version_state(attributes: dict):
@@ -1149,6 +1157,8 @@ def format_last_result(snapshot: ReviewSnapshot) -> str:
             return "；".join(f"TF {name} {label}" for name, label in snapshot.in_review)
         if snapshot.on_sale:
             return "当前无 TF 外部组在审构建；可测试 " + "、".join(snapshot.on_sale)
+        if snapshot.note in TF_EMPTY_NOTES:
+            return TF_EMPTY_NOTES[snapshot.note]
         return "当前无 TF 外部组在审构建；暂无可测试构建"
     if snapshot.in_review:
         return "；".join(f"{name} {label}" for name, label in snapshot.in_review)
@@ -1176,6 +1186,8 @@ def build_success_message(profile: str, checked_at: str, snapshot: ReviewSnapsho
         if snapshot.in_review:
             lines.append("TestFlight 外部组在审构建：")
             lines.extend(f"- {name} {label}" for name, label in snapshot.in_review)
+        elif snapshot.note in TF_EMPTY_NOTES:
+            lines.append(TF_EMPTY_NOTES[snapshot.note])
         else:
             lines.append("当前无 TF 外部组在审构建")
             sold = "、".join(snapshot.on_sale) if snapshot.on_sale else "暂无可测试构建"
@@ -1324,9 +1336,14 @@ def query_testflight(
     if failed is not None:
         return failed
     try:
-        builds = fetch_testflight_builds(api, app_id)
-        in_review, ready = classify_testflight_builds(builds)
-        snapshot = ReviewSnapshot(in_review, ready, watch=WATCH_TESTFLIGHT)
+        result = fetch_testflight_builds(api, app_id)
+        in_review, ready = classify_testflight_builds(result.builds)
+        snapshot = ReviewSnapshot(
+            in_review,
+            ready,
+            watch=WATCH_TESTFLIGHT,
+            note=result.empty_reason,
+        )
     except Exception as exc:
         return QueryOutcome("检查失败", clamp_error(str(exc)), None)
     return QueryOutcome(format_last_result(snapshot), "", snapshot)

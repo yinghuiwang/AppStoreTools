@@ -32,6 +32,20 @@ UPLOAD_STALE_STATUSES = frozenset({400, 403})
 UPLOAD_OK_STATUSES = frozenset({200, 201})
 UPLOAD_RETRY_BACKOFF_CAP_SEC = 8.0
 
+_TF_PATH_MARKERS = (
+    "/v1/betaGroups",
+    "/v1/betaAppReviewSubmissions",
+    "/v1/buildBetaDetails",
+    "buildBetaDetail",
+    "/v1/builds",
+)
+
+
+def _is_testflight_path(path: str) -> bool:
+    text = path or ""
+    return any(marker in text for marker in _TF_PATH_MARKERS)
+
+
 DEFAULT_ASC_MAX_INFLIGHT = 4
 _asc_inflight_lock = threading.Lock()
 _asc_inflight_sem: Optional[threading.Semaphore] = None
@@ -242,6 +256,9 @@ class AppStoreConnectAPI:
             return self._token
 
         expiry = now + timedelta(minutes=15)
+        # Do not set JWT ``scope``: a scoped token is limited to those paths.
+        # TestFlight access follows the API key's App Store Connect role
+        # (Admin / App Manager / Developer). Missing TF permission is HTTP 403.
         payload = {
             "iss": self.issuer_id,
             "iat": int(now.timestamp()),
@@ -295,6 +312,9 @@ class AppStoreConnectAPI:
                     )
                 except Exception:
                     error_detail = resp.text[:500]
+                if resp.status_code == 403 and _is_testflight_path(path):
+                    hint = t(ERRORS["tf_forbidden"])
+                    error_detail = f"{error_detail}; {hint}" if error_detail else hint
                 raise Exception(
                     f"API 错误 [{resp.status_code}] {method} {url}: {error_detail}"
                 )
@@ -1410,8 +1430,9 @@ class AppStoreConnectAPI:
         """List builds for an app, including related resources when requested.
 
         Pass ``include`` (for example
-        ``betaAppReviewSubmission,buildBetaDetail,betaGroups``) to avoid
-        per-build follow-up GETs. Returns ``{"data": [...], "included": [...]}``.
+        ``betaAppReviewSubmission,buildBetaDetail``) and list those relationship
+        names in ``fields[builds]`` so sparse fieldsets do not strip linkage.
+        Returns ``{"data": [...], "included": [...]}``.
         """
         query = {"filter[app]": app_id, "limit": 200}
         query.update(params)
@@ -1421,6 +1442,18 @@ class AppStoreConnectAPI:
         query = {"filter[app]": app_id, "limit": 200}
         query.update(params)
         return self._get_paginated_data("/v1/betaGroups", **query)
+
+    def list_beta_group_builds(self, group_id: str, **params) -> dict:
+        """List builds assigned to a TestFlight beta group.
+
+        Official collection: ``GET /v1/betaGroups/{id}/builds``. Apple documents
+        this as ``BuildsWithoutIncludesResponse`` (no ``include``).
+        """
+        query = {"limit": 200}
+        query.update(params)
+        return self._get_paginated_document(
+            f"/v1/betaGroups/{group_id}/builds", **query
+        )
 
     def list_beta_app_review_submissions(self, build_id: str) -> list:
         return self._get_paginated_data(

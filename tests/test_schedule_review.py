@@ -119,6 +119,13 @@ def test_testflight_messages_are_not_store_review():
     assert format_last_result(idle) == "当前无 TF 外部组在审构建；可测试 120"
     empty = ReviewSnapshot([], [], watch=WATCH_TESTFLIGHT)
     assert format_last_result(empty) == "当前无 TF 外部组在审构建；暂无可测试构建"
+    missing_groups = ReviewSnapshot([], [], watch=WATCH_TESTFLIGHT, note="no_external_groups")
+    assert format_last_result(missing_groups) == "没有 TestFlight 外部测试组"
+    assert "没有 TestFlight 外部测试组" in build_success_message(
+        "myapp", checked, missing_groups
+    )
+    missing_builds = ReviewSnapshot([], [], watch=WATCH_TESTFLIGHT, note="no_builds")
+    assert format_last_result(missing_builds) == "外部测试组没有构建"
     assert "App Store" not in build_success_message("myapp", checked, snapshot)
     assert "在审版本" not in build_success_message("myapp", checked, snapshot)
     assert build_failure_message("myapp", checked, "凭证不完整", watch=WATCH_TESTFLIGHT) == (

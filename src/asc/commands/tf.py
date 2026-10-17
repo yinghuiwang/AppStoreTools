@@ -49,7 +49,7 @@ def cmd_tf_status(
     resolved, config = _resolve_config(app)
     api, app_id = make_api_from_config(config)
     try:
-        builds = fetch_testflight_builds(api, app_id)
+        result = fetch_testflight_builds(api, app_id)
     except Exception as exc:
         typer.echo(_tf("failed", error=exc), err=True)
         hint = get_action_hint(exc)
@@ -58,8 +58,11 @@ def cmd_tf_status(
         raise typer.Exit(1)
     typer.echo(_tf("title"))
     typer.echo(f"{_tf('app')}: {resolved or config.app_name or ''} ({app_id})")
-    if not builds:
-        typer.echo(_tf("empty"))
+    if result.empty_reason == "no_external_groups":
+        typer.echo(_tf("no_external_groups"))
+        return
+    if not result.builds:
+        typer.echo(_tf("no_group_builds"))
         return
     header = [
         _tf("col_build"),
@@ -68,14 +71,17 @@ def cmd_tf_status(
         _tf("col_external_state"),
     ]
     typer.echo("  ".join(header))
-    for build in builds:
+    for build in result.builds:
         groups = "、".join(build.external_groups) if build.external_groups else _tf("none_external")
+        review = build.beta_review_state
+        if not review:
+            review = _tf("not_submitted") if not build.has_submission else "-"
         typer.echo(
             "  ".join(
                 [
                     build.version or "-",
                     groups,
-                    build.beta_review_state or "-",
+                    review,
                     build.external_build_state or "-",
                 ]
             )
