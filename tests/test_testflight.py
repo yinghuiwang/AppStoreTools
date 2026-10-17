@@ -156,8 +156,6 @@ def test_classify_only_external_review_states():
     in_review, ready = classify_testflight_builds(builds)
     assert in_review == [
         ("123（External）", "等待 Beta 审核"),
-        ("119（External）", "未送审"),
-        ("118（External）", "Beta 被拒"),
     ]
     assert ready == []
 
@@ -535,6 +533,165 @@ def test_query_testflight_uses_group_builds(tmp_path: Path):
     assert "TF 321（Public）" in outcome.last_result
     assert "等待 Beta 审核" in outcome.last_result
     assert outcome.snapshot.watch == "testflight"
+
+
+def _group_build(build_id, version, expired=False):
+    return {
+        "type": "builds",
+        "id": build_id,
+        "attributes": {
+            "version": version,
+            "expired": expired,
+            "uploadedDate": "2026-10-14T01:00:00Z",
+        },
+    }
+
+
+def _hydrate_ids(api):
+    ids = []
+    for item in api.calls:
+        if item[0] == "list_builds":
+            ids.extend(
+                part
+                for part in str(item[2].get("filter[id]", "")).split(",")
+                if part
+            )
+        elif item[0] in (
+            "list_beta_app_review_submissions",
+            "get_build_beta_detail",
+        ):
+            ids.append(item[1])
+    return ids
+
+
+def test_classify_uses_numeric_build_order_and_skips_empty_states():
+    builds = [
+        TestFlightBuild("old", "9", False, "", "APPROVED", "BETA_APPROVED", ["External"]),
+        TestFlightBuild("proc", "100", False, "", "", "PROCESSING", ["External"]),
+        TestFlightBuild("cur", "10", False, "", "IN_REVIEW", "IN_BETA_REVIEW", ["External"]),
+        TestFlightBuild("blank", "8", False, "", "", "", ["External"]),
+        TestFlightBuild("unsigned", "200", False, "", "", "READY_FOR_BETA_SUBMISSION", ["Public"]),
+        TestFlightBuild("pub", "50", False, "", "WAITING_FOR_REVIEW", "WAITING_FOR_BETA_REVIEW", ["Public"]),
+    ]
+    in_review, ready = classify_testflight_builds(builds)
+    assert in_review == [
+        ("10（External）", "Beta 审核中"),
+        ("50（Public）", "等待 Beta 审核"),
+    ]
+    assert ready == []
+
+
+def test_classify_ready_testing_is_current_and_hides_older_review():
+    builds = [
+        TestFlightBuild("a", "100", False, "", "APPROVED", "IN_BETA_TESTING", ["External"]),
+        TestFlightBuild("b", "99", False, "", "IN_REVIEW", "IN_BETA_REVIEW", ["External"]),
+    ]
+    in_review, ready = classify_testflight_builds(builds)
+    assert in_review == []
+    assert ready == ["100（External）"]
+
+
+def test_classify_unsigned_group_keeps_single_not_submitted():
+    builds = [
+        TestFlightBuild("proc", "100", False, "", "", "PROCESSING", ["External"]),
+        TestFlightBuild("blank", "9", False, "", "", "", ["External"]),
+        TestFlightBuild("ready_sub", "10", False, "", "", "READY_FOR_BETA_SUBMISSION", ["External"]),
+    ]
+    in_review, ready = classify_testflight_builds(builds)
+    assert in_review == [("100（External）", "未送审")]
+    assert ready == []
+
+
+def test_fetch_keeps_first_reviewed_build_per_group_by_numeric_version():
+    api = GroupFirstAPI(
+        groups=[
+            {"id": "g-ext", "type": "betaGroups", "attributes": {"name": "Public", "isInternalGroup": False}},
+            {"id": "g-beta", "type": "betaGroups", "attributes": {"name": "Beta", "isInternalGroup": False}},
+        ],
+        group_builds={
+            "g-ext": {
+                "data": [
+                    _group_build("b9", "9"),
+                    _group_build("b100", "100"),
+                    _group_build("b10", "10"),
+                ],
+                "included": [],
+            },
+            "g-beta": {
+                "data": [
+                    _group_build("c2", "2"),
+                    _group_build("c20", "20"),
+                ],
+                "included": [],
+            },
+        },
+        hydrate={"data": [], "included": []},
+        submissions={
+            "b100": [],
+            "b10": [{"id": "s10", "attributes": {"betaReviewState": "IN_REVIEW"}}],
+            "b9": [{"id": "s9", "attributes": {"betaReviewState": "APPROVED"}}],
+            "c20": [{"id": "s20", "attributes": {"betaReviewState": "WAITING_FOR_REVIEW"}}],
+            "c2": [{"id": "s2", "attributes": {"betaReviewState": "REJECTED"}}],
+        },
+        details={
+            "b100": {"id": "d100", "attributes": {"externalBuildState": "PROCESSING"}},
+            "b10": {"id": "d10", "attributes": {"externalBuildState": "IN_BETA_REVIEW"}},
+            "b9": {"id": "d9", "attributes": {"externalBuildState": "BETA_APPROVED"}},
+            "c20": {"id": "d20", "attributes": {"externalBuildState": "WAITING_FOR_BETA_REVIEW"}},
+            "c2": {"id": "d2", "attributes": {"externalBuildState": "BETA_REJECTED"}},
+        },
+    )
+    result = fetch_testflight_builds(api, "app-1")
+    assert [(item.version, item.external_groups) for item in result.builds] == [
+        ("10", ["Public"]),
+        ("20", ["Beta"]),
+    ]
+    assert result.builds[0].beta_review_state == "IN_REVIEW"
+    assert result.builds[1].beta_review_state == "WAITING_FOR_REVIEW"
+    hydrated = _hydrate_ids(api)
+    assert "b100" in hydrated
+    assert "b10" in hydrated
+    assert "c20" in hydrated
+    assert "b9" not in hydrated
+    assert "c2" not in hydrated
+
+
+def test_query_testflight_reports_only_current_build_not_history(tmp_path: Path):
+    api = GroupFirstAPI(
+        group_builds={
+            "g-ext": {
+                "data": [
+                    _group_build("b9", "9"),
+                    _group_build("b100", "100"),
+                    _group_build("b10", "10"),
+                ],
+                "included": [],
+            }
+        },
+        hydrate={"data": [], "included": []},
+        submissions={
+            "b100": [],
+            "b10": [{"id": "s10", "attributes": {"betaReviewState": "IN_REVIEW"}}],
+            "b9": [{"id": "s9", "attributes": {"betaReviewState": "APPROVED"}}],
+        },
+        details={
+            "b100": {"id": "d100", "attributes": {"externalBuildState": "PROCESSING"}},
+            "b10": {"id": "d10", "attributes": {"externalBuildState": "IN_BETA_REVIEW"}},
+            "b9": {"id": "d9", "attributes": {"externalBuildState": "BETA_APPROVED"}},
+        },
+    )
+    outcome = query_testflight(
+        "myapp",
+        profile_lookup=lambda name: _creds(tmp_path),
+        api_factory=lambda *args: api,
+        guard=lambda profile, creds: None,
+    )
+    assert outcome.query_error == ""
+    assert outcome.last_result == "TF 10（Public） Beta 审核中"
+    assert "TF 100" not in outcome.last_result
+    assert "TF 9" not in outcome.last_result
+    assert "BETA_APPROVED" not in outcome.last_result
+    assert outcome.last_result.count("TF ") == 1
 
 
 def test_query_testflight_explains_missing_external_groups(tmp_path: Path):

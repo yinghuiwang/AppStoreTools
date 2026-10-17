@@ -38,6 +38,9 @@ BETA_REVIEW_FALLBACK_LABELS = {
 
 TF_READY_STATES = frozenset({"READY_FOR_BETA_TESTING", "IN_BETA_TESTING"})
 
+# Empty / not-submitted / still-processing: keep walking to a smaller build.
+_SKIP_EXTERNAL_STATES = frozenset({"", "PROCESSING", "READY_FOR_BETA_SUBMISSION"})
+
 _HYDRATE_CHUNK = 40
 
 
@@ -310,11 +313,146 @@ def _hydrate_review_states(api, app_id: str, builds: list) -> None:
     _fill_missing_review_from_endpoints(api, builds)
 
 
+def _build_number_key(version: str) -> tuple:
+    """Numeric build order: 100 > 99 > 9. Non-numeric versions sort last."""
+    text = version.strip() if isinstance(version, str) else ""
+    if text.isdigit():
+        return (1, int(text), text)
+    return (0, 0, text)
+
+
+def has_review_status(build) -> bool:
+    """True when Beta Review or a meaningful externalBuildState is present."""
+    review = build.beta_review_state.strip() if isinstance(build.beta_review_state, str) else ""
+    if review:
+        return True
+    state = (
+        build.external_build_state.strip()
+        if isinstance(build.external_build_state, str)
+        else ""
+    )
+    return state not in _SKIP_EXTERNAL_STATES
+
+
+def _copy_build_for_group(build, group_name: str):
+    return TestFlightBuild(
+        build_id=build.build_id,
+        version=build.version,
+        expired=build.expired,
+        uploaded_date=build.uploaded_date,
+        beta_review_state=build.beta_review_state,
+        external_build_state=build.external_build_state,
+        external_groups=[group_name],
+        unresolved_group_ids=list(build.unresolved_group_ids),
+        has_submission=build.has_submission,
+    )
+
+
+def _merge_selected_group_builds(pairs: list) -> list:
+    selected = []
+    by_id = {}
+    for group_name, build in pairs:
+        if build.build_id and build.build_id in by_id:
+            existing = by_id[build.build_id]
+            if group_name not in existing.external_groups:
+                existing.external_groups.append(group_name)
+            continue
+        copied = _copy_build_for_group(build, group_name)
+        selected.append(copied)
+        if copied.build_id:
+            by_id[copied.build_id] = copied
+    return selected
+
+
+def _members_by_group(builds: list) -> dict:
+    by_group: dict = {}
+    for build in builds:
+        for name in build.external_groups:
+            by_group.setdefault(name, []).append(build)
+    return by_group
+
+
+def _group_names_in_order(builds: list, group_names=None) -> list:
+    if group_names is not None:
+        return list(group_names)
+    order = []
+    for build in builds:
+        for name in build.external_groups:
+            if name not in order:
+                order.append(name)
+    return order
+
+
+def _pick_current_group_build(members: list, is_current) -> Optional[object]:
+    ordered = sorted(members, key=lambda item: _build_number_key(item.version), reverse=True)
+    for build in ordered:
+        if build.expired:
+            continue
+        if is_current(build):
+            return build
+    return next((item for item in ordered if not item.expired), None) or (
+        ordered[0] if ordered else None
+    )
+
+
+def select_current_builds_by_group(builds: list, group_names=None) -> list:
+    """Keep at most one build per external group.
+
+    Walks build numbers from large to small and stops at the first build
+    with a review status. Groups with only empty / PROCESSING / 未送审
+    builds keep the highest-number candidate so callers can show 未送审
+    once instead of every historical row.
+    """
+    by_group = _members_by_group(builds)
+    pairs = []
+    for name in _group_names_in_order(builds, group_names):
+        members = by_group.get(name) or []
+        if not members:
+            continue
+        chosen = _pick_current_group_build(members, has_review_status)
+        if chosen is not None:
+            pairs.append((name, chosen))
+    return _merge_selected_group_builds(pairs)
+
+
+def _hydrate_and_select_current(api, app_id: str, builds: list, group_names: list) -> list:
+    """Hydrate review state from newest build downward; stop per group."""
+    by_group = _members_by_group(builds)
+    hydrated = set()
+
+    def ensure_current(build) -> bool:
+        ident = build.build_id
+        if ident and ident not in hydrated:
+            _hydrate_review_states(api, app_id, [build])
+            hydrated.add(ident)
+        return has_review_status(build)
+
+    pairs = []
+    for name in group_names:
+        members = by_group.get(name) or []
+        if not members:
+            continue
+        chosen = _pick_current_group_build(members, ensure_current)
+        if chosen is None:
+            continue
+        ident = chosen.build_id
+        if ident and ident not in hydrated:
+            _hydrate_review_states(api, app_id, [chosen])
+            hydrated.add(ident)
+        pairs.append((name, chosen))
+    return _merge_selected_group_builds(pairs)
+
+
 def fetch_testflight_builds(api, app_id: str) -> TestFlightFetchResult:
-    """Load external-group builds, then Beta Review / externalBuildState.
+    """Load each external group's current Beta Review build.
 
     Membership comes from ``GET /v1/betaGroups`` +
-    ``GET /v1/betaGroups/{id}/builds``. Review state is hydrated from
+    ``GET /v1/betaGroups/{id}/builds``. Builds are sorted by numeric
+    version (100 > 99 > 9); review state is hydrated from newest to
+    oldest until the first build with a review status is found. Each
+    external group contributes at most one row.
+
+    Review state comes from
     ``GET /v1/builds?include=betaAppReviewSubmission,buildBetaDetail``
     (relationship names must be in ``fields[builds]``) and, if include is
     empty, from ``GET /v1/betaAppReviewSubmissions`` and
@@ -378,8 +516,8 @@ def fetch_testflight_builds(api, app_id: str) -> TestFlightFetchResult:
             external_groups=names,
             empty_reason=EMPTY_NO_BUILDS,
         )
-    _hydrate_review_states(api, app_id, builds)
-    return TestFlightFetchResult(builds, external_groups=names, empty_reason="")
+    current = _hydrate_and_select_current(api, app_id, builds, names)
+    return TestFlightFetchResult(current, external_groups=names, empty_reason="")
 
 
 def tf_build_display_name(version: str, groups: list) -> str:
@@ -391,16 +529,22 @@ def tf_build_display_name(version: str, groups: list) -> str:
 
 
 def classify_testflight_builds(builds: list) -> tuple:
-    """Return ``(in_review, ready)`` rows for external-group builds."""
+    """Return ``(in_review, ready)`` rows for each group's current build."""
     seen = set()
     in_review = []
     ready = []
-    for build in builds:
+    for build in select_current_builds_by_group(builds):
         if build.build_id:
             if build.build_id in seen:
                 continue
             seen.add(build.build_id)
-        if build.expired or not build.has_external_group:
+        if not build.has_external_group:
+            continue
+        name = tf_build_display_name(build.version, build.external_groups)
+        if not has_review_status(build):
+            in_review.append((name, NOT_SUBMITTED_LABEL))
+            continue
+        if build.expired:
             continue
         state = build.external_build_state
         label = IN_TF_REVIEW_LABELS.get(state)
@@ -409,7 +553,6 @@ def classify_testflight_builds(builds: list) -> tuple:
         if label is None and state not in TF_READY_STATES:
             if not build.has_submission and not build.beta_review_state:
                 label = NOT_SUBMITTED_LABEL
-        name = tf_build_display_name(build.version, build.external_groups)
         if label:
             in_review.append((name, label))
         elif state in TF_READY_STATES:

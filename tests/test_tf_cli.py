@@ -50,6 +50,43 @@ def test_tf_status_explains_no_external_groups(monkeypatch):
     assert not any(call[0] == "list_beta_group_builds" for call in api.calls)
 
 
+def test_tf_status_prints_only_current_reviewed_build(monkeypatch):
+    from tests.test_testflight import _group_build
+
+    api = GroupFirstAPI(
+        group_builds={
+            "g-ext": {
+                "data": [
+                    _group_build("b9", "9"),
+                    _group_build("b100", "100"),
+                    _group_build("b10", "10"),
+                ],
+                "included": [],
+            }
+        },
+        hydrate={"data": [], "included": []},
+        submissions={
+            "b100": [],
+            "b10": [{"id": "s10", "attributes": {"betaReviewState": "IN_REVIEW"}}],
+            "b9": [{"id": "s9", "attributes": {"betaReviewState": "APPROVED"}}],
+        },
+        details={
+            "b100": {"id": "d100", "attributes": {"externalBuildState": "PROCESSING"}},
+            "b10": {"id": "d10", "attributes": {"externalBuildState": "IN_BETA_REVIEW"}},
+            "b9": {"id": "d9", "attributes": {"externalBuildState": "BETA_APPROVED"}},
+        },
+    )
+    _install_api(monkeypatch, api)
+    result = runner.invoke(app, ["tf", "status", "--app", "myapp"])
+    assert result.exit_code == 0, result.output
+    assert "10" in result.output
+    assert "IN_REVIEW" in result.output
+    assert "IN_BETA_REVIEW" in result.output
+    assert "100" not in result.output
+    assert "APPROVED" not in result.output
+    assert " 9 " not in f" {result.output} "
+
+
 def test_tf_status_prints_not_submitted(monkeypatch):
     api = GroupFirstAPI(
         submissions={"b1": []},
