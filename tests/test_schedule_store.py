@@ -137,8 +137,10 @@ def test_round_trip_preserves_order_and_kind_fields(tmp_path: Path):
     assert loaded[1].interval_hours == 2 and loaded[1].weekdays is None
     assert loaded[2].weekdays == [1, 4] and loaded[2].interval_hours is None
     assert [item.watch for item in loaded] == ["app_store", "app_store", "app_store"]
+    assert [item.last_notified_result for item in loaded] == ["", "", ""]
     text = path.read_text(encoding="utf-8")
     assert 'watch = "app_store"' in text.split("[[tasks]]")[1]
+    assert "last_notified_result" in text.split("[[tasks]]")[1]
     assert "interval_hours" in text.split("[[tasks]]")[2]
     assert "weekdays" not in text.split("[[tasks]]")[2]
     assert "weekdays" in text.split("[[tasks]]")[3]
@@ -228,6 +230,19 @@ def test_legacy_task_without_watch_defaults_to_app_store(tmp_path: Path):
     )
     loaded = load_tasks(path)
     assert loaded[0].watch == "app_store"
+    assert loaded[0].last_notified_result == ""
+
+
+def test_last_notified_result_round_trips(tmp_path: Path):
+    path = tmp_path / "schedules.toml"
+    task = _daily()
+    task.last_notified_result = "app_store|myapp|1.2.3:approved"
+    save_tasks(path, [task])
+    loaded = load_tasks(path)
+    assert loaded[0].last_notified_result == "app_store|myapp|1.2.3:approved"
+    assert 'last_notified_result = "app_store|myapp|1.2.3:approved"' in path.read_text(
+        encoding="utf-8"
+    )
 
 
 def test_watch_testflight_round_trips(tmp_path: Path):

@@ -10,6 +10,9 @@ from asc.schedule import (
     classify_versions,
     format_checked_at,
     format_last_result,
+    review_phase,
+    review_result_notify_key,
+    snapshot_has_in_progress,
 )
 
 
@@ -63,6 +66,49 @@ def test_blank_version_and_state_key_rules():
     snapshot = classify_versions([hidden, legacy])
     assert snapshot.in_review == [("3.0", "被拒")]
     assert snapshot.on_sale == []
+
+
+def test_approved_and_pending_release_are_review_results():
+    approved = classify_versions([version("a", "APPROVED", "2.0.0")])
+    assert approved.in_review == [("2.0.0", "已通过")]
+    pending = classify_versions([version("b", "PENDING_DEVELOPER_RELEASE", "2.0.1")])
+    assert pending.in_review == [("2.0.1", "待开发者发布")]
+    assert review_phase("APPROVED") == "approved"
+    assert review_phase("PENDING_DEVELOPER_RELEASE") == "approved"
+    assert review_phase("PENDING_APPLE_RELEASE") == "approved"
+    assert review_phase("READY_FOR_SALE") == "approved"
+    assert review_phase("REJECTED") == "rejected"
+    assert review_phase("METADATA_REJECTED") == "rejected"
+    assert review_phase("WAITING_FOR_REVIEW") == "in_progress"
+    assert review_phase("IN_REVIEW") == "in_progress"
+    assert review_phase("WAITING_FOR_BETA_REVIEW") == "in_progress"
+    assert review_phase("IN_BETA_REVIEW") == "in_progress"
+    assert review_phase("BETA_APPROVED") == "approved"
+    assert review_phase("BETA_REJECTED") == "rejected"
+    assert review_phase("READY_FOR_BETA_TESTING") == "approved"
+    assert review_phase("IN_BETA_TESTING") == "approved"
+    assert review_phase("未送审") == ""
+
+
+def test_result_notify_key_uses_profile_version_and_phase():
+    rejected = ReviewSnapshot([("1.2.3", "被拒")], [])
+    assert snapshot_has_in_progress(rejected) is False
+    assert review_result_notify_key(rejected, "myapp") == "app_store|myapp|1.2.3:rejected"
+    reviewing = ReviewSnapshot([("1.2.3", "审核中")], [])
+    assert snapshot_has_in_progress(reviewing) is True
+    assert review_result_notify_key(reviewing, "myapp") is None
+    on_sale = ReviewSnapshot([], ["1.2.0"])
+    assert review_result_notify_key(on_sale, "myapp") == "app_store|myapp|1.2.0:approved"
+    tf = ReviewSnapshot(
+        [("123（External）", "Beta 已通过")],
+        [],
+        watch=WATCH_TESTFLIGHT,
+    )
+    assert review_result_notify_key(tf, "myapp") == (
+        "testflight|myapp|123（External）:approved"
+    )
+    idle = ReviewSnapshot([], [])
+    assert review_result_notify_key(idle, "myapp") is None
 
 
 def test_empty_id_is_not_deduped():

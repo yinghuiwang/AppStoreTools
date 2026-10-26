@@ -39,7 +39,7 @@ WATCH_LABELS = {
     WATCH_APP_STORE: "App Store 版本审核",
     WATCH_TESTFLIGHT: "TestFlight 外部组版本审核",
 }
-_OPTIONAL_KEYS = frozenset({"watch"})
+_OPTIONAL_KEYS = frozenset({"watch", "last_notified_result"})
 _BASE_KEYS = frozenset(
     {
         "id",
@@ -100,6 +100,7 @@ class ScheduleTask:
         interval_hours: Optional[int] = None,
         weekdays: Optional[list] = None,
         watch: str = WATCH_APP_STORE,
+        last_notified_result: str = "",
     ) -> None:
         self.id = id
         self.profile = profile
@@ -114,6 +115,7 @@ class ScheduleTask:
         self.interval_hours = interval_hours
         self.weekdays = weekdays
         self.watch = watch if watch in VALID_WATCH else WATCH_APP_STORE
+        self.last_notified_result = last_notified_result or ""
 
 
 def default_schedule_path() -> Path:
@@ -257,6 +259,7 @@ def _parse_task(item: object, seen: set) -> ScheduleTask:
     last_run_at = _require_timestamp(item["last_run_at"], allow_empty=True)
     last_error = _require_text(item["last_error"])
     last_result = _require_text(item["last_result"])
+    last_notified_result = _parse_last_notified_result(item)
     interval_hours = None
     weekdays = None
     if kind == "interval":
@@ -277,6 +280,7 @@ def _parse_task(item: object, seen: set) -> ScheduleTask:
         interval_hours=interval_hours,
         weekdays=weekdays,
         watch=_parse_watch(item),
+        last_notified_result=last_notified_result,
     )
 
 
@@ -297,6 +301,12 @@ def _parse_watch(item: dict) -> str:
     if value not in VALID_WATCH:
         raise ScheduleCorruptError()
     return value
+
+
+def _parse_last_notified_result(item: dict) -> str:
+    if "last_notified_result" not in item:
+        return ""
+    return _require_text(item["last_notified_result"])
 
 
 def require_watch(value: object) -> str:
@@ -389,6 +399,7 @@ def _render_task(task: ScheduleTask) -> str:
             f"last_run_at = {_toml_basic(task.last_run_at)}",
             f"last_error = {_toml_basic(task.last_error)}",
             f"last_result = {_toml_basic(task.last_result)}",
+            f"last_notified_result = {_toml_basic(task.last_notified_result or '')}",
         ]
     )
     return "\n".join(lines)
@@ -1088,7 +1099,61 @@ IN_REVIEW_LABELS = {
     "METADATA_REJECTED": "被拒",
     "PENDING_DEVELOPER_RELEASE": "待开发者发布",
     "PENDING_APPLE_RELEASE": "待 Apple 发布",
+    "APPROVED": "已通过",
 }
+
+# In-progress review: notify every tick, and clear last_notified_result.
+REVIEW_IN_PROGRESS_STATES = frozenset(
+    {
+        "WAITING_FOR_REVIEW",
+        "IN_REVIEW",
+        "WAITING_FOR_BETA_REVIEW",
+        "IN_BETA_REVIEW",
+    }
+)
+REVIEW_APPROVED_STATES = frozenset(
+    {
+        "APPROVED",
+        "PENDING_DEVELOPER_RELEASE",
+        "PENDING_APPLE_RELEASE",
+        "READY_FOR_SALE",
+        "BETA_APPROVED",
+        "READY_FOR_BETA_TESTING",
+        "IN_BETA_TESTING",
+    }
+)
+REVIEW_REJECTED_STATES = frozenset(
+    {
+        "REJECTED",
+        "METADATA_REJECTED",
+        "BETA_REJECTED",
+    }
+)
+REVIEW_IN_PROGRESS_LABELS = frozenset(
+    {
+        "等待审核",
+        "审核中",
+        "等待 Beta 审核",
+        "Beta 审核中",
+    }
+)
+REVIEW_APPROVED_LABELS = frozenset(
+    {
+        "待开发者发布",
+        "待 Apple 发布",
+        "已通过",
+        "Beta 已通过",
+    }
+)
+REVIEW_REJECTED_LABELS = frozenset(
+    {
+        "被拒",
+        "Beta 被拒",
+    }
+)
+REVIEW_PHASE_IN_PROGRESS = "in_progress"
+REVIEW_PHASE_APPROVED = "approved"
+REVIEW_PHASE_REJECTED = "rejected"
 
 
 TF_EMPTY_NOTES = {
@@ -1165,6 +1230,57 @@ def format_last_result(snapshot: ReviewSnapshot) -> str:
     if snapshot.on_sale:
         return "当前无在审版本；已上架 " + "、".join(snapshot.on_sale)
     return "当前无在审版本；暂无已上架版本"
+
+
+def review_phase(token: str) -> str:
+    if token in REVIEW_IN_PROGRESS_STATES or token in REVIEW_IN_PROGRESS_LABELS:
+        return REVIEW_PHASE_IN_PROGRESS
+    if token in REVIEW_APPROVED_STATES or token in REVIEW_APPROVED_LABELS:
+        return REVIEW_PHASE_APPROVED
+    if token in REVIEW_REJECTED_STATES or token in REVIEW_REJECTED_LABELS:
+        return REVIEW_PHASE_REJECTED
+    return ""
+
+
+def snapshot_has_in_progress(snapshot: Optional[ReviewSnapshot]) -> bool:
+    if snapshot is None:
+        return False
+    return any(review_phase(label) == REVIEW_PHASE_IN_PROGRESS for _name, label in snapshot.in_review)
+
+
+def review_result_notify_key(snapshot: ReviewSnapshot, profile: str) -> Optional[str]:
+    pairs = []
+    for name, label in snapshot.in_review:
+        phase = review_phase(label)
+        if phase == REVIEW_PHASE_IN_PROGRESS:
+            return None
+        if phase in {REVIEW_PHASE_APPROVED, REVIEW_PHASE_REJECTED}:
+            pairs.append((str(name), phase))
+            continue
+        return None
+    for name in snapshot.on_sale:
+        if name:
+            pairs.append((str(name), REVIEW_PHASE_APPROVED))
+    if not pairs:
+        return None
+    watch = snapshot.watch if snapshot.watch in VALID_WATCH else WATCH_APP_STORE
+    body = ";".join(f"{name}:{phase}" for name, phase in sorted(pairs))
+    return f"{watch}|{profile}|{body}"
+
+
+def review_notify_decision(task: ScheduleTask, outcome: "QueryOutcome") -> tuple:
+    previous = getattr(task, "last_notified_result", "") or ""
+    if outcome.query_error or outcome.snapshot is None:
+        return True, previous
+    snapshot = outcome.snapshot
+    if snapshot_has_in_progress(snapshot):
+        return True, ""
+    key = review_result_notify_key(snapshot, task.profile)
+    if key is None:
+        return True, previous
+    if previous == key:
+        return False, key
+    return True, key
 
 
 def format_checked_at(now: datetime, timezone_name: str) -> str:
@@ -1485,7 +1601,12 @@ def execute_task(
     task.last_error = outcome.query_error
     if advance_next:
         task.next_run_at = format_timestamp(next_slot(task, now))
+    should_send, notified_after = review_notify_decision(task, outcome)
+    if snapshot_has_in_progress(outcome.snapshot):
+        task.last_notified_result = ""
     save_tasks(schedule_path, tasks)
+    if not should_send:
+        return "ok"
     checked = format_checked_at(now, task.timezone)
     if outcome.query_error or outcome.snapshot is None:
         text = build_failure_message(
@@ -1498,8 +1619,14 @@ def execute_task(
         text = build_success_message(task.profile, checked, outcome.snapshot)
     send_outcome = send(text)
     final_error = combine_last_error(outcome.query_error, send_outcome)
+    dirty = False
     if final_error != task.last_error:
         task.last_error = final_error
+        dirty = True
+    if not final_error and notified_after != (task.last_notified_result or ""):
+        task.last_notified_result = notified_after
+        dirty = True
+    if dirty:
         save_tasks(schedule_path, tasks)
     if task.last_error:
         return "error"
