@@ -8,6 +8,7 @@ from asc.schedule import (
     ReviewSnapshot,
     build_failure_message,
     build_success_message,
+    build_test_message,
     clamp_error,
     classify_versions,
     format_checked_at,
@@ -16,6 +17,7 @@ from asc.schedule import (
     review_phase,
     review_result_notify_key,
     snapshot_has_in_progress,
+    snapshot_lacks_review_status,
 )
 
 
@@ -117,6 +119,23 @@ def test_result_notify_key_uses_profile_version_and_phase():
     )
     idle = ReviewSnapshot([], [])
     assert review_result_notify_key(idle, "myapp") is None
+    assert snapshot_lacks_review_status(None) is False
+    assert snapshot_lacks_review_status(idle) is True
+    assert snapshot_lacks_review_status(reviewing) is False
+    assert snapshot_lacks_review_status(rejected) is False
+    assert snapshot_lacks_review_status(on_sale) is False
+    assert snapshot_lacks_review_status(
+        ReviewSnapshot([], [], watch=WATCH_TESTFLIGHT, note="no_external_groups")
+    ) is True
+    assert snapshot_lacks_review_status(
+        ReviewSnapshot([], [], watch=WATCH_TESTFLIGHT, note="no_builds")
+    ) is True
+    assert snapshot_lacks_review_status(
+        ReviewSnapshot([("123（External）", "未送审")], [], watch=WATCH_TESTFLIGHT)
+    ) is True
+    assert snapshot_lacks_review_status(
+        ReviewSnapshot([], ["123（External）"], watch=WATCH_TESTFLIGHT)
+    ) is False
 
 
 def test_empty_id_is_not_deduped():
@@ -150,6 +169,12 @@ def test_messages_use_profile_name_and_drop_seconds():
     )
     assert build_failure_message("myapp", checked, "凭证不完整") == (
         "**检查失败：凭证不完整**\n"
+        "应用：myapp\n"
+        "监听：App Store 版本审核\n"
+        "检查时间：2026-10-14 09:31（Asia/Shanghai）"
+    )
+    assert build_test_message("myapp", checked) == (
+        "**未查到审核状态（测试）**\n"
         "应用：myapp\n"
         "监听：App Store 版本审核\n"
         "检查时间：2026-10-14 09:31（Asia/Shanghai）"
@@ -189,6 +214,12 @@ def test_testflight_messages_are_not_store_review():
         "监听：TestFlight 外部组版本审核\n"
         "检查时间：2026-10-14 09:31（Asia/Shanghai）"
     )
+    assert build_test_message("myapp", checked, watch=WATCH_TESTFLIGHT) == (
+        "**未查到审核状态（测试）**\n"
+        "应用：myapp\n"
+        "监听：TestFlight 外部组版本审核\n"
+        "检查时间：2026-10-14 09:31（Asia/Shanghai）"
+    )
 
 
 def test_success_message_english(monkeypatch: pytest.MonkeyPatch):
@@ -214,6 +245,12 @@ def test_success_message_english(monkeypatch: pytest.MonkeyPatch):
     )
     assert build_failure_message("myapp", checked, "incomplete credentials") == (
         "**Check failed: incomplete credentials**\n"
+        "App: myapp\n"
+        "Watch: App Store version review\n"
+        "Checked at: 2026-10-14 09:31（Asia/Shanghai）"
+    )
+    assert build_test_message("myapp", checked) == (
+        "**No review status found (test)**\n"
         "App: myapp\n"
         "Watch: App Store version review\n"
         "Checked at: 2026-10-14 09:31（Asia/Shanghai）"

@@ -151,6 +151,14 @@ SCHEDULE_TEXT = {
     'notify_watch': {'zh': '监听：{watch}', 'en': 'Watch: {watch}'},
     'notify_checked_at': {'zh': '检查时间：{checked_at}', 'en': 'Checked at: {checked_at}'},
     'notify_fail': {'zh': '检查失败：{error}', 'en': 'Check failed: {error}'},
+    'notify_test': {
+        'zh': '未查到审核状态（测试）',
+        'en': 'No review status found (test)',
+    },
+    'notify_no_channel': {
+        'zh': '未配置通知渠道',
+        'en': 'No notification channel configured',
+    },
     'notify_watch_app_store': {
         'zh': 'App Store 版本审核',
         'en': 'App Store version review',

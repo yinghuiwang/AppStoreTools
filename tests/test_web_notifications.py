@@ -194,11 +194,8 @@ def test_feishu_signature_payload(monkeypatch: pytest.MonkeyPatch):
 
     payload = webhook_clients.build_feishu_payload("hello", "secret")
 
-    assert payload["msg_type"] == "post"
-    assert payload["content"]["post"]["zh_cn"]["title"] == "hello"
-    assert payload["content"]["post"]["zh_cn"]["content"] == [
-        [{"tag": "text", "text": "hello"}]
-    ]
+    assert payload["msg_type"] == "text"
+    assert payload["content"] == {"text": "hello"}
     assert payload["timestamp"] == "1700000000"
     assert payload["sign"] == "fiWS2+gh28DOydAv7hzONH/mDn9+b1Y4Y5ivXWXy8vA="
 
@@ -209,16 +206,23 @@ def test_wecom_payload_uses_markdown():
     assert payload == {"msgtype": "markdown", "markdown": {"content": "hello"}}
 
 
-def test_feishu_post_renders_status_line_bold():
+def test_wecom_payload_keeps_markdown_bold():
+    text = "**1.2.3 审核中**\n应用：myapp"
+    payload = webhook_clients.build_wecom_payload(text)
+
+    assert payload == {"msgtype": "markdown", "markdown": {"content": text}}
+
+
+def test_feishu_payload_uses_custom_bot_text_without_style():
     text = "**1.2.3 审核中**\n应用：myapp\n监听：App Store 版本审核"
     payload = webhook_clients.build_feishu_payload(text)
 
-    assert payload["msg_type"] == "post"
-    zh = payload["content"]["post"]["zh_cn"]
-    assert zh["title"] == "1.2.3 审核中"
-    assert zh["content"][0] == [{"tag": "text", "text": "1.2.3 审核中", "style": ["bold"]}]
-    assert zh["content"][1] == [{"tag": "text", "text": "应用：myapp"}]
-    assert payload["content"]["post"]["en_us"]["title"] == "1.2.3 审核中"
+    assert payload["msg_type"] == "text"
+    assert payload["content"] == {
+        "text": "1.2.3 审核中\n应用：myapp\n监听：App Store 版本审核"
+    }
+    assert "style" not in payload
+    assert "post" not in payload["content"]
 
 
 def test_dingtalk_title_uses_plain_first_line():
@@ -364,6 +368,67 @@ def test_send_provider_unsupported_provider_is_sanitized_and_does_not_post(
     assert calls == []
     assert "secret-token" not in result["error"]
     assert "secret-value" not in result["error"]
+
+
+def test_send_provider_feishu_posts_text_and_accepts_code_zero(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    calls = []
+
+    class Response:
+        status_code = 200
+        text = '{"code":0}'
+
+        def json(self):
+            return {
+                "StatusCode": 0,
+                "StatusMessage": "success",
+                "code": 0,
+                "data": {},
+                "msg": "success",
+            }
+
+    def fake_post(url, json, timeout):
+        calls.append({"url": url, "json": json, "timeout": timeout})
+        return Response()
+
+    monkeypatch.setattr(webhook_clients.requests, "post", fake_post)
+
+    result = webhook_clients.send_provider(
+        "feishu",
+        {"enabled": True, "url": "https://open.feishu.cn/open-apis/bot/v2/hook/example", "secret": ""},
+        "**1.2.3 审核中**\n应用：myapp",
+    )
+
+    assert result == {"provider": "feishu", "ok": True}
+    assert calls[0]["json"] == {
+        "msg_type": "text",
+        "content": {"text": "1.2.3 审核中\n应用：myapp"},
+    }
+
+
+def test_send_provider_feishu_rejects_http_200_business_error(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class Response:
+        status_code = 200
+        text = '{"code":9499,"msg":"Bad Request"}'
+
+        def json(self):
+            return {"code": 9499, "msg": "Bad Request", "data": {}}
+
+    monkeypatch.setattr(webhook_clients.requests, "post", lambda *args, **kwargs: Response())
+
+    result = webhook_clients.send_provider(
+        "feishu",
+        {"enabled": True, "url": "https://open.feishu.cn/open-apis/bot/v2/hook/example", "secret": ""},
+        "**未查到审核状态（测试）**\n应用：test",
+    )
+
+    assert result["provider"] == "feishu"
+    assert result["ok"] is False
+    assert "9499" in result["error"]
+    assert "Bad Request" in result["error"]
 
 
 def test_send_provider_dingtalk_posts_signed_url(monkeypatch: pytest.MonkeyPatch):

@@ -329,6 +329,121 @@ def test_run_now_checks_review_and_sends_webhook_without_moving_next(
     assert backend.bootstraps == bootstraps
 
 
+def test_run_now_empty_status_sends_test_webhook(
+    scheduled, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    client, path, _, _ = scheduled
+    monkeypatch.setattr("asc.i18n.LANG", "zh")
+    created = client.post(
+        "/api/schedules",
+        json={"profile": "myapp", "kind": "daily", "time": "09:30", "enabled": False},
+    )
+    assert created.status_code == 200
+    task_id = created.json()["id"]
+    key = tmp_path / "AuthKey.p8"
+    key.write_bytes(b"not-a-real-key")
+    hook = tmp_path / "webhook.toml"
+    hook.write_text(
+        "\n".join([
+            "enabled = true",
+            "[providers.feishu]",
+            "enabled = true",
+            'url = "https://example.com/hook"',
+            "[providers.wecom]",
+            "enabled = true",
+            'url = "https://example.com/wecom"',
+            "[providers.dingtalk]",
+            "enabled = true",
+            'url = "https://example.com/dingtalk"',
+        ]),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ASC_WEBHOOK_CONFIG_PATH", str(hook))
+
+    class FakeConnect:
+        def __init__(self, issuer_id, key_id, key_file):
+            self.args = (issuer_id, key_id, key_file)
+
+        def _get_paginated_data(self, api_path, **params):
+            return [{
+                "id": "v1",
+                "attributes": {"appStoreState": "PREPARE_FOR_SUBMISSION", "versionString": "1.0.0"},
+            }]
+
+    sent = []
+
+    def lookup(name):
+        return {
+            "issuer_id": "issuer",
+            "key_id": "KEYID",
+            "key_file": str(key),
+            "app_id": "123",
+        }
+
+    def fake_send(provider, config, text):
+        sent.append((provider, text))
+        return {"provider": provider, "ok": True}
+
+    monkeypatch.setattr("asc.schedule.query_review", real_query_review)
+    monkeypatch.setattr("asc.schedule.default_profile_lookup", lookup)
+    monkeypatch.setattr("asc.schedule._default_guard", lambda profile, creds: None)
+    monkeypatch.setattr("asc.api.AppStoreConnectAPI", FakeConnect)
+    monkeypatch.setattr("asc.web.webhook_clients.send_provider", fake_send)
+
+    ran = client.post(f"/api/schedules/{task_id}/run")
+
+    assert ran.status_code == 200
+    body = ran.json()
+    assert body["last_result"] == "未查到审核状态（测试）"
+    assert body["last_error"] == ""
+    assert [provider for provider, _text in sent] == ["feishu", "wecom", "dingtalk"]
+    text = sent[0][1]
+    assert text.startswith("**未查到审核状态（测试）**")
+    assert "应用：myapp" in text
+    assert "监听：App Store 版本审核" in text
+    assert all(item[1] == text for item in sent)
+
+
+def test_run_now_query_failure_does_not_send_test(
+    scheduled, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    client, path, _, _ = scheduled
+    monkeypatch.setattr("asc.i18n.LANG", "zh")
+    created = client.post(
+        "/api/schedules",
+        json={"profile": "myapp", "kind": "daily", "time": "09:30"},
+    )
+    assert created.status_code == 200
+    task_id = created.json()["id"]
+    hook = tmp_path / "webhook.toml"
+    hook.write_text(
+        "\n".join([
+            "enabled = true",
+            "[providers.feishu]",
+            "enabled = true",
+            'url = "https://example.com/hook"',
+        ]),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ASC_WEBHOOK_CONFIG_PATH", str(hook))
+    sent = []
+
+    def fake_send(provider, config, text):
+        sent.append(text)
+        return {"provider": provider, "ok": True}
+
+    monkeypatch.setattr("asc.web.webhook_clients.send_provider", fake_send)
+
+    ran = client.post(f"/api/schedules/{task_id}/run")
+    assert ran.status_code == 200
+    body = ran.json()
+    assert body["last_error"]
+    assert body["last_result"] == "检查失败"
+    assert sent
+    assert sent[0].startswith("**检查失败：")
+    assert "测试" not in sent[0]
+
+
 def test_run_failure_returns_200_without_moving_next(scheduled):
     client, path, _, _ = scheduled
     created = client.post("/api/schedules", json={"profile": "myapp", "kind": "daily", "time": "09:30"})

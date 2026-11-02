@@ -12,6 +12,7 @@ from asc.schedule import (
     QueryOutcome,
     ReviewSnapshot,
     ScheduleError,
+    SendOutcome,
     format_timestamp,
     load_tasks,
     save_tasks,
@@ -326,6 +327,30 @@ def test_tick_corrupt_exits_1_and_query_error_exits_0(scheduled, monkeypatch: py
     failed = runner.invoke(app, ["schedule", "tick"])
     assert failed.exit_code == 0
     assert "error" in failed.stdout
+
+
+def test_run_empty_sends_test_and_keeps_next(scheduled, monkeypatch: pytest.MonkeyPatch):
+    path, _, _ = scheduled
+    created = _add(["--app", "myapp", "--daily", "--time", "09:30"])
+    task_id = _task_id(created)
+    before = load_tasks(path)[0].next_run_at
+    sent = []
+
+    def empty(profile, **kwargs):
+        return QueryOutcome("当前无在审版本；暂无已上架版本", "", ReviewSnapshot([], []))
+
+    def send(text):
+        sent.append(text)
+        return SendOutcome(False, [], True)
+
+    monkeypatch.setattr("asc.schedule.query_review", empty)
+    monkeypatch.setattr("asc.schedule._default_send", send)
+    result = runner.invoke(app, ["schedule", "run", task_id])
+    assert result.exit_code == 0, _text(result)
+    assert result.stdout.strip().endswith("ok")
+    assert load_tasks(path)[0].next_run_at == before
+    assert load_tasks(path)[0].last_result == "未查到审核状态（测试）"
+    assert sent[0].startswith("**未查到审核状态（测试）**")
 
 
 def test_run_error_keeps_next_run(scheduled, monkeypatch: pytest.MonkeyPatch):

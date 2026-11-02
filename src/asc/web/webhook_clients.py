@@ -17,41 +17,15 @@ def strip_markdown_bold(text: str) -> str:
     return _BOLD_SEGMENT_RE.sub(r"\1", text)
 
 
-def feishu_post_segments(line: str) -> list[dict[str, Any]]:
-    if not line:
-        return [{"tag": "text", "text": ""}]
-    segments: list[dict[str, Any]] = []
-    pos = 0
-    for match in _BOLD_SEGMENT_RE.finditer(line):
-        if match.start() > pos:
-            segments.append({"tag": "text", "text": line[pos : match.start()]})
-        segments.append({"tag": "text", "text": match.group(1), "style": ["bold"]})
-        pos = match.end()
-    if pos < len(line):
-        segments.append({"tag": "text", "text": line[pos:]})
-    return segments or [{"tag": "text", "text": ""}]
-
-
-def feishu_post_content(text: str) -> list[list[dict[str, Any]]]:
-    return [feishu_post_segments(line) for line in str(text).split("\n")]
-
-
 def _first_line_title(text: str) -> str:
     first = str(text).split("\n", 1)[0]
     return strip_markdown_bold(first).strip() or "ASC 任务通知"
 
 
 def build_feishu_payload(text: str, secret: str = "") -> dict[str, Any]:
-    title = _first_line_title(text)
-    paragraphs = feishu_post_content(text)
     payload: dict[str, Any] = {
-        "msg_type": "post",
-        "content": {
-            "post": {
-                "zh_cn": {"title": title, "content": paragraphs},
-                "en_us": {"title": title, "content": paragraphs},
-            }
-        },
+        "msg_type": "text",
+        "content": {"text": strip_markdown_bold(text)},
     }
     if not secret:
         return payload
@@ -101,6 +75,49 @@ def build_dingtalk_url(url: str, secret: str = "") -> str:
     return f"{url}{separator}timestamp={timestamp}&sign={sign}"
 
 
+def _response_json(response: Any) -> dict[str, Any] | None:
+    parser = getattr(response, "json", None)
+    if not callable(parser):
+        return None
+    try:
+        body = parser()
+    except Exception:
+        return None
+    return body if isinstance(body, dict) else None
+
+
+def _nonzero_code(body: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key not in body:
+            continue
+        value = body[key]
+        if value not in (0, "0", None, ""):
+            return value
+    return None
+
+
+def _provider_http_error(provider: str, response: Any) -> str | None:
+    if not (200 <= response.status_code < 300):
+        return f"HTTP {response.status_code}"
+    body = _response_json(response)
+    if not body:
+        return None
+    provider_name = provider.lower()
+    if provider_name == "feishu":
+        code = _nonzero_code(body, "code", "StatusCode")
+        if code is None:
+            return None
+        message = str(body.get("msg") or body.get("StatusMessage") or "request failed")
+        return f"{code} {message}"[:200]
+    if provider_name in {"wecom", "dingtalk"}:
+        code = _nonzero_code(body, "errcode")
+        if code is None:
+            return None
+        message = str(body.get("errmsg") or "request failed")
+        return f"{code} {message}"[:200]
+    return None
+
+
 def send_provider(
     provider: str,
     config: dict[str, Any],
@@ -131,7 +148,7 @@ def send_provider(
     except Exception as exc:
         return {"provider": provider, "ok": False, "error": exc.__class__.__name__}
 
-    if 200 <= response.status_code < 300:
-        return {"provider": provider, "ok": True}
-
-    return {"provider": provider, "ok": False, "error": f"HTTP {response.status_code}"}
+    error = _provider_http_error(provider_name, response)
+    if error:
+        return {"provider": provider, "ok": False, "error": error}
+    return {"provider": provider, "ok": True}

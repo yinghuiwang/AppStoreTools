@@ -1248,6 +1248,23 @@ def snapshot_has_in_progress(snapshot: Optional[ReviewSnapshot]) -> bool:
     return any(review_phase(label) == REVIEW_PHASE_IN_PROGRESS for _name, label in snapshot.in_review)
 
 
+def snapshot_lacks_review_status(snapshot: Optional[ReviewSnapshot]) -> bool:
+    """True when a query succeeded but nothing reportable was found.
+
+    Empty App Store / TestFlight snapshots, TF empty notes, and
+    non-reportable rows such as 未送审 count as missing status. Query
+    failures (``snapshot is None``) do not.
+    """
+    if snapshot is None:
+        return False
+    if snapshot_has_in_progress(snapshot):
+        return False
+    if any(name for name in snapshot.on_sale if name):
+        return False
+    reportable = {REVIEW_PHASE_APPROVED, REVIEW_PHASE_REJECTED}
+    return not any(review_phase(label) in reportable for _name, label in snapshot.in_review)
+
+
 def review_result_notify_key(snapshot: ReviewSnapshot, profile: str) -> Optional[str]:
     pairs = []
     for name, label in snapshot.in_review:
@@ -1339,6 +1356,25 @@ def build_failure_message(
             _notify_line("notify_checked_at", checked_at=checked_at),
         ]
     )
+
+
+def build_test_message(
+    profile: str,
+    checked_at: str,
+    watch: str = WATCH_APP_STORE,
+) -> str:
+    return "\n".join(
+        [
+            markdown_bold(_notify_line("notify_test")),
+            _notify_line("notify_app", profile=profile),
+            _notify_line("notify_watch", watch=watch_label(watch)),
+            _notify_line("notify_checked_at", checked_at=checked_at),
+        ]
+    )
+
+
+def _missing_notification_channel(outcome: "SendOutcome") -> bool:
+    return not outcome.config_invalid and not outcome.failures and not outcome.attempted
 
 
 def clamp_error(text: str) -> str:
@@ -1597,6 +1633,7 @@ def execute_task(
     advance_next: bool,
     query,
     send,
+    force_test_on_empty: bool = False,
 ) -> str:
     try:
         outcome = _invoke_query(query, task)
@@ -1604,12 +1641,21 @@ def execute_task(
         outcome = QueryOutcome("检查失败", clamp_error(str(exc)), None)
     if not isinstance(outcome, QueryOutcome):
         outcome = QueryOutcome("检查失败", clamp_error(str(outcome)), None)
+    send_test = bool(
+        force_test_on_empty
+        and not outcome.query_error
+        and snapshot_lacks_review_status(outcome.snapshot)
+    )
     task.last_run_at = _stamp_last_run(task, now)
-    task.last_result = outcome.last_result
+    task.last_result = _notify_line("notify_test") if send_test else outcome.last_result
     task.last_error = outcome.query_error
     if advance_next:
         task.next_run_at = format_timestamp(next_slot(task, now))
-    should_send, notified_after = review_notify_decision(task, outcome)
+    if send_test:
+        should_send = True
+        notified_after = task.last_notified_result or ""
+    else:
+        should_send, notified_after = review_notify_decision(task, outcome)
     if snapshot_has_in_progress(outcome.snapshot):
         task.last_notified_result = ""
     save_tasks(schedule_path, tasks)
@@ -1623,15 +1669,24 @@ def execute_task(
             outcome.query_error or "检查失败",
             watch=_task_watch(task),
         )
+    elif send_test:
+        text = build_test_message(task.profile, checked, watch=_task_watch(task))
     else:
         text = build_success_message(task.profile, checked, outcome.snapshot)
     send_outcome = send(text)
-    final_error = combine_last_error(outcome.query_error, send_outcome)
+    if send_test and _missing_notification_channel(send_outcome):
+        final_error = user_message("notify_no_channel")
+    else:
+        final_error = combine_last_error(outcome.query_error, send_outcome)
     dirty = False
     if final_error != task.last_error:
         task.last_error = final_error
         dirty = True
-    if not final_error and notified_after != (task.last_notified_result or ""):
+    if (
+        not send_test
+        and not final_error
+        and notified_after != (task.last_notified_result or "")
+    ):
         task.last_notified_result = notified_after
         dirty = True
     if dirty:
@@ -1718,5 +1773,6 @@ def run_task(
             advance_next=False,
             query=query_fn,
             send=send_fn,
+            force_test_on_empty=True,
         )
         return task

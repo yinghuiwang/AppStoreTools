@@ -282,6 +282,172 @@ def test_tick_passes_watch_and_keeps_legacy_app_store(tmp_path: Path):
     assert saved[1].last_result == "TF 123 等待 Beta 审核"
 
 
+def _empty_query(profile, watch="app_store"):
+    if watch == WATCH_TESTFLIGHT:
+        return QueryOutcome(
+            "当前无 TF 外部组在审构建；暂无可测试构建",
+            "",
+            ReviewSnapshot([], [], watch=WATCH_TESTFLIGHT),
+        )
+    return QueryOutcome("当前无在审版本；暂无已上架版本", "", ReviewSnapshot([], []))
+
+
+def _attempted_send(sent):
+    def send(text):
+        sent.append(text)
+        return SendOutcome(False, [], True)
+
+    return send
+
+
+def test_run_empty_status_sends_test_message(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("asc.i18n.LANG", "zh")
+    path = tmp_path / "schedules.toml"
+    save_tasks(path, [_task()])
+    sent = []
+    now = datetime(2026, 10, 14, 9, 32, tzinfo=SH)
+    ran = run_task(
+        "a1b2c3d4",
+        schedule_path=path,
+        now=now,
+        query=_empty_query,
+        send=_attempted_send(sent),
+    )
+    assert ran.last_error == ""
+    assert ran.last_result == "未查到审核状态（测试）"
+    assert ran.next_run_at == "2026-10-14T09:30:00+08:00"
+    assert len(sent) == 1
+    assert sent[0] == (
+        "**未查到审核状态（测试）**\n"
+        "应用：myapp\n"
+        "监听：App Store 版本审核\n"
+        "检查时间：2026-10-14 09:32（Asia/Shanghai）"
+    )
+
+
+def test_run_tf_empty_and_not_submitted_send_test(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("asc.i18n.LANG", "zh")
+    path = tmp_path / "schedules.toml"
+    save_tasks(path, [_task(watch=WATCH_TESTFLIGHT)])
+    cases = [
+        ReviewSnapshot([], [], watch=WATCH_TESTFLIGHT, note="no_external_groups"),
+        ReviewSnapshot([], [], watch=WATCH_TESTFLIGHT, note="no_builds"),
+        ReviewSnapshot([("123（External）", "未送审")], [], watch=WATCH_TESTFLIGHT),
+    ]
+    now = datetime(2026, 10, 14, 9, 32, tzinfo=SH)
+    for snapshot in cases:
+        sent = []
+
+        def query(profile, watch="app_store", current=snapshot):
+            return QueryOutcome("empty", "", current)
+
+        ran = run_task(
+            "a1b2c3d4",
+            schedule_path=path,
+            now=now,
+            query=query,
+            send=_attempted_send(sent),
+        )
+        assert ran.last_error == ""
+        assert ran.last_result == "未查到审核状态（测试）"
+        assert sent[0].startswith("**未查到审核状态（测试）**")
+        assert "监听：TestFlight 外部组版本审核" in sent[0]
+
+
+def test_run_empty_without_webhook_is_explicit_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr("asc.i18n.LANG", "zh")
+    path = tmp_path / "schedules.toml"
+    save_tasks(path, [_task()])
+    sent = []
+
+    def send(text):
+        sent.append(text)
+        return SendOutcome(False, [], False)
+
+    now = datetime(2026, 10, 14, 9, 32, tzinfo=SH)
+    ran = run_task(
+        "a1b2c3d4",
+        schedule_path=path,
+        now=now,
+        query=_empty_query,
+        send=send,
+    )
+    assert sent
+    assert sent[0].startswith("**未查到审核状态（测试）**")
+    assert ran.last_result == "未查到审核状态（测试）"
+    assert ran.last_error == "未配置通知渠道"
+
+
+def test_run_on_sale_still_sends_official_status(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr("asc.i18n.LANG", "zh")
+    path = tmp_path / "schedules.toml"
+    save_tasks(path, [_task()])
+    sent = []
+
+    def query(profile, watch="app_store"):
+        snapshot = ReviewSnapshot([], ["1.2.0"])
+        return QueryOutcome("当前无在审版本；已上架 1.2.0", "", snapshot)
+
+    now = datetime(2026, 10, 14, 9, 32, tzinfo=SH)
+    ran = run_task(
+        "a1b2c3d4",
+        schedule_path=path,
+        now=now,
+        query=query,
+        send=_attempted_send(sent),
+    )
+    assert ran.last_error == ""
+    assert ran.last_result == "当前无在审版本；已上架 1.2.0"
+    assert sent[0].startswith("**当前无在审版本；已上架 1.2.0**")
+    assert "测试" not in sent[0]
+
+
+def test_run_query_failure_is_not_disguised_as_test(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr("asc.i18n.LANG", "zh")
+    path = tmp_path / "schedules.toml"
+    save_tasks(path, [_task()])
+    sent = []
+
+    def query(profile, watch="app_store"):
+        return QueryOutcome("检查失败", "API 403", None)
+
+    now = datetime(2026, 10, 14, 9, 32, tzinfo=SH)
+    ran = run_task(
+        "a1b2c3d4",
+        schedule_path=path,
+        now=now,
+        query=query,
+        send=_attempted_send(sent),
+    )
+    assert ran.last_error == "API 403"
+    assert ran.last_result == "检查失败"
+    assert sent[0].startswith("**检查失败：API 403**")
+    assert "测试" not in sent[0]
+
+
+def test_tick_empty_status_keeps_regular_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr("asc.i18n.LANG", "zh")
+    path = tmp_path / "schedules.toml"
+    save_tasks(path, [_task()])
+    sent = []
+    now = datetime(2026, 10, 14, 9, 32, tzinfo=SH)
+    assert tick(schedule_path=path, now=now, query=_empty_query, send=_attempted_send(sent)) == 0
+    saved = load_tasks(path)[0]
+    assert saved.last_result == "当前无在审版本；暂无已上架版本"
+    assert saved.last_error == ""
+    assert len(sent) == 1
+    assert sent[0].startswith("**当前无在审版本；暂无已上架版本**")
+    assert "测试" not in sent[0]
+
+
 def test_fcntl_unavailable_exits_1(tmp_path: Path, capsys, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr("asc.i18n.LANG", "zh")
     monkeypatch.setattr("asc.schedule._flock_module", lambda: None)
