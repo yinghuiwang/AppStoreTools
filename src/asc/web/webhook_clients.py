@@ -3,17 +3,55 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import re
 import time
 from typing import Any
 from urllib.parse import quote
 
 import requests
 
+_BOLD_SEGMENT_RE = re.compile(r"\*\*(.+?)\*\*")
+
+
+def strip_markdown_bold(text: str) -> str:
+    return _BOLD_SEGMENT_RE.sub(r"\1", text)
+
+
+def feishu_post_segments(line: str) -> list[dict[str, Any]]:
+    if not line:
+        return [{"tag": "text", "text": ""}]
+    segments: list[dict[str, Any]] = []
+    pos = 0
+    for match in _BOLD_SEGMENT_RE.finditer(line):
+        if match.start() > pos:
+            segments.append({"tag": "text", "text": line[pos : match.start()]})
+        segments.append({"tag": "text", "text": match.group(1), "style": ["bold"]})
+        pos = match.end()
+    if pos < len(line):
+        segments.append({"tag": "text", "text": line[pos:]})
+    return segments or [{"tag": "text", "text": ""}]
+
+
+def feishu_post_content(text: str) -> list[list[dict[str, Any]]]:
+    return [feishu_post_segments(line) for line in str(text).split("\n")]
+
+
+def _first_line_title(text: str) -> str:
+    first = str(text).split("\n", 1)[0]
+    return strip_markdown_bold(first).strip() or "ASC 任务通知"
+
 
 def build_feishu_payload(text: str, secret: str = "") -> dict[str, Any]:
+    title = _first_line_title(text)
+    paragraphs = feishu_post_content(text)
     payload: dict[str, Any] = {
-        "msg_type": "text",
-        "content": {"text": text},
+        "msg_type": "post",
+        "content": {
+            "post": {
+                "zh_cn": {"title": title, "content": paragraphs},
+                "en_us": {"title": title, "content": paragraphs},
+            }
+        },
     }
     if not secret:
         return payload
@@ -38,7 +76,7 @@ def build_dingtalk_payload(text: str, secret: str = "") -> dict[str, Any]:
     return {
         "msgtype": "markdown",
         "markdown": {
-            "title": "ASC 任务通知",
+            "title": _first_line_title(text),
             "text": text,
         },
     }

@@ -1289,34 +1289,40 @@ def format_checked_at(now: datetime, timezone_name: str) -> str:
 
 
 def watch_label(watch: str) -> str:
+    from asc.i18n import LANG, SCHEDULE_TEXT, t
+
+    if LANG == "en":
+        key = (
+            "notify_watch_testflight"
+            if watch == WATCH_TESTFLIGHT
+            else "notify_watch_app_store"
+        )
+        return t(SCHEDULE_TEXT[key])
     return WATCH_LABELS.get(watch, WATCH_LABELS[WATCH_APP_STORE])
 
 
+def markdown_bold(text: str) -> str:
+    value = str(text)
+    if value.startswith("**") and value.endswith("**") and len(value) >= 4:
+        return value
+    return f"**{value}**"
+
+
+def _notify_line(key: str, **params: object) -> str:
+    from asc.i18n import SCHEDULE_TEXT, t
+
+    return t(SCHEDULE_TEXT[key]).format(**params)
+
+
 def build_success_message(profile: str, checked_at: str, snapshot: ReviewSnapshot) -> str:
-    lines = [
-        f"应用：{profile}",
-        f"监听：{watch_label(snapshot.watch)}",
-        f"检查时间：{checked_at}",
-    ]
-    if snapshot.watch == WATCH_TESTFLIGHT:
-        if snapshot.in_review:
-            lines.append("TestFlight 外部组在审构建：")
-            lines.extend(f"- {name} {label}" for name, label in snapshot.in_review)
-        elif snapshot.note in TF_EMPTY_NOTES:
-            lines.append(TF_EMPTY_NOTES[snapshot.note])
-        else:
-            lines.append("当前无 TF 外部组在审构建")
-            sold = "、".join(snapshot.on_sale) if snapshot.on_sale else "暂无可测试构建"
-            lines.append(f"可测试：{sold}")
-        return "\n".join(lines)
-    if snapshot.in_review:
-        lines.append("在审版本：")
-        lines.extend(f"- {name} {label}" for name, label in snapshot.in_review)
-    else:
-        lines.append("当前无在审版本")
-        sold = "、".join(snapshot.on_sale) if snapshot.on_sale else "暂无已上架版本"
-        lines.append(f"已上架：{sold}")
-    return "\n".join(lines)
+    return "\n".join(
+        [
+            markdown_bold(format_last_result(snapshot)),
+            _notify_line("notify_app", profile=profile),
+            _notify_line("notify_watch", watch=watch_label(snapshot.watch)),
+            _notify_line("notify_checked_at", checked_at=checked_at),
+        ]
+    )
 
 
 def build_failure_message(
@@ -1325,11 +1331,13 @@ def build_failure_message(
     error: str,
     watch: str = WATCH_APP_STORE,
 ) -> str:
-    return (
-        f"应用：{profile}\n"
-        f"监听：{watch_label(watch)}\n"
-        f"检查时间：{checked_at}\n"
-        f"检查失败：{error}"
+    return "\n".join(
+        [
+            markdown_bold(_notify_line("notify_fail", error=error)),
+            _notify_line("notify_app", profile=profile),
+            _notify_line("notify_watch", watch=watch_label(watch)),
+            _notify_line("notify_checked_at", checked_at=checked_at),
+        ]
     )
 
 

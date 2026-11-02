@@ -1,6 +1,8 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from asc.schedule import (
     WATCH_TESTFLIGHT,
     ReviewSnapshot,
@@ -10,6 +12,7 @@ from asc.schedule import (
     classify_versions,
     format_checked_at,
     format_last_result,
+    markdown_bold,
     review_phase,
     review_result_notify_key,
     snapshot_has_in_progress,
@@ -17,6 +20,11 @@ from asc.schedule import (
 
 
 SH = ZoneInfo("Asia/Shanghai")
+
+
+@pytest.fixture(autouse=True)
+def _zh_notify_messages(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("asc.i18n.LANG", "zh")
 
 
 def version(vid, state, name="1.2.3", legacy=False):
@@ -127,22 +135,24 @@ def test_messages_use_profile_name_and_drop_seconds():
         version("b", "WAITING_FOR_REVIEW", "1.2.4"),
     ])
     assert build_success_message("myapp", checked, reviewing) == (
+        "**1.2.3 审核中；1.2.4 等待审核**\n"
         "应用：myapp\n"
         "监听：App Store 版本审核\n"
-        "检查时间：2026-10-14 09:31（Asia/Shanghai）\n"
-        "在审版本：\n"
-        "- 1.2.3 审核中\n"
-        "- 1.2.4 等待审核"
+        "检查时间：2026-10-14 09:31（Asia/Shanghai）"
     )
     on_sale = classify_versions([version("a", "READY_FOR_SALE", "1.2.0")])
-    assert build_success_message("myapp", checked, on_sale).endswith("已上架：1.2.0")
+    assert build_success_message("myapp", checked, on_sale).startswith(
+        "**当前无在审版本；已上架 1.2.0**\n"
+    )
     empty = classify_versions([])
-    assert build_success_message("myapp", checked, empty).endswith("已上架：暂无已上架版本")
+    assert build_success_message("myapp", checked, empty).startswith(
+        "**当前无在审版本；暂无已上架版本**\n"
+    )
     assert build_failure_message("myapp", checked, "凭证不完整") == (
+        "**检查失败：凭证不完整**\n"
         "应用：myapp\n"
         "监听：App Store 版本审核\n"
-        "检查时间：2026-10-14 09:31（Asia/Shanghai）\n"
-        "检查失败：凭证不完整"
+        "检查时间：2026-10-14 09:31（Asia/Shanghai）"
     )
 
 
@@ -155,11 +165,10 @@ def test_testflight_messages_are_not_store_review():
     )
     assert format_last_result(snapshot) == "TF 123（External） 等待 Beta 审核"
     assert build_success_message("myapp", checked, snapshot) == (
+        "**TF 123（External） 等待 Beta 审核**\n"
         "应用：myapp\n"
         "监听：TestFlight 外部组版本审核\n"
-        "检查时间：2026-10-14 09:31（Asia/Shanghai）\n"
-        "TestFlight 外部组在审构建：\n"
-        "- 123（External） 等待 Beta 审核"
+        "检查时间：2026-10-14 09:31（Asia/Shanghai）"
     )
     idle = ReviewSnapshot([], ["120"], watch=WATCH_TESTFLIGHT)
     assert format_last_result(idle) == "当前无 TF 外部组在审构建；可测试 120"
@@ -175,11 +184,45 @@ def test_testflight_messages_are_not_store_review():
     assert "App Store" not in build_success_message("myapp", checked, snapshot)
     assert "在审版本" not in build_success_message("myapp", checked, snapshot)
     assert build_failure_message("myapp", checked, "凭证不完整", watch=WATCH_TESTFLIGHT) == (
+        "**检查失败：凭证不完整**\n"
         "应用：myapp\n"
         "监听：TestFlight 外部组版本审核\n"
-        "检查时间：2026-10-14 09:31（Asia/Shanghai）\n"
-        "检查失败：凭证不完整"
+        "检查时间：2026-10-14 09:31（Asia/Shanghai）"
     )
+
+
+def test_success_message_english(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("asc.i18n.LANG", "en")
+    checked = "2026-10-14 09:31（Asia/Shanghai）"
+    reviewing = ReviewSnapshot([("1.2.3", "审核中")], [])
+    flight = ReviewSnapshot(
+        [("10（Public）", "Beta 审核中")],
+        [],
+        watch=WATCH_TESTFLIGHT,
+    )
+    assert build_success_message("myapp", checked, reviewing) == (
+        "**1.2.3 审核中**\n"
+        "App: myapp\n"
+        "Watch: App Store version review\n"
+        "Checked at: 2026-10-14 09:31（Asia/Shanghai）"
+    )
+    assert build_success_message("myapp", checked, flight).startswith(
+        "**TF 10（Public） Beta 审核中**\n"
+    )
+    assert "Watch: TestFlight external-group version review" in build_success_message(
+        "myapp", checked, flight
+    )
+    assert build_failure_message("myapp", checked, "incomplete credentials") == (
+        "**Check failed: incomplete credentials**\n"
+        "App: myapp\n"
+        "Watch: App Store version review\n"
+        "Checked at: 2026-10-14 09:31（Asia/Shanghai）"
+    )
+
+
+def test_markdown_bold_wraps_status_once():
+    assert markdown_bold("审核通过") == "**审核通过**"
+    assert markdown_bold("**Beta 审核中**") == "**Beta 审核中**"
 
 
 def test_clamp_error_redacts_and_counts_code_points():

@@ -48,7 +48,8 @@ def _quiet_send(text):
     return SendOutcome(False, [], False)
 
 
-def test_tick_writes_next_run_before_send(tmp_path: Path):
+def test_tick_writes_next_run_before_send(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("asc.i18n.LANG", "zh")
     path = tmp_path / "schedules.toml"
     save_tasks(path, [_task()])
     seen = {}
@@ -60,6 +61,7 @@ def test_tick_writes_next_run_before_send(tmp_path: Path):
         saved = load_tasks(path)[0]
         seen["next"] = saved.next_run_at
         seen["result"] = saved.last_result
+        assert text.startswith("**1.2.3 审核中**")
         assert "应用：myapp" in text
         return SendOutcome(False, [], False)
 

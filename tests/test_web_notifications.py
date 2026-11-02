@@ -194,8 +194,11 @@ def test_feishu_signature_payload(monkeypatch: pytest.MonkeyPatch):
 
     payload = webhook_clients.build_feishu_payload("hello", "secret")
 
-    assert payload["msg_type"] == "text"
-    assert payload["content"] == {"text": "hello"}
+    assert payload["msg_type"] == "post"
+    assert payload["content"]["post"]["zh_cn"]["title"] == "hello"
+    assert payload["content"]["post"]["zh_cn"]["content"] == [
+        [{"tag": "text", "text": "hello"}]
+    ]
     assert payload["timestamp"] == "1700000000"
     assert payload["sign"] == "fiWS2+gh28DOydAv7hzONH/mDn9+b1Y4Y5ivXWXy8vA="
 
@@ -204,6 +207,31 @@ def test_wecom_payload_uses_markdown():
     payload = webhook_clients.build_wecom_payload("hello")
 
     assert payload == {"msgtype": "markdown", "markdown": {"content": "hello"}}
+
+
+def test_feishu_post_renders_status_line_bold():
+    text = "**1.2.3 审核中**\n应用：myapp\n监听：App Store 版本审核"
+    payload = webhook_clients.build_feishu_payload(text)
+
+    assert payload["msg_type"] == "post"
+    zh = payload["content"]["post"]["zh_cn"]
+    assert zh["title"] == "1.2.3 审核中"
+    assert zh["content"][0] == [{"tag": "text", "text": "1.2.3 审核中", "style": ["bold"]}]
+    assert zh["content"][1] == [{"tag": "text", "text": "应用：myapp"}]
+    assert payload["content"]["post"]["en_us"]["title"] == "1.2.3 审核中"
+
+
+def test_dingtalk_title_uses_plain_first_line():
+    text = "**TF 10（Public） Beta 审核中**\n应用：myapp"
+    payload = webhook_clients.build_dingtalk_payload(text)
+
+    assert payload == {
+        "msgtype": "markdown",
+        "markdown": {
+            "title": "TF 10（Public） Beta 审核中",
+            "text": text,
+        },
+    }
 
 
 def test_dingtalk_signature_url(monkeypatch: pytest.MonkeyPatch):
@@ -365,7 +393,7 @@ def test_send_provider_dingtalk_posts_signed_url(monkeypatch: pytest.MonkeyPatch
     assert "sign=OuzzJR5%2BxZ4%2FEYwqtNt6sMYZQMTa%2FHEGvc9miJe7XzY%3D" in calls[0]["url"]
     assert calls[0]["json"] == {
         "msgtype": "markdown",
-        "markdown": {"title": "ASC 任务通知", "text": "hello"},
+        "markdown": {"title": "hello", "text": "hello"},
     }
 
 

@@ -147,6 +147,18 @@ SCHEDULE_TEXT = {
     'col_watch': {'zh': '监听', 'en': 'Watch'},
     'watch_app_store': {'zh': 'App Store 版本审核', 'en': 'App Store version review'},
     'watch_testflight': {'zh': 'TF 外部组版本审核', 'en': 'TF external Beta Review'},
+    'notify_app': {'zh': '应用：{profile}', 'en': 'App: {profile}'},
+    'notify_watch': {'zh': '监听：{watch}', 'en': 'Watch: {watch}'},
+    'notify_checked_at': {'zh': '检查时间：{checked_at}', 'en': 'Checked at: {checked_at}'},
+    'notify_fail': {'zh': '检查失败：{error}', 'en': 'Check failed: {error}'},
+    'notify_watch_app_store': {
+        'zh': 'App Store 版本审核',
+        'en': 'App Store version review',
+    },
+    'notify_watch_testflight': {
+        'zh': 'TestFlight 外部组版本审核',
+        'en': 'TestFlight external-group version review',
+    },
     'state_enabled': {'zh': '启用', 'en': 'enabled'},
     'state_disabled': {'zh': '停用', 'en': 'disabled'},
 }

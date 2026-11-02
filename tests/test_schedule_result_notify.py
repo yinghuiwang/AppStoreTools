@@ -66,6 +66,7 @@ def test_store_approved_notifies_once_across_ticks(tmp_path: Path):
     assert _tick(path, datetime(2026, 10, 14, 9, 32, tzinfo=SH), query, sent) == 0
     assert _tick(path, datetime(2026, 10, 14, 11, 32, tzinfo=SH), query, sent) == 0
     assert len(sent) == 1
+    assert sent[0].startswith("**1.2.3 待开发者发布**")
     assert "1.2.3" in sent[0]
     saved = load_tasks(path)[0]
     assert saved.last_result
@@ -178,6 +179,8 @@ def test_tf_rejected_again_after_beta_review(tmp_path: Path):
     ):
         assert _tick(path, now, query, sent) == 0
     assert len(sent) == 3
+    assert sent[0].startswith("**TF 123（External） Beta 被拒**")
+    assert sent[1].startswith("**TF 123（External） Beta 审核中**")
     assert "Beta 被拒" in sent[0]
     assert "Beta 审核中" in sent[1]
     assert "Beta 被拒" in sent[2]
