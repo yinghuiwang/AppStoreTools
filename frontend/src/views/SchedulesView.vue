@@ -3,11 +3,14 @@ import { computed, onMounted, reactive, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { MessagePlugin } from "tdesign-vue-next";
 import { ApiError, apiErrorMessage, httpJson } from "@/api/http";
+import { usePlatform } from "@/composables/usePlatform";
 import { useProfile } from "@/composables/useProfile";
 
 defineOptions({ name: "SchedulesView" });
 
 const { t } = useI18n();
+const { blocked, unsupportedText } = usePlatform();
+const osBlocked = computed(() => blocked("schedule"));
 
 type ScheduleTask = {
   id: string;
@@ -97,6 +100,7 @@ function report(err: unknown) {
 }
 
 async function load() {
+  if (osBlocked.value) return;
   const data = await httpJson<{ tasks: ScheduleTask[]; heartbeat: Heartbeat }>("/api/schedules");
   rows.value = (data.tasks || []).map(decorate);
   heartbeat.value = data.heartbeat || { installed: false, path: "" };
@@ -124,6 +128,7 @@ function resetForm() {
 }
 
 function openCreate() {
+  if (osBlocked.value) return;
   editingId.value = "";
   notice.value = "";
   resetForm();
@@ -131,6 +136,7 @@ function openCreate() {
 }
 
 function openEdit(task: ScheduleTask) {
+  if (osBlocked.value) return;
   editingId.value = task.id;
   notice.value = "";
   form.profile = task.profile;
@@ -149,6 +155,7 @@ function encode(body: Record<string, unknown>): string {
 }
 
 async function toggle(task: ScheduleTask, enabled: boolean) {
+  if (osBlocked.value) return;
   const body: Record<string, unknown> = {
     profile: task.profile,
     kind: task.kind,
@@ -167,6 +174,7 @@ async function toggle(task: ScheduleTask, enabled: boolean) {
 }
 
 async function save() {
+  if (osBlocked.value) return;
   if (!canSave.value) return;
   notice.value = "";
   const body: Record<string, unknown> = {
@@ -198,6 +206,7 @@ async function save() {
 }
 
 async function remove(task: ScheduleTask) {
+  if (osBlocked.value) return;
   try {
     await httpJson(`/api/schedules/${encodeURIComponent(task.id)}`, { method: "DELETE" });
     await load();
@@ -211,6 +220,7 @@ function isRunning(id: string): boolean {
 }
 
 async function run(task: ScheduleTask) {
+  if (osBlocked.value) return;
   if (isRunning(task.id)) return;
   runningIds.value = [...runningIds.value, task.id];
   runError.value = "";
@@ -232,6 +242,7 @@ async function run(task: ScheduleTask) {
 }
 
 async function installHeartbeat() {
+  if (osBlocked.value) return;
   try {
     await httpJson("/api/schedules/heartbeat/install", { method: "POST" });
     await load();
@@ -241,6 +252,7 @@ async function installHeartbeat() {
 }
 
 async function uninstallHeartbeat() {
+  if (osBlocked.value) return;
   try {
     await httpJson("/api/schedules/heartbeat/uninstall", { method: "POST" });
     await load();
@@ -250,6 +262,7 @@ async function uninstallHeartbeat() {
 }
 
 onMounted(async () => {
+  if (osBlocked.value) return;
   try {
     await Promise.all([load(), loadTimezones()]);
   } catch (err) {
@@ -260,21 +273,23 @@ onMounted(async () => {
 
 <template>
   <div class="page-stack">
+    <t-alert v-if="osBlocked" theme="warning" :title="unsupportedText" />
     <section class="card heartbeat">
       <div>
         <strong>{{ heartbeat.installed ? t("schedules.heartbeat_installed") : t("schedules.heartbeat_absent") }}</strong>
         <code v-if="heartbeat.path">{{ heartbeat.path }}</code>
       </div>
       <div class="actions">
-        <t-button theme="primary" @click="installHeartbeat">{{ t("schedules.install") }}</t-button>
-        <t-button variant="outline" @click="uninstallHeartbeat">{{ t("schedules.uninstall") }}</t-button>
+        <t-button theme="primary" :disabled="osBlocked" :title="osBlocked ? unsupportedText : undefined" @click="installHeartbeat">{{ t("schedules.install") }}</t-button>
+        <t-button variant="outline" :disabled="osBlocked" :title="osBlocked ? unsupportedText : undefined" @click="uninstallHeartbeat">{{ t("schedules.uninstall") }}</t-button>
+        <span v-if="osBlocked" class="os-note">{{ unsupportedText }}</span>
       </div>
     </section>
 
     <section class="card">
       <header class="section-head">
         <h2>{{ t("nav.schedules") }}</h2>
-        <t-button theme="primary" @click="openCreate">{{ t("schedules.add") }}</t-button>
+        <t-button theme="primary" :disabled="osBlocked" :title="osBlocked ? unsupportedText : undefined" @click="openCreate">{{ t("schedules.add") }}</t-button>
       </header>
       <p v-if="runSummary" class="row-ok">{{ runSummary }}</p>
       <p v-if="runError" class="row-error">{{ runError }}</p>
@@ -301,21 +316,22 @@ onMounted(async () => {
             <td class="mono">{{ row.nextText }}</td>
             <td>{{ row.last_result || "-" }}</td>
             <td>
-              <t-switch :value="row.enabled" @change="toggle(row, $event === true)" />
+              <t-switch :value="row.enabled" :disabled="osBlocked" @change="toggle(row, $event === true)" />
               <span>{{ row.enabled ? t("schedules.state_enabled") : t("schedules.state_disabled") }}</span>
               <p v-if="row.last_error" class="row-error">{{ row.last_error }}</p>
             </td>
             <td class="actions">
-              <t-button size="small" variant="text" @click="openEdit(row)">{{ t("schedules.edit") }}</t-button>
+              <t-button size="small" variant="text" :disabled="osBlocked" @click="openEdit(row)">{{ t("schedules.edit") }}</t-button>
               <t-button
                 size="small"
                 variant="text"
                 :loading="isRunning(row.id)"
-                :disabled="isRunning(row.id)"
+                :disabled="osBlocked || isRunning(row.id)"
+                :title="osBlocked ? unsupportedText : undefined"
                 @click="run(row)"
               >{{ t("schedules.run") }}</t-button>
               <t-popconfirm :content="t('schedules.confirm_delete')" @confirm="remove(row)">
-                <t-button size="small" theme="danger" variant="text">{{ t("schedules.delete") }}</t-button>
+                <t-button size="small" theme="danger" variant="text" :disabled="osBlocked">{{ t("schedules.delete") }}</t-button>
               </t-popconfirm>
             </td>
           </tr>
@@ -377,7 +393,7 @@ onMounted(async () => {
         <p v-if="notice" class="row-error">{{ notice }}</p>
         <div class="actions">
           <t-button variant="outline" @click="dialogOpen = false">{{ t("schedules.cancel") }}</t-button>
-          <t-button theme="primary" :disabled="!canSave" @click="save">{{ t("schedules.save") }}</t-button>
+          <t-button theme="primary" :disabled="osBlocked || !canSave" :title="osBlocked ? unsupportedText : undefined" @click="save">{{ t("schedules.save") }}</t-button>
         </div>
       </div>
     </t-dialog>
@@ -419,8 +435,13 @@ onMounted(async () => {
   vertical-align: top;
 }
 
-.empty {
+.empty,
+.os-note {
   color: var(--text-muted);
+}
+
+.os-note {
+  font-size: 12px;
 }
 
 .row-error {

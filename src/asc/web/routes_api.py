@@ -25,6 +25,7 @@ from asc.utils import make_api_from_config
 from asc.web import notifications
 from asc.web.dashboard import MANUAL_BASELINE_MINUTES, build_dashboard_summary
 from asc.web.i18n import t
+from asc.web.platform_gate import unsupported_response
 from asc.web.task_runner import (
     SSE_ABSOLUTE_TIMEOUT_SEC,
     TERMINAL_RECOVERY_KEY,
@@ -163,6 +164,7 @@ def bootstrap(request: Request):
     from asc import __version__
     from asc.cli import _installed_commit_short
     from asc.commands.update_cmd import _is_editable
+    from asc.platform import platform_status
     from asc.web.i18n import html_lang
     from asc.web.profile_context import apply_profile_cookie, load_web_profile_state
 
@@ -185,6 +187,7 @@ def bootstrap(request: Request):
         "has_machine_profile": state["has_machine_profile"],
         "paths": state["paths"],
         "is_editable": _is_editable(),
+        "platform": platform_status(),
     }
     resp = JSONResponse(payload)
     apply_profile_cookie(
@@ -685,6 +688,12 @@ def _start_build_task(
 ) -> str:
     from asc.commands.build import _build_phase_plan, build_core, deploy_core
     from asc.config import Config
+    from asc.platform import feature_supported
+    from asc.web.i18n import resolve_lang
+
+    toolchain = {"deploy": "deploy", "full": "release"}.get(mode, "build")
+    if not feature_supported(toolchain):
+        raise RuntimeError(t("platform.unsupported", lang=resolve_lang()))
 
     task_id = _task_store.create(
         "build",
@@ -835,6 +844,9 @@ def build_run(
     dry_run: str = _Form(""),
     reuse_archive: str = _Form(""),
 ):
+    blocked = unsupported_response(request, {"deploy": "deploy", "full": "release"}.get(mode, "build"))
+    if blocked is not None:
+        return blocked
     lang = _lang(request)
     profile = _cookie_profile(request)
     if not profile:
@@ -881,6 +893,9 @@ def build_run(
 @router.get("/build/schemes")
 def build_schemes(request: Request, project: str = ""):
     """Return list of schemes for a given project path."""
+    blocked = unsupported_response(request, "build")
+    if blocked is not None:
+        return blocked
     try:
         from asc.commands.build_inputs import detect_project, list_schemes, resolve_build_project_path
         profile = _cookie_profile(request)
@@ -912,6 +927,9 @@ def build_options(
     This mirrors the choices that `asc release --interactive` would prompt for
     in a terminal, but keeps the Web UI non-interactive at execution time.
     """
+    blocked = unsupported_response(request, "build")
+    if blocked is not None:
+        return blocked
     try:
         from asc.commands.build_inputs import (
             build_cache_matches_project,

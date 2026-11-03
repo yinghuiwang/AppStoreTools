@@ -491,7 +491,7 @@ def test_schedules_page_is_wired():
     assert 'value="app_store"' in view
     assert 'value="testflight"' in view
     assert "isRunning(row.id)" in view
-    assert ':disabled="isRunning(row.id)"' in view
+    assert ':disabled="osBlocked || isRunning(row.id)"' in view
     assert ':disabled="!row.enabled"' not in view
     assert "runSummary" in view
     assert [key for key in zh if key.startswith("schedules.")] == [

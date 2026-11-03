@@ -13,11 +13,14 @@ import sys
 import tempfile
 import time
 import uuid
+import xml.etree.ElementTree as ET
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional
+from xml.sax.saxutils import escape
 from zoneinfo import ZoneInfo, available_timezones
 
 try:
@@ -172,17 +175,52 @@ def new_task_id(existing: set, rng=None) -> str:
 
 
 def _flock_module():
+    """Return fcntl when it imports, otherwise msvcrt. Branch on the import, not the OS name."""
     try:
         import fcntl
     except ImportError:
+        fcntl = None
+    if fcntl is not None and hasattr(fcntl, "flock"):
+        return fcntl
+    try:
+        import msvcrt
+    except ImportError:
         return None
-    return fcntl
+    if hasattr(msvcrt, "locking"):
+        return msvcrt
+    return None
+
+
+def _lock_kind(module) -> str:
+    if module is None:
+        return "none"
+    if hasattr(module, "flock") and hasattr(module, "LOCK_EX") and hasattr(module, "LOCK_NB"):
+        return "fcntl"
+    if hasattr(module, "locking") and hasattr(module, "LK_NBLCK"):
+        return "msvcrt"
+    return "none"
+
+
+def _acquire_lock(module, handle) -> None:
+    if _lock_kind(module) == "fcntl":
+        module.flock(handle.fileno(), module.LOCK_EX | module.LOCK_NB)
+        return
+    handle.seek(0)
+    module.locking(handle.fileno(), module.LK_NBLCK, 1)
+
+
+def _release_lock(module, handle) -> None:
+    if _lock_kind(module) == "fcntl":
+        module.flock(handle.fileno(), module.LOCK_UN)
+        return
+    handle.seek(0)
+    module.locking(handle.fileno(), module.LK_UNLCK, 1)
 
 
 @contextmanager
 def schedule_lock(schedule_path: Path, *, blocking: bool, timeout: float = 30) -> Iterator[None]:
-    fcntl = _flock_module()
-    if fcntl is None:
+    lock_mod = _flock_module()
+    if _lock_kind(lock_mod) == "none":
         raise ScheduleError("fcntl_unavailable")
     parent = schedule_path.parent
     if not parent.exists():
@@ -191,12 +229,14 @@ def schedule_lock(schedule_path: Path, *, blocking: bool, timeout: float = 30) -
         parent.mkdir(parents=True, exist_ok=True)
     lock_path = Path(str(schedule_path) + ".lock")
     handle = lock_path.open("a+")
+    held = False
     try:
         if blocking:
             deadline = time.monotonic() + timeout
             while True:
                 try:
-                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    _acquire_lock(lock_mod, handle)
+                    held = True
                     break
                 except (BlockingIOError, OSError) as exc:
                     if not _lock_busy(exc):
@@ -206,7 +246,8 @@ def schedule_lock(schedule_path: Path, *, blocking: bool, timeout: float = 30) -
                     time.sleep(0.05)
         else:
             try:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                _acquire_lock(lock_mod, handle)
+                held = True
             except (BlockingIOError, OSError) as exc:
                 if _lock_busy(exc):
                     raise ScheduleLockBusy()
@@ -214,7 +255,8 @@ def schedule_lock(schedule_path: Path, *, blocking: bool, timeout: float = 30) -
         yield
     finally:
         try:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            if held:
+                _release_lock(lock_mod, handle)
         finally:
             handle.close()
 
@@ -410,7 +452,12 @@ def _toml_basic(value: str) -> str:
     return f'"{escaped}"'
 
 
-def capture_timezone(*, environ=None, localtime: Optional[Path] = None) -> str:
+def capture_timezone(
+    *,
+    environ=None,
+    localtime: Optional[Path] = None,
+    system: Optional[str] = None,
+) -> str:
     env = os.environ if environ is None else environ
     raw = env.get("TZ", "")
     if raw is None:
@@ -418,6 +465,8 @@ def capture_timezone(*, environ=None, localtime: Optional[Path] = None) -> str:
     name = str(raw).strip()
     if name and _zone_accepted(name):
         return name
+    if _capture_uses_windows(system):
+        return _timezone_from_windows()
     source = Path("/etc/localtime") if localtime is None else Path(localtime)
     resolved = os.path.realpath(source)
     marker = "zoneinfo/"
@@ -428,6 +477,136 @@ def capture_timezone(*, environ=None, localtime: Optional[Path] = None) -> str:
     if not found or not _zone_accepted(found):
         raise ScheduleError("timezone")
     return found
+
+
+def _capture_uses_windows(system: Optional[str]) -> bool:
+    from asc.platform import is_windows
+
+    return is_windows(system)
+
+
+def _windows_timezone_key_name() -> str:
+    import winreg
+
+    with winreg.OpenKey(
+        winreg.HKEY_LOCAL_MACHINE,
+        r"SYSTEM\CurrentControlSet\Control\TimeZoneInformation",
+    ) as key:
+        value, _regtype = winreg.QueryValueEx(key, "TimeZoneKeyName")
+    if isinstance(value, bytes):
+        value = value.decode("utf-16-le", errors="replace")
+    text = str(value).split("\x00", 1)[0].strip()
+    if not text:
+        raise OSError("TimeZoneKeyName is empty")
+    return text
+
+
+def _timezone_from_windows() -> str:
+    try:
+        key_name = _windows_timezone_key_name()
+    except ScheduleError:
+        raise
+    except Exception as exc:
+        raise ScheduleError("timezone") from exc
+    iana = _windows_zone_to_iana(key_name)
+    if not iana or not _zone_accepted(iana):
+        raise ScheduleError("timezone")
+    return iana
+
+
+# Windows TimeZoneKeyName -> IANA. tzdata 2026.6 ships zoneinfo only, not a
+# Windows map, so this table is the fallback. Rows are territory "001" entries
+# from Unicode CLDR common/supplemental/windowsZones.xml and include the zones
+# this project already uses (Asia/Shanghai, Europe/Berlin, America/New_York,
+# UTC). A map discovered from tzdata or zoneinfo replaces this table.
+_WINDOWS_ZONE_FALLBACK = {
+    "Pacific Standard Time": "America/Los_Angeles",
+    "Mountain Standard Time": "America/Denver",
+    "Central Standard Time": "America/Chicago",
+    "Eastern Standard Time": "America/New_York",
+    "US Eastern Standard Time": "America/Indianapolis",
+    "UTC": "Etc/UTC",
+    "GMT Standard Time": "Europe/London",
+    "W. Europe Standard Time": "Europe/Berlin",
+    "Central Europe Standard Time": "Europe/Budapest",
+    "Romance Standard Time": "Europe/Paris",
+    "Russian Standard Time": "Europe/Moscow",
+    "India Standard Time": "Asia/Calcutta",
+    "SE Asia Standard Time": "Asia/Bangkok",
+    "China Standard Time": "Asia/Shanghai",
+    "Singapore Standard Time": "Asia/Singapore",
+    "Taipei Standard Time": "Asia/Taipei",
+    "Tokyo Standard Time": "Asia/Tokyo",
+    "Korea Standard Time": "Asia/Seoul",
+    "AUS Eastern Standard Time": "Australia/Sydney",
+}
+
+
+def _parse_cldr_windows_zones(text: str) -> dict:
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError:
+        return {}
+    found = {}
+    for elem in root.iter():
+        if elem.tag.rsplit("}", 1)[-1] != "mapZone":
+            continue
+        if elem.attrib.get("territory") != "001":
+            continue
+        other = elem.attrib.get("other")
+        iana = elem.attrib.get("type")
+        if other and iana and other not in found:
+            found[str(other)] = str(iana)
+    return found
+
+
+def _discover_tzdata_windows_zones() -> dict:
+    """Return a Windows map shipped by tzdata or zoneinfo, when one exists."""
+    module_names = (
+        "tzdata.windows_zones",
+        "tzdata.zoneinfo.windows_zones",
+        "zoneinfo.windows_zones",
+    )
+    for name in module_names:
+        try:
+            module = __import__(name, fromlist=["WINDOWS_ZONES"])
+        except ImportError:
+            continue
+        data = getattr(module, "WINDOWS_ZONES", None) or getattr(module, "win_tz", None)
+        if isinstance(data, dict) and data:
+            return {str(key): str(value) for key, value in data.items()}
+    try:
+        import tzdata
+    except ImportError:
+        return {}
+    root = Path(tzdata.__file__).resolve().parent
+    candidates = (
+        root / "windowsZones.xml",
+        root / "zoneinfo" / "windowsZones.xml",
+        root / "zoneinfo" / "tzdata" / "windowsZones.xml",
+    )
+    for path in candidates:
+        if not path.is_file():
+            continue
+        parsed = _parse_cldr_windows_zones(path.read_text(encoding="utf-8"))
+        if parsed:
+            return parsed
+    return {}
+
+
+@lru_cache(maxsize=1)
+def _windows_zone_map() -> dict:
+    discovered = _discover_tzdata_windows_zones()
+    if discovered:
+        return discovered
+    return dict(_WINDOWS_ZONE_FALLBACK)
+
+
+def _windows_zone_to_iana(key_name: str) -> str:
+    name = str(key_name or "").split("\x00", 1)[0].strip()
+    if not name:
+        return ""
+    return _windows_zone_map().get(name, "")
 
 
 def require_timezone_name(value: object) -> str:
@@ -552,10 +731,56 @@ _CRON_PREFIX = "* * * * * "
 _CRON_SUFFIX = " schedule tick # asc-schedule"
 
 
+def _is_asc_executable_name(name: str) -> bool:
+    return name == "asc" or str(name).lower() == "asc.exe"
+
+
 def _asc_file(path: Path) -> Optional[Path]:
-    if path.name != "asc" or not path.is_file():
+    if not _is_asc_executable_name(path.name) or not path.is_file():
         return None
     return path.resolve()
+
+
+def _find_named_asc_exe(directory: Path) -> Optional[Path]:
+    if not directory.is_dir():
+        return None
+    exact = None
+    fallback = None
+    try:
+        children = list(directory.iterdir())
+    except OSError:
+        return None
+    for child in children:
+        if not child.is_file() or child.name.lower() != "asc.exe":
+            continue
+        if child.name == "asc.exe":
+            exact = child
+            break
+        if fallback is None:
+            fallback = child
+    chosen = exact or fallback
+    if chosen is None:
+        return None
+    return chosen.resolve()
+
+
+def _asc_exe_for_interpreter(executable: str) -> Optional[Path]:
+    parent = Path(executable).parent
+    found = _find_named_asc_exe(parent)
+    if found is not None:
+        return found
+    return _find_named_asc_exe(parent / "Scripts")
+
+
+def _exe_belongs_to_interpreter(candidate: Path, executable: str) -> bool:
+    try:
+        resolved = candidate.resolve()
+    except OSError:
+        return False
+    if resolved.name.lower() != "asc.exe":
+        return False
+    owned = _asc_exe_for_interpreter(executable)
+    return owned is not None and owned == resolved
 
 
 def _shebang_matches(script: Path, executable: str) -> bool:
@@ -579,13 +804,20 @@ def _shebang_matches(script: Path, executable: str) -> bool:
 
 
 def _asc_on_path(executable: str) -> Optional[Path]:
-    located = shutil.which("asc")
-    if not located:
-        return None
-    candidate = _asc_file(Path(located))
-    if candidate is None or not _shebang_matches(candidate, executable):
-        return None
-    return candidate
+    for name in ("asc", "asc.exe"):
+        located = shutil.which(name)
+        if not located:
+            continue
+        candidate = Path(located)
+        if not candidate.is_file():
+            continue
+        if candidate.name == "asc":
+            if _shebang_matches(candidate, executable):
+                return candidate.resolve()
+            continue
+        if candidate.name.lower() == "asc.exe" and _exe_belongs_to_interpreter(candidate, executable):
+            return candidate.resolve()
+    return None
 
 
 def resolve_asc_executable(argv0: Optional[str] = None) -> Path:
@@ -598,6 +830,9 @@ def resolve_asc_executable(argv0: Optional[str] = None) -> Path:
     sibling = _asc_file(Path(sys.executable).parent / "asc")
     if sibling is not None:
         return sibling
+    windows_sibling = _asc_exe_for_interpreter(sys.executable)
+    if windows_sibling is not None:
+        return windows_sibling
     located = _asc_on_path(sys.executable)
     if located is not None:
         return located
@@ -726,8 +961,164 @@ def _install_cron(asc_path: Path, backend) -> None:
         raise ScheduleError("install_failed", reason=str(exc)) from exc
 
 
+_WINDOWS_TASK_NS = "http://schemas.microsoft.com/windows/2004/02/mit/task"
+_WINDOWS_START_BOUNDARY = "2020-01-01T00:00:00"
+_SCHTASKS_PERMISSION_MARKERS = (
+    "access is denied",
+    "access denied",
+    "password",
+    "logon failure",
+    "privilege",
+    "elevation",
+)
+
+
+def windows_task_user_id(environ=None) -> str:
+    env = os.environ if environ is None else environ
+    username = str(env.get("USERNAME") or "").split("\x00", 1)[0].strip()
+    if "\\" in username:
+        return username
+    domain = str(env.get("USERDOMAIN") or "").split("\x00", 1)[0].strip()
+    if domain and username:
+        return domain + "\\" + username
+    if username:
+        return ".\\" + username
+    return ""
+
+
+def render_windows_task_xml(asc_path: Path, user_id: str) -> str:
+    command = escape(str(asc_path))
+    user = escape(user_id)
+    return (
+        '<?xml version="1.0" encoding="UTF-16"?>\n'
+        f'<Task version="1.2" xmlns="{_WINDOWS_TASK_NS}">\n'
+        "  <Triggers>\n"
+        "    <TimeTrigger>\n"
+        f"      <StartBoundary>{_WINDOWS_START_BOUNDARY}</StartBoundary>\n"
+        "      <Repetition>\n"
+        "        <Interval>PT1M</Interval>\n"
+        "      </Repetition>\n"
+        "    </TimeTrigger>\n"
+        "  </Triggers>\n"
+        "  <Principals>\n"
+        "    <Principal>\n"
+        f"      <UserId>{user}</UserId>\n"
+        "      <LogonType>InteractiveToken</LogonType>\n"
+        "    </Principal>\n"
+        "  </Principals>\n"
+        "  <Settings>\n"
+        "    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>\n"
+        "    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>\n"
+        "  </Settings>\n"
+        "  <Actions>\n"
+        "    <Exec>\n"
+        f"      <Command>{command}</Command>\n"
+        "      <Arguments>schedule tick</Arguments>\n"
+        "    </Exec>\n"
+        "  </Actions>\n"
+        "</Task>\n"
+    )
+
+
+def _decode_schtasks_output(data) -> str:
+    if data is None:
+        return ""
+    if isinstance(data, str):
+        return data
+    if not isinstance(data, (bytes, bytearray)):
+        return str(data)
+    blob = bytes(data)
+    if blob.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return blob.decode("utf-16")
+    if b"\x00" in blob[:64]:
+        for encoding in ("utf-16", "utf-16-le"):
+            try:
+                return blob.decode(encoding)
+            except UnicodeError:
+                continue
+    return blob.decode("utf-8", errors="replace")
+
+
+def _command_from_task_xml(text: str) -> str:
+    if not isinstance(text, str):
+        return ""
+    payload = text.lstrip("\ufeff").strip()
+    if not payload or "<" not in payload:
+        return ""
+    try:
+        root = ET.fromstring(payload)
+    except ET.ParseError:
+        return ""
+    for elem in root.iter():
+        if elem.tag.rsplit("}", 1)[-1] != "Command":
+            continue
+        if elem.text and elem.text.strip():
+            return elem.text.strip()
+    return ""
+
+
+def _schtasks_permission_or_password(text: str) -> bool:
+    if not text:
+        return False
+    if "拒绝访问" in text or "密码" in text:
+        return True
+    lowered = text.lower()
+    return any(marker in lowered for marker in _SCHTASKS_PERMISSION_MARKERS)
+
+
+def schtasks_task_missing(returncode: int, stdout: str, stderr: str) -> bool:
+    """True when query/delete output shows the task is absent.
+
+    A non-zero exit is not enough. The task is absent when stdout has no
+    Command element and stderr contains ERROR without a permission or
+    password failure. Any other failure stays ambiguous.
+    """
+    if returncode == 0:
+        return False
+    if _command_from_task_xml(stdout):
+        return False
+    if "ERROR" not in (stderr or "").upper():
+        return False
+    if _schtasks_permission_or_password(stderr):
+        return False
+    return True
+
+
+def _run_schtasks(command: list):
+    return subprocess.run(
+        command,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+    )
+
+
+def _install_windows(asc_path: Path, backend) -> None:
+    user_id = windows_task_user_id()
+    if not user_id:
+        raise ScheduleError("install_failed", reason="USERNAME is not set")
+    xml = render_windows_task_xml(asc_path, user_id)
+    try:
+        backend.write_task_xml(xml)
+    except ScheduleError:
+        raise
+    except Exception as exc:
+        raise ScheduleError("install_failed", reason=str(exc)) from exc
+
+
+def _require_schedule_os(backend) -> None:
+    from asc.platform import cli_allows
+
+    system = backend.system() if hasattr(backend, "system") else None
+    if not cli_allows("schedule", system):
+        raise ScheduleError("os_unsupported")
+
+
 def install_heartbeat(*, asc_path: Path, backend) -> None:
+    _require_schedule_os(backend)
     resolved = _require_asc_file(asc_path)
+    if backend.system() == "windows":
+        _install_windows(resolved, backend)
+        return
     if backend.system() == "darwin":
         _ensure_user_agent(backend)
         _install_darwin(resolved, backend)
@@ -736,7 +1127,14 @@ def install_heartbeat(*, asc_path: Path, backend) -> None:
 
 
 def uninstall_heartbeat(*, backend) -> bool:
+    _require_schedule_os(backend)
     try:
+        if backend.system() == "windows":
+            xml = backend.read_task_xml()
+            if xml is None:
+                return False
+            backend.delete_task()
+            return True
         if backend.system() == "darwin":
             _ensure_user_agent(backend)
             if backend.read_plist() is None:
@@ -785,6 +1183,21 @@ def _plist_program(data: bytes) -> str:
 
 
 def heartbeat_status(*, backend) -> dict:
+    from asc.platform import cli_allows
+
+    system = backend.system() if hasattr(backend, "system") else None
+    if not cli_allows("schedule", system):
+        return {"installed": False, "path": ""}
+    if backend.system() == "windows":
+        try:
+            xml = backend.read_task_xml()
+        except ScheduleError:
+            raise
+        except Exception as exc:
+            raise ScheduleError("install_failed", reason=str(exc)) from exc
+        if xml is None:
+            return {"installed": False, "path": ""}
+        return {"installed": True, "path": _command_from_task_xml(xml)}
     if backend.system() == "darwin":
         data = backend.read_plist()
         if data is None:
@@ -884,6 +1297,48 @@ class SystemHeartbeatBackend:
         if completed.returncode != 0:
             message = (completed.stderr or completed.stdout or "crontab failed").strip()
             raise RuntimeError(message)
+
+    def read_task_xml(self) -> Optional[str]:
+        completed = _run_schtasks(["schtasks", "/Query", "/TN", _AGENT_LABEL, "/XML"])
+        stdout = _decode_schtasks_output(completed.stdout)
+        stderr = _decode_schtasks_output(completed.stderr)
+        if completed.returncode == 0 or _command_from_task_xml(stdout):
+            return stdout
+        if schtasks_task_missing(completed.returncode, stdout, stderr):
+            return None
+        message = (stderr or stdout or f"schtasks exited {completed.returncode}").strip()
+        raise RuntimeError(message)
+
+    def write_task_xml(self, xml: str) -> None:
+        fd, raw_name = tempfile.mkstemp(prefix="asc-schedule-", suffix=".xml")
+        os.close(fd)
+        path = Path(raw_name)
+        try:
+            path.write_bytes(str(xml).encode("utf-16"))
+            completed = _run_schtasks(
+                ["schtasks", "/Create", "/TN", _AGENT_LABEL, "/XML", str(path), "/F"]
+            )
+            if completed.returncode != 0:
+                stdout = _decode_schtasks_output(completed.stdout)
+                stderr = _decode_schtasks_output(completed.stderr)
+                message = (stderr or stdout or f"schtasks exited {completed.returncode}").strip()
+                raise RuntimeError(message)
+        finally:
+            try:
+                path.unlink()
+            except OSError:
+                pass
+
+    def delete_task(self) -> None:
+        completed = _run_schtasks(["schtasks", "/Delete", "/TN", _AGENT_LABEL, "/F"])
+        if completed.returncode == 0:
+            return
+        stdout = _decode_schtasks_output(completed.stdout)
+        stderr = _decode_schtasks_output(completed.stderr)
+        if schtasks_task_missing(completed.returncode, stdout, stderr):
+            return
+        message = (stderr or stdout or f"schtasks exited {completed.returncode}").strip()
+        raise RuntimeError(message)
 
 
 def default_profile_lookup(name: str):

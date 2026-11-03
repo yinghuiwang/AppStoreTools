@@ -19,6 +19,7 @@ from asc.schedule import (
     require_watch,
 )
 from asc.web.i18n import t
+from asc.web.platform_gate import unsupported_response
 
 router = APIRouter()
 
@@ -162,6 +163,9 @@ def _load_state():
 
 @router.get("/schedules")
 async def list_schedules(request: Request):
+    blocked = unsupported_response(request, "schedule")
+    if blocked is not None:
+        return blocked
     try:
         tasks, heartbeat = await asyncio.to_thread(_load_state)
     except ScheduleCorruptError as exc:
@@ -175,13 +179,19 @@ async def list_schedules(request: Request):
 
 
 @router.get("/schedules/timezones")
-async def list_schedule_timezones():
+async def list_schedule_timezones(request: Request):
+    blocked = unsupported_response(request, "schedule")
+    if blocked is not None:
+        return blocked
     names = await asyncio.to_thread(schedule.list_timezones)
     return {"timezones": names}
 
 
 @router.post("/schedules")
 async def create_schedule(request: Request):
+    blocked = unsupported_response(request, "schedule")
+    if blocked is not None:
+        return blocked
     body = await _read_object(request)
     if body is None:
         return _error(request, "schedules.err.json", 400)
@@ -219,6 +229,9 @@ async def create_schedule(request: Request):
 
 @router.put("/schedules/{task_id}")
 async def update_schedule(task_id: str, request: Request):
+    blocked = unsupported_response(request, "schedule")
+    if blocked is not None:
+        return blocked
     body = await _read_object(request)
     if body is None:
         return _error(request, "schedules.err.json", 400)
@@ -252,6 +265,10 @@ async def update_schedule(task_id: str, request: Request):
 
 @router.delete("/schedules/{task_id}")
 async def delete_schedule(task_id: str, request: Request):
+    blocked = unsupported_response(request, "schedule")
+    if blocked is not None:
+        return blocked
+
     def _delete():
         schedule.remove_task(task_id, schedule_path=schedule.default_schedule_path())
 
@@ -264,6 +281,10 @@ async def delete_schedule(task_id: str, request: Request):
 
 @router.post("/schedules/{task_id}/run")
 async def run_schedule(task_id: str, request: Request):
+    blocked = unsupported_response(request, "schedule")
+    if blocked is not None:
+        return blocked
+
     def _run():
         return schedule.run_task(task_id, schedule_path=schedule.default_schedule_path())
 
@@ -276,6 +297,10 @@ async def run_schedule(task_id: str, request: Request):
 
 @router.post("/schedules/heartbeat/install")
 async def install_schedule_heartbeat(request: Request):
+    blocked = unsupported_response(request, "schedule")
+    if blocked is not None:
+        return blocked
+
     def _install():
         schedule.install_heartbeat(asc_path=asc_executable(), backend=heartbeat_backend())
         return schedule.heartbeat_status(backend=heartbeat_backend())
@@ -289,6 +314,10 @@ async def install_schedule_heartbeat(request: Request):
 
 @router.post("/schedules/heartbeat/uninstall")
 async def uninstall_schedule_heartbeat(request: Request):
+    blocked = unsupported_response(request, "schedule")
+    if blocked is not None:
+        return blocked
+
     def _uninstall():
         removed = schedule.uninstall_heartbeat(backend=heartbeat_backend())
         return removed, schedule.heartbeat_status(backend=heartbeat_backend())

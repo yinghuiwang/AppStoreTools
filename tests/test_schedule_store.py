@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import errno
+import sys
 import threading
+import types
 from pathlib import Path
 
 import pytest
@@ -266,3 +269,94 @@ def test_invalid_watch_is_corrupt(tmp_path: Path):
     )
     with pytest.raises(ScheduleCorruptError):
         load_tasks(path)
+
+
+class _FakeMsvcrt:
+    LK_NBLCK = 2
+    LK_LOCK = 1
+    LK_UNLCK = 0
+
+    def __init__(self, fail: bool = False) -> None:
+        self.fail = fail
+        self.calls = []
+
+    def locking(self, fd, mode, nbytes):
+        self.calls.append((mode, nbytes))
+        if self.fail and mode == self.LK_NBLCK:
+            raise OSError(errno.EACCES, "busy")
+
+
+def _record_lock_seeks(monkeypatch: pytest.MonkeyPatch):
+    seeks = []
+    real_open = Path.open
+
+    def wrapped(self, *args, **kwargs):
+        handle = real_open(self, *args, **kwargs)
+        if str(self).endswith(".lock"):
+            original = handle.seek
+
+            def seek(offset, whence=0):
+                seeks.append(offset)
+                return original(offset, whence)
+
+            handle.seek = seek
+        return handle
+
+    monkeypatch.setattr(Path, "open", wrapped)
+    return seeks
+
+
+def test_msvcrt_lock_uses_one_byte_nonblocking(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    path = tmp_path / "schedules.toml"
+    fake = _FakeMsvcrt()
+    monkeypatch.setattr("asc.schedule._flock_module", lambda: fake)
+    seeks = _record_lock_seeks(monkeypatch)
+    with schedule_lock(path, blocking=False):
+        pass
+    assert fake.calls == [(fake.LK_NBLCK, 1), (fake.LK_UNLCK, 1)]
+    assert seeks == [0, 0]
+
+
+def test_msvcrt_eacces_is_busy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    path = tmp_path / "schedules.toml"
+    fake = _FakeMsvcrt(fail=True)
+    monkeypatch.setattr("asc.schedule._flock_module", lambda: fake)
+    seeks = _record_lock_seeks(monkeypatch)
+    with pytest.raises(ScheduleLockBusy):
+        with schedule_lock(path, blocking=False):
+            pass
+    assert fake.calls == [(fake.LK_NBLCK, 1)]
+    assert seeks == [0]
+
+
+def test_msvcrt_eacces_times_out_without_blocking_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    path = tmp_path / "schedules.toml"
+    fake = _FakeMsvcrt(fail=True)
+    monkeypatch.setattr("asc.schedule._flock_module", lambda: fake)
+    clock = {"now": 100.0}
+    monkeypatch.setattr("asc.schedule.time.monotonic", lambda: clock["now"])
+
+    def sleep(seconds):
+        clock["now"] += seconds
+
+    monkeypatch.setattr("asc.schedule.time.sleep", sleep)
+    with pytest.raises(ScheduleLockTimeout):
+        with schedule_lock(path, blocking=True, timeout=0.2):
+            pass
+    assert fake.calls
+    assert all(mode == fake.LK_NBLCK and nbytes == 1 for mode, nbytes in fake.calls)
+    assert fake.LK_LOCK not in [mode for mode, _nbytes in fake.calls]
+
+
+def test_flock_module_uses_msvcrt_when_fcntl_missing(monkeypatch: pytest.MonkeyPatch):
+    from asc.schedule import _flock_module
+
+    fake = types.ModuleType("msvcrt")
+    fake.locking = lambda *_args: None
+    fake.LK_NBLCK = 2
+    fake.LK_UNLCK = 0
+    monkeypatch.setitem(sys.modules, "fcntl", None)
+    monkeypatch.setitem(sys.modules, "msvcrt", fake)
+    assert _flock_module() is fake

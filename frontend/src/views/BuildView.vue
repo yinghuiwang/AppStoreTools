@@ -16,6 +16,7 @@ import {
   writeFormMemory,
 } from "@/composables/useFormMemory";
 import { rememberFormPath } from "@/composables/useFormPaths";
+import { usePlatform } from "@/composables/usePlatform";
 import { useProfile } from "@/composables/useProfile";
 import { useRightRail } from "@/composables/useRightRail";
 import { useTaskPagePhase } from "@/composables/useTaskPagePhase";
@@ -59,6 +60,8 @@ const { t } = useI18n();
 const route = useRoute();
 const browse = useBrowse();
 const { snapshot } = useProfile();
+const { blocked, unsupportedText } = usePlatform();
+const osBlocked = computed(() => blocked("build"));
 const rail = useRightRail();
 defineOptions({ name: "BuildView" });
 
@@ -152,6 +155,7 @@ function scanStepsMessage(): string {
 }
 
 async function loadOptions() {
+  if (osBlocked.value) return;
   if (mode.value === "deploy") {
     optionsLoading.value = false;
     scanStatus.value = "idle";
@@ -192,6 +196,7 @@ async function loadOptions() {
 }
 
 async function pickProject() {
+  if (osBlocked.value) return;
   const path = await browse.pick({ mode: "dir", initialPath: project.value });
   if (path) {
     project.value = path;
@@ -201,6 +206,7 @@ async function pickProject() {
 }
 
 async function pickIpa() {
+  if (osBlocked.value) return;
   const path = await browse.pick({ mode: "file", ext: ".ipa", initialPath: ipaPath.value });
   if (path) ipaPath.value = path;
 }
@@ -215,6 +221,7 @@ function showMissing(items: string[]): boolean {
 }
 
 async function run() {
+  if (osBlocked.value) return;
   alert.value = "";
   fieldErrors.value = { certificate: "", profile: "", ipa: "" };
   const missing: string[] = [];
@@ -296,6 +303,7 @@ watch([scheme, signing, certificate], () => {
   void loadOptions();
 });
 onMounted(() => {
+  if (osBlocked.value) return;
   if (route.query.action === "build-upload") mode.value = "full";
   if (scannedOnce.value) return;
   scanMessage.value = t("build.scan_waiting");
@@ -306,6 +314,7 @@ onMounted(() => {
 <template>
   <div class="page-stack">
     <h1>{{ t("build.title") }}</h1>
+    <t-alert v-if="osBlocked" theme="warning" :title="unsupportedText" />
     <t-alert v-if="empty" theme="warning" :title="t('index.no_app')">
       <router-link to="/profiles">{{ t("nav.profiles") }}</router-link>
     </t-alert>
@@ -314,7 +323,7 @@ onMounted(() => {
     <div v-if="isForm" class="build-layout" :class="{ 'has-scan': showScanSidebar }">
       <div class="card build-form">
         <label class="field"><span>{{ t("build.mode") }}</span>
-          <t-select v-model="mode">
+          <t-select v-model="mode" :disabled="osBlocked">
             <t-option value="full" :label="t('build.mode_full')" />
             <t-option value="build" :label="t('build.mode_build')" />
             <t-option value="deploy" :label="t('build.mode_upload')" />
@@ -322,23 +331,23 @@ onMounted(() => {
         </label>
         <label v-if="mode !== 'deploy'" class="field"><span>{{ t("build.project_field") }}</span>
           <div class="field-row">
-            <t-input v-model="project" :placeholder="t('build.auto_detect')" />
-            <t-button @click="pickProject">{{ t("filebrowser.browse") }}</t-button>
+            <t-input v-model="project" :placeholder="t('build.auto_detect')" :disabled="osBlocked" />
+            <t-button :disabled="osBlocked" @click="pickProject">{{ t("filebrowser.browse") }}</t-button>
           </div>
         </label>
         <label v-if="mode !== 'deploy'" class="field"><span>{{ t("build.scheme") }}</span>
-          <t-select v-model="scheme" :placeholder="t('common.please_select')" clearable>
+          <t-select v-model="scheme" :placeholder="t('common.please_select')" clearable :disabled="osBlocked">
             <t-option v-for="name in options.schemes || []" :key="name" :value="name" :label="name" />
           </t-select>
         </label>
         <label class="field"><span>{{ t("build.platform") }}</span>
-          <t-select v-model="destination">
+          <t-select v-model="destination" :disabled="osBlocked">
             <t-option value="testflight" label="TestFlight" />
             <t-option value="appstore" label="App Store" />
           </t-select>
         </label>
         <label v-if="mode !== 'deploy'" class="field"><span>{{ t("build.signing") }}</span>
-          <t-select v-model="signing">
+          <t-select v-model="signing" :disabled="osBlocked">
             <t-option value="auto" :label="t('build.signing_auto')" />
             <t-option value="manual" :label="t('build.signing_manual')" />
           </t-select>
@@ -348,6 +357,7 @@ onMounted(() => {
           <label class="field"><span>{{ t("build.certificate") }}</span>
             <t-select
               v-model="certificate"
+              :disabled="osBlocked"
               :placeholder="t('common.please_select')"
               :status="fieldStatus('certificate')"
               :tips="fieldErrors.certificate || undefined"
@@ -359,6 +369,7 @@ onMounted(() => {
           <label class="field"><span>{{ t("build.profile") }}</span>
             <t-select
               v-model="profileName"
+              :disabled="osBlocked"
               :placeholder="t('common.please_select')"
               :status="fieldStatus('profile')"
               :tips="fieldErrors.profile || undefined"
@@ -372,23 +383,27 @@ onMounted(() => {
           <div class="field-row">
             <t-input
               v-model="ipaPath"
+              :disabled="osBlocked"
               :status="fieldStatus('ipa')"
               :tips="fieldErrors.ipa || undefined"
             />
-            <t-button @click="pickIpa">{{ t("filebrowser.browse") }}</t-button>
+            <t-button :disabled="osBlocked" @click="pickIpa">{{ t("filebrowser.browse") }}</t-button>
           </div>
         </label>
-        <t-checkbox v-model="verbose">{{ t("build.verbose") }}</t-checkbox>
-        <t-checkbox v-model="dryRun">{{ t("build.dry_run") }}</t-checkbox>
+        <t-checkbox v-model="verbose" :disabled="osBlocked">{{ t("build.verbose") }}</t-checkbox>
+        <t-checkbox v-model="dryRun" :disabled="osBlocked">{{ t("build.dry_run") }}</t-checkbox>
         <div v-if="mode !== 'deploy'" class="reuse">
           <span class="lbl">{{ t("build.archive_reuse") }}</span>
-          <t-radio-group v-model="reuseArchive">
+          <t-radio-group v-model="reuseArchive" :disabled="osBlocked">
             <t-radio value="">{{ t("build.reuse_auto") }}</t-radio>
             <t-radio value="reuse">{{ t("build.reuse_reuse") }}</t-radio>
             <t-radio value="rebuild">{{ t("build.reuse_rebuild") }}</t-radio>
           </t-radio-group>
         </div>
-        <t-button theme="primary" @click="run">{{ t("common.submit") }}</t-button>
+        <t-button theme="primary" :disabled="osBlocked" :title="osBlocked ? unsupportedText : undefined" @click="run">
+          {{ t("common.submit") }}
+        </t-button>
+        <span v-if="osBlocked" class="os-note">{{ unsupportedText }}</span>
       </div>
 
       <aside v-if="showScanSidebar" class="card build-scan" aria-live="polite">
@@ -403,7 +418,8 @@ onMounted(() => {
             <t-button
               size="small"
               :loading="optionsLoading && scannedOnce"
-              :disabled="optionsLoading && !scannedOnce"
+              :disabled="osBlocked || (optionsLoading && !scannedOnce)"
+              :title="osBlocked ? unsupportedText : undefined"
               @click="loadOptions"
             >{{ t("build.refresh") }}</t-button>
           </div>
@@ -503,6 +519,7 @@ onMounted(() => {
 
 <style scoped>
 h1 { margin: 0; }
+.os-note { color: var(--text-faint); font-size: 12px; }
 .muted { color: var(--text-muted); font-size: 12px; }
 .field-row { align-items: flex-start; }
 .reuse { display: flex; flex-direction: column; gap: 8px; }

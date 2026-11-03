@@ -454,4 +454,4 @@ def test_fcntl_unavailable_exits_1(tmp_path: Path, capsys, monkeypatch: pytest.M
     path = tmp_path / "schedules.toml"
     assert tick(schedule_path=path, query=_ok_query, send=_quiet_send) == 1
     assert not path.exists()
-    assert "fcntl" in capsys.readouterr().err
+    assert "文件锁不可用" in capsys.readouterr().err

@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
+import { usePlatform } from "@/composables/usePlatform";
 
 type NavItem = {
   to: string;
@@ -9,6 +10,7 @@ type NavItem = {
   match: "exact" | "prefix";
   prefix?: string;
   icon: string;
+  feature?: string;
 };
 
 type NavGroup = {
@@ -26,13 +28,13 @@ const groups: NavGroup[] = [
       { to: "/urls", labelKey: "nav.urls", match: "exact", icon: "link" },
     ],
   },
-  { labelKey: "nav.group.build", items: [{ to: "/build", labelKey: "nav.build", match: "exact", icon: "build" }] },
+  { labelKey: "nav.group.build", items: [{ to: "/build", labelKey: "nav.build", match: "exact", icon: "build", feature: "build" }] },
   { labelKey: "nav.group.iap", items: [{ to: "/iap", labelKey: "nav.iap", match: "exact", icon: "iap" }] },
   {
     labelKey: "nav.group.system",
     items: [
       { to: "/profiles", labelKey: "nav.profiles", match: "exact", icon: "profiles" },
-      { to: "/schedules", labelKey: "nav.schedules", match: "exact", icon: "notes" },
+      { to: "/schedules", labelKey: "nav.schedules", match: "exact", icon: "notes", feature: "schedule" },
       { to: "/guard", labelKey: "nav.guard", match: "exact", icon: "guard" },
       { to: "/settings", labelKey: "nav.settings", match: "exact", icon: "settings" },
       { to: "/update", labelKey: "nav.update", match: "exact", icon: "update" },
@@ -41,6 +43,7 @@ const groups: NavGroup[] = [
 ];
 
 const { t } = useI18n();
+const { blocked, unsupportedText } = usePlatform();
 const route = useRoute();
 const router = useRouter();
 const logoSrc = "/static/logo.svg";
@@ -60,7 +63,18 @@ function onResize() {
   if (!collapsed.value) flyoutKey.value = "";
 }
 
+function itemBlocked(item: NavItem): boolean {
+  return !!item.feature && blocked(item.feature);
+}
+
+function itemTitle(item: NavItem): string {
+  return itemBlocked(item) ? `${t(item.labelKey)} — ${unsupportedText.value}` : t(item.labelKey);
+}
+
 function onItemClick(event: MouseEvent, group: NavGroup, item: NavItem) {
+  if (itemBlocked(item)) {
+    event.preventDefault();
+  }
   if (!collapsed.value) return;
   if (isActive(item)) {
     event.preventDefault();
@@ -76,9 +90,10 @@ function closeFlyout() {
   flyoutKey.value = "";
 }
 
-function go(to: string) {
+function go(item: NavItem) {
+  if (itemBlocked(item)) return;
   flyoutKey.value = "";
-  void router.push(to);
+  void router.push(item.to);
 }
 
 const flyoutGroup = computed(() => groups.find((g) => g.labelKey === flyoutKey.value) || null);
@@ -103,18 +118,34 @@ onBeforeUnmount(() => {
     <nav class="nav">
       <section v-for="group in groups" :key="group.labelKey" class="group">
         <p class="group-label">{{ t(group.labelKey) }}</p>
-        <router-link
-          v-for="item in group.items"
-          :key="item.to"
-          :to="item.to"
-          class="nav-item"
-          :class="{ active: isActive(item) }"
-          :title="t(item.labelKey)"
-          @click="onItemClick($event, group, item)"
-        >
-          <span class="nav-icon" :data-icon="item.icon" aria-hidden="true" />
-          <span class="nav-label">{{ t(item.labelKey) }}</span>
-        </router-link>
+        <template v-for="item in group.items" :key="item.to">
+          <span
+            v-if="itemBlocked(item)"
+            class="nav-item is-disabled"
+            aria-disabled="true"
+            :title="itemTitle(item)"
+            @click="onItemClick($event, group, item)"
+          >
+            <span class="nav-icon" :data-icon="item.icon" aria-hidden="true" />
+            <span class="nav-text">
+              <span class="nav-label">{{ t(item.labelKey) }}</span>
+              <span class="nav-note">{{ unsupportedText }}</span>
+            </span>
+          </span>
+          <router-link
+            v-else
+            :to="item.to"
+            class="nav-item"
+            :class="{ active: isActive(item) }"
+            :title="t(item.labelKey)"
+            @click="onItemClick($event, group, item)"
+          >
+            <span class="nav-icon" :data-icon="item.icon" aria-hidden="true" />
+            <span class="nav-text">
+              <span class="nav-label">{{ t(item.labelKey) }}</span>
+            </span>
+          </router-link>
+        </template>
       </section>
     </nav>
     <div
@@ -128,10 +159,13 @@ onBeforeUnmount(() => {
         :key="item.to"
         type="button"
         class="flyout-item"
-        :class="{ active: isActive(item) }"
-        @click="go(item.to)"
+        :class="{ active: isActive(item) && !itemBlocked(item), 'is-disabled': itemBlocked(item) }"
+        :disabled="itemBlocked(item)"
+        :title="itemTitle(item)"
+        @click="go(item)"
       >
         {{ t(item.labelKey) }}
+        <small v-if="itemBlocked(item)">{{ unsupportedText }}</small>
       </button>
     </div>
   </aside>
@@ -240,6 +274,14 @@ onBeforeUnmount(() => {
   text-decoration: none;
 }
 
+.nav-item.is-disabled,
+.nav-item.is-disabled:hover {
+  color: var(--text-faint);
+  background: transparent;
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .nav-item.active {
   color: var(--accent);
   background: var(--accent-glow);
@@ -256,10 +298,23 @@ onBeforeUnmount(() => {
   background: var(--accent);
 }
 
+.nav-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 .nav-label {
   white-space: nowrap;
   font-size: 13px;
   font-weight: 550;
+}
+
+.nav-note {
+  font-size: 10px;
+  line-height: 1.3;
+  color: var(--text-faint);
+  white-space: nowrap;
 }
 
 .nav-icon {
@@ -332,7 +387,7 @@ onBeforeUnmount(() => {
 
 .sidebar.collapsed .brand-text,
 .sidebar.collapsed .group-label,
-.sidebar.collapsed .nav-label {
+.sidebar.collapsed .nav-text {
   display: none;
 }
 
@@ -382,5 +437,19 @@ onBeforeUnmount(() => {
 .flyout-item.active {
   color: var(--accent);
   background: var(--accent-glow);
+}
+
+.flyout-item.is-disabled,
+.flyout-item:disabled {
+  color: var(--text-faint);
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.flyout-item small {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--text-faint);
 }
 </style>

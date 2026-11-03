@@ -1,4 +1,6 @@
+import subprocess
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import plistlib
@@ -563,3 +565,284 @@ def test_status_uses_file_not_launchctl_probe():
     linux.crontab = "* * * * * '/usr/local/bin/asc' schedule tick # asc-schedule\n"
     assert heartbeat_status(backend=linux)["installed"] is True
     assert heartbeat_status(backend=linux)["path"] == "/usr/local/bin/asc"
+
+
+class WindowsScheduler(SystemHeartbeatBackend):
+    def system(self):
+        return "windows"
+
+
+def _forbid_posix_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    def forbidden():
+        raise AssertionError("posix identity")
+
+    monkeypatch.setattr("asc.schedule.os.getuid", forbidden)
+    monkeypatch.setattr("asc.schedule.os.geteuid", forbidden, raising=False)
+
+
+def _patch_schtasks(monkeypatch: pytest.MonkeyPatch, fake_run):
+    calls = []
+
+    def run(cmd, **kwargs):
+        calls.append(list(cmd))
+        assert kwargs.get("stdin") is subprocess.DEVNULL
+        assert "crontab" not in cmd
+        assert "launchctl" not in cmd
+        return fake_run(list(cmd), **kwargs)
+
+    monkeypatch.setattr("asc.schedule.subprocess.run", run)
+    return calls
+
+
+def _task_xml_text(data: bytes) -> str:
+    return data.decode("utf-16")
+
+
+def test_windows_task_xml_is_minute_interactive_user_task(tmp_path: Path):
+    from asc.schedule import render_windows_task_xml
+
+    asc = tmp_path / "中文目录" / "asc.exe"
+    asc.parent.mkdir()
+    asc.write_bytes(b"MZ")
+    xml = render_windows_task_xml(asc.resolve(), r"CONTOSO\wang")
+    root = ET.fromstring(xml.encode("utf-16"))
+    ns = {"t": "http://schemas.microsoft.com/windows/2004/02/mit/task"}
+    assert root.tag == "{http://schemas.microsoft.com/windows/2004/02/mit/task}Task"
+    assert root.findtext("t:Triggers/t:TimeTrigger/t:Repetition/t:Interval", namespaces=ns) == "PT1M"
+    assert root.findtext("t:Triggers/t:TimeTrigger/t:StartBoundary", namespaces=ns)
+    assert root.find("t:Triggers/t:TimeTrigger/t:EndBoundary", namespaces=ns) is None
+    assert root.find("t:Triggers/t:TimeTrigger/t:Repetition/t:Duration", namespaces=ns) is None
+    assert "EndBoundary" not in xml
+    assert "<Duration>" not in xml
+    assert root.findtext("t:Principals/t:Principal/t:LogonType", namespaces=ns) == "InteractiveToken"
+    assert root.findtext("t:Principals/t:Principal/t:UserId", namespaces=ns) == r"CONTOSO\wang"
+    assert "SYSTEM" not in root.findtext("t:Principals/t:Principal/t:UserId", namespaces=ns)
+    assert root.findtext("t:Settings/t:DisallowStartIfOnBatteries", namespaces=ns) == "false"
+    assert root.findtext("t:Settings/t:StopIfGoingOnBatteries", namespaces=ns) == "false"
+    assert root.findtext("t:Actions/t:Exec/t:Command", namespaces=ns) == str(asc.resolve())
+    assert root.findtext("t:Actions/t:Exec/t:Arguments", namespaces=ns) == "schedule tick"
+    assert asc.resolve().is_absolute()
+
+
+def test_windows_user_id_uses_domain_or_dot_username(monkeypatch: pytest.MonkeyPatch):
+    from asc.schedule import windows_task_user_id
+
+    monkeypatch.setenv("USERDOMAIN", "CONTOSO")
+    monkeypatch.setenv("USERNAME", "wang")
+    assert windows_task_user_id() == r"CONTOSO\wang"
+    monkeypatch.delenv("USERDOMAIN", raising=False)
+    assert windows_task_user_id() == r".\wang"
+    monkeypatch.setenv("USERNAME", r"CONTOSO\wang")
+    assert windows_task_user_id() == r"CONTOSO\wang"
+
+
+def test_windows_install_calls_schtasks_create_with_utf16_xml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    asc = tmp_path / "中文目录" / "asc.exe"
+    asc.parent.mkdir()
+    asc.write_bytes(b"MZ")
+    monkeypatch.setenv("USERDOMAIN", "CONTOSO")
+    monkeypatch.setenv("USERNAME", "wang")
+    _forbid_posix_identity(monkeypatch)
+    seen = {}
+
+    def fake_run(cmd, **kwargs):
+        assert cmd[:5] == ["schtasks", "/Create", "/TN", "com.asc.schedule", "/XML"]
+        assert cmd[6:] == ["/F"]
+        forbidden = {"/RU", "/RP", "/NP", "/RL", "HIGHEST", "SYSTEM"}
+        assert forbidden.isdisjoint(cmd)
+        xml_path = Path(cmd[5])
+        seen["path"] = xml_path
+        seen["existed"] = xml_path.is_file()
+        seen["data"] = xml_path.read_bytes()
+        return _Proc(0, stdout="SUCCESS")
+
+    calls = _patch_schtasks(monkeypatch, fake_run)
+    install_heartbeat(asc_path=asc.resolve(), backend=WindowsScheduler())
+
+    assert len(calls) == 1
+    assert calls[0][0] == "schtasks"
+    assert seen["existed"] is True
+    assert seen["data"].startswith((b"\xff\xfe", b"\xfe\xff"))
+    assert not seen["path"].exists()
+    text = _task_xml_text(seen["data"])
+    root = ET.fromstring(seen["data"])
+    ns = {"t": "http://schemas.microsoft.com/windows/2004/02/mit/task"}
+    assert root.findtext("t:Actions/t:Exec/t:Command", namespaces=ns) == str(asc.resolve())
+    assert root.findtext("t:Actions/t:Exec/t:Arguments", namespaces=ns) == "schedule tick"
+    assert root.findtext("t:Principals/t:Principal/t:LogonType", namespaces=ns) == "InteractiveToken"
+    assert root.findtext("t:Triggers/t:TimeTrigger/t:Repetition/t:Interval", namespaces=ns) == "PT1M"
+    assert "EndBoundary" not in text
+
+
+def test_windows_create_failure_leaves_no_task_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    asc = tmp_path / "asc.exe"
+    asc.write_bytes(b"MZ")
+    monkeypatch.setenv("USERNAME", "wang")
+    monkeypatch.delenv("USERDOMAIN", raising=False)
+    _forbid_posix_identity(monkeypatch)
+    seen = {}
+
+    def fake_run(cmd, **kwargs):
+        assert cmd[1] == "/Create"
+        xml_path = Path(cmd[5])
+        seen["path"] = xml_path
+        seen["data"] = xml_path.read_bytes()
+        return _Proc(1, stderr="ERROR: Access is denied.")
+
+    calls = _patch_schtasks(monkeypatch, fake_run)
+    with pytest.raises(ScheduleError) as exc:
+        install_heartbeat(asc_path=asc.resolve(), backend=WindowsScheduler())
+    assert exc.value.code == "install_failed"
+    assert len(calls) == 1
+    assert not seen["path"].exists()
+    text = _task_xml_text(seen["data"])
+    assert r".\wang" in text
+    assert "SYSTEM" not in text
+
+
+def test_windows_not_executable_does_not_call_schtasks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    def fake_run(cmd, **kwargs):
+        raise AssertionError(cmd)
+
+    monkeypatch.setattr("asc.schedule.subprocess.run", fake_run)
+    _forbid_posix_identity(monkeypatch)
+    with pytest.raises(ScheduleError) as exc:
+        install_heartbeat(asc_path=tmp_path / "missing.exe", backend=WindowsScheduler())
+    assert exc.value.code == "not_executable"
+
+
+def test_windows_missing_username_does_not_call_schtasks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    asc = tmp_path / "asc.exe"
+    asc.write_bytes(b"MZ")
+    monkeypatch.delenv("USERNAME", raising=False)
+    monkeypatch.delenv("USERDOMAIN", raising=False)
+
+    def fake_run(cmd, **kwargs):
+        raise AssertionError(cmd)
+
+    monkeypatch.setattr("asc.schedule.subprocess.run", fake_run)
+    with pytest.raises(ScheduleError) as exc:
+        install_heartbeat(asc_path=asc.resolve(), backend=WindowsScheduler())
+    assert exc.value.code == "install_failed"
+
+
+def test_windows_query_parses_path_and_delete_uses_schtasks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from asc.schedule import render_windows_task_xml
+
+    asc = tmp_path / "asc.exe"
+    asc.write_bytes(b"MZ")
+    xml = render_windows_task_xml(asc.resolve(), r".\wang")
+
+    def fake_run(cmd, **kwargs):
+        if cmd[1] == "/Query":
+            assert cmd == ["schtasks", "/Query", "/TN", "com.asc.schedule", "/XML"]
+            return _Proc(0, stdout=xml)
+        if cmd[1] == "/Delete":
+            assert cmd == ["schtasks", "/Delete", "/TN", "com.asc.schedule", "/F"]
+            return _Proc(0, stdout="SUCCESS")
+        raise AssertionError(cmd)
+
+    calls = _patch_schtasks(monkeypatch, fake_run)
+    assert heartbeat_status(backend=WindowsScheduler()) == {
+        "installed": True,
+        "path": str(asc.resolve()),
+    }
+    assert uninstall_heartbeat(backend=WindowsScheduler()) is True
+    assert [cmd[1] for cmd in calls] == ["/Query", "/Query", "/Delete"]
+
+
+def test_windows_missing_task_uninstall_returns_false(monkeypatch: pytest.MonkeyPatch):
+    def fake_run(cmd, **kwargs):
+        assert cmd[1] == "/Query"
+        return _Proc(1, stderr="ERROR: The system cannot find the file specified.")
+
+    calls = _patch_schtasks(monkeypatch, fake_run)
+    assert heartbeat_status(backend=WindowsScheduler()) == {"installed": False, "path": ""}
+    assert uninstall_heartbeat(backend=WindowsScheduler()) is False
+    assert all(cmd[1] == "/Query" for cmd in calls)
+    assert all(cmd[1] != "/Delete" for cmd in calls)
+
+
+def test_windows_query_permission_is_not_treated_as_missing(monkeypatch: pytest.MonkeyPatch):
+    def fake_run(cmd, **kwargs):
+        return _Proc(1, stderr="ERROR: Access is denied.")
+
+    _patch_schtasks(monkeypatch, fake_run)
+    with pytest.raises(ScheduleError) as status_exc:
+        heartbeat_status(backend=WindowsScheduler())
+    assert status_exc.value.code == "install_failed"
+    with pytest.raises(ScheduleError) as uninstall_exc:
+        uninstall_heartbeat(backend=WindowsScheduler())
+    assert uninstall_exc.value.code == "uninstall_failed"
+
+
+def test_windows_query_without_error_token_is_not_missing(monkeypatch: pytest.MonkeyPatch):
+    def fake_run(cmd, **kwargs):
+        return _Proc(1, stderr="schtasks failed")
+
+    _patch_schtasks(monkeypatch, fake_run)
+    with pytest.raises(ScheduleError) as status_exc:
+        heartbeat_status(backend=WindowsScheduler())
+    assert status_exc.value.code == "install_failed"
+    with pytest.raises(ScheduleError) as uninstall_exc:
+        uninstall_heartbeat(backend=WindowsScheduler())
+    assert uninstall_exc.value.code == "uninstall_failed"
+
+
+def test_resolve_asc_exe_direct_sibling_scripts_and_foreign_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    direct = tmp_path / "dist" / "ASC.EXE"
+    direct.parent.mkdir()
+    direct.write_bytes(b"MZ")
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "python.exe"))
+    monkeypatch.setattr(sys, "argv", [str(direct)])
+    assert resolve_asc_executable() == direct.resolve()
+
+    bindir = tmp_path / "venv" / "Scripts"
+    bindir.mkdir(parents=True)
+    python = bindir / "python.exe"
+    python.write_bytes(b"MZ")
+    sibling = bindir / "Asc.ExE"
+    sibling.write_bytes(b"MZ")
+    foreign_dir = tmp_path / "other" / "Scripts"
+    foreign_dir.mkdir(parents=True)
+    foreign = foreign_dir / "asc.exe"
+    foreign.write_bytes(b"MZ")
+    module = tmp_path / "pkg" / "__main__.py"
+    module.parent.mkdir()
+    module.write_text("print('module')\n", encoding="utf-8")
+    monkeypatch.setattr(sys, "executable", str(python))
+    monkeypatch.setattr(sys, "argv", [str(module)])
+    monkeypatch.setenv("PATH", str(foreign_dir))
+    assert resolve_asc_executable() == sibling.resolve()
+
+    root = tmp_path / "Python312"
+    root.mkdir()
+    base_python = root / "python.exe"
+    base_python.write_bytes(b"MZ")
+    scripts_asc = root / "Scripts" / "asc.exe"
+    scripts_asc.parent.mkdir()
+    scripts_asc.write_bytes(b"MZ")
+    monkeypatch.setattr(sys, "executable", str(base_python))
+    monkeypatch.setenv("PATH", str(tmp_path / "empty-path"))
+    assert resolve_asc_executable() == scripts_asc.resolve()
+
+    other_python = tmp_path / "elsewhere" / "python.exe"
+    other_python.parent.mkdir()
+    other_python.write_bytes(b"MZ")
+    monkeypatch.setattr(sys, "executable", str(other_python))
+    monkeypatch.setenv("PATH", str(foreign_dir))
+    with pytest.raises(ScheduleError) as exc:
+        resolve_asc_executable()
+    assert exc.value.code == "not_executable"

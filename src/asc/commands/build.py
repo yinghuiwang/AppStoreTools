@@ -21,6 +21,7 @@ from asc.guard import (
     read_ipa_bundle_id,
 )
 from asc.i18n import t, HELP, ERRORS
+from asc.platform import cli_allows
 from asc.progress import ProcessCanceled, Spinner
 from asc.reporting import TaskReporter, make_cli_reporter
 from asc.utils import resolve_app_profile
@@ -190,9 +191,11 @@ class UploadProgressReporter:
 
 
 def _require_macos() -> None:
-    if sys.platform != "darwin":
-        typer.echo(f"❌ {t(ERRORS['macos_only'])}", err=True)
-        raise typer.Exit(2)
+    """Stop build/deploy/release before xcodebuild, codesign, or altool."""
+    if cli_allows("build", sys.platform):
+        return
+    typer.echo(f"❌ {t(ERRORS['macos_only'])}", err=True)
+    raise typer.Exit(2)
 
 
 def parse_bundle_id_from_profile(profile_path: str) -> str:

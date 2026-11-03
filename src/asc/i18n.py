@@ -107,8 +107,12 @@ SCHEDULE_TEXT = {
         'en': 'Watch type must be app_store or testflight',
     },
     'fcntl_unavailable': {
-        'zh': '当前系统不支持文件锁（fcntl）',
-        'en': 'File locking (fcntl) is not available on this system',
+        'zh': '文件锁不可用',
+        'en': 'File locking is unavailable',
+    },
+    'os_unsupported': {
+        'zh': '当前系统不支持',
+        'en': 'Not supported on this operating system',
     },
     'not_executable': {
         'zh': '请使用 asc 可执行文件安装心跳，不能用 python -m asc',
@@ -423,16 +427,16 @@ HELP = {
         'zh': '引导式项目初始化：检查环境，配置 App profile。',
     },
     'cmd_build': {
-        'en': 'Build Xcode project and export .ipa file.',
-        'zh': '构建 Xcode 项目并导出 .ipa 文件。',
+        'en': 'Build Xcode project and export .ipa file. (macOS only)',
+        'zh': '构建 Xcode 项目并导出 .ipa 文件。（仅 macOS）',
     },
     'cmd_deploy': {
-        'en': 'Upload .ipa to TestFlight or App Store.',
-        'zh': '上传 .ipa 到 TestFlight 或 App Store。',
+        'en': 'Upload .ipa to TestFlight or App Store. (macOS only)',
+        'zh': '上传 .ipa 到 TestFlight 或 App Store。（仅 macOS）',
     },
     'cmd_release': {
-        'en': 'Build and publish to TestFlight or App Store in one step.',
-        'zh': '一键构建并发布到 TestFlight 或 App Store。',
+        'en': 'Build and publish to TestFlight or App Store in one step. (macOS only)',
+        'zh': '一键构建并发布到 TestFlight 或 App Store。（仅 macOS）',
     },
     'cmd_app': {
         'en': 'Manage app profiles.',
@@ -443,8 +447,8 @@ HELP = {
         'zh': '管理 App 绑定守卫功能。',
     },
     'cmd_schedule': {
-        'en': 'Schedule iOS review checks and webhook notices.',
-        'zh': '定时查询 iOS 审核状态并发送 webhook 通知。',
+        'en': 'Schedule iOS review checks and webhook notices. (not available on Windows)',
+        'zh': '定时查询 iOS 审核状态并发送 webhook 通知。（Windows 不可用）',
     },
     'schedule_timezone': {
         'en': 'IANA time zone, for example Asia/Shanghai. Omit to use the system time zone.',
@@ -655,8 +659,8 @@ ERRORS = {
     },
     # Build errors
     'macos_only': {
-        'en': 'This command is only supported on macOS',
-        'zh': '此命令仅支持 macOS',
+        'en': 'Not supported on this operating system',
+        'zh': '当前系统不支持',
     },
     'missing_api_credentials': {
         'en': 'Missing API credentials. Please run "asc app add" to configure',

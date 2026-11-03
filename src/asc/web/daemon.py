@@ -171,7 +171,7 @@ def start_background(host: str, port: int) -> dict[str, Any]:
     env["ASC_WEB_PORT"] = str(port)
 
     try:
-        proc = subprocess.Popen(
+        proc = _popen_detached(
             _uvicorn_cmd(host, port),
             stdout=log_handle,
             stderr=subprocess.STDOUT,
@@ -213,6 +213,19 @@ def start_background(host: str, port: int) -> dict[str, Any]:
     }
 
 
+def _popen_detached(args: list[str], **kwargs: Any) -> subprocess.Popen:
+    """Start a background process. Windows has no ``preexec_fn`` or ``setsid``."""
+    if sys.platform == "win32":
+        kwargs.pop("preexec_fn", None)
+        kwargs.pop("start_new_session", None)
+        flags = int(kwargs.pop("creationflags", 0))
+        # These constants exist only on Windows builds of Python.
+        flags |= int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200))
+        flags |= int(getattr(subprocess, "DETACHED_PROCESS", 0x00000008))
+        kwargs["creationflags"] = flags
+    return subprocess.Popen(args, **kwargs)
+
+
 def _signal_pid(pid: int, sig: signal.Signals) -> None:
     """Send *sig* to *pid*, preferring the process group when *pid* is the leader.
 
@@ -220,12 +233,17 @@ def _signal_pid(pid: int, sig: signal.Signals) -> None:
     their PID equals the process-group ID. Only then is ``killpg`` safe; for a
     foreground server that shares the shell's process group we signal the PID
     alone so we do not tear down the user's terminal.
+
+    Windows has no process-group signals. ``SIGTERM`` terminates the process.
     """
+    if sys.platform == "win32":
+        os.kill(pid, signal.SIGTERM)
+        return
     try:
         pgid = os.getpgid(pid)
     except OSError:
         pgid = None
-    if pgid is not None and pgid == pid:
+    if pgid is not None and pgid == pid and hasattr(os, "killpg"):
         os.killpg(pid, sig)
         return
     os.kill(pid, sig)
@@ -259,7 +277,7 @@ def stop(timeout: float = 5.0, *, pid: int | None = None) -> dict[str, Any]:
         time.sleep(0.1)
 
     try:
-        _signal_pid(target_pid, signal.SIGKILL)
+        _signal_pid(target_pid, getattr(signal, "SIGKILL", signal.SIGTERM))
     except OSError:
         pass
 
@@ -538,7 +556,7 @@ def schedule_restart(
     )
     log_handle.flush()
     try:
-        proc = subprocess.Popen(
+        proc = _popen_detached(
             [sys.executable, "-c", helper_code],
             stdout=log_handle,
             stderr=subprocess.STDOUT,

@@ -6,6 +6,7 @@ import { MessagePlugin } from "tdesign-vue-next";
 import { httpJson } from "@/api/http";
 import { mapRetryPath } from "@/api/types";
 import PageLoading from "@/components/PageLoading.vue";
+import { usePlatform } from "@/composables/usePlatform";
 import { useProfile } from "@/composables/useProfile";
 import { useRightRail } from "@/composables/useRightRail";
 import { useTaskLog } from "@/composables/useTaskLog";
@@ -70,10 +71,12 @@ const QUICK_ACTIONS = [
     titleKey: "index.action_build",
     descKey: "index.action_build_desc",
     mark: "▶",
+    feature: "build",
   },
 ] as const;
 
 const { t } = useI18n();
+const { blocked, unsupportedText } = usePlatform();
 const router = useRouter();
 const { snapshot } = useProfile();
 const rail = useRightRail();
@@ -165,6 +168,23 @@ function retryTo(path?: string) {
   const mapped = mapRetryPath(path);
   if (!ALLOWED_RETRY.has(mapped)) return "";
   return mapped === "/listing" ? "/listing?tab=upload" : mapped;
+}
+
+function actionBlocked(feature?: string) {
+  return !!feature && blocked(feature);
+}
+
+function retryBlocked(path?: string) {
+  const mapped = mapRetryPath(path);
+  if (mapped === "/build") return blocked("build");
+  if (mapped === "/schedules") return blocked("schedule");
+  return false;
+}
+
+function openRetry(path?: string) {
+  const target = retryTo(path);
+  if (!target || retryBlocked(path)) return;
+  void router.push(target);
 }
 
 function isCancelling(task: Task) {
@@ -453,19 +473,33 @@ onUnmounted(() => {
           <span>{{ t("index.quick_hint") }}</span>
         </div>
         <div class="quick-list">
-          <router-link
-            v-for="action in QUICK_ACTIONS"
-            :key="action.titleKey"
-            class="quick-link"
-            :to="action.to"
-          >
-            <span class="quick-mark" aria-hidden="true">{{ action.mark }}</span>
-            <span>
-              <strong>{{ t(action.titleKey) }}</strong>
-              <small>{{ t(action.descKey) }}</small>
-            </span>
-            <span class="quick-arrow" aria-hidden="true">›</span>
-          </router-link>
+          <template v-for="action in QUICK_ACTIONS" :key="action.titleKey">
+            <div
+              v-if="actionBlocked('feature' in action ? action.feature : '')"
+              class="quick-link is-disabled"
+              aria-disabled="true"
+              :title="unsupportedText"
+            >
+              <span class="quick-mark" aria-hidden="true">{{ action.mark }}</span>
+              <span>
+                <strong>{{ t(action.titleKey) }}</strong>
+                <small>{{ unsupportedText }}</small>
+              </span>
+              <span class="quick-arrow" aria-hidden="true">›</span>
+            </div>
+            <router-link
+              v-else
+              class="quick-link"
+              :to="action.to"
+            >
+              <span class="quick-mark" aria-hidden="true">{{ action.mark }}</span>
+              <span>
+                <strong>{{ t(action.titleKey) }}</strong>
+                <small>{{ t(action.descKey) }}</small>
+              </span>
+              <span class="quick-arrow" aria-hidden="true">›</span>
+            </router-link>
+          </template>
         </div>
       </nav>
     </div>
@@ -511,10 +545,13 @@ onUnmounted(() => {
               <t-button
                 v-if="row.status === 'error' && retryTo(row.retry_path)"
                 size="small"
-                @click="router.push(retryTo(row.retry_path))"
+                :disabled="retryBlocked(row.retry_path)"
+                :title="retryBlocked(row.retry_path) ? unsupportedText : undefined"
+                @click="openRetry(row.retry_path)"
               >
                 {{ t("index.retry") }}
               </t-button>
+              <span v-if="row.status === 'error' && retryBlocked(row.retry_path)" class="os-note">{{ unsupportedText }}</span>
             </div>
           </template>
           <template #empty>
@@ -743,6 +780,14 @@ onUnmounted(() => {
   text-decoration: none;
   box-shadow: inset 3px 0 0 var(--accent-dim);
 }
+.quick-link.is-disabled,
+.quick-link.is-disabled:hover {
+  color: var(--text-faint);
+  cursor: not-allowed;
+  opacity: 0.55;
+  box-shadow: none;
+  background: transparent;
+}
 .quick-mark {
   width: 26px;
   height: 26px;
@@ -776,6 +821,10 @@ onUnmounted(() => {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+.os-note {
+  color: var(--text-faint);
+  font-size: 11px;
 }
 @keyframes dash-pulse { 50% { opacity: 0.35; } }
 @media (max-width: 1100px) {

@@ -50,6 +50,10 @@ def allow_unknown_ip() -> bool:
     return _env_flag("ASC_GUARD_ALLOW_UNKNOWN_IP")
 
 
+def _fallback_machine_fingerprint() -> str:
+    return f"{platform.node()}-{uuid.getnode()}"
+
+
 def _get_machine_fingerprint_macos() -> str:
     result = subprocess.run(
         ["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
@@ -156,10 +160,14 @@ class Guard:
         global _machine_fp_cache
         if _machine_fp_cache is not None:
             return _machine_fp_cache
-        try:
-            fp = _get_machine_fingerprint_macos()
-        except Exception:
-            fp = f"{platform.node()}-{uuid.getnode()}"
+        if sys.platform == "darwin":
+            try:
+                fp = _get_machine_fingerprint_macos()
+            except Exception:
+                fp = _fallback_machine_fingerprint()
+        else:
+            # Windows has no ioreg. node + MAC is stable enough for Guard.
+            fp = _fallback_machine_fingerprint()
         _machine_fp_cache = fp
         return fp
 

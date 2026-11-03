@@ -10,7 +10,8 @@ from zoneinfo import ZoneInfo
 import typer
 
 from asc import schedule
-from asc.i18n import HELP, t
+from asc.i18n import ERRORS, HELP, t
+from asc.platform import cli_allows
 from asc.schedule import (
     WATCH_APP_STORE,
     ScheduleError,
@@ -23,6 +24,17 @@ from asc.schedule import (
 )
 
 schedule_app = typer.Typer(help=t(HELP["cmd_schedule"]), no_args_is_help=True)
+
+
+@schedule_app.callback()
+def _schedule_platform_gate(ctx: typer.Context) -> None:
+    """Stop before scheduler setup when this OS cannot host schedules."""
+    if getattr(ctx, "resilient_parsing", False):
+        return
+    if cli_allows("schedule", sys.platform):
+        return
+    typer.echo(f"❌ {t(ERRORS['macos_only'])}", err=True)
+    raise typer.Exit(2)
 
 
 def _fail(exc: ScheduleError) -> None:

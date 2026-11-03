@@ -17,6 +17,11 @@ export type Bootstrap = {
   has_machine_profile: boolean;
   paths: { csv: string; screenshots: string; iap: string };
   is_editable: boolean;
+  platform?: {
+    system: string;
+    windows: boolean;
+    unsupported: string[];
+  };
 };
 
 export function mapRetryPath(path: string | null | undefined): string {

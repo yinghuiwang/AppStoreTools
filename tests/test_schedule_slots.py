@@ -7,6 +7,7 @@ import pytest
 from asc.schedule import (
     ScheduleError,
     ScheduleTask,
+    _windows_zone_map,
     capture_timezone,
     due_action,
     format_timestamp,
@@ -176,3 +177,57 @@ def test_capture_timezone_prefers_valid_tz_then_localtime(tmp_path: Path):
     with pytest.raises(ScheduleError) as exc:
         capture_timezone(environ={"TZ": "Not/AZone"}, localtime=tmp_path / "missing")
     assert exc.value.code == "timezone"
+
+
+def test_capture_timezone_windows_maps_registry_and_skips_localtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    target = tmp_path / "zoneinfo" / "Europe" / "Berlin"
+    target.parent.mkdir(parents=True)
+    target.write_text("x", encoding="utf-8")
+    link = tmp_path / "localtime"
+    link.symlink_to(target)
+    _windows_zone_map.cache_clear()
+    keys = {"name": "China Standard Time"}
+
+    def key_name():
+        return keys["name"]
+
+    def realpath(path):
+        raise AssertionError(path)
+
+    monkeypatch.setattr("asc.schedule._windows_timezone_key_name", key_name)
+    monkeypatch.setattr("asc.schedule.os.path.realpath", realpath)
+    assert capture_timezone(environ={"TZ": ""}, localtime=link, system="windows") == "Asia/Shanghai"
+    keys["name"] = "W. Europe Standard Time"
+    assert capture_timezone(environ={}, localtime=link, system="win32") == "Europe/Berlin"
+    keys["name"] = "Eastern Standard Time"
+    assert capture_timezone(environ={}, system="windows") == "America/New_York"
+    keys["name"] = "UTC"
+    assert capture_timezone(environ={"TZ": "Not/AZone"}, system="windows") == "Etc/UTC"
+    keys["name"] = "Central Pacific Standard Time"
+    with pytest.raises(ScheduleError) as exc:
+        capture_timezone(environ={}, localtime=link, system="windows")
+    assert exc.value.code == "timezone"
+
+    def registry_should_not_run():
+        raise AssertionError("registry")
+
+    monkeypatch.setattr("asc.schedule._windows_timezone_key_name", registry_should_not_run)
+    assert capture_timezone(environ={"TZ": "Europe/Berlin"}, localtime=link, system="windows") == "Europe/Berlin"
+
+
+def test_windows_zone_map_prefers_library_mapping(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(
+        "asc.schedule._discover_tzdata_windows_zones",
+        lambda: {"China Standard Time": "Asia/Urumqi"},
+    )
+    _windows_zone_map.cache_clear()
+    try:
+        monkeypatch.setattr(
+            "asc.schedule._windows_timezone_key_name",
+            lambda: "China Standard Time",
+        )
+        assert capture_timezone(environ={}, system="windows") == "Asia/Urumqi"
+    finally:
+        _windows_zone_map.cache_clear()

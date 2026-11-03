@@ -81,6 +81,35 @@ def test_start_background_starts_process(isolated_state):
     assert log_file.exists()
 
 
+def test_start_background_windows_does_not_use_preexec(isolated_state):
+    mock_proc = MagicMock()
+    mock_proc.pid = 42
+    with patch.object(daemon, "get_status", return_value={"running": False}), \
+         patch.object(daemon, "wait_port_ready", return_value=True), \
+         patch("asc.web.daemon.sys.platform", "win32"), \
+         patch("asc.web.daemon.subprocess.Popen", return_value=mock_proc) as mock_popen:
+        result = daemon.start_background("127.0.0.1", 9091)
+
+    assert result["status"] == "started"
+    kwargs = mock_popen.call_args.kwargs
+    assert "preexec_fn" not in kwargs
+    assert "start_new_session" not in kwargs
+    flags = kwargs["creationflags"]
+    assert flags & 0x00000200
+
+
+def test_signal_pid_windows_terminates_without_killpg():
+    import signal as signal_mod
+
+    with patch("asc.web.daemon.sys.platform", "win32"), \
+         patch("asc.web.daemon.os.kill") as kill, \
+         patch("asc.web.daemon.os.killpg") as killpg:
+        daemon._signal_pid(7, signal_mod.SIGTERM)
+
+    kill.assert_called_once_with(7, signal_mod.SIGTERM)
+    killpg.assert_not_called()
+
+
 def test_start_background_waits_until_port_accepts(isolated_state):
     mock_proc = MagicMock()
     mock_proc.pid = 55555
