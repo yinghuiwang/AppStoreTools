@@ -1,3 +1,3 @@
 """asc - App Store Connect CLI tool"""
 
-__version__ = "0.1.30"
+__version__ = "0.1.31"
