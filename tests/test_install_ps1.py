@@ -32,6 +32,11 @@ def test_install_ps1_keeps_unrelated_windows_behavior():
     assert "PrependPath=1" in text
 
 
+def _ps_single_quoted(literal: str) -> str:
+    assert literal.startswith("'") and literal.endswith("'"), literal
+    return literal[1:-1].replace("''", "'")
+
+
 def test_install_ps1_repairs_broken_python_registration():
     text = _text()
     assert "python-3.12.7" not in text
@@ -45,7 +50,13 @@ def test_install_ps1_repairs_broken_python_registration():
     uninstall = _function_body(text, "Uninstall-AscWingetPythonUser")
     assert "--scope', 'user'" in uninstall
     assert "--disable-interactivity" in uninstall
+    assert "--silent" in uninstall
     assert "--accept-source-agreements" in uninstall
+    assert "accept-package-agreements" not in uninstall
+    assert "'-e'" in uninstall
+    assert "Python.Python.3.12" in uninstall
+    install_id = _function_body(text, "Install-AscWingetId")
+    assert "--accept-package-agreements" in install_id
     repair = _function_body(text, "Repair-AscUserPythonOnce")
     assert repair.index("Uninstall-AscWingetPythonUser") < repair.index("Install-AscWingetId")
     assert "ascPyRepairDone" in repair
@@ -66,6 +77,62 @@ def test_install_ps1_repairs_broken_python_registration():
     assert "最后安装包版本" in missing
     assert "Get-AscTail" not in missing
     assert "WiX" not in missing
+    assert "搜到的路径" in missing
+    assert "第一层子目录" in missing
+    assert r"%LOCALAPPDATA%\Programs\Python" in missing
+
+
+def test_install_ps1_locates_python_after_successful_install():
+    text = _text()
+    search = _function_body(text, "Get-AscPyCandidates")
+    assert r"Python312\python.exe" in search
+    assert r"Launcher\py.exe" in search
+    assert "Add-AscChildPythonExe $pyList $pythonList $localRoot 2 ''" in search
+    assert "Add-AscPythonFromInstallLogs" in search
+    assert search.index("Add-AscPythonFromInstallLogs") < search.index("where.exe python")
+    assert "Add-AscUninstallPythonCandidates" in search
+    assert "ExecutablePath" in search
+    assert "InstallLocation" in _function_body(text, "Add-AscUninstallPythonCandidates")
+    assert "InstallPath" in search
+    assert "Add-AscGlobExe $pythonList" not in search
+    logs = _function_body(text, "Add-AscPythonFromInstallLogs")
+    assert "ascPyLogPath" in logs
+    assert "Python 3.12*.log" in logs
+    assert "TargetDir" in logs
+    assert "InstallPath" in logs
+    assert "安装目录" in logs
+    patterns = [
+        _ps_single_quoted(item)
+        for item in re.findall(r"(?m)^            ('(?:''|[^'])*'),?$", logs)
+    ]
+    assert len(patterns) >= 5
+    samples = {
+        "Setting string variable 'TargetDir' to value 'C:\\Users\\Administrator\\AppData\\Local\\Programs\\Python\\Python312\\'": r"C:\Users\Administrator\AppData\Local\Programs\Python\Python312",
+        "Variable: InstallPath = C:\\Program Files\\Python312\\": r"C:\Program Files\Python312",
+        "Property(S): TARGETDIR = C:\\Program Files\\Python312\\": r"C:\Program Files\Python312",
+        "安装目录: C:\\Users\\Administrator\\AppData\\Local\\Programs\\Python\\Python312\\": r"C:\Users\Administrator\AppData\Local\Programs\Python\Python312",
+    }
+    for line, expected in samples.items():
+        found = []
+        for pattern in patterns:
+            match = re.search(pattern, line)
+            if match:
+                found.append(match.group(1).rstrip("\\"))
+        assert expected in found, (line, found, patterns)
+    probe = _function_body(text, "Test-AscPyCandidate")
+    assert "$info.FileName = $full" in probe
+    assert "$info.WorkingDirectory = $work" in probe
+    assert "Invoke-AscCaptured" not in probe
+    assert "Microsoft Store" in probe
+    assert "Python was not found" in probe
+    finder = _function_body(text, "Find-AscPy")
+    assert "$script:ascPyFoundPaths = New-Object" in finder
+    assert "$script:ascPyRejections = New-Object" in finder
+    assert finder.index("if (-not $tested.Ok)") < finder.index("$bestRank = $rank")
+    assert re.findall(r"(?m)^\s*return\b.*", finder) == ["        return $best"]
+    assert "Update-AscProcessPath" in _function_body(text, "Install-AscOfficialScope")
+    scope = _function_body(text, "Install-AscOfficialScope")
+    assert scope.index("Update-AscProcessPath") < scope.index("Find-AscPy")
 
 
 def test_install_ps1_function_cleanup_matches_definitions():
