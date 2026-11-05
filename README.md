@@ -48,7 +48,7 @@ $wc.Encoding = [System.Text.Encoding]::UTF8
 Invoke-Expression $wc.DownloadString('https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/feat/windows-compat/install.ps1')
 ```
 
-`install.ps1` treats the Microsoft Store Python alias as not installed. If `py -3` is missing or older than 3.9, it installs Python 3.12 with winget, then with the official 3.12.7 installer.
+`install.ps1` treats the Microsoft Store Python alias as not installed. If no `python.exe` or `py.exe` is 3.9 or newer, it installs Python 3.12 with winget. A winget registration with no interpreter is uninstalled once and installed again. The official package uses the version winget reported, or 3.12.10.
 
 Or install the published package directly:
 

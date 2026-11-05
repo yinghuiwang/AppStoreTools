@@ -48,7 +48,7 @@ $wc.Encoding = [System.Text.Encoding]::UTF8
 Invoke-Expression $wc.DownloadString('https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/feat/windows-compat/install.ps1')
 ```
 
-`install.ps1` 会把 Microsoft Store 的 Python 占位程序当成未安装。如果没有可用的 `py -3`，或版本低于 3.9，会先用 winget 安装 Python 3.12，仍不可用时再安装官方 3.12.7 安装包。
+`install.ps1` 会把 Microsoft Store 的 Python 占位程序当成未安装。如果没有 3.9 或更高的 `python.exe` / `py.exe`，会用 winget 安装 Python 3.12。winget 有登记但磁盘上没有解释器时，只卸载再装一轮。官方安装包使用 winget 报告的版本，没有版本时用 3.12.10。
 
 也可以直接安装 PyPI 发布版本或 GitHub 最新源码：
 
