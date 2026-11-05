@@ -135,6 +135,39 @@ def test_install_ps1_locates_python_after_successful_install():
     assert scope.index("Update-AscProcessPath") < scope.index("Find-AscPy")
 
 
+def test_install_ps1_runs_platform_check_from_a_file():
+    text = _text()
+    marker = "$platformCode = @'"
+    start = text.index(marker)
+    close = text.index("\n'@", start)
+    body = text[start + len(marker) + 1:close]
+    assert body.startswith("import asc\n")
+    assert "import asc.platform as platform" in body
+    assert '__version__' in body
+    assert 'feature_supported("build")' in body
+    assert 'cli_allows("schedule")' in body
+    assert 'cli_allows("release")' in body
+    assert 'print("ASC_STATUS ok")' in body
+    assert "$" not in body
+    region = text[start:text.index("if ($ascFails.Count -gt 0)", start)]
+    assert '@"' not in region
+    assert "ascPyExe -c" not in region
+    assert "python -c" not in region
+    assert " -c " not in region
+    assert "$env:TEMP" in region
+    assert "asc-platform-check-" in region
+    assert '.py"' in region
+    assert "$script:ascPyExe" in region
+    assert "RedirectStandardError = $true" in region
+    assert "Remove-Item -LiteralPath $platformScript" in region
+    assert "Get-AscTail" not in region
+    assert "if ($platformExit -ne 0)" in region
+    assert "Write-Host $platformErrText.TrimEnd" in region
+    assert "$script:ascBranch -eq 'feat/windows-compat'" in region
+    assert "$script:ascSourceLabel -eq 'PyPI'" in region
+    assert "build False、schedule True、release False" in region
+
+
 def test_install_ps1_function_cleanup_matches_definitions():
     text = _text()
     defined = set(re.findall(r"(?m)^    function ([A-Za-z0-9-]+)", text))

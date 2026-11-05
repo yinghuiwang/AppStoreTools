@@ -1921,49 +1921,91 @@ print("ASC_SCHEDULE " + ("True" if schedule else "False"))
 print("ASC_RELEASE " + ("True" if release else "False"))
 print("ASC_STATUS ok")
 '@
-    $platformRaw = & $script:ascPyExe -c $platformCode
-    $platformExit = $LASTEXITCODE
-    $platformTags = Read-AscTagged $platformRaw
-    $platformStatus = [string]$platformTags['ASC_STATUS']
-    $enforceBranch = $false
-    if ($script:ascBranch -eq 'feat/windows-compat') {
-        $enforceBranch = $true
-    } elseif ($script:ascBranch -eq 'local' -and $platformStatus -eq 'ok') {
-        $enforceBranch = $true
+    $platformScript = Join-Path -Path $env:TEMP -ChildPath ("asc-platform-check-" + [guid]::NewGuid().ToString("n") + ".py")
+    $platformExit = 1
+    $platformRaw = @()
+    $platformErrText = ""
+    $platformProc = $null
+    try {
+        $platformUtf8 = New-Object System.Text.UTF8Encoding $false
+        [System.IO.File]::WriteAllText($platformScript, $platformCode, $platformUtf8)
+        $platformInfo = New-Object System.Diagnostics.ProcessStartInfo
+        $platformInfo.FileName = $script:ascPyExe
+        $platformInfo.Arguments = '"' + ($platformScript.Replace('"', '\"')) + '"'
+        $platformInfo.UseShellExecute = $false
+        $platformInfo.RedirectStandardOutput = $true
+        $platformInfo.RedirectStandardError = $true
+        $platformInfo.CreateNoWindow = $true
+        $platformProc = New-Object System.Diagnostics.Process
+        $platformProc.StartInfo = $platformInfo
+        $null = $platformProc.Start()
+        $platformOutTask = $platformProc.StandardOutput.ReadToEndAsync()
+        $platformErrTask = $platformProc.StandardError.ReadToEndAsync()
+        $null = $platformProc.WaitForExit()
+        $platformStdout = [string]$platformOutTask.Result
+        $platformErrText = [string]$platformErrTask.Result
+        if ($null -ne $platformProc.ExitCode) {
+            $platformExit = $platformProc.ExitCode
+        }
+        $platformRaw = @($platformStdout -split "`r?`n")
+    } finally {
+        if ($null -ne $platformProc) {
+            try { $platformProc.Dispose() } catch { }
+        }
+        if (-not [string]::IsNullOrWhiteSpace($platformScript) -and (Test-Path -LiteralPath $platformScript)) {
+            Remove-Item -LiteralPath $platformScript -Force -ErrorAction SilentlyContinue
+        }
     }
 
-    if ($platformStatus -eq 'no-api') {
-        if ($script:ascSourceLabel -eq 'PyPI') {
-            Write-AscWarn "当前是 PyPI 发布版，没有 Windows 分支检查"
-        } elseif ($script:ascBranch -eq 'feat/windows-compat') {
-            Write-AscErr "feat/windows-compat 缺少 feature_supported / cli_allows"
-            $ascFails.Add('Windows 分支检查')
-        } else {
-            Write-AscWarn "当前安装没有 feature_supported / cli_allows，跳过 Windows 分支期望"
+    if ($platformExit -ne 0) {
+        if (-not [string]::IsNullOrEmpty($platformErrText)) {
+            Write-Host $platformErrText.TrimEnd("`r", "`n")
         }
-    } elseif ($platformStatus -eq 'ok') {
-        $buildValue = [string]$platformTags['ASC_BUILD']
-        $scheduleValue = [string]$platformTags['ASC_SCHEDULE']
-        $releaseValue = [string]$platformTags['ASC_RELEASE']
-        Write-Host "版本: $($platformTags['ASC_VERSION'])"
-        Write-Host "platform.py: $($platformTags['ASC_PLATFORM'])"
-        Write-Host "feature_supported('build') = $buildValue"
-        Write-Host "cli_allows('schedule') = $scheduleValue"
-        Write-Host "cli_allows('release') = $releaseValue"
-        $branchMatch = ($buildValue -eq 'False' -and $scheduleValue -eq 'True' -and $releaseValue -eq 'False')
-        if ($enforceBranch) {
-            if ($branchMatch) {
-                Write-AscOk "Windows 分支检查通过（build False，schedule True，release False）"
-            } else {
-                Write-AscErr "Windows 分支检查失败：期望 build False、schedule True、release False"
-                $ascFails.Add('Windows 分支检查')
-            }
-        } else {
-            Write-AscOk "已打印平台检查结果（不把 Windows 分支期望当作失败）"
-        }
-    } else {
         Write-AscErr "无法导入 asc.platform（退出码 $platformExit）"
         $ascFails.Add('asc.platform')
+    } else {
+        $platformTags = Read-AscTagged $platformRaw
+        $platformStatus = [string]$platformTags['ASC_STATUS']
+        $enforceBranch = $false
+        if ($script:ascBranch -eq 'feat/windows-compat') {
+            $enforceBranch = $true
+        } elseif ($script:ascBranch -eq 'local' -and $platformStatus -eq 'ok') {
+            $enforceBranch = $true
+        }
+
+        if ($platformStatus -eq 'no-api') {
+            if ($script:ascSourceLabel -eq 'PyPI') {
+                Write-AscWarn "当前是 PyPI 发布版，没有 Windows 分支检查"
+            } elseif ($script:ascBranch -eq 'feat/windows-compat') {
+                Write-AscErr "feat/windows-compat 缺少 feature_supported / cli_allows"
+                $ascFails.Add('Windows 分支检查')
+            } else {
+                Write-AscWarn "当前安装没有 feature_supported / cli_allows，跳过 Windows 分支期望"
+            }
+        } elseif ($platformStatus -eq 'ok') {
+            $buildValue = [string]$platformTags['ASC_BUILD']
+            $scheduleValue = [string]$platformTags['ASC_SCHEDULE']
+            $releaseValue = [string]$platformTags['ASC_RELEASE']
+            Write-Host "版本: $($platformTags['ASC_VERSION'])"
+            Write-Host "platform.py: $($platformTags['ASC_PLATFORM'])"
+            Write-Host "feature_supported('build') = $buildValue"
+            Write-Host "cli_allows('schedule') = $scheduleValue"
+            Write-Host "cli_allows('release') = $releaseValue"
+            $branchMatch = ($buildValue -eq 'False' -and $scheduleValue -eq 'True' -and $releaseValue -eq 'False')
+            if ($enforceBranch) {
+                if ($branchMatch) {
+                    Write-AscOk "Windows 分支检查通过（build False，schedule True，release False）"
+                } else {
+                    Write-AscErr "Windows 分支检查失败：期望 build False、schedule True、release False"
+                    $ascFails.Add('Windows 分支检查')
+                }
+            } else {
+                Write-AscOk "已打印平台检查结果（不把 Windows 分支期望当作失败）"
+            }
+        } else {
+            Write-AscErr "无法导入 asc.platform（退出码 $platformExit）"
+            $ascFails.Add('asc.platform')
+        }
     }
 
     if ($ascFails.Count -gt 0) {
