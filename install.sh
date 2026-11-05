@@ -84,6 +84,7 @@ while [[ $# -gt 0 ]]; do
       echo "This script targets macOS / Linux, including WSL."
       echo "Windows (PowerShell, not Git Bash):"
       echo "  irm https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.ps1 | iex"
+      echo "  \$env:ASC_INSTALL_BRANCH='feat/windows-compat'; irm https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/feat/windows-compat/install.ps1 | iex"
       echo "Uninstall: pipx uninstall asc-appstore-tools"
       echo "           pip uninstall asc-appstore-tools"
       echo "           asc uninstall --yes"
@@ -113,7 +114,13 @@ case "$OS" in
     echo ""
     echo "  irm https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.ps1 | iex"
     echo ""
-    echo "这一行安装的是 PyPI 已发布版本。Windows 定时任务和后台 web 的兼容改动尚未发布；构建/上传/发布在 Windows 上不可用。"
+    echo "安装 feat/windows-compat 分支时，先设置环境变量再执行："
+    echo ""
+    echo "  \$env:ASC_INSTALL_BRANCH='feat/windows-compat'"
+    echo "  irm https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/feat/windows-compat/install.ps1 | iex"
+    echo ""
+    echo "这一行会忽略 Microsoft Store 的 Python 占位；没有 Python 3.9+ 时自动安装 Python 3.12。"
+    echo "未设置 ASC_INSTALL_BRANCH 时安装的是 PyPI 已发布版本。Windows 定时任务和后台 web 的兼容改动尚未发布；构建/上传/发布在 Windows 上不可用。"
     _asc_stop 0
     ;;
   *)
