@@ -18,7 +18,11 @@
 #   Invoke-Expression $wc.DownloadString('https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/feat/windows-compat/install.ps1')
 # File execution also accepts a positional branch, -Branch, or --branch.
 # The Microsoft Store python/python3 alias is treated as not installed.
+# Usable Python does not require py.exe. Prefer a real py.exe, then python.exe
+# from the registry and usual directories. Skip Microsoft\WindowsApps stubs.
+# Run that absolute path for pip and asc. Search before winget or the official installer.
 # Missing or older than 3.9: install Python 3.12 with winget, then the official installer.
+# Exit 1638 / 0x666 and winget -1978335189 / 0x8A15002B mean the product is already installed.
 # This script does not install Xcode, signing tools, or altool, and it does not create scheduled tasks.
 
 $ascSavedExit = $global:LASTEXITCODE
@@ -51,6 +55,9 @@ try {
     $script:ascPyExe = ''
     $script:ascPyLog = New-Object System.Collections.Generic.List[string]
     $script:ascPyTail = ''
+    $script:ascPySearchNotes = New-Object System.Collections.Generic.List[string]
+    $script:ascPyAlreadyInstalled = $false
+    $script:ascPyFromExisting = $false
 
     function Write-AscOk([string]$Message) { Write-Host "[OK] $Message" -ForegroundColor Green }
     function Write-AscWarn([string]$Message) { Write-Host "[!] $Message" -ForegroundColor Yellow }
@@ -108,6 +115,7 @@ try {
         Write-Host "  Invoke-Expression `$wc.DownloadString('https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/feat/windows-compat/install.ps1')"
         Write-Host ""
         Write-Host "没有 Python 3.9+，或只有 Microsoft Store 占位程序时，脚本会自动安装 Python 3.12。"
+        Write-Host "已经安装的 py.exe 或 python.exe（3.9 或更高，且不在 Microsoft\WindowsApps）会直接使用，不再重装。"
         Write-Host ""
         Write-Host "在已 clone 的仓库根目录安装本地源码："
         Write-Host "  `$env:ASC_INSTALL_BRANCH='local'"
@@ -250,9 +258,13 @@ try {
 
     function ConvertTo-AscVersion([string]$Text) {
         if ([string]::IsNullOrWhiteSpace($Text)) { return -1 }
-        $match = [regex]::Match($Text, '(\d+)\.(\d+)')
+        $match = [regex]::Match($Text, '(\d+)\.(\d+)(?:\.(\d+))?')
         if (-not $match.Success) { return -1 }
-        return ([int]$match.Groups[1].Value * 1000 + [int]$match.Groups[2].Value)
+        $micro = 0
+        if ($match.Groups[3].Success -and -not [string]::IsNullOrWhiteSpace($match.Groups[3].Value)) {
+            $micro = [int]$match.Groups[3].Value
+        }
+        return ([int]$match.Groups[1].Value * 1000000 + [int]$match.Groups[2].Value * 1000 + $micro)
     }
 
     function Invoke-AscCaptured {
@@ -355,43 +367,209 @@ try {
         }
     }
 
-    function Get-AscPyCandidates {
-        $list = New-Object System.Collections.Generic.List[string]
-        if (-not [string]::IsNullOrWhiteSpace($env:SystemRoot)) {
-            Add-AscUniquePath $list (Join-Path $env:SystemRoot 'py.exe')
-        }
-        Add-AscUniquePath $list 'C:\Windows\py.exe'
-        if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
-            Add-AscUniquePath $list (Join-Path $env:LOCALAPPDATA 'Programs\Python\Launcher\py.exe')
-        }
-        Add-AscLauncherFromRegistry $list
-        foreach ($path in @(Get-AscWherePaths 'py')) {
-            Add-AscUniquePath $list $path
-        }
-        return @($list.ToArray())
+    function Test-AscAlreadyInstalledExit($Code) {
+        if ($null -eq $Code) { return $false }
+        $text = ("$Code").Trim()
+        if ($text -match '^(?i)0x0*666$') { return $true }
+        if ($text -match '^(?i)0x0*8[Aa]15002[Bb]$') { return $true }
+        if ($text -eq '1638' -or $text -eq '-1978335189' -or $text -eq '2316632107') { return $true }
+        return $false
     }
 
-    function Test-AscPyCandidate([string]$PyExe) {
-        if (Test-AscWindowsAppsPath $PyExe) { return $null }
-        if (-not (Test-Path -LiteralPath $PyExe -PathType Leaf)) { return $null }
-        $listed = Invoke-AscCaptured -Exe $PyExe -ArgumentList @('-0p')
-        if (Test-AscStoreText $listed.Text) { return $null }
-        $detectCode = 'import sys; print("ASC_EXE " + sys.executable); print("ASC_VER " + sys.version.split()[0]); raise SystemExit(0 if sys.version_info >= (3, 9) else 2)'
-        $ran = Invoke-AscCaptured -Exe $PyExe -ArgumentList @('-3', '-c', $detectCode)
+    function Add-AscPySearchNote([string]$Note) {
+        if ($null -eq $script:ascPySearchNotes) {
+            $script:ascPySearchNotes = New-Object System.Collections.Generic.List[string]
+        }
+        if ([string]::IsNullOrWhiteSpace($Note)) { return }
+        foreach ($item in $script:ascPySearchNotes) {
+            if ($item -eq $Note) { return }
+        }
+        $script:ascPySearchNotes.Add($Note) | Out-Null
+    }
+
+    function Add-AscClassifiedExe {
+        param(
+            [System.Collections.Generic.List[string]]$PyList,
+            [System.Collections.Generic.List[string]]$PythonList,
+            [string]$Path
+        )
+        if ([string]::IsNullOrWhiteSpace($Path)) { return }
+        $leaf = [System.IO.Path]::GetFileName($Path.Trim().Trim('"'))
+        if ($leaf -match '^(?i)py\.exe$') {
+            Add-AscUniquePath $PyList $Path
+        } else {
+            Add-AscUniquePath $PythonList $Path
+        }
+    }
+
+    function Add-AscGlobExe {
+        param(
+            [System.Collections.Generic.List[string]]$List,
+            [string]$Pattern,
+            [string]$Note
+        )
+        Add-AscPySearchNote $Note
+        if ([string]::IsNullOrWhiteSpace($Pattern)) { return }
+        if ($Pattern.Contains('*')) {
+            $items = @()
+            try {
+                $items = @(Get-ChildItem -Path $Pattern -File -ErrorAction SilentlyContinue)
+            } catch {
+                $items = @()
+            }
+            foreach ($item in $items) {
+                if ($null -eq $item) { continue }
+                Add-AscUniquePath $List $item.FullName
+            }
+            return
+        }
+        Add-AscUniquePath $List $Pattern
+    }
+
+    function Add-AscRegistryPythonCore {
+        param(
+            [System.Collections.Generic.List[string]]$PyList,
+            [System.Collections.Generic.List[string]]$PythonList,
+            [string]$HiveName,
+            [string]$ViewName,
+            [string]$SubKey
+        )
+        $hive = [Microsoft.Win32.RegistryHive]::LocalMachine
+        if ($HiveName -eq 'HKCU') { $hive = [Microsoft.Win32.RegistryHive]::CurrentUser }
+        $view = [Microsoft.Win32.RegistryView]::Registry64
+        if ($ViewName -eq '32') { $view = [Microsoft.Win32.RegistryView]::Registry32 }
+        if ($ViewName -eq 'Default') { $view = [Microsoft.Win32.RegistryView]::Default }
+        $base = $null
+        $root = $null
+        try {
+            try {
+                $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey($hive, $view)
+            } catch {
+                $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey($hive, [Microsoft.Win32.RegistryView]::Default)
+            }
+            $root = $base.OpenSubKey($SubKey)
+            if ($null -eq $root) { return }
+            foreach ($name in @($root.GetSubKeyNames())) {
+                $install = $null
+                try {
+                    $install = $root.OpenSubKey(($name + '\InstallPath'))
+                    if ($null -eq $install) { continue }
+                    $exe = $install.GetValue('ExecutablePath')
+                    if ($null -ne $exe -and -not [string]::IsNullOrWhiteSpace([string]$exe)) {
+                        Add-AscClassifiedExe $PyList $PythonList (([string]$exe).Trim().Trim('"'))
+                    }
+                    $dir = $install.GetValue('')
+                    if ($null -ne $dir -and -not [string]::IsNullOrWhiteSpace([string]$dir)) {
+                        $pythonExe = Join-Path (([string]$dir).Trim().Trim('"').TrimEnd('\')) 'python.exe'
+                        Add-AscClassifiedExe $PyList $PythonList $pythonExe
+                    }
+                } catch {
+                    continue
+                } finally {
+                    if ($null -ne $install) { $install.Close() }
+                }
+            }
+        } catch {
+            return
+        } finally {
+            if ($null -ne $root) { $root.Close() }
+            if ($null -ne $base) { $base.Close() }
+        }
+    }
+
+    function Get-AscPyCandidates {
+        $script:ascPySearchNotes = New-Object System.Collections.Generic.List[string]
+        $pyList = New-Object System.Collections.Generic.List[string]
+        $pythonList = New-Object System.Collections.Generic.List[string]
+
+        Add-AscPySearchNote 'HKCU\Software\Python\PythonCore\*\InstallPath'
+        Add-AscPySearchNote 'HKLM\Software\Python\PythonCore\*\InstallPath'
+        Add-AscPySearchNote 'HKLM\Software\WOW6432Node\Python\PythonCore\*\InstallPath'
+        Add-AscPySearchNote '注册表 ExecutablePath'
+        Add-AscRegistryPythonCore $pyList $pythonList 'HKCU' 'Default' 'Software\Python\PythonCore'
+        Add-AscRegistryPythonCore $pyList $pythonList 'HKLM' '64' 'Software\Python\PythonCore'
+        Add-AscRegistryPythonCore $pyList $pythonList 'HKLM' '64' 'Software\WOW6432Node\Python\PythonCore'
+
+        if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+            $localRoot = Join-Path $env:LOCALAPPDATA 'Programs\Python'
+            Add-AscGlobExe $pythonList (Join-Path $localRoot 'Python*\python.exe') (Join-Path $localRoot 'Python*')
+            Add-AscGlobExe $pyList (Join-Path $localRoot 'Launcher\py.exe') (Join-Path $localRoot 'Launcher')
+        } else {
+            Add-AscPySearchNote '%LOCALAPPDATA%\Programs\Python\Python*'
+            Add-AscPySearchNote '%LOCALAPPDATA%\Programs\Python\Launcher'
+        }
+
+        Add-AscGlobExe $pythonList 'C:\Program Files\Python*\python.exe' 'C:\Program Files\Python*'
+        Add-AscGlobExe $pythonList 'C:\Program Files (x86)\Python*\python.exe' 'C:\Program Files (x86)\Python*'
+        if (-not [string]::IsNullOrWhiteSpace($env:ProgramFiles)) {
+            $pfPattern = Join-Path $env:ProgramFiles 'Python*\python.exe'
+            if ($pfPattern.Replace('/', '\').ToLowerInvariant() -ne 'c:\program files\python*\python.exe') {
+                Add-AscGlobExe $pythonList $pfPattern (Join-Path $env:ProgramFiles 'Python*')
+            }
+        }
+        if (-not [string]::IsNullOrWhiteSpace(${env:ProgramFiles(x86)})) {
+            $pf86Pattern = Join-Path ${env:ProgramFiles(x86)} 'Python*\python.exe'
+            if ($pf86Pattern.Replace('/', '\').ToLowerInvariant() -ne 'c:\program files (x86)\python*\python.exe') {
+                Add-AscGlobExe $pythonList $pf86Pattern (Join-Path ${env:ProgramFiles(x86)} 'Python*')
+            }
+        }
+
+        $windowsPy = 'C:\Windows\py.exe'
+        Add-AscGlobExe $pyList $windowsPy $windowsPy
+        if (-not [string]::IsNullOrWhiteSpace($env:SystemRoot)) {
+            $sysPy = Join-Path $env:SystemRoot 'py.exe'
+            if ($sysPy.Replace('/', '\').TrimEnd('\').ToLowerInvariant() -ne 'c:\windows\py.exe') {
+                Add-AscGlobExe $pyList $sysPy $sysPy
+            }
+        }
+
+        Add-AscPySearchNote 'HKCU\Software\Python\Launcher'
+        Add-AscPySearchNote 'HKLM\Software\Python\Launcher'
+        Add-AscPySearchNote 'HKLM\Software\WOW6432Node\Python\Launcher'
+        Add-AscLauncherFromRegistry $pyList
+
+        Add-AscPySearchNote 'where.exe python'
+        foreach ($path in @(Get-AscWherePaths 'python')) {
+            Add-AscClassifiedExe $pyList $pythonList ([string]$path)
+        }
+        Add-AscPySearchNote 'where.exe py'
+        foreach ($path in @(Get-AscWherePaths 'py')) {
+            Add-AscClassifiedExe $pyList $pythonList ([string]$path)
+        }
+
+        $all = New-Object System.Collections.Generic.List[string]
+        foreach ($item in $pyList) { Add-AscUniquePath $all $item }
+        foreach ($item in $pythonList) { Add-AscUniquePath $all $item }
+        return @($all.ToArray())
+    }
+
+    function Test-AscPyCandidate([string]$Exe) {
+        if (Test-AscWindowsAppsPath $Exe) { return $null }
+        if (-not (Test-Path -LiteralPath $Exe -PathType Leaf)) { return $null }
+        $full = ''
+        try {
+            $full = [System.IO.Path]::GetFullPath($Exe)
+        } catch {
+            return $null
+        }
+        if (Test-AscWindowsAppsPath $full) { return $null }
+        $detectCode = 'import sys; print(sys.version_info); print("ASC_EXE " + sys.executable); print("ASC_VER %d.%d.%d" % sys.version_info[:3]); raise SystemExit(0 if sys.version_info >= (3, 9) else 2)'
+        $ran = Invoke-AscCaptured -Exe $full -ArgumentList @('-c', $detectCode)
         if (Test-AscStoreText $ran.Text) { return $null }
         $lines = @([string]$ran.Text -split "`r?`n")
         $tags = Read-AscTagged $lines
-        $exe = [string]$tags['ASC_EXE']
+        $reported = [string]$tags['ASC_EXE']
         $ver = [string]$tags['ASC_VER']
-        if (Test-AscWindowsAppsPath $exe) { return $null }
+        if (Test-AscWindowsAppsPath $reported) { return $null }
         if ([string]::IsNullOrWhiteSpace($ver)) { return $null }
         $ok = ($ran.ExitCode -eq 0)
-        return @{ Executable = $PyExe; Version = $ver; Ok = [bool]$ok; ExitCode = $ran.ExitCode }
+        return @{ Executable = $full; Version = $ver; Ok = [bool]$ok; ExitCode = $ran.ExitCode }
     }
 
     function Find-AscPy {
         $bestOk = $null
         $bestOkRank = -1
+        $bestOkIsPy = $false
         $bestLow = $null
         $bestLowRank = -1
         foreach ($candidate in @(Get-AscPyCandidates)) {
@@ -399,10 +577,16 @@ try {
             $tested = Test-AscPyCandidate ([string]$candidate)
             if ($null -eq $tested) { continue }
             $rank = ConvertTo-AscVersion ([string]$tested.Version)
+            if ($rank -lt 0) { $rank = 0 }
+            $isPy = ([System.IO.Path]::GetFileName([string]$tested.Executable) -match '^(?i)py\.exe$')
             if ($tested.Ok) {
-                if ($rank -gt $bestOkRank) {
+                $better = $false
+                if ($rank -gt $bestOkRank) { $better = $true }
+                elseif ($rank -eq $bestOkRank -and $isPy -and -not $bestOkIsPy) { $better = $true }
+                if ($better) {
                     $bestOk = $tested
                     $bestOkRank = $rank
+                    $bestOkIsPy = [bool]$isPy
                 }
             } elseif ($rank -gt $bestLowRank) {
                 $bestLow = $tested
@@ -464,8 +648,10 @@ try {
             }
         }
         if (-not [string]::IsNullOrWhiteSpace($PyExe)) {
+            if (Test-AscWindowsAppsPath $PyExe) { return }
             $dir = [string](Split-Path -Parent $PyExe)
-            if ($dir -match '(?i)\\Launcher$') {
+            if ([string]::IsNullOrWhiteSpace($dir)) { return }
+            if ($dir -match '(?i)\\(Python[0-9.]+|Launcher)$') {
                 Add-AscUserPath $dir
             }
         }
@@ -563,18 +749,33 @@ try {
             $first = Install-AscPythonExe $dest 1
             $firstNote = ''
             if ($first.ExitCode -eq 3010) { $firstNote = '（3010 通常表示已安装，可能需要重新登录）' }
+            if (Test-AscAlreadyInstalledExit $first.ExitCode) {
+                $script:ascPyAlreadyInstalled = $true
+                $firstNote = '（1638 / 0x666 表示同一产品已经安装）'
+            }
             Add-AscPyLog "官方安装包 $fileName InstallAllUsers=1 退出码 $($first.ExitCode)$firstNote"
             $script:ascPyTail = [string]$first.Tail
             Update-AscProcessPath
             Add-AscPyLauncherPath ''
             $found = Find-AscPy
-            if ($found -and $found.Ok) { return $found }
+            if ($found -and $found.Ok) {
+                if (Test-AscAlreadyInstalledExit $first.ExitCode) { $script:ascPyFromExisting = $true }
+                return $found
+            }
             if (-not $elevated) {
-                Write-AscWarn "InstallAllUsers=1 未得到可用的 py -3（退出码 $($first.ExitCode)）。当前进程未提升，改为 InstallAllUsers=0。"
+                if (Test-AscAlreadyInstalledExit $first.ExitCode) {
+                    Write-AscWarn "InstallAllUsers=1 退出码 $($first.ExitCode) 表示已经安装，但未找到 3.9 或更高的解释器。当前进程未提升，改为 InstallAllUsers=0。"
+                } else {
+                    Write-AscWarn "InstallAllUsers=1 未得到可用的 Python 3.9 或更高版本（退出码 $($first.ExitCode)）。当前进程未提升，改为 InstallAllUsers=0。"
+                }
                 Write-Host "正在静默安装 Python 3.12.7（InstallAllUsers=0）..."
                 $second = Install-AscPythonExe $dest 0
                 $secondNote = ''
                 if ($second.ExitCode -eq 3010) { $secondNote = '（3010 通常表示已安装，可能需要重新登录）' }
+                if (Test-AscAlreadyInstalledExit $second.ExitCode) {
+                    $script:ascPyAlreadyInstalled = $true
+                    $secondNote = '（1638 / 0x666 表示同一产品已经安装）'
+                }
                 Add-AscPyLog "官方安装包 $fileName InstallAllUsers=0 退出码 $($second.ExitCode)$secondNote"
                 $script:ascPyTail = [string]$second.Tail
                 if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
@@ -586,12 +787,15 @@ try {
                 Update-AscProcessPath
                 Add-AscPyLauncherPath ''
                 $found = Find-AscPy
-                if ($found -and $found.Ok) { return $found }
+                if ($found -and $found.Ok) {
+                    if (Test-AscAlreadyInstalledExit $second.ExitCode) { $script:ascPyFromExisting = $true }
+                    return $found
+                }
             }
             if ($found -and -not [string]::IsNullOrWhiteSpace([string]$found.Version)) {
-                Add-AscPyLog "官方安装包结束后 py -3 仍是 $($found.Version)，低于 3.9"
+                Add-AscPyLog "官方安装包结束后解释器仍是 $($found.Version)，低于 3.9"
             } else {
-                Add-AscPyLog '官方安装包结束后仍未找到可用的 py.exe'
+                Add-AscPyLog '官方安装包结束后仍未找到可用的 python.exe 或 py.exe'
             }
             return $null
         } catch {
@@ -617,53 +821,81 @@ try {
         if (-not [string]::IsNullOrWhiteSpace($env:PY_PYTHON)) {
             $extra = " 当前 PY_PYTHON=$($env:PY_PYTHON)。若它指向旧版本，请改为 3.12 或删除后再运行。"
         }
-        Stop-AscInstall ("未能安装可用的 Python 3.9 或更高版本（py -3 能运行，且 py.exe 不在 Microsoft\WindowsApps）。已尝试：$tried。$extra`n最后输出：`n$tail")
+        $searched = '无'
+        if ($null -ne $script:ascPySearchNotes -and $script:ascPySearchNotes.Count -gt 0) {
+            $searched = ($script:ascPySearchNotes -join '；')
+        }
+        if ($script:ascPyAlreadyInstalled) {
+            Stop-AscInstall ("Python 已经安装，但没有找到 3.9 或更高版本的解释器（已忽略 Microsoft\WindowsApps）。已搜索：$searched。已尝试：$tried。$extra`n最后输出：`n$tail")
+        }
+        Stop-AscInstall ("未能安装可用的 Python 3.9 或更高版本（需要 python.exe 或 py.exe 能运行，且不在 Microsoft\WindowsApps）。已搜索：$searched。已尝试：$tried。$extra`n最后输出：`n$tail")
     }
 
     function Install-AscPython312 {
         $script:ascPyLog = New-Object System.Collections.Generic.List[string]
         $script:ascPyTail = '（无输出）'
+        $script:ascPyFromExisting = $false
         $winget = Get-AscWingetPath
         $elevated = Test-AscElevated
         if ($winget) {
             $userResult = Install-AscWingetId -Winget $winget -Id 'Python.Python.3.12' -Scope 'user'
+            $alreadyUser = Test-AscAlreadyInstalledExit $userResult.ExitCode
+            if ($alreadyUser) { $script:ascPyAlreadyInstalled = $true }
             Add-AscPyLog "winget Python.Python.3.12 --scope user 退出码 $($userResult.ExitCode)"
+            if ($alreadyUser) {
+                Add-AscPyLog "winget 用户范围退出码 $($userResult.ExitCode) 视为已经安装（-1978335189 / 0x8A15002B，或 1638 / 0x666）"
+            }
             $script:ascPyTail = [string]$userResult.Tail
             Update-AscProcessPath
             Add-AscPyLauncherPath ''
             $found = Find-AscPy
             if ($found -and $found.Ok) {
                 Add-AscPyLauncherPath ([string]$found.Executable)
-                $script:ascInstalled += 'Python 3.12'
                 if ($userResult.ExitCode -eq 0) {
+                    $script:ascInstalled += 'Python 3.12'
                     Write-AscOk "已安装 Python $($found.Version)（winget 用户范围）"
+                } elseif ($alreadyUser) {
+                    $script:ascPyFromExisting = $true
+                    Write-AscWarn "winget 用户范围退出码 $($userResult.ExitCode) 表示已经安装。找到 Python $($found.Version)：$($found.Executable)。继续安装命令行工具。"
                 } else {
-                    Write-AscWarn "winget 用户范围退出码为 $($userResult.ExitCode)。py -3 $($found.Version) 已可用，继续安装。"
+                    Write-AscWarn "winget 用户范围退出码为 $($userResult.ExitCode)。已找到 Python $($found.Version)：$($found.Executable)，继续安装。"
                 }
                 return $found
             }
             if ($elevated) {
-                Write-AscWarn "用户范围安装后仍没有可用的 py.exe。当前进程已提升，改为机器范围。"
+                if ($alreadyUser) {
+                    Write-AscWarn "winget 用户范围表示 Python 已经安装，但还没有找到 3.9 或更高的解释器。当前进程已提升，改为机器范围后再搜索。"
+                } else {
+                    Write-AscWarn "用户范围安装后仍没有可用的 Python 3.9 或更高版本。当前进程已提升，改为机器范围。"
+                }
                 $machineResult = Install-AscWingetId -Winget $winget -Id 'Python.Python.3.12' -Scope 'machine'
+                $alreadyMachine = Test-AscAlreadyInstalledExit $machineResult.ExitCode
+                if ($alreadyMachine) { $script:ascPyAlreadyInstalled = $true }
                 Add-AscPyLog "winget Python.Python.3.12 --scope machine 退出码 $($machineResult.ExitCode)"
+                if ($alreadyMachine) {
+                    Add-AscPyLog "winget 机器范围退出码 $($machineResult.ExitCode) 视为已经安装（-1978335189 / 0x8A15002B，或 1638 / 0x666）"
+                }
                 $script:ascPyTail = [string]$machineResult.Tail
                 Update-AscProcessPath
                 Add-AscPyLauncherPath ''
                 $found = Find-AscPy
                 if ($found -and $found.Ok) {
                     Add-AscPyLauncherPath ([string]$found.Executable)
-                    $script:ascInstalled += 'Python 3.12'
                     if ($machineResult.ExitCode -eq 0) {
+                        $script:ascInstalled += 'Python 3.12'
                         Write-AscOk "已安装 Python $($found.Version)（winget 机器范围）"
+                    } elseif ($alreadyMachine) {
+                        $script:ascPyFromExisting = $true
+                        Write-AscWarn "winget 机器范围退出码 $($machineResult.ExitCode) 表示已经安装。找到 Python $($found.Version)：$($found.Executable)。继续安装命令行工具。"
                     } else {
-                        Write-AscWarn "winget 机器范围退出码为 $($machineResult.ExitCode)。py -3 $($found.Version) 已可用，继续安装。"
+                        Write-AscWarn "winget 机器范围退出码为 $($machineResult.ExitCode)。已找到 Python $($found.Version)：$($found.Executable)，继续安装。"
                     }
                     return $found
                 }
             } else {
                 Add-AscPyLog '当前进程未提升，跳过 winget --scope machine'
             }
-            Write-AscWarn "winget 结束后仍没有可用的 py -3（3.9 或更高）。改为官方安装包。"
+            Write-AscWarn "winget 结束后仍没有可用的 Python 3.9 或更高版本。改为官方安装包。"
         } else {
             Add-AscPyLog 'winget 不可用'
             Write-AscWarn "未找到可用的 winget。改为下载官方 Python 3.12.7 安装包。"
@@ -671,12 +903,16 @@ try {
         $found = Install-AscPythonOfficial
         if ($found -and $found.Ok) {
             Add-AscPyLauncherPath ([string]$found.Executable)
-            $script:ascInstalled += 'Python 3.12.7'
-            Write-AscOk "已安装 Python $($found.Version)（官方安装包）"
+            if ($script:ascPyFromExisting) {
+                Write-AscWarn "安装包报告 Python 已经安装。找到 $($found.Version)：$($found.Executable)。继续安装命令行工具。"
+            } else {
+                $script:ascInstalled += 'Python 3.12.7'
+                Write-AscOk "已安装 Python $($found.Version)（官方安装包）"
+            }
             return $found
         }
         if ($found -and -not [string]::IsNullOrWhiteSpace([string]$found.Version)) {
-            Add-AscPyLog "安装后 py -3 仍是 $($found.Version)，低于 3.9"
+            Add-AscPyLog "安装后解释器仍是 $($found.Version)，低于 3.9"
         }
         Stop-AscPythonMissing
     }
@@ -686,12 +922,13 @@ try {
         $found = Find-AscPy
         if ($found -and $found.Ok) {
             $script:ascPyExe = [string]$found.Executable
+            Write-AscOk "已找到 Python $($found.Version)：$($found.Executable)。跳过安装。"
             return $found
         }
         if ($found -and -not [string]::IsNullOrWhiteSpace([string]$found.Version)) {
-            Write-AscWarn "py -3 版本为 $($found.Version)，低于 3.9。开始自动安装 Python 3.12。"
+            Write-AscWarn "找到的 Python 为 $($found.Version)，低于 3.9。开始自动安装 Python 3.12。"
         } else {
-            Write-AscWarn "未找到可用的 py -3（已忽略 Microsoft Store 占位程序）。开始自动安装 Python 3.12。"
+            Write-AscWarn "未找到可用的 Python 3.9 或更高版本（已忽略 Microsoft Store 占位程序）。开始自动安装 Python 3.12。"
         }
         $installed = Install-AscPython312
         $script:ascPyExe = [string]$installed.Executable
@@ -872,25 +1109,25 @@ try {
     $ascPy = Resolve-AscPython
     $script:ascPyExe = [string]$ascPy.Executable
     if ([string]::IsNullOrWhiteSpace($script:ascPyExe) -or (Test-AscWindowsAppsPath $script:ascPyExe)) {
-        Stop-AscInstall "py launcher 路径无效。"
+        Stop-AscInstall "Python 解释器路径无效。"
     }
     $script:ascPyVer = [string]$ascPy.Version
-    Write-AscOk "Python: $($script:ascPyExe) -3 ($($script:ascPyVer))"
+    Write-AscOk "Python: $($script:ascPyExe) ($($script:ascPyVer))"
 
-    & $script:ascPyExe -3 -m pip --version
+    & $script:ascPyExe -m pip --version
     if ($LASTEXITCODE -ne 0) {
         Write-AscWarn "pip 不可用，尝试 ensurepip ..."
-        & $script:ascPyExe -3 -m ensurepip --upgrade
+        & $script:ascPyExe -m ensurepip --upgrade
         if ($LASTEXITCODE -ne 0) {
             Stop-AscInstall "ensurepip 失败，pip 仍不可用。请查看上方输出后重新运行本脚本。"
         }
-        & $script:ascPyExe -3 -m pip install --upgrade pip
+        & $script:ascPyExe -m pip install --upgrade pip
         if ($LASTEXITCODE -ne 0) {
             Stop-AscInstall "pip 升级失败。请查看上方输出后重新运行本脚本。"
         }
         $script:ascInstalled += 'pip'
     }
-    $pipLine = & $script:ascPyExe -3 -m pip --version
+    $pipLine = & $script:ascPyExe -m pip --version
     if ($LASTEXITCODE -ne 0) {
         Stop-AscInstall "pip 安装后仍不可用。请查看上方输出后重新运行本脚本。"
     }
@@ -900,7 +1137,7 @@ try {
     Write-Host ""
     if ([string]::IsNullOrWhiteSpace($script:ascBranch)) {
         Write-Host "正在从 PyPI 安装 asc-appstore-tools ..."
-        & $script:ascPyExe -3 -m pip install --user --upgrade asc-appstore-tools
+        & $script:ascPyExe -m pip install --user --upgrade asc-appstore-tools
         if ($LASTEXITCODE -ne 0) {
             Stop-AscInstall "pip 安装失败。请查看上方输出。"
         }
@@ -910,7 +1147,7 @@ try {
         Write-Host "正在从本地仓库安装（editable）：$($script:ascLocalRoot)"
         Push-Location -LiteralPath $script:ascLocalRoot
         try {
-            & $script:ascPyExe -3 -m pip install --user -e .
+            & $script:ascPyExe -m pip install --user -e .
             if ($LASTEXITCODE -ne 0) {
                 Stop-AscInstall "本地 editable 安装失败。请查看上方 pip 输出。"
             }
@@ -922,7 +1159,7 @@ try {
     } else {
         $ascGitUrl = "git+https://github.com/yinghuiwang/AppStoreTools.git@$($script:ascBranch)"
         Write-Host "正在从 GitHub 安装 $($script:ascBranch) ..."
-        & $script:ascPyExe -3 -m pip install --user --upgrade $ascGitUrl
+        & $script:ascPyExe -m pip install --user --upgrade $ascGitUrl
         if ($LASTEXITCODE -ne 0) {
             Stop-AscInstall "GitHub 分支安装失败。请查看上方 pip 输出。"
         }
@@ -930,7 +1167,7 @@ try {
         Write-AscOk "asc-appstore-tools 安装成功（--user / git 分支 $($script:ascBranch)）"
     }
 
-    $ascScriptsRaw = & $script:ascPyExe -3 -c "import sysconfig; print(sysconfig.get_path('scripts', 'nt_user') or '')"
+    $ascScriptsRaw = & $script:ascPyExe -c "import sysconfig; print(sysconfig.get_path('scripts', 'nt_user') or '')"
     $ascScripts = ''
     foreach ($ascScriptsLine in @($ascScriptsRaw)) {
         $ascScriptsText = "$ascScriptsLine".Trim()
@@ -941,13 +1178,13 @@ try {
     Write-Host ""
     $ascFails = New-Object System.Collections.Generic.List[string]
 
-    Write-Host "验证: $($script:ascPyExe) -3 -m asc --help"
-    & $script:ascPyExe -3 -m asc --help
+    Write-Host "验证: $($script:ascPyExe) -m asc --help"
+    & $script:ascPyExe -m asc --help
     if ($LASTEXITCODE -eq 0) {
-        Write-AscOk "py -3 -m asc --help 通过"
+        Write-AscOk "$($script:ascPyExe) -m asc --help 通过"
     } else {
-        Write-AscErr "py -3 -m asc --help 失败"
-        $ascFails.Add('py -3 -m asc --help')
+        Write-AscErr "$($script:ascPyExe) -m asc --help 失败"
+        $ascFails.Add("$($script:ascPyExe) -m asc --help")
     }
 
     Write-Host ""
@@ -982,7 +1219,7 @@ print("ASC_SCHEDULE " + ("True" if schedule else "False"))
 print("ASC_RELEASE " + ("True" if release else "False"))
 print("ASC_STATUS ok")
 '@
-    $platformRaw = & $script:ascPyExe -3 -c $platformCode
+    $platformRaw = & $script:ascPyExe -c $platformCode
     $platformExit = $LASTEXITCODE
     $platformTags = Read-AscTagged $platformRaw
     $platformStatus = [string]$platformTags['ASC_STATUS']
@@ -1060,7 +1297,8 @@ print("ASC_STATUS ok")
         'Write-AscOk', 'Write-AscWarn', 'Write-AscErr', 'Show-AscSummary', 'Stop-AscInstall', 'Show-AscHelp',
         'Add-AscUserPath', 'Update-AscProcessPath', 'Read-AscTagged', 'Test-AscWindowsAppsPath', 'Test-AscStoreText',
         'Get-AscTail', 'Add-AscUniquePath', 'Add-AscPyLog', 'ConvertTo-AscVersion', 'Invoke-AscCaptured',
-        'Get-AscWherePaths', 'Add-AscLauncherFromRegistry', 'Get-AscPyCandidates', 'Test-AscPyCandidate', 'Find-AscPy',
+        'Get-AscWherePaths', 'Add-AscLauncherFromRegistry', 'Test-AscAlreadyInstalledExit', 'Add-AscPySearchNote',
+        'Add-AscClassifiedExe', 'Add-AscGlobExe', 'Add-AscRegistryPythonCore', 'Get-AscPyCandidates', 'Test-AscPyCandidate', 'Find-AscPy',
         'Write-AscIgnoredStoreAliases', 'Test-AscElevated', 'Get-AscWingetPath', 'Add-AscPyLauncherPath',
         'Install-AscWingetId', 'Get-AscRecentPythonLogTail', 'Install-AscPythonExe', 'Install-AscPythonOfficial',
         'Stop-AscPythonMissing', 'Install-AscPython312', 'Resolve-AscPython', 'Find-AscGitExe', 'Use-AscGitExe',
@@ -1068,7 +1306,7 @@ print("ASC_STATUS ok")
     )) {
         Remove-Item -Path "Function:\$ascFn" -ErrorAction SilentlyContinue
     }
-    foreach ($ascStateName in @('ascSummaryShown', 'ascFailed', 'ascInstalled', 'ascPyVer', 'ascPipVer', 'ascPath', 'ascSourceLabel', 'ascBranch', 'ascLocalRoot', 'ascPyExe', 'ascPyLog', 'ascPyTail')) {
+    foreach ($ascStateName in @('ascSummaryShown', 'ascFailed', 'ascInstalled', 'ascPyVer', 'ascPipVer', 'ascPath', 'ascSourceLabel', 'ascBranch', 'ascLocalRoot', 'ascPyExe', 'ascPyLog', 'ascPyTail', 'ascPySearchNotes', 'ascPyAlreadyInstalled', 'ascPyFromExisting')) {
         Remove-Variable -Name $ascStateName -Scope Script -ErrorAction SilentlyContinue
     }
 }
