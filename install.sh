@@ -83,8 +83,8 @@ while [[ $# -gt 0 ]]; do
       echo "Default install is from PyPI (asc-appstore-tools)."
       echo "This script targets macOS / Linux, including WSL."
       echo "Windows (PowerShell, not Git Bash):"
-      echo "  irm https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.ps1 | iex"
-      echo "  \$env:ASC_INSTALL_BRANCH='feat/windows-compat'; irm https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/feat/windows-compat/install.ps1 | iex"
+      echo "  \$wc = New-Object System.Net.WebClient; \$wc.Encoding = [System.Text.Encoding]::UTF8; Invoke-Expression \$wc.DownloadString('https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/feat/windows-compat/install.ps1')"
+      echo "  \$env:ASC_INSTALL_BRANCH='feat/windows-compat'; \$wc = New-Object System.Net.WebClient; \$wc.Encoding = [System.Text.Encoding]::UTF8; Invoke-Expression \$wc.DownloadString('https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/feat/windows-compat/install.ps1')"
       echo "Uninstall: pipx uninstall asc-appstore-tools"
       echo "           pip uninstall asc-appstore-tools"
       echo "           asc uninstall --yes"
@@ -112,12 +112,12 @@ case "$OS" in
     echo "install.sh 不能在 Windows 原生环境（含 Git Bash）安装。"
     echo "请在 PowerShell 中执行："
     echo ""
-    echo "  irm https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.ps1 | iex"
+    echo "  \$wc = New-Object System.Net.WebClient; \$wc.Encoding = [System.Text.Encoding]::UTF8; Invoke-Expression \$wc.DownloadString('https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/feat/windows-compat/install.ps1')"
     echo ""
     echo "安装 feat/windows-compat 分支时，先设置环境变量再执行："
     echo ""
     echo "  \$env:ASC_INSTALL_BRANCH='feat/windows-compat'"
-    echo "  irm https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/feat/windows-compat/install.ps1 | iex"
+    echo "  \$wc = New-Object System.Net.WebClient; \$wc.Encoding = [System.Text.Encoding]::UTF8; Invoke-Expression \$wc.DownloadString('https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/feat/windows-compat/install.ps1')"
     echo ""
     echo "这一行会忽略 Microsoft Store 的 Python 占位；没有 Python 3.9+ 时自动安装 Python 3.12。"
     echo "未设置 ASC_INSTALL_BRANCH 时安装的是 PyPI 已发布版本。Windows 定时任务和后台 web 的兼容改动尚未发布；构建/上传/发布在 Windows 上不可用。"
@@ -126,7 +126,7 @@ case "$OS" in
   *)
     fatal "不支持的操作系统: $OS"
     echo "  若在 Windows 上，请在 PowerShell 中执行："
-    echo "    irm https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.ps1 | iex"
+    echo "    \$wc = New-Object System.Net.WebClient; \$wc.Encoding = [System.Text.Encoding]::UTF8; Invoke-Expression \$wc.DownloadString('https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/feat/windows-compat/install.ps1')"
     _asc_stop 1
     ;;
 esac

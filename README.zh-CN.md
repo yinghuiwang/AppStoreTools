@@ -37,11 +37,15 @@ curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/inst
 Windows（PowerShell）：
 
 ```powershell
-irm https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.ps1 | iex
+$wc = New-Object System.Net.WebClient
+$wc.Encoding = [System.Text.Encoding]::UTF8
+Invoke-Expression $wc.DownloadString('https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/feat/windows-compat/install.ps1')
 
 # 安装 feat/windows-compat 分支
 $env:ASC_INSTALL_BRANCH='feat/windows-compat'
-irm https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/feat/windows-compat/install.ps1 | iex
+$wc = New-Object System.Net.WebClient
+$wc.Encoding = [System.Text.Encoding]::UTF8
+Invoke-Expression $wc.DownloadString('https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/feat/windows-compat/install.ps1')
 ```
 
 `install.ps1` 会把 Microsoft Store 的 Python 占位程序当成未安装。如果没有可用的 `py -3`，或版本低于 3.9，会先用 winget 安装 Python 3.12，仍不可用时再安装官方 3.12.7 安装包。

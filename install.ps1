@@ -1,17 +1,33 @@
-# App Store Connect Tools — Windows installer.
+﻿# App Store Connect Tools — Windows installer.
 # Run in the current process. Do not Set-ExecutionPolicy.
-#   irm https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.ps1 | iex
-# This branch (script + CLI). irm | iex does not forward script arguments reliably:
+# Download this branch as UTF-8, then Invoke-Expression. Do not pipe irm to iex.
+# Default (no ASC_INSTALL_BRANCH) installs the PyPI package asc-appstore-tools.
+# The script URL stays on this branch because Python auto-install is not on main:
+#   $wc = New-Object System.Net.WebClient
+#   $wc.Encoding = [System.Text.Encoding]::UTF8
+#   Invoke-Expression $wc.DownloadString('https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/feat/windows-compat/install.ps1')
+# This branch (script + CLI). Set ASC_INSTALL_BRANCH; it is not forwarded as an argument:
 #   $env:ASC_INSTALL_BRANCH='feat/windows-compat'
-#   irm https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/feat/windows-compat/install.ps1 | iex
+#   $wc = New-Object System.Net.WebClient
+#   $wc.Encoding = [System.Text.Encoding]::UTF8
+#   Invoke-Expression $wc.DownloadString('https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/feat/windows-compat/install.ps1')
 # Local editable install from a cloned repo root:
 #   $env:ASC_INSTALL_BRANCH='local'
-#   irm https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.ps1 | iex
+#   $wc = New-Object System.Net.WebClient
+#   $wc.Encoding = [System.Text.Encoding]::UTF8
+#   Invoke-Expression $wc.DownloadString('https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/feat/windows-compat/install.ps1')
 # File execution also accepts a positional branch, -Branch, or --branch.
-# Default (no branch) installs the PyPI package asc-appstore-tools.
 # The Microsoft Store python/python3 alias is treated as not installed.
 # Missing or older than 3.9: install Python 3.12 with winget, then the official installer.
 # This script does not install Xcode, signing tools, or altool, and it does not create scheduled tasks.
+
+$ascSavedExit = $global:LASTEXITCODE
+try { chcp 65001 | Out-Null } catch { }
+$global:LASTEXITCODE = $ascSavedExit
+try {
+    $OutputEncoding = New-Object System.Text.UTF8Encoding $false
+    [Console]::OutputEncoding = $OutputEncoding
+} catch { }
 
 $ascSavedEap = $ErrorActionPreference
 $ErrorActionPreference = 'Stop'
@@ -81,17 +97,23 @@ try {
         Write-Host "App Store Connect Tools — Windows 安装程序"
         Write-Host ""
         Write-Host "默认安装 PyPI 包 asc-appstore-tools："
-        Write-Host "  irm https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.ps1 | iex"
+        Write-Host "  `$wc = New-Object System.Net.WebClient"
+        Write-Host "  `$wc.Encoding = [System.Text.Encoding]::UTF8"
+        Write-Host "  Invoke-Expression `$wc.DownloadString('https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/feat/windows-compat/install.ps1')"
         Write-Host ""
-        Write-Host "安装 GitHub 分支（irm | iex 请用环境变量，并下载该分支上的脚本）："
+        Write-Host "安装 GitHub 分支（先设置环境变量，再按 UTF-8 下载该分支上的脚本）："
         Write-Host "  `$env:ASC_INSTALL_BRANCH='feat/windows-compat'"
-        Write-Host "  irm https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/feat/windows-compat/install.ps1 | iex"
+        Write-Host "  `$wc = New-Object System.Net.WebClient"
+        Write-Host "  `$wc.Encoding = [System.Text.Encoding]::UTF8"
+        Write-Host "  Invoke-Expression `$wc.DownloadString('https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/feat/windows-compat/install.ps1')"
         Write-Host ""
         Write-Host "没有 Python 3.9+，或只有 Microsoft Store 占位程序时，脚本会自动安装 Python 3.12。"
         Write-Host ""
         Write-Host "在已 clone 的仓库根目录安装本地源码："
         Write-Host "  `$env:ASC_INSTALL_BRANCH='local'"
-        Write-Host "  irm https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.ps1 | iex"
+        Write-Host "  `$wc = New-Object System.Net.WebClient"
+        Write-Host "  `$wc.Encoding = [System.Text.Encoding]::UTF8"
+        Write-Host "  Invoke-Expression `$wc.DownloadString('https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/feat/windows-compat/install.ps1')"
         Write-Host ""
         Write-Host "直接运行脚本时也可以传参（优先于环境变量）："
         Write-Host "  .\install.ps1"

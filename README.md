@@ -37,11 +37,15 @@ curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/inst
 Windows (PowerShell):
 
 ```powershell
-irm https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.ps1 | iex
+$wc = New-Object System.Net.WebClient
+$wc.Encoding = [System.Text.Encoding]::UTF8
+Invoke-Expression $wc.DownloadString('https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/feat/windows-compat/install.ps1')
 
 # Install the feat/windows-compat branch
 $env:ASC_INSTALL_BRANCH='feat/windows-compat'
-irm https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/feat/windows-compat/install.ps1 | iex
+$wc = New-Object System.Net.WebClient
+$wc.Encoding = [System.Text.Encoding]::UTF8
+Invoke-Expression $wc.DownloadString('https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/feat/windows-compat/install.ps1')
 ```
 
 `install.ps1` treats the Microsoft Store Python alias as not installed. If `py -3` is missing or older than 3.9, it installs Python 3.12 with winget, then with the official 3.12.7 installer.
