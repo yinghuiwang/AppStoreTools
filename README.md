@@ -28,22 +28,19 @@ Metadata, screenshot, IAP, and Web UI workflows can run on Linux and Windows. Ap
 
 ### 1. Install `asc`
 
-Preferred: install the published package from PyPI.
+macOS / Linux:
 
 ```bash
-python -m pip install asc-appstore-tools
+curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh | bash
 ```
 
-On macOS / Linux, the repository installer also defaults to PyPI (GitHub is a fallback, or use `--ref` for a branch):
+Windows (PowerShell):
 
-```bash
-curl -fL --retry 5 --connect-timeout 20 \
-  -o /tmp/asc-install.sh \
-  https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh
-bash /tmp/asc-install.sh
+```powershell
+irm https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.ps1 | iex
 ```
 
-Alternatively, install the published package or the latest source:
+Or install the published package directly:
 
 ```bash
 python -m pip install asc-appstore-tools

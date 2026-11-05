@@ -2,6 +2,8 @@
 # When sourced, set -euo pipefail would leak into the caller's shell and cause
 # any subsequent failed command (e.g. a typo) to silently kill the session.
 # Save current options and restore them at the end of this script.
+# 管道用法：curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh | bash
+# 安装 PyPI 已发布的 asc-appstore-tools，不安装未发布分支。
 _asc_saved_opts="$-"
 set -euo pipefail
 _asc_sourced=0
@@ -30,7 +32,7 @@ _asc_finish() {
 
   _asc_restore_shell
 
-  unset _asc_saved_opts _asc_sourced _asc_need_path_export _asc_need_local_bin_export _asc_restore_shell _asc_finish _asc_stop
+  unset _asc_saved_opts _asc_sourced _asc_need_path_export _asc_need_local_bin_export _asc_restore_shell _asc_finish _asc_stop _asc_path_line_user _asc_path_line_local
   if [ "$_asc_was_sourced" = "1" ]; then
     local _asc_return_status="$_asc_status"
     return "$_asc_return_status"
@@ -79,9 +81,9 @@ while [[ $# -gt 0 ]]; do
       echo "  -h, --help            Show this help"
       echo ""
       echo "Default install is from PyPI (asc-appstore-tools)."
-      echo "This script targets macOS / Linux."
-      echo "Windows:  pip install asc-appstore-tools"
-      echo "          pipx install asc-appstore-tools"
+      echo "This script targets macOS / Linux, including WSL."
+      echo "Windows (PowerShell, not Git Bash):"
+      echo "  irm https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.ps1 | iex"
       echo "Uninstall: pipx uninstall asc-appstore-tools"
       echo "           pip uninstall asc-appstore-tools"
       echo "           asc uninstall --yes"
@@ -105,19 +107,19 @@ case "$OS" in
   Darwin) PLATFORM="macOS" ;;
   Linux)  PLATFORM="Linux" ;;
   MINGW*|MSYS*|CYGWIN*)
-    error "install.sh 面向 macOS / Linux，不支持 Windows。"
-    echo "  请改用："
-    echo "    pip install asc-appstore-tools"
-    echo "    或 pipx install asc-appstore-tools"
-    echo "  卸载："
-    echo "    pip uninstall asc-appstore-tools"
-    echo "    或 pipx uninstall asc-appstore-tools"
-    echo "    或 asc uninstall --yes"
-    _asc_stop 1
+    # WSL 的 uname 是 Linux，不会进到这里。
+    echo "install.sh 不能在 Windows 原生环境（含 Git Bash）安装。"
+    echo "请在 PowerShell 中执行："
+    echo ""
+    echo "  irm https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.ps1 | iex"
+    echo ""
+    echo "这一行安装的是 PyPI 已发布版本。Windows 定时任务和后台 web 的兼容改动尚未发布；构建/上传/发布在 Windows 上不可用。"
+    _asc_stop 0
     ;;
   *)
     fatal "不支持的操作系统: $OS"
-    echo "  Windows 请使用: pip install asc-appstore-tools"
+    echo "  若在 Windows 上，请在 PowerShell 中执行："
+    echo "    irm https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.ps1 | iex"
     _asc_stop 1
     ;;
 esac
@@ -202,7 +204,7 @@ _asc_install_spec() {
     fi
     return 1
   fi
-  if "$PYTHON" -m pip install --user --upgrade "$spec" 2>/dev/null; then
+  if "$PYTHON" -m pip install --user --upgrade "$spec"; then
     info "asc-appstore-tools 安装成功（--user / ${label}）"
     return 0
   fi
@@ -257,8 +259,10 @@ fi
 # ── 7. 检测 pip bin 目录并写入 PATH ──
 USER_BIN=$("$PYTHON" -m site --user-base 2>/dev/null)/bin
 _asc_need_path_export=0
+_asc_path_line_user=""
+_asc_path_line_local=""
 if { [ -d "$USER_BIN" ] && [[ ":$PATH:" != *":$USER_BIN:"* ]]; } || { [ -d "$LOCAL_BIN" ] && [[ ":$PATH:" != *":$LOCAL_BIN:"* ]]; }; then
-  # 写入 shell 配置文件
+  # 写入 shell 配置文件（已有同一路径则不追加）
   SHELL_NAME="$(basename "${SHELL:-bash}")"
   if [ "$SHELL_NAME" = "zsh" ]; then
     RC_FILE="$HOME/.zshrc"
@@ -268,21 +272,27 @@ if { [ -d "$USER_BIN" ] && [[ ":$PATH:" != *":$USER_BIN:"* ]]; } || { [ -d "$LOC
     RC_FILE="$HOME/.profile"
   fi
 
-  if [ -d "$USER_BIN" ] && [[ ":$PATH:" != *":$USER_BIN:"* ]] && ! grep -qF "$USER_BIN" "$RC_FILE" 2>/dev/null; then
-    echo "" >> "$RC_FILE"
-    echo "# Added by asc-appstore-tools installer" >> "$RC_FILE"
-    echo "export PATH=\"$USER_BIN:\$PATH\"" >> "$RC_FILE"
-    info "已将 $USER_BIN 写入 $RC_FILE"
+  if [ -d "$USER_BIN" ] && [[ ":$PATH:" != *":$USER_BIN:"* ]]; then
+    _asc_path_line_user="export PATH=\"$USER_BIN:\$PATH\""
+    if ! grep -qF "$USER_BIN" "$RC_FILE" 2>/dev/null; then
+      echo "" >> "$RC_FILE"
+      echo "# Added by asc-appstore-tools installer" >> "$RC_FILE"
+      echo "export PATH=\"$USER_BIN:\$PATH\"" >> "$RC_FILE"
+      info "已将 $USER_BIN 写入 $RC_FILE"
+    fi
   fi
 
-  if [ -d "$LOCAL_BIN" ] && [[ ":$PATH:" != *":$LOCAL_BIN:"* ]] && ! grep -qF "$LOCAL_BIN" "$RC_FILE" 2>/dev/null; then
-    echo "" >> "$RC_FILE"
-    echo "# Added by asc-appstore-tools installer" >> "$RC_FILE"
-    echo "export PATH=\"$LOCAL_BIN:\$PATH\"" >> "$RC_FILE"
-    info "已将 $LOCAL_BIN 写入 $RC_FILE"
+  if [ -d "$LOCAL_BIN" ] && [[ ":$PATH:" != *":$LOCAL_BIN:"* ]] && [ "$LOCAL_BIN" != "$USER_BIN" ]; then
+    _asc_path_line_local="export PATH=\"$LOCAL_BIN:\$PATH\""
+    if ! grep -qF "$LOCAL_BIN" "$RC_FILE" 2>/dev/null; then
+      echo "" >> "$RC_FILE"
+      echo "# Added by asc-appstore-tools installer" >> "$RC_FILE"
+      echo "export PATH=\"$LOCAL_BIN:\$PATH\"" >> "$RC_FILE"
+      info "已将 $LOCAL_BIN 写入 $RC_FILE"
+    fi
   fi
 
-  # 标记需要在父 shell 中 export（不能在这里做，因为下面要恢复 set 选项）
+  # 标记需要在父 shell 中 export（source 时生效；管道执行只影响本进程）
   _asc_need_path_export=1
   _asc_need_local_bin_export=1
 fi
@@ -290,10 +300,12 @@ fi
 # ── 8. 验证安装 ──
 if command -v asc &>/dev/null; then
   info "asc 命令可用：$(command -v asc)"
+elif [ -x "${USER_BIN:-}/asc" ]; then
+  info "asc 已安装：${USER_BIN}/asc"
+elif [ -x "${LOCAL_BIN:-}/asc" ]; then
+  info "asc 已安装：${LOCAL_BIN}/asc"
 else
-  warn "asc 命令在当前会话不可用，请运行："
-  echo "  source $RC_FILE"
-  echo "  或重新打开终端"
+  warn "当前 PATH 中还没有 asc。"
 fi
 
 # ── 9. 收尾 ──
@@ -302,17 +314,21 @@ echo "================================================"
 echo -e "  ${GREEN}安装完成！${NC}"
 echo "================================================"
 echo ""
-if [ -n "${RC_FILE:-}" ]; then
-  if command -v asc &>/dev/null; then
-    info "asc 命令已在当前 shell 可用"
+if [ -n "${_asc_path_line_user}" ] || [ -n "${_asc_path_line_local}" ]; then
+  if [ "$_asc_sourced" = "1" ]; then
+    echo -e "  ${YELLOW}提示：${NC}若当前终端还不能运行 asc，请执行：source ${RC_FILE}"
   else
-    echo -e "  ${YELLOW}提示：${NC}如果 asc 命令还不可用，请执行："
-    echo ""
-    echo "    source $RC_FILE"
-    echo ""
-    echo "  或重新打开终端。"
-    echo ""
+    echo -e "  ${YELLOW}提示：${NC}这次是在管道里安装的，不会改你当前终端的 PATH。请新开一个终端再运行 asc。"
   fi
+  echo "  需要加入 PATH 的内容如下（已写入 shell 配置；重复安装不会再追加）："
+  echo ""
+  if [ -n "${_asc_path_line_user}" ]; then
+    echo "    ${_asc_path_line_user}"
+  fi
+  if [ -n "${_asc_path_line_local}" ]; then
+    echo "    ${_asc_path_line_local}"
+  fi
+  echo ""
 fi
 echo "下一步：在你的项目目录中运行："
 echo ""

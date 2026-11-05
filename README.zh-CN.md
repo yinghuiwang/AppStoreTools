@@ -28,22 +28,19 @@
 
 ### 1. 安装 `asc`
 
-推荐从 PyPI 安装已发布的包：
+macOS / Linux：
 
 ```bash
-python -m pip install asc-appstore-tools
+curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh | bash
 ```
 
-macOS / Linux 也可用仓库安装脚本（默认 PyPI，失败再回退 GitHub；`--ref` 指定分支）：
+Windows（PowerShell）：
 
-```bash
-curl -fL --retry 5 --connect-timeout 20 \
-  -o /tmp/asc-install.sh \
-  https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh
-bash /tmp/asc-install.sh
+```powershell
+irm https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.ps1 | iex
 ```
 
-也可以安装 PyPI 发布版本或 GitHub 最新源码：
+也可以直接安装 PyPI 发布版本或 GitHub 最新源码：
 
 ```bash
 python -m pip install asc-appstore-tools

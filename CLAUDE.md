@@ -23,9 +23,16 @@ pip install -e ".[dev]"
 # Or install from GitHub
 pip install git+https://github.com/yinghuiwang/AppStoreTools.git
 
-# Quick setup with install script
-source <(curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh)
+# Quick setup — macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.sh | bash
+```
 
+```powershell
+# Quick setup — Windows (PowerShell)
+irm https://raw.githubusercontent.com/yinghuiwang/AppStoreTools/main/install.ps1 | iex
+```
+
+```bash
 # Initialize project
 asc install              # Interactive setup wizard
 asc init                 # Scaffold AppStore/ directory in Xcode project
