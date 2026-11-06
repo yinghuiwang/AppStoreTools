@@ -783,7 +783,19 @@ def _exe_belongs_to_interpreter(candidate: Path, executable: str) -> bool:
     return owned is not None and owned == resolved
 
 
+def _shebang_token(text: str) -> str:
+    body = text.strip()
+    if len(body) >= 2 and body.startswith('"'):
+        end = body.find('"', 1)
+        if end > 1:
+            return body[1:end]
+    return body.split(None, 1)[0]
+
+
 def _shebang_matches(script: Path, executable: str) -> bool:
+    # Windows launchers are PE files. A shebang check would reject asc.exe.
+    if script.name.lower().endswith(".exe"):
+        return False
     try:
         with script.open("rb") as handle:
             line = handle.readline(4096)
@@ -794,13 +806,118 @@ def _shebang_matches(script: Path, executable: str) -> bool:
     text = line[2:].strip().decode("utf-8", errors="replace")
     if not text:
         return False
-    token = text.split(None, 1)[0]
-    if token == "env" or token.endswith("/env"):
+    token = _shebang_token(text)
+    if not token or token == "env" or token.endswith("/env") or token.endswith("\\env"):
         return False
     try:
         return Path(token).resolve() == Path(executable).resolve()
     except OSError:
         return False
+
+
+_ASC_LAUNCHER_SCRIPTS = frozenset({"asc-script.py", "asc-script.pyw"})
+
+
+def _is_launcher_script_name(name: str) -> bool:
+    return name.lower() in _ASC_LAUNCHER_SCRIPTS
+
+
+def _windows_user_script_dirs(executable: Path) -> list:
+    """pip --user scripts for a python.org install.
+
+    python.exe lives in Local\\Programs\\Python\\PythonXY\\ while asc.exe
+    lives in Roaming\\Python\\PythonXY\\Scripts\\.
+    """
+    version = executable.parent.name
+    if re.fullmatch(r"Python\d+", version, flags=re.IGNORECASE) is None:
+        return []
+    found = []
+    python_dir = executable.parent.parent
+    programs = python_dir.parent
+    local_dir = programs.parent
+    if (
+        python_dir.name.lower() == "python"
+        and programs.name.lower() == "programs"
+        and local_dir.name.lower() == "local"
+    ):
+        found.append(local_dir.parent / "Roaming" / "Python" / version / "Scripts")
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        found.append(Path(appdata) / "Python" / version / "Scripts")
+    userbase = os.environ.get("PYTHONUSERBASE")
+    if userbase:
+        found.append(Path(userbase) / version / "Scripts")
+    return found
+
+
+def _interpreter_script_dirs(executable: str) -> list:
+    parent = Path(executable).parent
+    return [parent, parent / "Scripts", *_windows_user_script_dirs(Path(executable))]
+
+
+def _same_install_directory(directory: Path, executable: str) -> bool:
+    try:
+        resolved = directory.resolve()
+    except OSError:
+        return False
+    for candidate in _interpreter_script_dirs(executable):
+        try:
+            if candidate.resolve() == resolved:
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def _launcher_script_confirmed(script: Path, executable: str) -> bool:
+    return _shebang_matches(script, executable) or _same_install_directory(script.parent, executable)
+
+
+def _sibling_launcher_script(directory: Path) -> Optional[Path]:
+    if not directory.is_dir():
+        return None
+    exact = None
+    fallback = None
+    try:
+        children = list(directory.iterdir())
+    except OSError:
+        return None
+    for child in children:
+        if not child.is_file() or not _is_launcher_script_name(child.name):
+            continue
+        if child.name == "asc-script.py":
+            exact = child
+            break
+        if fallback is None:
+            fallback = child
+    chosen = exact or fallback
+    if chosen is None:
+        return None
+    return chosen
+
+
+def _exe_for_launcher_script(script: Path, executable: str) -> Optional[Path]:
+    """pip's Windows wrapper: argv[0] is asc-script.py beside asc.exe."""
+    if not _is_launcher_script_name(script.name) or not script.is_file():
+        return None
+    if not _launcher_script_confirmed(script, executable):
+        return None
+    return _find_named_asc_exe(script.parent)
+
+
+def _exe_for_stripped_launcher(argv_path: Path, executable: str) -> Optional[Path]:
+    """pip rewrites argv[0] from asc.exe to a bare asc path that is not a file."""
+    if argv_path.name != "asc" or argv_path.exists():
+        return None
+    exe = _find_named_asc_exe(argv_path.parent)
+    if exe is None:
+        return None
+    script = _sibling_launcher_script(argv_path.parent)
+    if script is not None and _launcher_script_confirmed(script, executable):
+        return exe
+    if _same_install_directory(argv_path.parent, executable):
+        return exe
+    return None
 
 
 def _asc_on_path(executable: str) -> Optional[Path]:
@@ -821,10 +938,17 @@ def _asc_on_path(executable: str) -> Optional[Path]:
 
 
 def resolve_asc_executable(argv0: Optional[str] = None) -> Path:
-    raw = sys.argv[0] if argv0 is None else argv0
-    direct = _asc_file(Path(raw))
+    raw = Path(sys.argv[0] if argv0 is None else argv0)
+    direct = _asc_file(raw)
     if direct is not None:
         return direct
+    # Running asc.exe on Windows often enters through the sibling asc-script.py.
+    launched = _exe_for_launcher_script(raw, sys.executable)
+    if launched is not None:
+        return launched
+    stripped = _exe_for_stripped_launcher(raw, sys.executable)
+    if stripped is not None:
+        return stripped
     # Keep the interpreter path's own directory. Resolving sys.executable
     # follows a venv/conda symlink into the real prefix and misses bin/asc.
     sibling = _asc_file(Path(sys.executable).parent / "asc")

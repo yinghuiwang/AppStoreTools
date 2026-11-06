@@ -846,3 +846,150 @@ def test_resolve_asc_exe_direct_sibling_scripts_and_foreign_path(
     with pytest.raises(ScheduleError) as exc:
         resolve_asc_executable()
     assert exc.value.code == "not_executable"
+
+
+def _windows_task_action(monkeypatch: pytest.MonkeyPatch, asc_path: Path):
+    monkeypatch.setenv("USERNAME", "Administrator")
+    monkeypatch.delenv("USERDOMAIN", raising=False)
+    _forbid_posix_identity(monkeypatch)
+    seen = {}
+
+    def fake_run(cmd, **kwargs):
+        assert cmd[0] == "schtasks" and cmd[1] == "/Create"
+        xml_path = Path(cmd[5])
+        seen["data"] = xml_path.read_bytes()
+        return _Proc(0, stdout="SUCCESS")
+
+    calls = _patch_schtasks(monkeypatch, fake_run)
+    install_heartbeat(asc_path=asc_path, backend=WindowsScheduler())
+    root = ET.fromstring(seen["data"])
+    ns = {"t": "http://schemas.microsoft.com/windows/2004/02/mit/task"}
+    return (
+        calls,
+        root.findtext("t:Actions/t:Exec/t:Command", namespaces=ns),
+        root.findtext("t:Actions/t:Exec/t:Arguments", namespaces=ns),
+    )
+
+
+def _pip_user_layout(tmp_path: Path):
+    python = (
+        tmp_path
+        / "AppData"
+        / "Local"
+        / "Programs"
+        / "Python"
+        / "Python312"
+        / "python.exe"
+    )
+    scripts = tmp_path / "AppData" / "Roaming" / "Python" / "Python312" / "Scripts"
+    python.parent.mkdir(parents=True)
+    scripts.mkdir(parents=True)
+    python.write_bytes(b"MZ")
+    exe = scripts / "asc.exe"
+    exe.write_bytes(b"MZ")
+    script = scripts / "asc-script.py"
+    return python, exe, script
+
+
+def test_windows_asc_exe_schedules_absolute_launcher(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    root = tmp_path / "Python312"
+    python = root / "python.exe"
+    python.parent.mkdir()
+    python.write_bytes(b"MZ")
+    scripts = root / "Scripts"
+    scripts.mkdir()
+    exe = scripts / "ASC.EXE"
+    exe.write_bytes(b"MZ")
+    empty = tmp_path / "empty-path"
+    empty.mkdir()
+    monkeypatch.setattr(sys, "executable", str(python))
+    monkeypatch.setattr(sys, "argv", [str(exe), "schedule", "install"])
+    monkeypatch.setenv("PATH", str(empty))
+
+    resolved = resolve_asc_executable()
+    calls, command, arguments = _windows_task_action(monkeypatch, resolved)
+
+    assert resolved == exe.resolve()
+    assert len(calls) == 1
+    assert command == str(exe.resolve())
+    assert arguments == "schedule tick"
+    assert command != str(python.resolve())
+
+    venv_python = scripts / "python.exe"
+    venv_python.write_bytes(b"MZ")
+    monkeypatch.setattr(sys, "executable", str(venv_python))
+    assert resolve_asc_executable() == exe.resolve()
+
+
+def test_windows_asc_script_schedules_sibling_exe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    python, exe, script = _pip_user_layout(tmp_path)
+    script.write_text("#!/usr/bin/env python\n", encoding="utf-8")
+    empty = tmp_path / "empty-path"
+    empty.mkdir()
+    monkeypatch.setattr(sys, "executable", str(python))
+    monkeypatch.setattr(sys, "argv", [str(script), "schedule", "install"])
+    monkeypatch.setenv("PATH", str(empty))
+    monkeypatch.delenv("APPDATA", raising=False)
+    monkeypatch.delenv("PYTHONUSERBASE", raising=False)
+
+    resolved = resolve_asc_executable()
+    calls, command, arguments = _windows_task_action(monkeypatch, resolved)
+
+    assert resolved == exe.resolve()
+    assert len(calls) == 1
+    assert command == str(exe.resolve())
+    assert arguments == "schedule tick"
+    assert not command.lower().endswith("python.exe")
+    assert not command.endswith("asc-script.py")
+
+    quoted = tmp_path / "quoted" / "asc-script.py"
+    quoted.parent.mkdir()
+    quoted_exe = quoted.parent / "asc.exe"
+    quoted_exe.write_bytes(b"MZ")
+    quoted.write_text(f'#!"{python}"\n', encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", [str(quoted), "schedule", "install"])
+    assert resolve_asc_executable() == quoted_exe.resolve()
+
+    monkeypatch.setattr(sys, "argv", [str(script.parent / "asc"), "schedule", "install"])
+    assert resolve_asc_executable() == exe.resolve()
+
+
+def test_windows_python_module_does_not_schedule_python(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    python, exe, script = _pip_user_layout(tmp_path)
+    script.write_text(f"#!{python}\n", encoding="utf-8")
+    module = tmp_path / "site-packages" / "asc" / "__main__.py"
+    module.parent.mkdir(parents=True)
+    module.write_text("print('module')\n", encoding="utf-8")
+    foreign = tmp_path / "other" / "python.exe"
+    foreign.parent.mkdir()
+    foreign.write_bytes(b"MZ")
+    monkeypatch.setattr(sys, "executable", str(python))
+    monkeypatch.setattr(sys, "argv", [str(module), "schedule", "install"])
+    monkeypatch.setenv("PATH", str(exe.parent))
+    monkeypatch.delenv("APPDATA", raising=False)
+    monkeypatch.delenv("PYTHONUSERBASE", raising=False)
+
+    def fake_run(cmd, **kwargs):
+        raise AssertionError(cmd)
+
+    monkeypatch.setattr("asc.schedule.subprocess.run", fake_run)
+    with pytest.raises(ScheduleError) as exc:
+        install_heartbeat(asc_path=resolve_asc_executable(), backend=WindowsScheduler())
+    assert exc.value.code == "not_executable"
+
+    stray = tmp_path / "stray" / "asc-script.py"
+    stray.parent.mkdir()
+    stray_exe = stray.parent / "asc.exe"
+    stray_exe.write_bytes(b"MZ")
+    stray.write_text(f"#!{foreign}\n", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", [str(stray), "schedule", "install"])
+    monkeypatch.setenv("PATH", str(tmp_path / "empty-path"))
+    with pytest.raises(ScheduleError) as stray_exc:
+        resolve_asc_executable()
+    assert stray_exc.value.code == "not_executable"
