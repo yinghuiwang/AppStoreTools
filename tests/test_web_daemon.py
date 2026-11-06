@@ -98,6 +98,74 @@ def test_start_background_windows_does_not_use_preexec(isolated_state):
     assert flags & 0x00000200
 
 
+def test_windows_stop_terminates_that_pid_when_sigterm_fails(isolated_state):
+    import signal as signal_mod
+
+    terminated = []
+
+    def fake_kill(pid, sig):
+        assert pid == 5872
+        assert int(sig) == int(signal_mod.SIGTERM)
+        raise OSError(87, "The parameter is incorrect")
+
+    def fake_terminate(pid):
+        assert pid == 5872
+        terminated.append(pid)
+
+    def fake_alive(pid):
+        assert pid == 5872
+        return not terminated
+
+    with patch("asc.web.daemon.sys.platform", "win32"), \
+         patch("asc.web.daemon.os.kill", side_effect=fake_kill), \
+         patch.object(daemon, "_terminate_win32_pid", side_effect=fake_terminate), \
+         patch.object(daemon, "is_process_alive", side_effect=fake_alive), \
+         patch("asc.web.daemon.time.sleep"), \
+         patch("asc.web.daemon.subprocess.run") as taskkill:
+        result = daemon.stop(timeout=0.2, pid=5872)
+
+    assert result == {"status": "stopped", "pid": 5872}
+    assert terminated == [5872]
+    taskkill.assert_not_called()
+
+
+def test_windows_stop_terminates_pid_when_sigterm_leaves_it_alive(isolated_state):
+    import signal as signal_mod
+
+    terminated = []
+
+    def fake_kill(pid, sig):
+        assert pid == 5872
+        assert int(sig) == int(signal_mod.SIGTERM)
+
+    def fake_terminate(pid):
+        assert pid == 5872
+        terminated.append(pid)
+
+    def fake_alive(pid):
+        assert pid == 5872
+        return not terminated
+
+    with patch("asc.web.daemon.sys.platform", "win32"), \
+         patch("asc.web.daemon.os.kill", side_effect=fake_kill), \
+         patch.object(daemon, "_terminate_win32_pid", side_effect=fake_terminate), \
+         patch.object(daemon, "is_process_alive", side_effect=fake_alive), \
+         patch("asc.web.daemon.time.sleep"):
+        result = daemon.stop(timeout=0.2, pid=5872)
+
+    assert result == {"status": "stopped", "pid": 5872}
+    assert terminated == [5872]
+
+
+def test_windows_liveness_does_not_signal():
+    with patch("asc.web.daemon.sys.platform", "win32"), \
+         patch.object(daemon, "_win32_process_alive", return_value=True) as query, \
+         patch("asc.web.daemon.os.kill") as kill:
+        assert daemon.is_process_alive(5872) is True
+    query.assert_called_once_with(5872)
+    kill.assert_not_called()
+
+
 def test_signal_pid_windows_terminates_without_killpg():
     import signal as signal_mod
 

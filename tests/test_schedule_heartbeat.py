@@ -993,3 +993,115 @@ def test_windows_python_module_does_not_schedule_python(
     with pytest.raises(ScheduleError) as stray_exc:
         resolve_asc_executable()
     assert stray_exc.value.code == "not_executable"
+
+
+def _administrator_pip_layout(tmp_path: Path):
+    """python.org per-user install: Local python.exe, Roaming Scripts asc.exe."""
+    root = tmp_path / "Users" / "Administrator" / "AppData"
+    python = root / "Local" / "Programs" / "Python" / "Python312" / "python.exe"
+    scripts = root / "Roaming" / "Python" / "Python312" / "Scripts"
+    site = root / "Roaming" / "Python" / "Python312" / "site-packages" / "asc"
+    python.parent.mkdir(parents=True)
+    scripts.mkdir(parents=True)
+    site.mkdir(parents=True)
+    python.write_bytes(b"MZ")
+    exe = scripts / "asc.exe"
+    exe.write_bytes(b"MZ")
+    script = scripts / "asc-script.py"
+    module = site / "__main__.py"
+    module.write_text("print('module')\n", encoding="utf-8")
+    return python, exe, script, module
+
+
+def _prepare_windows_resolver(monkeypatch: pytest.MonkeyPatch, python: Path, path: Path):
+    empty = path
+    monkeypatch.setattr(sys, "executable", str(python))
+    monkeypatch.setenv("PATH", str(empty))
+    monkeypatch.delenv("APPDATA", raising=False)
+    monkeypatch.delenv("PYTHONUSERBASE", raising=False)
+
+
+def test_windows_local_python_roaming_scripts_schedule_asc_exe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    python, exe, script, module = _administrator_pip_layout(tmp_path)
+    script.write_text(f"#!{python}\n", encoding="utf-8")
+    empty = tmp_path / "empty-path"
+    empty.mkdir()
+    _prepare_windows_resolver(monkeypatch, python, empty)
+
+    for argv in (str(exe), str(script)):
+        monkeypatch.setattr(sys, "argv", [argv, "schedule", "install"])
+        resolved = resolve_asc_executable()
+        calls, command, arguments = _windows_task_action(monkeypatch, resolved)
+        assert resolved == exe.resolve()
+        assert len(calls) == 1
+        assert command == str(exe.resolve())
+        assert arguments == "schedule tick"
+        assert not command.lower().endswith("python.exe")
+
+    monkeypatch.setattr(sys, "argv", [str(exe).replace("/", "\\"), "schedule", "install"])
+    assert resolve_asc_executable() == exe.resolve()
+
+    spelled = str(python.resolve()).swapcase().replace("/", "\\")
+    script.write_text(f'#!"{spelled}"\n', encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", [str(script).replace("/", "\\"), "schedule", "install"])
+    assert resolve_asc_executable() == exe.resolve()
+
+    script.write_text("#!python.exe\n", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", [str(script), "schedule", "install"])
+    assert resolve_asc_executable() == exe.resolve()
+
+    monkeypatch.setattr(sys, "argv", [str(module), "schedule", "install"])
+    monkeypatch.setenv("PATH", str(exe.parent))
+    with pytest.raises(ScheduleError) as exc:
+        resolve_asc_executable()
+    assert exc.value.code == "not_executable"
+
+
+def test_windows_other_drive_shebang_does_not_require_same_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    python = tmp_path / "D" / "Tools" / "Python312" / "python.exe"
+    scripts = (
+        tmp_path
+        / "C"
+        / "Users"
+        / "Administrator"
+        / "AppData"
+        / "Roaming"
+        / "Python"
+        / "Python312"
+        / "Scripts"
+    )
+    python.parent.mkdir(parents=True)
+    scripts.mkdir(parents=True)
+    python.write_bytes(b"MZ")
+    exe = scripts / "asc.exe"
+    exe.write_bytes(b"MZ")
+    script = scripts / "asc-script.py"
+    empty = tmp_path / "empty-path"
+    empty.mkdir()
+    _prepare_windows_resolver(monkeypatch, python, empty)
+    assert "Programs" not in python.parts
+    assert script.parent not in python.parents
+    assert python.parent not in script.parents
+
+    monkeypatch.setattr(sys, "argv", [str(exe).replace("/", "\\"), "schedule", "install"])
+    assert resolve_asc_executable() == exe.resolve()
+
+    spelled = str(python.resolve()).swapcase().replace("/", "\\")
+    script.write_text(f'#!"{spelled}"\n', encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", [str(script).replace("/", "\\"), "schedule", "install"])
+    resolved = resolve_asc_executable()
+    calls, command, arguments = _windows_task_action(monkeypatch, resolved)
+    assert resolved == exe.resolve()
+    assert len(calls) == 1
+    assert command == str(exe.resolve())
+    assert arguments == "schedule tick"
+
+    script.write_text("#!python.exe\n", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", [str(script), "schedule", "install"])
+    assert resolve_asc_executable() == exe.resolve()
+    monkeypatch.setattr(sys, "argv", [str(scripts / "asc"), "schedule", "install"])
+    assert resolve_asc_executable() == exe.resolve()

@@ -792,27 +792,80 @@ def _shebang_token(text: str) -> str:
     return body.split(None, 1)[0]
 
 
-def _shebang_matches(script: Path, executable: str) -> bool:
+def _as_path(raw: str) -> Path:
+    """Accept Windows argv spellings from a POSIX test or a real Win32 process."""
+    text = str(raw).strip().strip('"')
+    if text.startswith("\\\\?\\"):
+        text = text[4:]
+    if "\\" in text or (len(text) >= 2 and text[0].isalpha() and text[1] == ":"):
+        text = text.replace("\\", "/")
+    return Path(text)
+
+
+def _windows_style_path(text: str) -> bool:
+    raw = str(text).strip().strip('"')
+    if "\\" in raw or raw.lower().endswith(".exe"):
+        return True
+    return len(raw) >= 2 and raw[0].isalpha() and raw[1] == ":"
+
+
+def _windows_path_key(text: str) -> str:
+    raw = str(text).strip().strip('"').replace("\\", "/")
+    if raw.lower().startswith("//?/"):
+        raw = raw[4:]
+    candidate = Path(raw)
+    try:
+        if candidate.exists():
+            absolute = str(candidate.resolve())
+        else:
+            absolute = os.path.abspath(raw)
+    except OSError:
+        absolute = os.path.abspath(raw)
+    return absolute.replace("\\", "/").casefold()
+
+
+def _interpreter_paths_match(token: str, executable: str) -> bool:
+    if _windows_style_path(token) or _windows_style_path(executable):
+        return _windows_path_key(token) == _windows_path_key(executable)
+    try:
+        return Path(token).resolve() == Path(executable).resolve()
+    except OSError:
+        return False
+
+
+def _bare_windows_interpreter(token: str, executable: str) -> bool:
+    """``#!python.exe`` names the interpreter already running this process."""
+    normalized = token.strip().strip('"').replace("\\", "/")
+    if not normalized or "/" in normalized:
+        return False
+    name = normalized.casefold()
+    if name not in {"python.exe", "pythonw.exe"}:
+        return False
+    return Path(executable).name.casefold() == name
+
+
+def _shebang_body(script: Path) -> str:
     # Windows launchers are PE files. A shebang check would reject asc.exe.
     if script.name.lower().endswith(".exe"):
-        return False
+        return ""
     try:
         with script.open("rb") as handle:
             line = handle.readline(4096)
     except OSError:
-        return False
+        return ""
     if not line.startswith(b"#!"):
-        return False
-    text = line[2:].strip().decode("utf-8", errors="replace")
+        return ""
+    return line[2:].strip().decode("utf-8", errors="replace")
+
+
+def _shebang_matches(script: Path, executable: str) -> bool:
+    text = _shebang_body(script)
     if not text:
         return False
     token = _shebang_token(text)
     if not token or token == "env" or token.endswith("/env") or token.endswith("\\env"):
         return False
-    try:
-        return Path(token).resolve() == Path(executable).resolve()
-    except OSError:
-        return False
+    return _interpreter_paths_match(token, executable)
 
 
 _ASC_LAUNCHER_SCRIPTS = frozenset({"asc-script.py", "asc-script.pyw"})
@@ -870,7 +923,13 @@ def _same_install_directory(directory: Path, executable: str) -> bool:
 
 
 def _launcher_script_confirmed(script: Path, executable: str) -> bool:
-    return _shebang_matches(script, executable) or _same_install_directory(script.parent, executable)
+    if _shebang_matches(script, executable):
+        return True
+    text = _shebang_body(script)
+    token = _shebang_token(text) if text else ""
+    if token and _bare_windows_interpreter(token, executable):
+        return True
+    return _same_install_directory(script.parent, executable)
 
 
 def _sibling_launcher_script(directory: Path) -> Optional[Path]:
@@ -938,7 +997,7 @@ def _asc_on_path(executable: str) -> Optional[Path]:
 
 
 def resolve_asc_executable(argv0: Optional[str] = None) -> Path:
-    raw = Path(sys.argv[0] if argv0 is None else argv0)
+    raw = _as_path(sys.argv[0] if argv0 is None else argv0)
     direct = _asc_file(raw)
     if direct is not None:
         return direct

@@ -38,11 +38,67 @@ def _open_url(host: str, port: int) -> str:
 def is_process_alive(pid: int) -> bool:
     if pid <= 0:
         return False
+    if sys.platform == "win32":
+        # os.kill(pid, 0) is TerminateProcess on Windows, so a liveness check
+        # would kill this PID. Query the exit code instead.
+        return _win32_process_alive(pid)
     try:
         os.kill(pid, 0)
     except OSError:
         return False
     return True
+
+
+def _win32_kernel32():
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    return ctypes, kernel32, wintypes
+
+
+def _win32_process_alive(pid: int) -> bool:
+    """True when this PID is still running. Does not signal any process."""
+    ctypes, kernel32, wintypes = _win32_kernel32()
+    process_query_limited_information = 0x1000
+    still_active = 259
+    kernel32.GetExitCodeProcess.argtypes = (
+        wintypes.HANDLE,
+        ctypes.POINTER(wintypes.DWORD),
+    )
+    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+    handle = kernel32.OpenProcess(process_query_limited_information, False, int(pid))
+    if not handle:
+        return False
+    try:
+        code = wintypes.DWORD()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return False
+        return int(code.value) == still_active
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _terminate_win32_pid(pid: int) -> None:
+    """End exactly this PID. Does not match by image name or process tree."""
+    ctypes, kernel32, wintypes = _win32_kernel32()
+    process_terminate = 0x0001
+    kernel32.TerminateProcess.argtypes = (wintypes.HANDLE, wintypes.UINT)
+    kernel32.TerminateProcess.restype = wintypes.BOOL
+    handle = kernel32.OpenProcess(process_terminate, False, int(pid))
+    if not handle:
+        error = ctypes.get_last_error()
+        raise OSError(error, f"unable to open process {pid}")
+    try:
+        if not kernel32.TerminateProcess(handle, 1):
+            error = ctypes.get_last_error()
+            raise OSError(error, f"unable to terminate process {pid}")
+    finally:
+        kernel32.CloseHandle(handle)
 
 
 def read_state() -> dict[str, Any] | None:
@@ -234,10 +290,15 @@ def _signal_pid(pid: int, sig: signal.Signals) -> None:
     foreground server that shares the shell's process group we signal the PID
     alone so we do not tear down the user's terminal.
 
-    Windows has no process-group signals. ``SIGTERM`` terminates the process.
+    Windows ``os.kill(pid, SIGTERM)`` opens the process with ``PROCESS_ALL_ACCESS``
+    and fails for a detached Web UI process. Fall back to ``TerminateProcess``
+    on this PID only.
     """
     if sys.platform == "win32":
-        os.kill(pid, signal.SIGTERM)
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            _terminate_win32_pid(pid)
         return
     try:
         pgid = os.getpgid(pid)
@@ -269,6 +330,13 @@ def stop(timeout: float = 5.0, *, pid: int | None = None) -> dict[str, Any]:
         clear_state()
         return {"status": "error", "message": str(exc)}
 
+    # SIGTERM can return without ending a detached Win32 process.
+    if sys.platform == "win32" and is_process_alive(target_pid):
+        try:
+            _terminate_win32_pid(target_pid)
+        except OSError:
+            pass
+
     deadline = time.time() + timeout
     while time.time() < deadline:
         if not is_process_alive(target_pid):
@@ -277,7 +345,10 @@ def stop(timeout: float = 5.0, *, pid: int | None = None) -> dict[str, Any]:
         time.sleep(0.1)
 
     try:
-        _signal_pid(target_pid, getattr(signal, "SIGKILL", signal.SIGTERM))
+        if sys.platform == "win32":
+            _terminate_win32_pid(target_pid)
+        else:
+            _signal_pid(target_pid, getattr(signal, "SIGKILL", signal.SIGTERM))
     except OSError:
         pass
 
