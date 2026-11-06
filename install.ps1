@@ -1861,7 +1861,7 @@ try {
     } else {
         $ascGitUrl = "git+https://github.com/yinghuiwang/AppStoreTools.git@$($script:ascBranch)"
         Write-Host "正在从 GitHub 安装 $($script:ascBranch) ..."
-        & $script:ascPyExe -m pip install --user --upgrade $ascGitUrl
+        & $script:ascPyExe -m pip install --user --upgrade --force-reinstall --no-cache-dir $ascGitUrl
         if ($LASTEXITCODE -ne 0) {
             Stop-AscInstall "GitHub 分支安装失败。请查看上方 pip 输出。"
         }

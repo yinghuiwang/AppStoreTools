@@ -19,6 +19,7 @@ from asc.schedule import (
     quote_posix_single,
     render_cron_line,
     render_launch_agent_plist,
+    render_windows_task_xml,
     resolve_asc_executable,
     uninstall_heartbeat,
     user_message,
@@ -990,9 +991,7 @@ def test_windows_python_module_does_not_schedule_python(
     stray.write_text(f"#!{foreign}\n", encoding="utf-8")
     monkeypatch.setattr(sys, "argv", [str(stray), "schedule", "install"])
     monkeypatch.setenv("PATH", str(tmp_path / "empty-path"))
-    with pytest.raises(ScheduleError) as stray_exc:
-        resolve_asc_executable()
-    assert stray_exc.value.code == "not_executable"
+    assert resolve_asc_executable() == stray_exe.resolve()
 
 
 def _administrator_pip_layout(tmp_path: Path):
@@ -1053,10 +1052,8 @@ def test_windows_local_python_roaming_scripts_schedule_asc_exe(
     assert resolve_asc_executable() == exe.resolve()
 
     monkeypatch.setattr(sys, "argv", [str(module), "schedule", "install"])
-    monkeypatch.setenv("PATH", str(exe.parent))
-    with pytest.raises(ScheduleError) as exc:
-        resolve_asc_executable()
-    assert exc.value.code == "not_executable"
+    monkeypatch.setenv("PATH", str(empty))
+    assert resolve_asc_executable() == exe.resolve()
 
 
 def test_windows_other_drive_shebang_does_not_require_same_parent(
@@ -1105,3 +1102,68 @@ def test_windows_other_drive_shebang_does_not_require_same_parent(
     assert resolve_asc_executable() == exe.resolve()
     monkeypatch.setattr(sys, "argv", [str(scripts / "asc"), "schedule", "install"])
     assert resolve_asc_executable() == exe.resolve()
+
+
+def test_windows_user_install_finds_roaming_asc_exe_without_schtasks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """python.org --user: Local python.exe, Roaming site-packages, Roaming Scripts."""
+    python, exe, script, module = _administrator_pip_layout(tmp_path)
+    package = module.parent
+    init = package / "__init__.py"
+    init.write_text('__version__ = "0.1.31"\n', encoding="utf-8")
+    script.write_text("#!Z:\\\\not\\\\the\\\\running\\\\python.exe\n", encoding="utf-8")
+    empty = tmp_path / "empty-path"
+    empty.mkdir()
+    _prepare_windows_resolver(monkeypatch, python, empty)
+
+    def fail_run(*_args, **_kwargs):
+        raise AssertionError("schtasks must not be called")
+
+    monkeypatch.setattr("asc.schedule.subprocess.run", fail_run)
+    assert [part.lower() for part in python.parts[-5:]] == [
+        "local",
+        "programs",
+        "python",
+        "python312",
+        "python.exe",
+    ]
+    assert [part.lower() for part in exe.parts[-5:]] == [
+        "roaming",
+        "python",
+        "python312",
+        "scripts",
+        "asc.exe",
+    ]
+    assert [part.lower() for part in module.parts[-4:]] == [
+        "python312",
+        "site-packages",
+        "asc",
+        "__main__.py",
+    ]
+    assert python.parent not in exe.parents
+    assert exe.parent.parent == package.parent.parent
+
+    for argv in (script, exe, module):
+        monkeypatch.setattr(sys, "argv", [str(argv).replace("/", "\\"), "schedule", "install"])
+        resolved = resolve_asc_executable()
+        xml = render_windows_task_xml(resolved, "Administrator")
+        assert resolved == exe.resolve()
+        assert f"<Command>{resolved}</Command>" in xml
+        assert "<Arguments>schedule tick</Arguments>" in xml
+        assert not str(resolved).lower().endswith("python.exe")
+
+    import asc
+
+    monkeypatch.setattr(asc, "__file__", str(init))
+    unrelated = tmp_path / "Temp" / "run.py"
+    unrelated.parent.mkdir()
+    unrelated.write_text("print('run')\n", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", [str(unrelated).replace("/", "\\"), "schedule", "install"])
+    assert resolve_asc_executable() == exe.resolve()
+
+    exe.unlink()
+    monkeypatch.setattr(sys, "argv", [str(module).replace("/", "\\"), "schedule", "install"])
+    with pytest.raises(ScheduleError) as exc:
+        resolve_asc_executable()
+    assert exc.value.code == "not_executable"

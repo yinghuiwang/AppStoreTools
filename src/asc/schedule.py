@@ -979,6 +979,54 @@ def _exe_for_stripped_launcher(argv_path: Path, executable: str) -> Optional[Pat
     return None
 
 
+def _asc_exe_for_package_file(anchor: Path) -> Optional[Path]:
+    """``<prefix>/site-packages/asc/<file>`` launches ``<prefix>/Scripts/asc.exe``.
+
+    Two directories above the package is the Python prefix (Python312).
+    """
+    try:
+        package_dir = anchor.resolve().parent
+    except OSError:
+        return None
+    if package_dir.name.lower() != "asc":
+        return None
+    if not ((package_dir / "__init__.py").is_file() or (package_dir / "__main__.py").is_file()):
+        return None
+    return _find_named_asc_exe(package_dir.parent.parent / "Scripts")
+
+
+def _running_package_files() -> list:
+    files = [Path(__file__)]
+    try:
+        import asc
+    except ImportError:
+        return files
+    init = getattr(asc, "__file__", None)
+    if init:
+        files.append(Path(init))
+    return files
+
+
+def _windows_installed_asc_exe(argv_path: Path) -> Optional[Path]:
+    """Find this install's asc.exe without comparing shebangs.
+
+    pip on Windows runs ``asc-script.py``, ``asc.exe``, or ``python -m asc``
+    (``site-packages/asc/__main__.py``). The launcher is ``Scripts/asc.exe``
+    next to argv[0], or two directories above the running package.
+    """
+    beside = _find_named_asc_exe(argv_path.parent)
+    if beside is not None:
+        return beside
+    found = _asc_exe_for_package_file(argv_path)
+    if found is not None:
+        return found
+    for anchor in _running_package_files():
+        found = _asc_exe_for_package_file(anchor)
+        if found is not None:
+            return found
+    return None
+
+
 def _asc_on_path(executable: str) -> Optional[Path]:
     for name in ("asc", "asc.exe"):
         located = shutil.which(name)
@@ -1019,6 +1067,9 @@ def resolve_asc_executable(argv0: Optional[str] = None) -> Path:
     located = _asc_on_path(sys.executable)
     if located is not None:
         return located
+    installed = _windows_installed_asc_exe(raw)
+    if installed is not None:
+        return installed
     raise ScheduleError("not_executable")
 
 

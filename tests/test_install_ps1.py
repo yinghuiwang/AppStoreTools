@@ -168,6 +168,21 @@ def test_install_ps1_runs_platform_check_from_a_file():
     assert "build False、schedule True、release False" in region
 
 
+def test_install_ps1_git_branch_bypasses_pip_cache():
+    text = _text()
+    pypi, rest = text.split("正在从 PyPI 安装 asc-appstore-tools", 1)
+    pypi_branch, rest = rest.split("elseif ($script:ascBranch -eq 'local')", 1)
+    _local, git_branch = rest.split("正在从 GitHub 安装", 1)
+    assert pypi  # keep the split anchored at the PyPI heading
+    assert "& $script:ascPyExe -m pip install --user --upgrade asc-appstore-tools" in pypi_branch
+    assert "--force-reinstall" not in pypi_branch
+    assert "--no-cache-dir" not in pypi_branch
+    assert (
+        "& $script:ascPyExe -m pip install --user --upgrade --force-reinstall --no-cache-dir $ascGitUrl"
+        in git_branch
+    )
+
+
 def test_install_ps1_function_cleanup_matches_definitions():
     text = _text()
     defined = set(re.findall(r"(?m)^    function ([A-Za-z0-9-]+)", text))
